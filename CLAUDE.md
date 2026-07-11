@@ -38,8 +38,10 @@ GSL 1.9–1.10; modern GSL is 2.x — untested).
 ### Other legacy assets
 
 - `../distro/doc/manifest.pdf` — the full manual (manifest.tex source). `spin.html` is a tutorial.
+  **Copied into `docs/` here** (see below).
 - `../distro/scripts/` — model exporters: `neuron2html.pl` (model → standalone HTML calculator),
   `neuron2palm.pl`, `neuron2iphone.rb`, plus `mkdataset.pl`. Documented in manifest.pdf ch. 11.
+  **Not carried forward** (see decisions).
 - `../distro/data/` — sample datasets: PSA (`psa_defs.txt`, `ordata`), low birthweight
   (`lowbwt2-2*`), XOR, BP40 train/test.
 - `../distro/neuron-2.6*.tar.gz` — release tarballs 2.6 through 2.64.
@@ -50,21 +52,40 @@ GSL 1.9–1.10; modern GSL is 2.x — untested).
 - **GSL is not installed** (`brew install gsl` would be needed to rebuild).
 - Untested whether 2.64 compiles under modern clang++ / GSL 2.x.
 
-## neuron-3.0 direction — OPEN DECISIONS
+## neuron-3.0 direction — DECIDED (2026-07-11)
 
-Not yet decided with Craig:
+1. **Language/stack: hybrid.** C++ for the engine — speed matters. Python for data
+   grooming and everything around the engine.
+2. **Interface: KISS.** Keep it simple and portable — porting to other systems is a
+   priority, so no web UI, no heavy frameworks. Simple CLI.
+3. **Scope: full engine port.** The statistical parts (goodness-of-fit, ROC, Wald,
+   condition numbers, DFA, logistic regression, stepwise) are the novel and useful pieces —
+   they all come along, together with the neural nets.
+4. **Exporters: dropped.** The HTML/Palm/iPhone exporters are not carried forward — in the
+   current era an LLM can generate a calculator from a saved model directly.
 
-1. **Language/stack** — modernize the C++ (CMake, C++20, current GSL or Eigen/Accelerate)
-   vs. rewrite in Python (numpy/scipy, fits the global venv workflow) vs. hybrid.
-2. **Interface** — keep the interactive terminal menu, move to a CLI with flags/config files,
-   or a workbench-mounted web UI (see locker CLAUDE.md for the blueprint convention).
-3. **Scope** — full port (nets + logistic + DFA + stats + exporters) or start with a core
-   (datasets + backprop + logistic) and grow.
-4. **Model exporters** — HTML/Palm/iPhone exporters are of their era; decide what a 2026
-   equivalent looks like (if any).
+## Docs (`docs/`)
+
+Legacy documentation copied from `../distro/doc/` (2026-07-11):
+
+- `docs/manifest.pdf` — the full neUROn2++ manual (ch. 11 covers the dropped exporters)
+- `docs/spin.html` — tutorial (self-contained, no external assets)
+- `docs/maths.pdf`, `bareprop.pdf`, `network.pdf`, `driver.pdf` — algorithm/design docs
+- `docs/tex/` — LaTeX sources (grep-able; `manifest.tex` is the searchable form of the
+  manual) + `figures/` with small PDF versions of the manifest figures. The original
+  `manifest.tex` references multi-MB `.bmp` scans that were deliberately NOT copied;
+  a rebuild would need `\includegraphics` switched to the PDF figures.
+
+## Housekeeping deferred by Craig
+
+- **No GitHub remote and no global-memory writes yet** — Craig wants to work a while first;
+  if the project proves worth it, he'll create a GitHub repo and then we enroll memory
+  (claude-memory symlink) and push. Don't do either until he says so.
 
 ## Status
 
-- **2026-07-11** — Project reanimated: explored `../distro`, wrote this CLAUDE.md and
-  README.md, initialized git. No code yet. Next: decide the open questions above with Craig,
-  then verify the legacy build (install GSL, try compiling 2.64) as a baseline reference.
+- **2026-07-11** — Project reanimated: explored `../distro`, wrote CLAUDE.md + README.md,
+  initialized git (branch `main`). Direction decided (see above); legacy docs pulled into
+  `docs/`. No code yet. Next: verify the legacy build as a baseline (install GSL via brew,
+  try compiling 2.64 under modern clang++/GSL 2.x — expect some porting friction), then
+  design the 3.0 layout (C++ engine + Python tooling).

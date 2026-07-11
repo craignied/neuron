@@ -1,0 +1,342 @@
+<html>
+	<head>
+		<title>neUROn2++ Spin Tutorial</title>
+	</head>
+
+	<body bgcolor="#ffffff">
+		<p>If you haven't already done so, follow the instructions in the README file to install neUROn2++ on your system.</p>
+		<p>Let's take neUROn2++ for a spin.  In the following exercise, you will train a neural network on the classic &quot;exclusive-or&quot; (xor) problem.</p>
+		<p>You will use the file &quot;xor.csv&quot; found in the <b>doc</b> directory of your neUROn2++ distribution.  To see what this file &quot;looks like&quot;, type &quot;cat xor.csv&quot;:</p>
+
+		<pre ...>
+$ cat xor.csv			
+0,0,0
+0,0,0
+0,1,1
+1,0,1
+1,1,0
+		</pre>
+
+		<p>Create a directory called &quot;xor&quot;, and put <i>only</i> the data file &quot;xor.csv&quot; in it. In general, you should have a different directory for each experiment. </p>
+		<p>Now type &quot;neuron&quot; to run the program:</p>
+
+		<pre ...>
+$ neuron
+Welcome to neuron 2.6
+
+( 1 ) Specify dataset
+( 2 ) Specify model
+( 3 ) Use model
+( 4 ) Discriminant function analysis
+( 9 ) Quit
+Menu choice:
+		</pre>			
+
+		<p>You will first need to specify your dataset, so choose option 1:</p>
+
+		<pre ...>
+Menu choice: 1
+
+( 1 ) Number of input nodes: 1
+( 2 ) Number of output nodes: 1
+( 3 ) Load raw dataset
+( 4 ) Convert a raw dataset into a training set
+( 5 ) Randomize a raw dataset into training and test sets
+( 6 ) Load training set
+( 7 ) Save training set
+( 8 ) Save scaling factors
+( 9 ) Load test set
+( 10 ) Save test set
+( 11 ) Log dataset operations to history file: yes
+( 12 ) Specify variate bounds and types
+( 13 ) ROC area reporting
+( 14 ) Return to main menu
+Menu choice:
+		</pre>
+
+		<p>The number of input nodes in the &quot;xor&quot; is 2, and you must specify the number of input nodes before you load the dataset, so choose option 1, and specify 2 input nodes:</p>
+		<pre ...>
+Menu choice: 1
+How many input nodes? 2
+
+( 1 ) Number of input nodes: 2
+( 2 ) Number of output nodes: 1
+( 3 ) Load raw dataset
+( 4 ) Convert a raw dataset into a training set
+( 5 ) Randomize a raw dataset into training and test sets
+( 6 ) Load training set
+( 7 ) Save training set
+( 8 ) Save scaling factors
+( 9 ) Load test set
+( 10 ) Save test set
+( 11 ) Log dataset operations to history file: yes
+( 12 ) Specify variate bounds and types
+( 13 ) ROC area reporting
+( 14 ) Return to main menu
+Menu choice:		
+		</pre>
+
+		<p>The xor dataset is &quot;raw&quot;, meaning that its columns have not been normalized, so to load it, choose option 3, and type &quot;xor.csv&quot; when prompted for the name of your file:</p>
+		<pre ...>
+Menu choice: 3
+What is the name of the raw data file? xor.csv
+The loaded matrix has 4 rows and 3 columns.
+
+( 1 ) Number of input nodes: 2
+( 2 ) Number of output nodes: 1
+( 3 ) Load raw dataset
+( 4 ) Convert a raw dataset into a training set
+( 5 ) Randomize a raw dataset into training and test sets
+( 6 ) Load training set
+( 7 ) Save training set
+( 8 ) Save scaling factors
+( 9 ) Load test set
+( 10 ) Save test set
+( 11 ) Log dataset operations to history file: yes
+( 12 ) Specify variate bounds and types
+( 13 ) ROC area reporting
+( 14 ) Return to main menu
+Menu choice:
+		</pre>
+
+		<p>Note that you've been informed of how many rows and columns are in your dataset.  Check this every time you load a dataset.  In this case, it is correct.</p>
+		<p>Now you must convert the raw dataset into a training set, so choose option 4, and when prompted, choose &quot;yes&quot; to save the training set
+		and scaling factors, do so.  Here I've named the training set &quot;trainset&quot; and the scaling factors &quot;scales&quot;. Get in the habit of <i>always</i>
+		saving your training set and scaling factors when you convert raw data.  If you don't you <i>will not</i> be able to deploy your model on the web in html or on devices such as the iphone.</p>
+		<pre ...>
+Menu choice: 4
+Would you like to save the training set to a file? (yes/no)? yes
+What is the name of the file to save the training set? trainset
+The training set was successfully saved to the file trainset.
+What is the name of the file to save the scaling factors? scales
+Scaling factors were successfully saved to the file scales.
+
+( 1 ) Number of input nodes: 2
+( 2 ) Number of output nodes: 1
+( 3 ) Load raw dataset
+( 4 ) Convert a raw dataset into a training set
+( 5 ) Randomize a raw dataset into training and test sets
+( 6 ) Load training set
+( 7 ) Save training set
+( 8 ) Save scaling factors
+( 9 ) Load test set
+( 10 ) Save test set
+( 11 ) Log dataset operations to history file: yes
+( 12 ) Specify variate bounds and types
+( 13 ) ROC area reporting
+( 14 ) Return to main menu
+Menu choice:
+		</pre>
+
+		<p>After you've saved your files, choose the option to return to the main menu:</p>
+		<pre ...>
+Menu choice: 14
+
+( 1 ) Specify dataset
+( 2 ) Specify model
+( 3 ) Use model
+( 4 ) Discriminant function analysis
+( 9 ) Quit
+Menu choice:		
+		</pre>
+
+		<p>Now it's time to specify your model, so choose option 2 from the main menu:</p>
+		<pre ...>
+Menu choice: 2
+
+( 1 ) Bias nodes: yes
+( 2 ) Number of hidden layers: 1
+         Layer 1: 1 node(s)
+( 3 ) Output error function: X-entropy
+( 4 ) Load network from a file
+( 5 ) Binary logistic regression
+( 6 ) Log last operation to file: yes
+( 7 ) Log to history file: yes
+( 8 ) Return to main menu
+Menu choice:
+		</pre>
+
+		<p>Here, you'll want to specify a neural network with 1 hidden layer, 3 hidden nodes and biases, using the cross-entropy error function, so the only option you'll need to change is 2, and specify 1 hidden layer with 3 hidden nodes:</p>
+		<pre ...>
+Menu choice: 2
+How many hidden layers? 1
+For layer 1, how many hidden nodes? 3
+
+( 1 ) Bias nodes: yes
+( 2 ) Number of hidden layers: 1
+         Layer 1: 3 node(s)
+( 3 ) Output error function: X-entropy
+( 4 ) Load network from a file
+( 5 ) Binary logistic regression
+( 6 ) Log last operation to file: yes
+( 7 ) Log to history file: yes
+( 8 ) Return to main menu
+Menu choice:		
+		</pre>
+
+		<p>Then choose the option to return to the main menu:</p>
+		<pre ...>
+Menu choice: 8
+
+( 1 ) Specify dataset
+( 2 ) Specify model
+( 3 ) Use model
+( 4 ) Discriminant function analysis
+( 9 ) Quit
+Menu choice:		
+		</pre>
+
+		<p>Now you're ready to train your neural network.  Choose option 3 from the main menu:</p>
+		<pre ...>
+Menu choice: 3
+
+( 1 ) Randomize weights
+( 2 ) Set learning rate: 1
+( 3 ) Set stopping conditions
+( 4 ) Set batch/epoch (currently on)
+( 5 ) Set weight decay (lambda = 5e-05)
+( 6 ) Print counter: logarithmic
+( 7 ) Train model
+( 8 ) Save the network to a file
+( 9 ) Stepwise Regression
+( 10 ) Return to main menu
+Menu choice:		
+		</pre>
+
+		<p>You need to randomize the weights of your neural network, so choose option 1:</p>
+		<pre ...>
+Menu choice: 1
+
+( 1 ) Randomize weights
+( 2 ) Set learning rate: 1
+( 3 ) Set stopping conditions
+( 4 ) Set batch/epoch (currently on)
+( 5 ) Set weight decay (lambda = 5e-05)
+( 6 ) Print counter: logarithmic
+( 7 ) Train model
+( 8 ) Save the network to a file
+( 9 ) Stepwise Regression
+( 10 ) Return to main menu
+Menu choice:
+		</pre>
+
+		<p>You are now ready to train your neural network.  Choose option 7, and choice 1 for canonical backpropagation:</p>
+		<pre ...>
+Menu choice: 7
+Choose training algorithm:
+( 1 ) Canonical backpropagation (gradient descent)
+( 2 ) Conjugate gradient descent
+( 3 ) Shanno's algorithm
+Menu choice: 1
+		</pre>
+
+		<p>And you will see something like:</p>
+		<pre ...>
+I'm running an iterative model:
+SimpleProp
+Bias nodes on all layers by definition
+2 input nodes
+1 hidden layer by definition
+3 hidden nodes
+1 output node by definition
+Number of exemplars in training set: 4
+Training algorithm is canonical backpropagation
+Training is off-line (batch/epoch is on)
+Learning rate eta: 1
+Weight decay term lambda: 5e-05
+Error checking routines in effect:
+Maximum number of iterations: 1000000
+Stop if maximum absolute gradient decreases below 1e-06
+
+    Iteration: X-entropy error:  Max abs grad:  CA Train %
+             1     6.951960e-01   3.536506e-02        50.0
+             2     6.935994e-01   2.140393e-02        75.0
+             3     6.930135e-01   1.299381e-02        75.0
+             4     6.927932e-01   7.941422e-03        50.0
+             5     6.927044e-01   4.908768e-03        50.0
+             6     6.926629e-01   3.088563e-03        50.0
+             7     6.926382e-01   2.792852e-03        50.0
+             8     6.926195e-01   2.873435e-03        50.0
+             9     6.926028e-01   2.927862e-03        50.0
+            10     6.925866e-01   2.966697e-03        50.0
+            20     6.924144e-01   3.174986e-03        50.0
+            30     6.922068e-01   3.400715e-03        50.0
+            40     6.919481e-01   3.691997e-03        50.0
+            50     6.916157e-01   4.066036e-03        50.0
+            60     6.911761e-01   4.546325e-03        50.0
+            70     6.905773e-01   5.165077e-03        50.0
+            80     6.897372e-01   5.965750e-03        50.0
+            90     6.885225e-01   7.004964e-03        50.0
+           100     6.867148e-01   8.351043e-03        50.0
+           200     5.383120e-01   2.575054e-02        75.0
+           300     2.902703e-01   3.445652e-02       100.0
+           400     1.011949e-01   1.742616e-02       100.0
+           500     5.420009e-02   9.958643e-03       100.0
+           600     3.840505e-02   6.587198e-03       100.0
+           700     3.086922e-02   4.851017e-03       100.0
+           800     2.654172e-02   3.810636e-03       100.0
+           900     2.377062e-02   3.120775e-03       100.0
+          1000     2.186507e-02   2.630618e-03       100.0
+          2000     1.600769e-02   9.248780e-04       100.0
+          3000     1.492749e-02   4.961384e-04       100.0
+          4000     1.454885e-02   3.077829e-04       100.0
+          5000     1.437038e-02   2.062685e-04       100.0
+          6000     1.426888e-02   1.454585e-04       100.0
+          7000     1.420352e-02   1.075162e-04       100.0
+          8000     1.415798e-02   9.417955e-05       100.0
+          9000     1.412460e-02   8.854925e-05       100.0
+         10000     1.409931e-02   8.303568e-05       100.0
+         20000     1.400765e-02   4.271617e-05       100.0
+         30000     1.399011e-02   2.184773e-05       100.0
+         40000     1.398570e-02   1.114094e-05       100.0
+         50000     1.398454e-02   5.721044e-06       100.0
+         60000     1.398422e-02   2.964833e-06       100.0
+         70000     1.398413e-02   1.547545e-06       100.0
+         80000     1.398411e-02   8.115472e-07       100.0
+The maximum absolute gradient became lower than 1.0e-06.
+
+Total iterations = 80000
+That took 0000:00:01
+
+Final X-entropy error in the training set = 2.937890e-03.
+Log likelihood = -1.175156e-02
+
+Training set:
+-------------
+Classification accuracy: 100.0%
+Sensitivity: 100.0%
+Specificity: 100.0%
+Predictive value positive: 100.0%
+Predictive value negative: 100.0%
+Classification table for training set:
+----------------------------------
+         Predicted T   Predicted F
+         -----------   -----------
+Known T:           2             0
+Known F:           0             2
+----------------------------------
+WARNING: Maximum number of bins to be searched (10) exceeds data (0),
+Setting Maximum number of bins to 0
+Cannot calculate ROC statistically, not enough data points (10)
+By trapezoidal method, ROC area = 1.000000
+Number thresholds = 4
+Kolmogorov-Smirnov goodness of fit D = 1, p = 0.0970269
+Pearson's Chi-Square goodness of fit p = 0.997352
+Could not calculate Hosmer-Lemeshow goodness of fit: a too large, ITMAX too small in gcf
+
+Would you like to save this model (yes/no)? 
+		</pre>
+
+		<p>Answer &quot;yes&quot to save your model, giving it a name that indicates this is your first run.  (It's useful to get into the habit of always saving your model, as you can reload it if you need to &quot;go back&quot to a previous run.)
+		Because your initial random weights will be different, what will appear on your screen will be different than this picture.  If your classification accuracy is not 100%, enter option 7 repeatedly until it becomes 100%.  If after several tries it does not appear to be learning, choose option 1 to re-randomize your initial weights, and try option 7 again.</p>
+		<p>When you are finished, choose the option to return to the main menu, and then the option to quit.</p>
+		<p>Examine the newly created file in your directory called &quot;neuron.log&quot;.  You should see a log of all of your operations in &quot;neuron.log&quot;.</p>
+		<p>Congratulations, and welcome to the neUROn2++ team!</p>
+		<hr>
+		<p><font size="+1">Exercises </font></p>
+		<p>Complete the following exercises:</p>
+		<p>1. Train the xor dataset with a neural network with 2 hidden nodes and biases.  Does it train differently?  Why?</p>
+		<p>2. Train the xor dataset with a neural network with 3 hidden nodes, and no biases.  Does it train differently? Why?</p>
+	</body>
+
+</html>

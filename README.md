@@ -27,11 +27,18 @@ a common dataset/model architecture:
 It was used extensively in medical research — notably neural-network prediction models
 in urology and reproductive medicine.
 
+## Design
+
+- **Hybrid stack** — a C++ engine for speed, Python for data preparation and tooling
+- **Simple, portable interface** — plain CLI, no heavy frameworks, easy to port
+- **Full engine scope** — the neural networks and all of the statistical machinery
+  (the novel and useful core) are carried forward; the legacy model exporters are not
+
 ## Status
 
 Early reanimation. The legacy 2.6.4 codebase (C++, GSL, autotools) is preserved alongside
-this repository as reference; the architecture and stack for 3.0 are being decided.
-See `CLAUDE.md` for current project state and open decisions.
+this repository as reference, and its documentation lives in `docs/` — `manifest.pdf` is
+the full manual, `spin.html` the tutorial. See `CLAUDE.md` for current project state.
 
 ## Legacy build (reference)
 

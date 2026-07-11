@@ -1,0 +1,32 @@
+\documentclass{article}
+\usepackage{color}
+\usepackage{graphicx}
+\usepackage[dvipdfm]{hyperref} % this should be the last package
+
+% Colors
+\definecolor{myLinkColor}{rgb}{0.5, 0.0, 0.7} 
+\def\beginpurple{{\special{pdf:bc \purple}}}
+\def\purple{[0.2 0.0 0.45]}
+\def\beginred{{\special{pdf:bc \red}}}
+\def\red{[0.8 0.0 0.0]}
+\def\begincolor#1{\special{pdf:bc #1}}
+\def\endcolor{{\special{pdf:ec}}}
+
+% hyperref configuration
+\hypersetup{colorlinks=true,
+linkcolor=myLinkColor}
+
+\newcounter{figcount}
+
+% Math from maths.tex
+\newcommand{\D}[2]{\frac{\partial #1}{\partial #2}}
+
+\title{neUROn2++ Command Line Interface}
+
+\begin{document}
+
+\maketitle
+
+\input{drivertext}
+
+\end{document}

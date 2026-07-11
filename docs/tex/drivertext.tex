@@ -1,0 +1,766 @@
+\setcounter{figcount}{1}
+
+\section{Specify dataset}
+
+This menu choice includes all of the procedures related to specifying
+the dataset for the model.  A dataset must be specified {\em before}
+any other step.
+
+\subsection{Number of input nodes}
+
+This menu choice allows you to set the number of input nodes.  Its
+default is 1 input node, although that should {\em never} be used.
+
+\subsection{Number of output nodes}
+
+This menu choice allows you to set the number of output nodes.  Its
+default is 1 output node.
+
+\subsection{Load raw dataset}
+
+This menu choice allows you to load a {\em raw} dataset from a file.
+The file must be in the same directory as the program.  A raw dataset
+is one whose inputs and outputs have not yet been normalized.
+Generally, neural computational procedures require a dataset to be
+normalized, whereas statistical procedures do not.  All datasets are
+of the format:
+
+\begin{center}
+\begin{tabular}{cccccccc}
+$i_{11}$ & $i_{12}$ & $\ldots$ & $i_{1I}$ & $o_{11}$ & $o_{12}$ &
+$\ldots$ & $o_{1O}$ \\
+$i_{21}$ & $i_{22}$ & $\ldots$ & $i_{2I}$ & $o_{21}$ & $o_{22}$ &
+$\ldots$ & $o_{2O}$ \\
+$i_{31}$ & $i_{32}$ & $\ldots$ & $i_{3I}$ & $o_{31}$ & $o_{32}$ &
+$\ldots$ & $o_{3O}$ \\
+$\ldots$ & $\ldots$ & $\ldots$ & $\ldots$ & $\ldots$ & $\ldots$ &
+$\ldots$ & $\ldots$ \\
+$i_{N1}$ & $i_{N2}$ & $\ldots$ & $i_{NI}$ & $o_{N1}$ & $o_{N2}$ &
+$\ldots$ & $o_{NO}$ \\
+\end{tabular}
+\end{center}
+
+Where $i$ is an input to the model, and $o$ is an output, and for $N$
+examples (``exemplars'') in the set, with $I$ total inputs and $O$
+total outputs.
+
+These columns may be separated in the file by spaces, commas, or any
+character which is non-numeric (1 through 9, `.', e, E, - or + are not
+allowed as column separators.).
+
+\subsection{Convert a raw dataset into a training set}
+
+This menu choice will convert your raw dataset into a training set, by
+normalizing its inputs and outputs to those specified in the menu
+choice ``specify variate bounds and types.''  You will be asked if you
+want to change the number of thresholds used to calculate ROC area.
+
+You will also be asked if you want to save your training set into
+a file.  {\bf This is generally recommended,} as you may want to load
+the training set at some point in the future to resume training.
+If you do save your training set, you will be asked for the filename
+to save its scaling factors.  Scaling factors are used in the equation:
+\begin{equation}\label{driverScale}
+x_{norm} = lbound + S(x - min)
+\end{equation}
+where $x_{norm}$ is the normalized result, $lbound$ is the lower limit
+of the normalized $x$ value (1 value for all), $S$ is the scaling
+factor, and $min$ is the minimum value of each $x$ in the dataset. In
+this way, should the model be used in the future, you will be able to
+compute the normalized $x_{norm}$ value from the $x$ value that the
+user supplies.
+
+\subsection{Randomize a raw dataset into training and test sets}
+
+This menu choice will randomly divide your raw dataset into training
+and test sets.  As it will attempt to keep the fraction of outcomes
+equal in both sets the same, the number of output nodes {\em must be}
+1, and the output {\em must be} discrete (e.g. held to 0 or 1).  You
+specify if an output is discrete in the menu choice ``specify variate
+bounds and types.''
+
+After the dataset has been randomized, you will be asked if you want
+to change the number of thresholds used to calculate ROC area, and if
+you want to save the newly created training and test sets to files.
+
+As with converting a raw dataset into a training set, you will be
+asked if you want to save your training set and scaling factors into a
+file (see \hyperref[driverScale]{equation \ref{driverScale}}).  You
+will also be asked if you want to save your test set into a file.
+Again, {\bf this is generally recommended.}
+
+You will be given the following choices to specify the number of
+exemplars to be placed in the test set, with the remainder to be
+placed in the training set (``$N1/N2$'' cross-validation):
+
+\subsubsection{As a whole number}
+
+This choice allows you to specify the number of exemplars in the test
+set as a whole number.
+
+\subsubsection{As a fraction with a numerator and denominator}
+
+This choice allows you to specify the number of exemplars in the test
+set as a fraction of the number of exemplars in the raw dataset.  You
+will be asked for the numerator and the denominator of that fraction.
+
+\subsubsection{As a decimal fraction}
+
+This choice allows you to specify the number of exemplars in the test
+set as a fraction of the number of exemplars in the raw dataset.  You
+will be asked for the decimal notation of that fraction (e.g. $0.25$
+would place $\frac{1}{4}$ of the exemplars from the raw dataset into
+the test set, and the remainder into the training set.)
+
+\subsection{Load training set}
+
+This menu choice allows you to load a training set from a file.  The
+file must be in the same directory as the program.  After the training
+set has been loaded, you will be asked if you want to change the
+number of thresholds used to calculate ROC area.
+
+\subsection{Save training set}
+
+This menu choice allows you to save your training set to a file, which
+will be saved in the same directory as the program.  You will also be
+asked for the filename to save its scaling factors.
+See \hyperref[driverScale]{equation \ref{driverScale}} for an
+explanation of scaling factors.
+
+\subsection{Save scaling factors}
+
+This menu choice allows you to save the scaling factors of the
+training set, so that should the model be used in the future, you will
+be able to compute the normalized $x_{norm}$ values from the $x$
+values that the user supplies.  See \hyperref[driverScale]{equation
+\ref{driverScale}} for an explanation of scaling factors.
+
+\subsection{Load test set}
+
+This menu choice allows you to load a test set from a file.  The file
+must be in the same directory as the program.  After the test set has
+been loaded, you will be asked if you want to change the number of
+thresholds used to calculate ROC area.
+
+\subsection{Save test set}
+
+This menu choice allows you to save your test set to a file, which
+will be saved in the same directory as the program.
+
+\subsection{Log dataset operations to history file}
+
+Set this option to ``yes'' if you want the operations you perform in
+the ``Specify dataset'' menu to be logged to the history file {\bf
+neuron.log}.  This file will appear in the same directory as the
+program.
+
+\subsection{Specify variate bounds and types}
+
+In the following menu choices, variates are normalized according to
+the equation:
+
+\begin{equation}\label{USERinputScale}
+x_{norm} = lbound + [({{x - min} \over {max - min}}) \times (hbound -
+lbound)]
+\end{equation}
+
+Where $lbound$ is the lower boundary of a normalized value, $hbound$
+is the upper boundary, $min$ is the minimum value of a variable {\em
+in the training set}, $max$ is the maximum value of a variable {\em in
+the training set}, $x$ is the variable's value and the normalized
+value of $x$ is $x_{norm}$.
+
+\subsubsection{Output is discrete}
+
+Set this to ``yes'' if your outputs will always be either 0 or 1.
+
+\subsubsection{Threshold for discrete output}
+
+Set this to the number over which model outputs will be defined as 1,
+and under which model outputs will be defined as 0 for discrete
+output.  For example, if the threshold is $0.5$, a numeric model
+output of $0.6$ will be transformed to 1, and a numeric model ouput of
+$0.3$ will be transformed to 0.  The default is $0.5$.
+
+\subsubsection{Lower limit of input variates}
+
+Choose this menu item to set $lbound$ for inputs in equation
+\ref{USERinputScale}.  The default is $-0.9$.
+
+\subsubsection{Upper limit of input variates}
+
+Choose this menu item to set $hbound$ for inputs in equation
+\ref{USERinputScale}.  The default is $+0.9$.
+
+\subsubsection{Lower limit of output variates}
+
+Choose this menu item to set $lbound$ for outputs in equation
+\ref{USERinputScale}.  The default is $+0.1$ if the output is not discrete
+(and obviously 0 if it is).
+
+\subsubsection{Upper limit of output variates}
+
+Choose this menu item to set $hbound$ for outputs in equation
+\ref{USERinputScale}.  The default is $+0.9$ if the output is not discrete
+(and obviously 1 if it is).
+
+\subsection{Number of thresholds to calculate ROC area}
+
+Choose this menu item to set the number of thresholds over which ROC
+area is calculated.  The output {\em must be} discrete, and the number
+of outputs {\em must be} 1 for ROC area to be calculated.
+
+\section{Specify model}
+
+Choose this menu item to specify a {\em neural computational} model.
+A dataset must be specified {\em before} this choice, and this menu
+choice must obviously be specified before ``Use model''.  Discriminant
+function analysis {\em does not} require this menu choice, and in
+fact, it is useless for discriminant function analysis.
+
+\subsection{Bias nodes}
+
+Choose this menu item to specify whether or not bias nodes will be
+included in your neural computational model.  In general, for a
+real-world model, you should {\em always} include bias nodes.  The
+default is ``yes''.
+
+\subsection{Number of hidden layers / nodes on each layer}
+
+Choose this option to specify the number of hidden layers and number
+of nodes on each layer.  The default is 1 layer with 1 node, although
+neural computational models will generally have $>$ 1 hidden node.
+Most models will, however, only have 1 hidden layer.
+
+\subsection{Output error function}
+
+Choose this option to specify the output error function.  ``LMS'' is
+least-mean-squared:
+
+\begin{equation}
+E = \frac{1}{2} \sum_{i=1}^{m} (y_i - o_i)^2
+\end{equation}
+where $E$ is the error, $m$ the number of outputs, $y$ is the known
+value and $o$ the model's output.
+
+You may also choose the cross-entropy error function ``X-entropy'':
+
+\begin{equation}
+E = \sum_{i=1}^{m} -y\log(o)-(1-y)\log(1-o)
+\end{equation}
+
+For the cross-entropy error function, the output {\em must be}
+discrete.  Note that for sigmoidal output nodes, where for
+output $\vec{\bf{o}}$,
+
+\begin{displaymath}
+\vec{\bf{o}} = \frac{1}{1+e^{-\vec{\bf{x}}}}
+\end{displaymath}
+
+if any element of $\vec{\bf{x}}$ is very large or very small,
+the program will round to $0$ or $1$, and the $\log$ terms in the
+cross-entropy error function will cause an error.  In such cases,
+an approximation is made (see the document {\bf manifest.pdf}
+for a detailed explanation of that approximation), and the following
+error will be generated:
+
+\begin{verbatim}
+WARNING: Numerical out of bounds encountered when calculating error
+\end{verbatim}
+
+\subsection{Load network from a file}
+
+This menu choice allows you to load a neural computational model from
+a file.  The file must be in the same directory as the program.
+
+\subsection{Binary logistic regression}
+
+This menu choice specifies binary logistic regression, which is
+mathematically equivalent to a single output node neural network with
+a bias, the sigmoidal transfer function, no hidden nodes, and the
+cross-entropy error function. {\em \beginred Always run a binary
+logistic regression model} {\bf before} {\em starting to build a
+neural network. \endcolor}  If your binary logistic model has
+acceptable goodness-of-fit, you don't need to build a neural network.
+
+Note that at the end of a binary logistic run, $\beta$ weights will be
+reported, along with their standard errors and $p$-values for the Wald
+test that the $\beta$ weights are nonzero.\footnote{see Hosmer and
+Lemeshow, Applied Logistic Regression, 2nd edition, John Wiley \&
+Sons, Inc., New York, 2000, pp 36--42}  Note also that the indexing
+begins with input number 0, which is often referred to as the $y$-
+intercept.  {\em \beginred In this case, $\beta_0$ is} {\bf not} {\em
+the $y$-intercept. \endcolor}  It is the $\beta$ weight of the first
+variate, indexed to 0.  The $y$-intercept is clearly labeled as
+``$y$-intercept'' in the report table.
+
+\subsection{Log last operation to file}
+
+Set this option to ``yes'' (the default) if you want the last neural
+computational operation performed to be logged to the file {\bf
+model.txt}.  This file will be {\em overwritten} with each run, and
+will appear in the same directory as the program.
+
+\subsection{Log to history file}
+
+Set this option to ``yes'' (the default) if you want the neural
+computational operations that are performed logged to the file {\bf
+neuron.log}.  This file will be {\em appended} with each operation,
+and will appear in the same directory as the program.
+
+\section{Use model}
+
+Choose this menu item to use a specified {\em neural computational}
+model.  A dataset must be specified {\em before} this choice, and the
+``Specify Model'' menu must also have been entered before ``Use
+model''.
+
+\subsection{Randomize weights}
+
+Choose this option to randomize the weights of the neural
+computational model.  Prior to training the model, weights {\em must
+be} set, either by randomization or by loading the model from a file
+in the ``Specify model'' menu.  By default, weights are randomized
+between $-0.5$ and $+0.5$.
+
+\subsection{Set learning rate}
+
+Choose this option to set the learning rate $\eta$ of the neural
+computational model.  The default is $\eta = 1/N$ for on-line
+backpropagation (where $N$ is the number of exemplars), and $\eta = 1$
+for off-line (``batch'' or ``epoch'') training.
+
+You may choose the learning rate to be ``automatic'' (see the Manifest
+documentation for a fuller explanation of automatic stepsize
+selection.) Briefly, automatic stepsize selection is designed to
+prevent oscillation around a local error minimum.  Due to the increase
+in time required for this feature, it may be most optimal to train to
+near a local error minimum before setting automatic stepsize selection
+{\em on}.
+
+\subsection{Set stopping conditions}
+
+Choose this option to set conditions by which the neural computational
+model will stop training.  These include:
+
+\subsubsection{Set maximum number of iterations}
+
+The model will stop training after the specified number of iterations.
+The default is 1000000, {\em which is arbitrary.  Do not consider any
+neural computational model to be trained by stopping at any arbitrary
+threshold.  You} must {\em inspect the model yourself to see if it has
+stopped training.}
+
+\subsubsection{Lower error limit}
+
+Use this choice to set the lower error limit that, if the error of the
+model decreases below, will result in cessation of training.  For
+example, you could set this to the limit of your compiler.  By
+default, no lower error limit is set.
+
+\subsubsection{Limit of change in error over 1 iteration}
+
+Use this choice to set the lower error limit that, if the change in
+error over 1 iteration is below, will result in cessation of training.
+Thus, in
+
+\begin{equation}
+\Delta E = E_{t+1} - E_t
+\end{equation}
+
+Where $E_t$ is the error after a training iteration, and $E_{t+1}$ is
+the error after the next training iteration, if $\Delta E$ is less
+than the specified value, training stops.  By default, this condition
+is not specified.
+
+\subsubsection{Stop if increase over error window width}
+
+Allows you to set a number of iterations that after which the error
+increases, training will stop.  Thus, in
+
+\begin{equation}
+E_{n+\Delta} > E_{n}
+\end{equation}
+
+Where $n$ is the current iteration, $E$ the error at an iteration, and
+$\Delta$ the error window width, training will stop if the inequality
+is satisfied.  By default, this condition is not specified.
+
+\subsubsection{Maximum absolute gradient limit}
+
+All neural networks update their weights in the following form:
+
+\begin{equation}
+{\bf w}_{t+1} = {\bf w}_t - \eta {\bf g}_t
+\end{equation}
+
+where $\bf{w}_t$ is the weight structure at time $t$, $\eta$ is the
+learning rate, and $\bf{g}_t$ is the gradient.  This menu choice
+allows you to stop training when the maximum absolute value of the
+elements in the gradient structure $\bf{g}_t$ decreases below the
+chosen limit.  The default is $10^{-6}$.
+
+\vspace{9 pt}{\bf \large \beginred READ THIS! \endcolor}
+
+\beginred The maximum absolute gradient limit should be the primary
+means by which you judge that training has ended, {\em not} by
+the error minimum. \endcolor
+
+For canonical backpropagation, using the maximum absolute gradient
+limit will significantly slow training (not by the number of
+iterations it takes to train, but by the amount of computational time
+consumed per iteration.)  Thus, one strategy is to turn the maximum
+gradient choice off until you are near a local error minimum as judged
+loosely by the decrease in the error, then to turn on this menu
+choice.
+
+Don't be surprised if the maximum absolute gradient fluctuates
+(increases and decreases.)  Remember, there is more than one node and
+one layer in even the simplest neural network.  Keep an eye on the
+overall trend of the maximum absolute gradient to insure it is
+decreasing.
+
+\subsection{Batch Epoch}
+
+Choose this option to set batch/epoch learning.
+
+The {\em on-line} backpropagation learning algorithm is given by the
+formula:
+\begin{equation}
+{\bf w}_{t+1} = {\bf w}_t - \eta {\bf g}_k({\bf w}_t)
+\end{equation}
+where $k$ is the exemplar index, ${\bf w}$ is the weight, $t$ the
+iteration, ${\bf g}$ is the error gradient with respect to the weight,
+and $\eta$ is the learning rate.  By default, if on-line learning is
+chosen, $\eta = 1/N$, where $N$ is the number of exemplars.
+
+The {\em off-line}, also known as ``batch'' or ``epoch''
+backpropagation learning algorithm is given by the formula:
+\begin{equation}
+{\bf w}_{t+1} = {\bf w}_t - \eta {\bf g}({\bf w}_t)
+\end{equation}
+where the {\em average gradient} ${\bf g}$ is defined by the formula:
+\begin{equation}
+{\bf g} = (1/N) \sum_{k=1}^N {\bf g}_k.
+\end{equation}
+By default, if off-line learning is chosen, $\eta = 1$.
+
+See the neUROn2++ Design Manifest for a more detailed description of
+on-line and off- line learning.
+
+If batch/epoch is set {\em on}, off-line, ``batch'' or ``epoch''
+learning is used. If batch/epoch is set {\em off}, on-line learning is
+used.
+
+\subsection{Weight Decay}
+
+The {\em error function}, $E_k$, for the $k$th exemplar is
+defined by the formula:
+\begin{equation}\label{USERdeferrorfunk}
+E_k({\bf w}) =
+e(y^k, {\bf o}^{(m)}_k) +
+\frac{1}{2\sigma_w^2} \sum_{i=1}^m |{\bf w}|^2.
+\end{equation}
+
+where $y$ is the known or target outcome, and ${\bf o}$ is the model's
+output.  The second term on the right hand side of
+(\ref{USERdeferrorfunk}) is required to guarantee reliable statistical
+inference. It basically `` stabilizes'' the learning process by
+preventing the weights in the network from becoming too large or too
+small.  $\sigma_w$ is the standard deviation of the weights {\em \bf
+chosen by the user.}  Thus, a connection weight is expected to lie
+between $-1.96 \sigma_w$ and $+1.96 \sigma_w$ with probability equal
+to about 95\%. Adjustment of this parameter can ``change results'' of
+the statistical analysis so $\sigma_w$ is constrained to be exponents
+of 10 (e.g. 10, 100, 1000, $\ldots$ $10^{12}$.  Once chosen,
+$\sigma_w$ should not be changed.
+
+A reasonable choice for $\sigma_w$ might be $\sigma_w = 100$. This
+basically constrains the ``learning process'' to find connection
+strengths for the ANN such that the connection strength weight ranges
+between $-200$ and $+200$. The choice of $\sigma_w$ should be reported
+in conjunction with all statistical analysis results. Note that as
+$\sigma_w \rightarrow \infty$, the effect of the summation term
+becomes negligible.
+
+The learning rate equivalent of equation \ref{USERdeferrorfunk} is
+
+% Note the necessity of \left. even though it doesn't show
+\begin{eqnarray*}
+\vec w_{t+1} & = & \vec w_t - \eta \left. \D{E'}w \right|_{w_t} \\
+& = & \vec w_t - \eta \left. \D{E}w \right|_{w_t} - 2\eta\lambda\vec w_t \\
+& = & (1-2\eta\lambda)\vec w_t - \eta \left. \D{E}w \right|_{w_t}
+\end{eqnarray*}
+
+where $(1-2\eta\lambda)$ is ``weight decay''. $\lambda$ may
+be set by either of 2 methods:
+
+\begin{itemize}
+
+\item The complexity of the population objective function $>>$ sample
+objective function:
+
+\begin{equation}
+\lambda = \frac 1{N2\sigma_w^2}
+\end{equation}
+
+\item The complexity of the population objective function $\simeq$
+sample objective function:
+
+\begin{equation}\label{USERsameComplexEqn}
+\lambda = \frac 1{2\sigma_w^2}
+\end{equation}
+
+\end{itemize}
+
+In general, as we don't know the complexity of the population
+objective function a priori, we choose equation \ref{USERsameComplexEqn}
+to calculate $\lambda$.
+
+The following choices allow you to specify weight decay:
+
+\subsubsection{Don't change anything}
+
+Allows the uninformed user (which, assuming you've read this section,
+you are {\em not},) to exit without changing the way in which weight
+decay is calculated.
+
+\subsubsection{lambda = 1 / ( 2 * sigma$^\wedge$2 )}
+
+Specifies that the weight decay term be calculated by
+
+\begin{displaymath}
+\lambda = \frac 1{2\sigma_w^2}
+\end{displaymath}
+
+and sets $\sigma_w$ to be an exponent of 10 from $10^1$ to $10^{12}$.
+
+\subsubsection{lambda = 1 / ( 2 * N * sigma$^\wedge$2 )}
+
+Specifies that the weight decay term be calculated by
+
+\begin{displaymath}
+\lambda = \frac 1{N2\sigma_w^2}
+\end{displaymath}
+
+and sets $\sigma_w$ to be an exponent of 10 from $10^1$ to $10^{12}$.
+
+\subsubsection{No weight decay}
+
+Turns off weight decay.
+
+\vspace{9 pt}{\bf \large \beginred READ THIS! \endcolor}
+
+Using too large of a weight decay term will degrade network modeling
+performance, but it is critical to use weight decay in order for
+statistical inference, for example, stepwise regression.  Thus,
+setting a proper weight decay value is of utmost importance.  Here is
+a good strategy to determine the proper weight decay value:
+
+{\em (Note that the default value for the weight decay term is
+$\frac 1{2\sigma_w^2}$ with $\sigma_w = 100$.  This is to prevent the
+uninformed user from making incorrect statistical inferences.
+However, you are no longer the uninformed user. In the first step, you
+will turn off weight decay.)}
+
+\begin{enumerate}
+
+\item Turn weight decay off.
+
+\item Experiment with different neural network architectures until you
+find one that is as near as possible a strict local minimum, and with
+as high ROC area as possible.
+
+\item Save the neural network from Step 2.
+
+\item Load the neural network from Step 2, and turn on weight decay.
+Use the choice for $\lambda = \frac 1{2\sigma_w^2}$, and choose a low
+initial value for $\sigma$, for example $10^2$.
+
+\item Train the neural network to as near a possible a strict local
+minimum (you'll be starting with the final weights from Step 2.)
+
+\item Compare the ROC area to that from Step 2.  If it is similar, go
+to step 8.
+
+\item If the ROC area has substantially degraded, increase $\sigma$,
+load the neural network from Step 2, and go to Step 5.
+
+\item Save the neural network, and record $\sigma_w$, as you will cite
+it when you publish your results. Perform stepwise regression with
+this value in the weight decay term, beginning with the final weights
+from the network you saved in this Step.
+
+\end{enumerate}
+
+\subsection{Print counter}
+
+This menu choice allows you to indicate whether printing will be
+linear (prints after a set number of iterations) or logarithmic.
+Logarithmic is recommended.
+
+\subsection{Train model}
+
+This menu choice initiates neural computational model training.  You
+will choose the type of gradient descent.  For an explanation of
+conjugate gradient descent and the Shanno algorithm, see Golden, pp.
+217--218 and 221--222.\footnote{Richard M. Golden, Mathematical
+Methods for Neural Network Analysis and Design, 1996, MIT Press, ISBN
+0-262-07174-6, pp. 217--218, 221--222}  A brief explanation of these
+methods may also be found in the design manifest.
+
+The menu choices are ordered by robustness of the algorithm, from less
+to more.  Thus, conjugate gradient descent is less robust than the
+Shanno algorithm.
+
+\vspace{9 pt}{\bf \large \beginred READ THIS! \endcolor}
+
+Conjugate gradient descent and the Shanno algorithm generally are much
+faster at finding a local error minimum than canonical backpropagation
+{\em once one is near the local error minimum}.  Thus, your training
+strategy should be to use canonical backpropagation until you are near
+a local error minimum (as judged by the maximum absolute gradient),
+and then apply either conjugated gradient descent or the Shanno
+algorithm. Empirically try each advanced algorithm, and choose the one
+to use based on your trials.
+
+\subsubsection{Canonical backpropagation}
+
+This menu choice implements standard, plain vanilla backpropagation.
+
+\subsubsection{Conjugate gradient descent}
+
+This menu choice implements conjugate gradient descent.  See the
+design manifest and Golden pp. 221--222.
+
+\subsubsection{Shanno algorithm}
+
+This menu choice implements the Shanno algorithm.  See the design
+manifest and Golden pp. 217--218.
+
+\subsection{Save the network to a file}
+
+This menu choice allows you to save your trained neural computational
+model with its weights to a file.  You may train the model repeatedly
+prior to saving it, if you so choose.  If you have one output, and it
+is discrete, you will also be asked if you want to save the network's
+guesses to a file. These guesses will be saved as a 2 column file,
+with the first column being the known value, and the second column
+being the network's guess. You will be asked if you want to save
+guesses for the training set, and if it is loaded, the test set.
+
+\subsection{Stepwise regression}\label{stepregress}
+
+Stepwise regression allows you to determine which input variables are
+statistically significant to your trained neural computational model.
+For a more complete discussion, see the neUROn2++ Design Manifest.
+If you have not just finished training a neural network, you will be
+asked for the final error of the network model to regress.
+
+\subsubsection{Specify variables}
+
+A variable may be represented by more than 1 input node.  For example,
+ethnicity may be represented by 4 nodes: African-American, Asian,
+Hispanic and Caucasian.  Or a variable may be represented by 2 nodes:
+1 in which the value is present or absent, and the other by the value
+of the variable itself.  Variable structure may be input from the
+command line or loaded from file.
+
+Input characters include:
+\begin{itemize}
+\item {\bf ;} delimits variables
+\item {\bf ,} delimits nodes
+\item {\bf -} specifies a range of nodes
+\item spaces are ignored
+\end{itemize}
+
+For example, ``0-3,5; 4,8; 6,7'' indicates that variable 0 is composed
+of input nodes 0,1,2,3 and 5, variable 1 is composed of input nodes 4
+and 8, and variable 2 is composed of input nodes 6 and 7.
+
+\subsubsection{Stepwise reverse regression}
+
+Stepwise reverse regression proceeds by training the full network, and
+recording that network's final error.  Input variables are removed 1
+at a time, the subnetworks so generated are trained to completion and
+their errors recorded, and the variable with the largest $p$-value
+(least significant) is then recorded with its $p$-value.  Using the
+final error of the network which is deficient the one node with the
+largest $p$-value as a starting point, input variables are then
+removed 2 at a time, with each pair containing the 1 variable with the
+largest $p$-value and 1 of the remaining input variables.  The pair of
+variables with the largest $p$-value (least significant) is then
+recorded with its $p$-value, and the process repeats until a chosen
+threshold $p$-value is reached.
+
+Figure~\arabic{figcount} demonstrates stepwise reverse regression.
+
+\begin{figure}[htb]\addtocounter{figcount}{1}
+\begin{picture}(4.2,2.2)
+\put(0,0){\framebox(4.2,2.2)}
+% for dvi
+\put(0.1,0.1){\includegraphics[width=4in,height=2in]{reverse.bmp}}
+% for dvipdfm
+\put(0.1,0.1){\special{pdf: epdf width 4in height 2in (reverse.pdf)}}
+\end{picture}
+\makebox[4in]{\rule{0in}{2in}}
+\caption{Stepwise reverse regression}
+\end{figure}
+
+\subsubsection{Stepwise forward regression}
+
+Stepwise forward regression proceeds by training a baseline network
+with no input nodes, and recording that network's final error.  Input
+variables are added 1 at a time, the subnetworks so generated are
+trained to completion and their errors recorded, and the variable with
+the smallest $p$-value (most significant) is then recorded with its
+$p$-value.  Using the final error of the network which is the one node
+with the smallest $p$-value as a starting point, input variables are
+then added 2 at a time, with each pair containing the 1 variable with
+the smallest $p$-value and 1 of the remaining input variables.  The
+pair of variables with the smallest $p$-value (most significant) is
+then recorded with its $p$-value, and the process repeats until a
+chosen threshold $p$-value is reached.
+
+Figure~\arabic{figcount} demonstrates stepwise forward regression.
+
+\begin{figure}[htb]\addtocounter{figcount}{1}
+\begin{picture}(4.2,2.2)
+\put(0,0){\framebox(4.2,2.2)}
+% for dvi
+\put(0.1,0.1){\includegraphics[width=4in,height=2.1in]{forward.bmp}}
+% for dvipdfm
+\put(0.1,0.1){\special{pdf: epdf width 4in height 2.1in(forward.pdf)}}
+\end{picture}
+\makebox[4in]{\rule{0in}{2.1in}}
+\caption{Stepwise forward regression}
+\end{figure}
+
+\section{Discriminant function analysis}
+
+Choose this menu item to use discriminant function analysis to model
+your dataset(s).
+
+\subsection{Linear discriminant function analysis }
+
+Choose this menu item to model your dataset(s) with {\em LDFA}, linear
+discriminant function analysis.
+
+\subsection{Quadratic discriminant function analysis }
+
+Choose this menu item to model your dataset(s) with {\em QDFA},
+quadratic discriminant function analysis.
+
+\subsection{Log last operation to file}
+
+Set this option to ``yes'' (the default) if you want the last
+statistical operation performed to be logged to the file {\bf
+model.txt}.  This file will be {\em overwritten} with each modeling
+procedure, and will appear in the same directory as the program.
+
+\subsection{Log to history file}
+
+Set this option to ``yes'' (the default) if you want the statistical
+operations that are performed logged to the file {\bf neuron.log}.
+This file will be {\em appended} with each operation, and will appear
+in the same directory as the program.
