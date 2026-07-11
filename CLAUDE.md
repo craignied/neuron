@@ -126,3 +126,12 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   committed reference network `tests/oracle/xor_net.txt` instead of retraining.
   Audited `stats.cpp` for sibling 1-based NR bugs: none found (`fit()` is 0-based;
   the `1..ITMAX` loops are iteration counters).
+- **2026-07-12** — Pushed to GitHub (`craignied/neuron`), memory enrolled. **Seedable
+  RNG landed:** `util::set_seed()` + `neuron --seed N` (and `--version`). One seeding
+  point controls everything (weights + train/test splits all flow through
+  `util::d_random()`/`rand()`); unseeded behavior unchanged (clock). Verified: two
+  seed-42 XOR runs byte-identical except the wall-clock "That took" line; different
+  seed diverges; verify_oracle.sh still passes. Note: `rand()` streams are
+  libc-specific, so cross-platform runs with the same seed may differ — same-machine
+  reproducibility is the contract. Next candidates: golden seeded-transcript test,
+  raw new/delete → smart pointers, `tools/` Python side (mkdataset.pl replacement).

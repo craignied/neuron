@@ -26,13 +26,23 @@ using namespace std;
 
 // Random number methods
 
-// No arguments seeds generator with timestamp
+// Set when the user supplies an explicit seed (--seed); suppresses timestamp seeding
+static bool userSeededFlag = false;
+
+// Seeds the generator with a user-specified seed for reproducible runs
+void util::set_seed( unsigned seed )
+{
+	srand( seed );
+	userSeededFlag = true;
+}
+
+// No arguments seeds generator with timestamp (unless set_seed was called)
 void util::d_random()
 {
 	// Insure that this is only done once per program run
 	static bool firstFlag = true;
 
-	if ( firstFlag )
+	if ( firstFlag && !userSeededFlag )
 		srand( time( 0 ) );
 
 	firstFlag = false;

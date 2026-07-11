@@ -30,7 +30,10 @@ namespace util {
 	};
 
 	// Random number methods:
-	// No arguments seeds generator with timestamp
+	// Seeds the generator with a user-specified seed for reproducible runs;
+	//    overrides the timestamp seeding in d_random()
+	void set_seed( unsigned );
+	// No arguments seeds generator with timestamp (unless set_seed was called)
 	void d_random();
 	// 1 argument returns random number between -arg and +arg
 	double d_random( double );

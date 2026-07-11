@@ -12,6 +12,7 @@
 // #define GAURAV // For Gaurav's work on BackProp
 
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -51,8 +52,31 @@ bool logLastOp = true, // initial log last operation to file flag
 	logHistory = true; // initial log to history file flag
 
 // Main method
-int main()
+int main( int argc, char* argv[] )
 {
+	// Parse command-line arguments
+	for ( int a = 1; a < argc; a++ )
+	{
+		string arg( argv[ a ] );
+
+		if ( arg == "--version" )
+		{
+			cout << NEURON_PACKAGE_STRING << endl;
+			return 0;
+		}
+		else if ( arg == "--seed" && a + 1 < argc )
+		{
+			util::set_seed( ( unsigned ) atol( argv[ ++a ] ) );
+			cout << "Random seed set to " << argv[ a ]
+				<< " (runs with the same seed and inputs are reproducible)" << endl;
+		}
+		else
+		{
+			cerr << "Usage: neuron [--seed N] [--version]" << endl;
+			return 1;
+		}
+	}
+
 	// Print welcome message
 	cout << "Welcome to " << NEURON_PACKAGE_STRING << endl;
 

@@ -45,6 +45,15 @@ cmake --build build
 ./build/neuron
 ```
 
+```
+Usage: neuron [--seed N] [--version]
+```
+
+`--seed N` makes runs reproducible: the same seed with the same inputs produces
+bit-identical training (weight initialization and train/test splits both draw from
+the seeded generator). Without it, the generator is seeded from the clock, as
+neUROn2++ always was.
+
 The engine is C++17 with no dependencies beyond GSL — it builds anywhere those exist.
 
 > **If you copied or moved this directory:** delete any `build/` that came along
