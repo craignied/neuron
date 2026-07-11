@@ -133,5 +133,17 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   seed-42 XOR runs byte-identical except the wall-clock "That took" line; different
   seed diverges; verify_oracle.sh still passes. Note: `rand()` streams are
   libc-specific, so cross-platform runs with the same seed may differ — same-machine
-  reproducibility is the contract. Next candidates: golden seeded-transcript test,
-  raw new/delete → smart pointers, `tools/` Python side (mkdataset.pl replacement).
+  reproducibility is the contract.
+- **2026-07-12 (later)** — **Smart-pointer pass + EOF guard.** Driver ownership is now
+  `unique_ptr`: `specify_data()`/`specify_model()` return `unique_ptr<DataSet/Model>`,
+  main() holds them (manual delete/double-free risk gone); RegressNet's `netCopyPtr`
+  is `unique_ptr<Network>` (empty dtor used to leak the working copy on exceptions).
+  Also fixed en passant: 2.x's `specify_data()` failure path nulled the raw pointer
+  without deleting (leak), and all `util::ask*` functions looped forever on dead cin —
+  a desynced scripted run wrote a 9 GB prompt file before being caught. New
+  `check_input_ok()` guard exits cleanly on EOF/failed extraction ("Input ended
+  unexpectedly"). Verified: builds zero-warning; verify_oracle.sh passes; seed-42 XOR
+  transcript byte-identical to pre-refactor; stepwise reverse regression (RegressNet's
+  copy machinery) smoke-tested end-to-end (needs a p-value threshold answer after
+  choosing reverse/forward — scripts beware). Non-owning params (use_model, dfa, etc.)
+  stay raw pointers by design.

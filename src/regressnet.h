@@ -13,6 +13,7 @@
 #include <string>
 #include <sstream>
 #include <map>
+#include <memory>
 #include <stdexcept>
 
 using namespace std;
@@ -49,8 +50,8 @@ public:
 	};
 
 private:
-	Network *netPtr, // incoming Network
-		*netCopyPtr; // copy of incoming Network to make subnetworks
+	Network *netPtr; // incoming Network (not owned)
+	unique_ptr< Network > netCopyPtr; // owned copy of incoming Network to make subnetworks
 
 	bool historyFlag; // indicates logging to history file
 

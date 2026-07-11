@@ -104,6 +104,19 @@ ostream& operator << ( ostream& output, const timestamp& t )
 
 // Ask methods
 
+// Guard called after every interactive read: if cin has died (EOF on piped
+//    input, or a failed extraction that would otherwise never recover), the
+//    reask loops below would spin forever writing prompts — exit instead.
+//    (In 2.x a script that ran out of answers looped infinitely.)
+static void check_input_ok()
+{
+	if ( !cin )
+	{
+		cerr << endl << "Input ended unexpectedly -- exiting." << endl;
+		exit( 1 );
+	}
+}
+
 // askI method, asks integer question with a lower bound
 // Arguments: string& question, int lower bound
 // Example: number = askI( "What is your number? ", 1 );
@@ -116,6 +129,7 @@ int util::askI( const string& question, const int lower )
 	// Ask the question, get the answer
 	cout << question;
 	cin >> inString;
+	check_input_ok();
 
 	// Conver the string to integer
 	value = atoi( inString.c_str() );
@@ -128,6 +142,7 @@ int util::askI( const string& question, const int lower )
 		cout << "and it must be an integer." << endl;
 		cout << question;
 		cin >> inString;
+		check_input_ok();
 		value = atoi( inString.c_str() );
 	}
 
@@ -146,6 +161,7 @@ int util::askI( const string& question, const int lower, const int upper )
 	// Ask the question, get the answer
 	cout << question;
 	cin >> inString;
+	check_input_ok();
 
 	// Conver the string to integer
 	value = atoi( inString.c_str() );
@@ -159,6 +175,7 @@ int util::askI( const string& question, const int lower, const int upper )
 		cout << "and it must be an integer." << endl;
 		cout << question;
 		cin >> inString;
+		check_input_ok();
 		value = atoi( inString.c_str() );
 	}
 
@@ -175,6 +192,7 @@ double util::askD( const string& question, const double lower )
 	// Ask the question, get the answer
 	cout << question;
 	cin >> value;
+	check_input_ok();
 
 	// Bounds check, reask question if necessary
 	while ( value < lower )
@@ -183,6 +201,7 @@ double util::askD( const string& question, const double lower )
 		cout << lower << "." << endl;
 		cout << question;
 		cin >> value;
+		check_input_ok();
 	}
 
 	return value;
@@ -198,6 +217,7 @@ double util::askD( const string& question, const double lower, const double uppe
 	// Ask the question, get the answer
 	cout << question;
 	cin >> value;
+	check_input_ok();
 
 	// Bounds check, reask question if necessary
 	while ( value < lower || value > upper )
@@ -206,6 +226,7 @@ double util::askD( const string& question, const double lower, const double uppe
 		cout << lower << ", but not greater than " << upper << "." << endl;
 		cout << question;
 		cin >> value;
+		check_input_ok();
 	}
 
 	return value;
@@ -223,6 +244,7 @@ bool util::askYesNo( const string& question )
 	// Ask the question, get the answer
 	cout << question;
 	cin >> s;
+	check_input_ok();
 
 	// Change to lower case
 	int ( *f )( int );
@@ -245,6 +267,7 @@ bool util::askYesNo( const string& question )
 		cout << "Let's try that again: a yes or no answer is required." << endl;
 		cout << question;
 		cin >> s;
+		check_input_ok();
 
 		// Convert to lower case
 		int ( *f )( int );
@@ -280,6 +303,7 @@ string& util::getGoodFile( string& filename )
 		cout << "I can't find a file named " << filename << "." << endl;
 		cout << "Please enter a valid file name: ";
 		cin >> filename;
+		check_input_ok();
 		ifstream inputFile( filename.c_str(), ios::in ); // test file for input
 		if ( inputFile ) openfile = true; // success
 	}

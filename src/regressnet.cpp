@@ -17,7 +17,7 @@
 #include "stats.h"
 
 // Default constructor
-RegressNet::RegressNet() : netPtr ( 0 ), netCopyPtr ( 0 ),
+RegressNet::RegressNet() : netPtr ( 0 ),
 	historyFlag ( false ), errorString ( "RegressNet error: " ) { }
 
 // Copy constructor
@@ -130,16 +130,16 @@ bool RegressNet::copy_network()
 
 	if ( typeid( *netPtr ) == typeid( BareProp ) ) // it's a BareProp network
 		// Create new BareProp object with copy ctor & set pointer to the copy
-		netCopyPtr = new BareProp( *dynamic_cast< BareProp* >( netPtr ) );
+		netCopyPtr = make_unique< BareProp >( *dynamic_cast< BareProp* >( netPtr ) );
 	else if ( typeid( *netPtr ) == typeid( SimpleProp ) ) // it's a SimpleProp network
 		// Create new SimpleProp object with copy ctor & set pointer to the copy
-		netCopyPtr = new SimpleProp( *dynamic_cast< SimpleProp* >( netPtr ) );
+		netCopyPtr = make_unique< SimpleProp >( *dynamic_cast< SimpleProp* >( netPtr ) );
 	else if ( typeid( *netPtr ) == typeid( BackProp ) ) // it's a BackProp network
 		// Create new BackProp object with copy ctor & set pointer to the copy
-		netCopyPtr = new BackProp( *dynamic_cast< BackProp* >( netPtr ) );
+		netCopyPtr = make_unique< BackProp >( *dynamic_cast< BackProp* >( netPtr ) );
 	else if ( typeid( *netPtr ) == typeid( Logistic ) ) // it's a Binary logistic network
 		// Create new Logistic object with copy ctor & set pointer to the copy
-		netCopyPtr = new Logistic( *dynamic_cast< Logistic* >( netPtr ) );
+		netCopyPtr = make_unique< Logistic >( *dynamic_cast< Logistic* >( netPtr ) );
 	else // no identifiable Network type was found
 	{
 		errorOut << errorString << "couldn't copy Network, unknown type";
@@ -225,7 +225,7 @@ void RegressNet::reverse_regress()
 					for ( unsigned k = 0; k < removed.size(); k++ )
 						sub_variables.push_back( variable_defs[ removed[ k ] ] );
 					
-					delete netCopyPtr; // delete copy if it exists
+					netCopyPtr.reset(); // delete copy if it exists
 					copy_network(); // copy the incoming Network to create a subnetwork
 
 					// Print message reporting which variables & nodes are being removed
@@ -309,7 +309,7 @@ void RegressNet::reverse_regress()
 		}
 	}
 
-	delete netCopyPtr; // get rid of copy of Network object for subnetworks
+	netCopyPtr.reset(); // get rid of copy of Network object for subnetworks
 }
 
 // Stepwise forward regression
@@ -375,7 +375,7 @@ void RegressNet::forward_regress()
 					for ( unsigned k = 0; k < added.size(); k++ )
 						sub_variables.push_back( variable_defs[ added[ k ] ] );
 
-					delete netCopyPtr; // delete copy if it exists
+					netCopyPtr.reset(); // delete copy if it exists
 					copy_network(); // copy the incoming Network to create new network
 
 					// Print message reporting which variables & nodes are being added
@@ -469,7 +469,7 @@ void RegressNet::forward_regress()
 		}
 	}
 
-	delete netCopyPtr; // get rid of copy of Network object for subnetworks
+	netCopyPtr.reset(); // get rid of copy of Network object for subnetworks
 }
 
 // Calculate chi-square using Wilk's GLRT

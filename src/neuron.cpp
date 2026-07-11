@@ -18,6 +18,7 @@
 #include <sstream>
 #include <string>
 #include <map>
+#include <memory>
 #include <typeinfo>
 #include "version.h"
 
@@ -34,11 +35,11 @@
 using namespace std;
 
 // Menu and submenu prototypes
-DataSet* specify_data(); // main menu: specify dataset method
+unique_ptr< DataSet > specify_data(); // main menu: specify dataset method
 	void data_characteristics( DataSet* ); // specify dataset: specify variate bounds & types
 	bool randomize_raw( DataSet* ); // specify dataset: randomize raw dataset into training & test sets
 	void specify_ROC( DataSet* ); // specify dataset: ROC reporting
-	Model* specify_model( DataSet* ); // main menu: specify model method
+	unique_ptr< Model > specify_model( DataSet* ); // main menu: specify model method
 bool use_model( Model* ); // main menu: use model
 	void stop_conditions( Model* ); // use model: specify stopping conditions
 	void regress_menu( Model*, double ); // use model: stepwise regression menu
@@ -80,9 +81,10 @@ int main( int argc, char* argv[] )
 	// Print welcome message
 	cout << "Welcome to " << NEURON_PACKAGE_STRING << endl;
 
-	// Dataset and Model pointers for instantiated objects
-	DataSet *dataPtr = 0;
-	Model *modelPtr = 0;
+	// Dataset and Model owners for instantiated objects; smart pointers make
+	//    replacement and scope exit exception-safe (no manual delete)
+	unique_ptr< DataSet > dataPtr;
+	unique_ptr< Model > modelPtr;
 
 	// Set initial unsigned values
 	unsigned choice = 0; // non-quit choice
@@ -111,8 +113,7 @@ int main( int argc, char* argv[] )
 		// Do choice
 		if ( choice == 1 ) // specify dataset
 		{
-			// Get a pointer to a new dataset object, test if valid
-			delete dataPtr; // prevent memory leak if it exists
+			// Get a new dataset object (replacing any previous one), test if valid
 			if ( !( dataPtr = specify_data() ) )
 				dataSpecifiedFlag = false;
 			else
@@ -127,9 +128,8 @@ int main( int argc, char* argv[] )
 			//    must be specified before model is specified
 			if ( dataSpecifiedFlag )
 			{
-				// Get a pointer to a new Model object, test if valid
-				delete modelPtr; // prevent memory leak if it exists
-				if ( !( modelPtr = specify_model( dataPtr ) ) )
+				// Get a new Model object (replacing any previous one), test if valid
+				if ( !( modelPtr = specify_model( dataPtr.get() ) ) )
 					modelSpecifiedFlag = false;
 				else
 					modelSpecifiedFlag = true;
@@ -142,7 +142,7 @@ int main( int argc, char* argv[] )
 		{
 			// Check to see if model and dataset have been specified
 			if ( modelSpecifiedFlag && dataSpecifiedFlag )
-				modelUsedFlag = use_model( modelPtr );
+				modelUsedFlag = use_model( modelPtr.get() );
 			else
 				cout << "You must specify a model and a dataset first." << endl;
 		}
@@ -150,7 +150,7 @@ int main( int argc, char* argv[] )
 		{
 			// Check to see that dataset specified
 			if ( dataSpecifiedFlag )
-				dfa( dataPtr );
+				dfa( dataPtr.get() );
 			else
 				cout << "You must specify a dataset first." << endl;
 		}
@@ -168,17 +168,13 @@ int main( int argc, char* argv[] )
 	// Print goodbye message
 	cout << endl << "Thank you for using neuron 3.0" << endl;
 
-	// Delete objects created by new
-	delete dataPtr;
-	delete modelPtr;
-
 	return 0;
 }
 
 // Main menu choice 1: Specify dataset submenu
-DataSet* specify_data() // returns a dataset if correctly specified
+unique_ptr< DataSet > specify_data() // returns a dataset if correctly specified
 {
-	DataSet *dataPtr = new DataSet; // dataset factory
+	auto dataPtr = make_unique< DataSet >(); // dataset factory
 
 	// Set initial variable values
 	unsigned choice = 0, // initial non-quit choice
@@ -271,7 +267,7 @@ DataSet* specify_data() // returns a dataset if correctly specified
 		}
 		else if ( choice == 5 ) // randomize a raw dataset into training & test sets
 		{
-			if ( randomize_raw( dataPtr ) ) // use submenu
+			if ( randomize_raw( dataPtr.get() ) ) // use submenu
 				scalesFlag = true; // scaling factors will be set by randomize() or randomizeD()
 		}
 
@@ -358,18 +354,18 @@ DataSet* specify_data() // returns a dataset if correctly specified
 		}
 
 		else if ( choice == 12 ) // specify variate bounds and types
-			data_characteristics( dataPtr );
+			data_characteristics( dataPtr.get() );
 
 		else if ( choice == 13 ) // specify number of ROC thresholds
 			// Specify ROC reporting only if output is discrete and only 1 output
 			if ( dataPtr->getDiscrete() && dataPtr->getOutput() == 1 )
-				specify_ROC( dataPtr );
+				specify_ROC( dataPtr.get() );
 	}
 
 	if ( !dataPtr->trainLoaded() ) // if a training set wasn't loaded, it's not valid
-		dataPtr = 0; // so clear it
+		dataPtr.reset(); // so clear it (the 2.x code nulled the raw pointer here, leaking it)
 
-	return dataPtr; // return pointer to new dataset object
+	return dataPtr; // return the new dataset object (or empty on failure)
 }
 
 // Main menu choice 1: Specify dataset submenu choice: Randomize raw dataset
@@ -761,9 +757,9 @@ void specify_ROC( DataSet* dataPtr )
 }
 
 // Main menu choice 2: Specify model submenu
-Model* specify_model( DataSet* dataPtr ) // returns a Model if correctly specified
+unique_ptr< Model > specify_model( DataSet* dataPtr ) // returns a Model if correctly specified
 {
-	Model *modelPtr = 0; // model factory
+	unique_ptr< Model > modelPtr; // model factory
 
 	// Set initial variable values
 	unsigned choice = 0, // initial non-quit choice
@@ -869,20 +865,20 @@ Model* specify_model( DataSet* dataPtr ) // returns a Model if correctly specifi
 
 			// Make a new Model to load the file into
 			if ( lineString == "Binary logistic" ) // it's a Logistic object
-				modelPtr = new Logistic;
+				modelPtr = make_unique< Logistic >();
 			else if ( lineString == "SimpleProp" ) // it's a SimpleProp object
-				modelPtr = new SimpleProp;
+				modelPtr = make_unique< SimpleProp >();
 			else if ( lineString == "BareProp" ) // it's a BareProp object
-				modelPtr = new BareProp;
+				modelPtr = make_unique< BareProp >();
 			else if ( lineString == "BackProp" ) // it's a BackProp object
 			{
-				modelPtr = new BackProp;
+				modelPtr = make_unique< BackProp >();
 
 				// Determine if network has biases from next line in file
 				bool biasFlag;
 				loadfile >> biasFlag;
 
-				dynamic_cast< Network* >( modelPtr )->setBias( biasFlag );
+				dynamic_cast< Network* >( modelPtr.get() )->setBias( biasFlag );
 			}
 			else
 				validModel = false; // no valid object type was found
@@ -908,7 +904,7 @@ Model* specify_model( DataSet* dataPtr ) // returns a Model if correctly specifi
 				}
 
 				// Use the Network method to load it from file
-				if ( dynamic_cast< Network* >( modelPtr )->load( reply ) )
+				if ( dynamic_cast< Network* >( modelPtr.get() )->load( reply ) )
 					// Return directly to main menu to avoid redefining model
 					return modelPtr; // return a pointer to the Model
 			}
@@ -925,7 +921,7 @@ Model* specify_model( DataSet* dataPtr ) // returns a Model if correctly specifi
 
 			else // check's OK, so make object
 			{
-				modelPtr = new Logistic;
+				modelPtr = make_unique< Logistic >();
 
 				// And load its dataset: this must happen BEFORE architecture is specified
 				modelPtr->setDataSet( *dataPtr );
@@ -960,20 +956,20 @@ Model* specify_model( DataSet* dataPtr ) // returns a Model if correctly specifi
 
 	// The Model factory
 #ifdef GAURAV // general backpropagation network
-	modelPtr = new BackProp;
-	dynamic_cast< Network* >( modelPtr )->setBias( biases );
+	modelPtr = make_unique< BackProp >();
+	dynamic_cast< Network* >( modelPtr.get() )->setBias( biases );
 #else // Determine the type of Model object
 	if ( dataPtr->getOutput() == 1 && nLayer.size() == 1 )
 	{
 		if ( biases )
-			modelPtr = new SimpleProp; // biases makes it SimpleProp
+			modelPtr = make_unique< SimpleProp >(); // biases makes it SimpleProp
 		else
-			modelPtr = new BareProp; // no biases makes it BareProp
+			modelPtr = make_unique< BareProp >(); // no biases makes it BareProp
 	}
 	else
 	{
-		modelPtr = new BackProp; // general backpropagation network
-		dynamic_cast< Network* >( modelPtr )->setBias( biases );
+		modelPtr = make_unique< BackProp >(); // general backpropagation network
+		dynamic_cast< Network* >( modelPtr.get() )->setBias( biases );
 	}
 #endif
 
@@ -992,17 +988,17 @@ Model* specify_model( DataSet* dataPtr ) // returns a Model if correctly specifi
 
 	// Set the number of hidden nodes to specify the network architecture
 #ifdef GAURAV // general backpropagation network
-	dynamic_cast< BackProp* >( modelPtr )->setHidden( nLayer );
+	dynamic_cast< BackProp* >( modelPtr.get() )->setHidden( nLayer );
 #else
 	if ( ( dataPtr->getOutput() == 1 ) && ( nLayer.size() == 1 ) )
 	{
 		if ( biases )
-			dynamic_cast< SimpleProp* >( modelPtr )->setHidden( nLayer[ 0 ] );
+			dynamic_cast< SimpleProp* >( modelPtr.get() )->setHidden( nLayer[ 0 ] );
 		else
-			dynamic_cast< BareProp* >( modelPtr )->setHidden( nLayer[ 0 ] );
+			dynamic_cast< BareProp* >( modelPtr.get() )->setHidden( nLayer[ 0 ] );
 	}
 	else
-		dynamic_cast< BackProp* >( modelPtr )->setHidden( nLayer );
+		dynamic_cast< BackProp* >( modelPtr.get() )->setHidden( nLayer );
 #endif
 
 	return modelPtr; // return pointer to new Model object
