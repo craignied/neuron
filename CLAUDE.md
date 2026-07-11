@@ -147,3 +147,13 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   copy machinery) smoke-tested end-to-end (needs a p-value threshold answer after
   choosing reverse/forward — scripts beware). Non-owning params (use_model, dfa, etc.)
   stay raw pointers by design.
+- **2026-07-12 (later)** — **RNG switched to std::mt19937** (in utility.cpp behind the
+  unchanged `util::d_random()` interface; new `util::i_random(n)` replaces the raw
+  `rand() % n` calls in vector_ops.cpp). Seeded streams are now specified by the C++
+  standard → reproducible across platforms/compilers (old `rand()` was libc-specific;
+  MSVC's RAND_MAX is 32767). Doubles are mapped from raw generator output, NOT
+  std::uniform_real_distribution (whose implementation varies between stdlibs — don't
+  "modernize" that away). Seed streams differ from the rand() era (seed-42 XOR now
+  converges at 90k iters vs 300k). Verified: zero warnings, verify_oracle.sh passes,
+  seed-42 reproducible, stratified train/test randomize path exercised. This unlocks a
+  cross-platform golden-transcript test (not yet built).

@@ -39,6 +39,8 @@ namespace util {
 	double d_random( double );
 	// 2 arguments returns random number between arguments
 	double d_random( double, double );
+	// Returns a uniform random integer in [0, n-1]
+	unsigned i_random( unsigned );
 
 	// Rounds to number of significant digits
 	double round( double, unsigned );

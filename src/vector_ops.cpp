@@ -4,7 +4,7 @@
 
 #include "stdafx.h" // For MSVC, must be first!
 
-#include <algorithm> // GCC needs for srand() and rand()
+#include <algorithm>
 #include <math.h>
 #include <time.h>
 
@@ -39,12 +39,12 @@ vector< unsigned >& nvec::random_positions( vector< unsigned >& v )
 
 	assert( n > 0 ); // vector must have at least 1 element
 
-	v[ 0 ] = rand() % n; // make random 1st element
+	v[ 0 ] = util::i_random( n ); // make random 1st element
 
 	// Loop through vector, referencing each element with index i
 	for ( unsigned i = 1; i < n; i++ )
 	{ 
-		random = rand() % n; // make a new random number
+		random = util::i_random( n ); // make a new random number
 		unsigned j = 0; // reset index j for elements prior to index i
 		
 		// Scan through the vector elements prior to index i to see if
@@ -53,7 +53,7 @@ vector< unsigned >& nvec::random_positions( vector< unsigned >& v )
 		{
 			if ( v[ j ] == random ) // found previous instance of random number
 			{
-				random = rand() % n; // make a new random number
+				random = util::i_random( n ); // make a new random number
 				j = 0; // and reset index j for elements prior to index i
 			}
 			else

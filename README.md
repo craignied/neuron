@@ -51,8 +51,10 @@ Usage: neuron [--seed N] [--version]
 
 `--seed N` makes runs reproducible: the same seed with the same inputs produces
 bit-identical training (weight initialization and train/test splits both draw from
-the seeded generator). Without it, the generator is seeded from the clock, as
-neUROn2++ always was.
+the seeded generator). The generator is `std::mt19937`, whose output stream the
+C++ standard specifies exactly — so seeded runs reproduce across platforms and
+compilers, not just on one machine. Without `--seed`, the generator is seeded from
+the clock, as neUROn2++ always was.
 
 The engine is C++17 with no dependencies beyond GSL — it builds anywhere those exist.
 

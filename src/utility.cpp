@@ -8,7 +8,8 @@
 #pragma warning (disable: 4786)
 #endif
 
-#include <algorithm> // GCC needs for srand() and rand()
+#include <algorithm>
+#include <random>  // std::mt19937
 #include <iostream>
 #include <fstream>
 #include <iomanip>
@@ -26,13 +27,20 @@ using namespace std;
 
 // Random number methods
 
+// Mersenne Twister generator (std::mt19937): unlike rand(), the C++ standard
+//    specifies its output stream exactly, so a given seed produces identical
+//    runs on every platform and compiler (MSVC's rand() has RAND_MAX = 32767).
+//    Raw generator output is mapped to doubles here rather than through
+//    std::uniform_real_distribution, whose implementation may vary.
+static mt19937 rng;
+
 // Set when the user supplies an explicit seed (--seed); suppresses timestamp seeding
 static bool userSeededFlag = false;
 
 // Seeds the generator with a user-specified seed for reproducible runs
 void util::set_seed( unsigned seed )
 {
-	srand( seed );
+	rng.seed( seed );
 	userSeededFlag = true;
 }
 
@@ -43,7 +51,7 @@ void util::d_random()
 	static bool firstFlag = true;
 
 	if ( firstFlag && !userSeededFlag )
-		srand( time( 0 ) );
+		rng.seed( ( unsigned ) time( 0 ) );
 
 	firstFlag = false;
 }
@@ -51,14 +59,20 @@ void util::d_random()
 // 1 argument returns random number between -arg and +arg
 double util::d_random( double limit )
 {
-	return limit * ( 2 * ( double ) rand() / ( double ) RAND_MAX - 1 );
+	return limit * ( 2 * ( double ) rng() / ( double ) mt19937::max() - 1 );
 }
 
 // 2 arguments returns random number between arguments
 double util::d_random( double lower, double upper )
 {
-	return ( upper - lower ) * ( double ) rand() / ( double ) RAND_MAX
+	return ( upper - lower ) * ( double ) rng() / ( double ) mt19937::max()
 		+ lower;
+}
+
+// Returns a uniform random integer in [0, n-1] (replaces legacy rand() % n)
+unsigned util::i_random( unsigned n )
+{
+	return ( unsigned )( rng() % n );
 }
 
 // Rounds to number of significant digits, first argument is number
