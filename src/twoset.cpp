@@ -36,6 +36,9 @@ void TwoSet::initialize()
 	HLX2calcFlag = false;  //  Hui Liu added 09/09/2004
 	minBins = 3;
 	maxBins = 10;
+	// Zero the cached statistic values so no path can ever print
+	//    uninitialized memory (2.x left these uninitialized)
+	statP = statChi2 = KSD = KSP = PKX2P = HLX2P = 0;
 }
 
 // Copy constructor
@@ -82,6 +85,12 @@ void TwoSet::copy( const TwoSet& rhs )
 	KScalcFlag = rhs.KScalcFlag;
 	PKX2calcFlag = rhs.PKX2calcFlag;  // Hui Liu added 09/09/2004
 	HLX2calcFlag = rhs.HLX2calcFlag;   // Hui Liu added 09/09/2004
+	// Copy the cached statistic values with their flags — 2.x copied the
+	//    flags but not the values, so copies claimed statistics they never held
+	KSD = rhs.KSD;
+	KSP = rhs.KSP;
+	PKX2P = rhs.PKX2P;
+	HLX2P = rhs.HLX2P;
 }
 
 // Loads Matrix into TwoSet object, takes incoming Matrix as argument
@@ -250,7 +259,22 @@ double& TwoSet::test( const unsigned r )
 {
 	assert( r >= 0 && r < n ); // bounds check row argument
 
+	// Handing out a writable reference means the guess column may change,
+	//    so cached statistics can no longer be trusted. In 2.x they were
+	//    never invalidated: retraining printed the FIRST run's K-S/Pearson/
+	//    H-L values, and stepwise regression printed uninitialized memory.
+	invalidate();
+
 	return A( r, 1 );
+}
+
+// Invalidate cached statistics (call whenever the guess column changes)
+void TwoSet::invalidate()
+{
+	statROCcalcFlag = false;
+	KScalcFlag = false;
+	PKX2calcFlag = false;
+	HLX2calcFlag = false;
 }
 
 // Const accessor for a row's element in the test column

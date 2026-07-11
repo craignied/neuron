@@ -166,3 +166,13 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   platform-portable). `.gitattributes` forces LF so Windows checkouts compare clean;
   run_golden.sh also strips CR and finds build/Release/neuron.exe (MSVC multi-config).
   Oracle check stays local-only (needs ../distro tarball).
+- **2026-07-12 (CI day-one catch)** — First matrix run: xor golden passed on ALL
+  three OSes (mt19937 portability proven); regress golden failed on Linux/Windows
+  with different garbage → **third legacy bug found: stale/uninitialized TwoSet
+  statistics.** Guesses are written via `test(r) = o` (network.cpp) which never
+  invalidated cached stats: 2.x reprinted the FIRST run's K-S/Pearson/H-L on every
+  retrain, and TwoSet::copy() copied calc flags but not values (regression printed
+  uninitialized memory; mac's zero pages hid it). Fix: `TwoSet::invalidate()` called
+  from the non-const `test()` accessor; copy() now copies KSD/KSP/PKX2P/HLX2P;
+  initialize() zeroes all stat values. Goldens re-blessed — null-model lines now
+  show computed values (D=0 **p=1**, Pearson p=0.318907) instead of lucky zeros.

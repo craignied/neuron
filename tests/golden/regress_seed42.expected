@@ -343,8 +343,8 @@ Known F:           1             1
 Cannot calculate ROC statistically, not enough data points (10)
 By trapezoidal method, ROC area = 0.500000
 Number thresholds = 4
-Kolmogorov-Smirnov goodness of fit D = 0, p = 0
-Pearson's Chi-Square goodness of fit p = 0
+Kolmogorov-Smirnov goodness of fit D = 0, p = 1
+Pearson's Chi-Square goodness of fit p = 0.318907
 Hosmer-Lemeshow goodness of fit p = Could not calculate Hosmer-Lemeshow goodness of fit: a too large, ITMAX too small in gcf
 
 Error prior network = 0.0132348
@@ -441,8 +441,8 @@ Known F:           1             1
 Cannot calculate ROC statistically, not enough data points (10)
 By trapezoidal method, ROC area = 0.500000
 Number thresholds = 4
-Kolmogorov-Smirnov goodness of fit D = 0, p = 0
-Pearson's Chi-Square goodness of fit p = 0
+Kolmogorov-Smirnov goodness of fit D = 0, p = 1
+Pearson's Chi-Square goodness of fit p = 0.318907
 Hosmer-Lemeshow goodness of fit p = Could not calculate Hosmer-Lemeshow goodness of fit: a too large, ITMAX too small in gcf
 
 Error prior network = 0.0132348
@@ -549,8 +549,8 @@ Known F:           0             2
 Cannot calculate ROC statistically, not enough data points (10)
 By trapezoidal method, ROC area = 0.000000
 Number thresholds = 4
-Kolmogorov-Smirnov goodness of fit D = 0, p = 0
-Pearson's Chi-Square goodness of fit p = 0
+Kolmogorov-Smirnov goodness of fit D = 0, p = 1
+Pearson's Chi-Square goodness of fit p = 0.318907
 Hosmer-Lemeshow goodness of fit p = Could not calculate Hosmer-Lemeshow goodness of fit: a too large, ITMAX too small in gcf
 
 Error prior network = 6.931472e-01

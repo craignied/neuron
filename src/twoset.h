@@ -59,7 +59,8 @@ public:
 	vector< double > test() const; // get new vector from test column
 	double& real( const unsigned ); // accessor for a row's element in the real column
 	const double real( const unsigned ) const; // const accessor for a real element
-	double& test( const unsigned ); // accessor for a row's element in the test column
+	double& test( const unsigned ); // accessor for a row element in the test column (invalidates cached stats)
+	void invalidate(); // invalidate cached statistics after guesses change
 	const double test( const unsigned ) const; // const accessor for a test element
 
 	// Accessors for dataset and calculated metrics
