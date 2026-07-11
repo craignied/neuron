@@ -1,0 +1,10 @@
+.DS_Store
+.env
+credentials.json
+client_secrets.json
+*.p8
+.claude/settings.local.json
+.vscode/
+__pycache__/
+*.pyc
+venv/
