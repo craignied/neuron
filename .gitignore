@@ -8,6 +8,6 @@ client_secrets.json
 __pycache__/
 *.pyc
 venv/
-baseline/build/
-baseline/runs/
 build/
+tests/oracle/bin/
+tests/oracle/runs/

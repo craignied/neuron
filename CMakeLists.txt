@@ -7,6 +7,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(GSL REQUIRED)
 
-file(GLOB ENGINE_SOURCES engine/src/*.cpp)
+file(GLOB ENGINE_SOURCES src/*.cpp)
 add_executable(neuron ${ENGINE_SOURCES})
 target_link_libraries(neuron PRIVATE GSL::gsl GSL::gslcblas)

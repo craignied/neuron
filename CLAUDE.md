@@ -51,11 +51,11 @@ GSL 1.9–1.10; modern GSL is 2.x — untested).
 - **2.64 builds clean on Apple Silicon** — zero source changes, modern clang++ (C++14
   default) + Homebrew GSL 2.8. Only warnings: `std::unary_function` deprecation in
   `function_defs.h` (would break under `-std=c++17`).
-- Reference build + scripted XOR smoke test live in `baseline/` (see its README).
+- Reference build + scripted XOR smoke test live in `tests/oracle/` (see its README).
   XOR trains to 100% CA with full stats output; weight randomization is unseeded, so
   runs are nondeterministic — compare endpoint statistics, not traces.
 - The old `../distro/src/neuron` binary is x86_64; ignore it, rebuild via
-  `baseline/build_legacy.sh`.
+  `tests/oracle/build_oracle.sh`.
 - Program quirks: greets as "2.63" (stale pre-generated configure in the 2.64 tarball);
   writes `model.txt` + `neuron.log` logs into its cwd.
 
@@ -96,15 +96,15 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   `docs/`.
 - **2026-07-11 (later)** — Legacy 2.64 verified working as the numerical oracle: built
   arm64 against GSL 2.8, ran a scripted XOR session end-to-end (100% CA, ROC 1.0, K-S /
-  Pearson / H-L stats all exercised). Harness committed in `baseline/`.
+  Pearson / H-L stats all exercised). Harness committed in `tests/oracle/` (originally `baseline/`, reorganized same day).
 - **2026-07-11 (evening)** — **neuron 3.0.0-dev is alive.** Strategy: carry the legacy
   engine forward as the 3.0 base and modernize in place (not a ground-up rewrite).
-  Done: legacy source copied to `engine/src/`, made C++17-clean (dropped 5
+  Done: legacy source copied to `src/` (originally `engine/src/`), made C++17-clean (dropped 5
   `unary_function` inheritances in function_defs.h, stripped 6 `throw(DivisionByZero)`
   specs in twoset.{h,cpp}), `config.h` → `version.h` (NEURON_PACKAGE_STRING),
   top-level CMakeLists.txt (C++17, `find_package(GSL)`), builds with **zero warnings**.
   Verified two ways: (1) XOR training run — same endpoint stats as legacy;
-  (2) `baseline/verify_oracle.sh` — legacy trains & saves a network, both binaries load
+  (2) `tests/oracle/verify_oracle.sh` — legacy trains & saves a network, both binaries load
   the same weights and do an eta-0 forward pass, outputs **numerically identical**
   (diff-clean). Note: `distro/data/Run9` (11-input SimpleProp) has no matching dataset
   in distro/data (BP40 files are 13-col), so the oracle check generates its own network.
