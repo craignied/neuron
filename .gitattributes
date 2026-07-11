@@ -1,0 +1,4 @@
+# Force LF everywhere so golden transcripts and scripted inputs compare
+# byte-identically on Windows checkouts (the program itself emits LF).
+* text=auto eol=lf
+*.pdf binary

@@ -11,3 +11,4 @@ venv/
 build/
 tests/oracle/bin/
 tests/oracle/runs/
+tests/golden/runs/

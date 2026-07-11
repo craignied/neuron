@@ -1,5 +1,7 @@
 # neuron 3.0
 
+[![CI](https://github.com/craignied/neuron/actions/workflows/ci.yml/badge.svg)](https://github.com/craignied/neuron/actions/workflows/ci.yml)
+
 A neural computational modeling environment — the third major revision of **neUROn**,
 begun in 1992 by Craig Niederberger.
 
@@ -61,6 +63,20 @@ The engine is C++17 with no dependencies beyond GSL — it builds anywhere those
 > **If you copied or moved this directory:** delete any `build/` that came along
 > before configuring (`rm -rf build`). CMake caches the absolute source path and
 > refuses to reuse a cache created at a different location.
+
+## Testing
+
+Every push is built and tested on macOS, Linux, and Windows by the GitHub Actions
+matrix in `.github/workflows/ci.yml`. The core check is the **golden transcript
+test** (`tests/golden/run_golden.sh`): two fully seeded sessions — XOR training and
+stepwise reverse regression — must reproduce their committed transcripts byte for
+byte (only the elapsed-time line is excluded). Because the RNG is `std::mt19937`,
+the same transcripts must match on all three platforms; any numerical drift anywhere
+in the engine fails the build. After an intentional output change, regenerate with
+`./tests/golden/run_golden.sh --bless`.
+
+A second, local-only check (`tests/oracle/`) cross-verifies the engine against the
+original neUROn2++ binary; see its README.
 
 ## Layout
 

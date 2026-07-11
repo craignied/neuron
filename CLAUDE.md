@@ -157,3 +157,12 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   converges at 90k iters vs 300k). Verified: zero warnings, verify_oracle.sh passes,
   seed-42 reproducible, stratified train/test randomize path exercised. This unlocks a
   cross-platform golden-transcript test (not yet built).
+- **2026-07-12 (night)** — **Golden-transcript test + CI matrix.** `tests/golden/`:
+  two seeded sessions (xor_seed42: training+stats; regress_seed42: + stepwise reverse
+  regression) must reproduce committed transcripts byte-for-byte (only "That took"
+  excluded); `run_golden.sh --bless` regenerates after intentional output changes.
+  `.github/workflows/ci.yml`: macOS/Linux/Windows matrix — GSL via apt/brew/vcpkg
+  (vcpkg cached), CMake build, golden test on all three (mt19937 makes transcripts
+  platform-portable). `.gitattributes` forces LF so Windows checkouts compare clean;
+  run_golden.sh also strips CR and finds build/Release/neuron.exe (MSVC multi-config).
+  Oracle check stays local-only (needs ../distro tarball).

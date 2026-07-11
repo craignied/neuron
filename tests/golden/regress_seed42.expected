@@ -1,0 +1,593 @@
+Random seed set to 42 (runs with the same seed and inputs are reproducible)
+Welcome to neuron 3.0.0-dev
+
+( 1 ) Specify dataset
+( 2 ) Specify model
+( 3 ) Use model
+( 4 ) Discriminant function analysis
+( 9 ) Quit
+Menu choice: 
+( 1 ) Number of input nodes: 1
+( 2 ) Number of output nodes: 1
+( 3 ) Load raw dataset
+( 4 ) Convert a raw dataset into a training set
+( 5 ) Randomize a raw dataset into training and test sets
+( 6 ) Load training set
+( 7 ) Save training set
+( 8 ) Save scaling factors
+( 9 ) Load test set
+( 10 ) Save test set
+( 11 ) Log dataset operations to history file: yes
+( 12 ) Specify variate bounds and types
+( 13 ) ROC area reporting
+( 14 ) Return to main menu
+Menu choice: How many input nodes? 
+( 1 ) Number of input nodes: 2
+( 2 ) Number of output nodes: 1
+( 3 ) Load raw dataset
+( 4 ) Convert a raw dataset into a training set
+( 5 ) Randomize a raw dataset into training and test sets
+( 6 ) Load training set
+( 7 ) Save training set
+( 8 ) Save scaling factors
+( 9 ) Load test set
+( 10 ) Save test set
+( 11 ) Log dataset operations to history file: yes
+( 12 ) Specify variate bounds and types
+( 13 ) ROC area reporting
+( 14 ) Return to main menu
+Menu choice: How many output nodes? 
+( 1 ) Number of input nodes: 2
+( 2 ) Number of output nodes: 1
+( 3 ) Load raw dataset
+( 4 ) Convert a raw dataset into a training set
+( 5 ) Randomize a raw dataset into training and test sets
+( 6 ) Load training set
+( 7 ) Save training set
+( 8 ) Save scaling factors
+( 9 ) Load test set
+( 10 ) Save test set
+( 11 ) Log dataset operations to history file: yes
+( 12 ) Specify variate bounds and types
+( 13 ) ROC area reporting
+( 14 ) Return to main menu
+Menu choice: What is the name of the training set data file? The loaded matrix has 4 rows and 3 columns.
+
+( 1 ) Number of input nodes: 2
+( 2 ) Number of output nodes: 1
+( 3 ) Load raw dataset
+( 4 ) Convert a raw dataset into a training set
+( 5 ) Randomize a raw dataset into training and test sets
+( 6 ) Load training set
+( 7 ) Save training set
+( 8 ) Save scaling factors
+( 9 ) Load test set
+( 10 ) Save test set
+( 11 ) Log dataset operations to history file: yes
+( 12 ) Specify variate bounds and types
+( 13 ) ROC area reporting
+( 14 ) Return to main menu
+Menu choice: 
+( 1 ) Specify dataset
+( 2 ) Specify model
+( 3 ) Use model
+( 4 ) Discriminant function analysis
+( 9 ) Quit
+Menu choice: 
+( 1 ) Bias nodes: yes
+( 2 ) Number of hidden layers: 1
+         Layer 1: 1 node(s)
+( 3 ) Output error function: X-entropy
+( 4 ) Load network from a file
+( 5 ) Binary logistic regression
+( 6 ) Log last operation to file: yes
+( 7 ) Log to history file: yes
+( 8 ) Return to main menu
+Menu choice: How many hidden layers? For layer 1, how many hidden nodes? 
+( 1 ) Bias nodes: yes
+( 2 ) Number of hidden layers: 1
+         Layer 1: 3 node(s)
+( 3 ) Output error function: X-entropy
+( 4 ) Load network from a file
+( 5 ) Binary logistic regression
+( 6 ) Log last operation to file: yes
+( 7 ) Log to history file: yes
+( 8 ) Return to main menu
+Menu choice: 
+( 1 ) Specify dataset
+( 2 ) Specify model
+( 3 ) Use model
+( 4 ) Discriminant function analysis
+( 9 ) Quit
+Menu choice: 
+( 1 ) Randomize weights
+( 2 ) Set learning rate: 1
+( 3 ) Set stopping conditions
+( 4 ) Set batch/epoch (currently on)
+( 5 ) Set weight decay (lambda = 5e-05)
+( 6 ) Print counter: logarithmic
+( 7 ) Train model
+( 8 ) Save the network to a file
+( 9 ) Stepwise Regression
+( 10 ) Return to main menu
+Menu choice: 
+( 1 ) Randomize weights
+( 2 ) Set learning rate: 1
+( 3 ) Set stopping conditions
+( 4 ) Set batch/epoch (currently on)
+( 5 ) Set weight decay (lambda = 5e-05)
+( 6 ) Print counter: logarithmic
+( 7 ) Train model
+( 8 ) Save the network to a file
+( 9 ) Stepwise Regression
+( 10 ) Return to main menu
+Menu choice: Choose training algorithm:
+( 1 ) Canonical backpropagation (gradient descent)
+( 2 ) Conjugate gradient descent
+( 3 ) Shanno's algorithm
+Menu choice: I'm running an iterative model:
+SimpleProp
+Bias nodes on all layers by definition
+2 input nodes
+1 hidden layer by definition
+3 hidden nodes
+1 output node by definition
+Number of exemplars in training set: 4
+Training algorithm is canonical backpropagation
+Training is off-line (batch/epoch is on)
+Learning rate eta: 1
+Weight decay term lambda: 5e-05
+Error checking routines in effect:
+Maximum number of iterations: 1000000
+Stop if maximum absolute gradient decreases below 1e-06
+
+    Iteration: X-entropy error:  Max abs grad:  CA Train %
+             1     7.198612e-01   1.143957e-01        50.0
+             2     7.010760e-01   6.300420e-02        50.0
+             3     6.954821e-01   3.422719e-02        50.0
+             4     6.938619e-01   1.863183e-02        50.0
+             5     6.933947e-01   1.026226e-02        50.0
+             6     6.932583e-01   5.782524e-03        50.0
+             7     6.932165e-01   3.385887e-03        50.0
+             8     6.932018e-01   2.103130e-03        75.0
+             9     6.931948e-01   1.415754e-03        75.0
+            10     6.931901e-01   1.334296e-03        75.0
+            20     6.931527e-01   1.277841e-03        75.0
+            30     6.931178e-01   1.228561e-03        75.0
+            40     6.930840e-01   1.188567e-03        50.0
+            50     6.930505e-01   1.156731e-03        50.0
+            60     6.930164e-01   1.132179e-03        75.0
+            70     6.929811e-01   1.114249e-03        75.0
+            80     6.929437e-01   1.102456e-03        75.0
+            90     6.929034e-01   1.096467e-03        75.0
+           100     6.928591e-01   1.096084e-03        75.0
+           200     6.917366e-01   2.232657e-03        75.0
+           300     6.707292e-01   1.282503e-02        75.0
+           400     2.713452e-01   3.781104e-02       100.0
+           500     8.266987e-02   1.586234e-02       100.0
+           600     4.787951e-02   8.934162e-03       100.0
+           700     3.497158e-02   6.091284e-03       100.0
+           800     2.847340e-02   4.575060e-03       100.0
+           900     2.463927e-02   3.638233e-03       100.0
+          1000     2.214704e-02   3.003539e-03       100.0
+          2000     1.524346e-02   9.799442e-04       100.0
+          3000     1.412297e-02   5.143358e-04       100.0
+          4000     1.375315e-02   3.154612e-04       100.0
+          5000     1.358669e-02   2.099525e-04       100.0
+          6000     1.349519e-02   1.474270e-04       100.0
+          7000     1.343754e-02   1.077557e-04       100.0
+          8000     1.339776e-02   8.587950e-05       100.0
+          9000     1.336865e-02   7.831650e-05       100.0
+         10000     1.334651e-02   7.204176e-05       100.0
+         20000     1.326242e-02   3.737952e-05       100.0
+         30000     1.324325e-02   2.090275e-05       100.0
+         40000     1.323746e-02   1.172805e-05       100.0
+         50000     1.323565e-02   6.557155e-06       100.0
+         60000     1.323509e-02   3.657607e-06       100.0
+         70000     1.323492e-02   2.038222e-06       100.0
+         80000     1.323486e-02   1.135458e-06       100.0
+         90000     1.323485e-02   6.325147e-07       100.0
+The maximum absolute gradient became lower than 1.0e-06.
+
+Total iterations = 90000
+
+Final X-entropy error in the training set = 2.752137e-03.
+Log likelihood = -1.100855e-02
+
+Training set:
+-------------
+Classification accuracy: 100.0%
+Sensitivity: 100.0%
+Specificity: 100.0%
+Predictive value positive: 100.0%
+Predictive value negative: 100.0%
+Classification table for training set:
+----------------------------------
+         Predicted T   Predicted F
+         -----------   -----------
+Known T:           2             0
+Known F:           0             2
+----------------------------------
+WARNING: Maximum number of bins to be searched (10) exceeds data (0),
+Setting Maximum number of bins to 0
+Cannot calculate ROC statistically, not enough data points (10)
+By trapezoidal method, ROC area = 1.000000
+Number thresholds = 4
+Kolmogorov-Smirnov goodness of fit D = 1, p = 0.0970269
+Pearson's Chi-Square goodness of fit p = 0.997129
+Hosmer-Lemeshow goodness of fit p = Could not calculate Hosmer-Lemeshow goodness of fit: a too large, ITMAX too small in gcf
+
+Would you like to save this model (yes/no)? 
+( 1 ) Randomize weights
+( 2 ) Set learning rate: 1
+( 3 ) Set stopping conditions
+( 4 ) Set batch/epoch (currently on)
+( 5 ) Set weight decay (lambda = 5e-05)
+( 6 ) Print counter: logarithmic
+( 7 ) Train model
+( 8 ) Save the network to a file
+( 9 ) Stepwise Regression
+( 10 ) Return to main menu
+Menu choice: 
+( 1 ) Specify variables
+( 2 ) Stepwise reverse regression
+( 3 ) Stepwise forward regression
+( 4 ) Return to previous menu
+Menu choice: 
+( 1 ) From the command line
+( 2 ) From a file
+Choose: 
+Variables are separated by semicolons (;),
+input nodes by commas (,), and hyphens can be used
+for multiple input nodes.  For example: 0-4;5,6;7;8
+
+Enter definition of variables: 
+( 1 ) Specify variables
+( 2 ) Stepwise reverse regression
+( 3 ) Stepwise forward regression
+( 4 ) Return to previous menu
+Menu choice: 
+What is the smallest p-value at which variables should
+stop being removed in the stepwise regression? 
+Reverse regressing a SimpleProp Network:
+Variable structure:
+variable 0 is represented by input node(s) 0 
+variable 1 is represented by input node(s) 1 
+
+Removing variable(s) 0  = node(s) 0 :
+I'm running an iterative model:
+SimpleProp
+Bias nodes on all layers by definition
+1 input nodes
+1 hidden layer by definition
+3 hidden nodes
+1 output node by definition
+Number of exemplars in training set: 4
+Training algorithm is canonical backpropagation
+Training is off-line (batch/epoch is on)
+Learning rate eta: 1
+Weight decay term lambda: 5e-05
+Error checking routines in effect:
+Maximum number of iterations: 1000000
+Stop if maximum absolute gradient decreases below 1e-06
+
+    Iteration: X-entropy error:  Max abs grad:  CA Train %
+             1     7.568663e-01   2.606677e-01        50.0
+             2     7.653951e-01   2.480776e-01        50.0
+             3     7.609662e-01   2.662719e-01        50.0
+             4     7.719646e-01   2.981949e-01        50.0
+             5     7.724353e-01   3.364155e-01        50.0
+             6     7.883485e-01   3.711345e-01        50.0
+             7     7.919817e-01   4.084809e-01        50.0
+             8     8.165995e-01   4.328503e-01        50.0
+             9     8.281064e-01   4.627123e-01        50.0
+            10     8.902549e-01   4.794607e-01        50.0
+            20     9.978641e-01   5.097001e-01        50.0
+            30     9.541331e-01   4.891950e-01        50.0
+            40     9.091492e-01   4.654923e-01        50.0
+            50     8.673213e-01   4.379260e-01        50.0
+            60     8.329894e-01   4.079518e-01        50.0
+            70     8.064214e-01   3.771888e-01        50.0
+            80     7.855331e-01   3.460859e-01        50.0
+            90     7.684795e-01   3.145330e-01        50.0
+           100     7.542273e-01   2.825845e-01        50.0
+           200     7.030157e-01   5.164992e-02        50.0
+           300     7.012100e-01   3.223781e-03        50.0
+           400     7.011236e-01   5.905127e-04        50.0
+           500     7.010443e-01   5.687613e-04        50.0
+           600     7.009658e-01   5.658595e-04        50.0
+           700     7.008881e-01   5.630374e-04        50.0
+           800     7.008111e-01   5.602291e-04        50.0
+           900     7.007349e-01   5.574346e-04        50.0
+          1000     7.006595e-01   5.546537e-04        50.0
+          2000     6.999452e-01   5.275811e-04        50.0
+          3000     6.992989e-01   5.017974e-04        50.0
+          4000     6.987140e-01   4.772350e-04        50.0
+          5000     6.981847e-01   4.538299e-04        50.0
+          6000     6.977057e-01   4.315218e-04        50.0
+          7000     6.972722e-01   4.102545e-04        50.0
+          8000     6.968799e-01   3.899756e-04        50.0
+          9000     6.965249e-01   3.706369e-04        50.0
+         10000     6.962036e-01   3.521944e-04        50.0
+         20000     6.942718e-01   2.097157e-04        50.0
+         30000     6.935619e-01   1.257426e-04        50.0
+         40000     6.933005e-01   7.734861e-05        50.0
+         50000     6.932038e-01   4.813288e-05        50.0
+         60000     6.931680e-01   2.984541e-05        50.0
+         70000     6.931549e-01   1.837386e-05        50.0
+         80000     6.931500e-01   1.124782e-05        50.0
+         90000     6.931482e-01   6.860424e-06        50.0
+        100000     6.931476e-01   4.175118e-06        50.0
+        200000     6.931472e-01   2.827690e-08        50.0
+The maximum absolute gradient became lower than 1.0e-06.
+
+Total iterations = 200000
+
+Final X-entropy error in the training set = 6.931472e-01.
+Log likelihood = -2.772589e+00
+
+Training set:
+-------------
+Classification accuracy: 50.0%
+Sensitivity: 50.0%
+Specificity: 50.0%
+Predictive value positive: 50.0%
+Predictive value negative: 50.0%
+Classification table for training set:
+----------------------------------
+         Predicted T   Predicted F
+         -----------   -----------
+Known T:           1             1
+Known F:           1             1
+----------------------------------
+Cannot calculate ROC statistically, not enough data points (10)
+By trapezoidal method, ROC area = 0.500000
+Number thresholds = 4
+Kolmogorov-Smirnov goodness of fit D = 0, p = 0
+Pearson's Chi-Square goodness of fit p = 0
+Hosmer-Lemeshow goodness of fit p = Could not calculate Hosmer-Lemeshow goodness of fit: a too large, ITMAX too small in gcf
+
+Error prior network = 0.0132348
+Error this subnetwork = 0.693147
+Chi-square = 5.4393, degrees of freedom = 3
+p = 0.142315
+
+Removing variable(s) 1  = node(s) 1 :
+I'm running an iterative model:
+SimpleProp
+Bias nodes on all layers by definition
+1 input nodes
+1 hidden layer by definition
+3 hidden nodes
+1 output node by definition
+Number of exemplars in training set: 4
+Training algorithm is canonical backpropagation
+Training is off-line (batch/epoch is on)
+Learning rate eta: 1
+Weight decay term lambda: 5e-05
+Error checking routines in effect:
+Maximum number of iterations: 1000000
+Stop if maximum absolute gradient decreases below 1e-06
+
+    Iteration: X-entropy error:  Max abs grad:  CA Train %
+             1     7.532257e-01   2.973669e-01        50.0
+             2     7.758730e-01   3.367619e-01        50.0
+             3     7.846880e-01   4.011239e-01        50.0
+             4     8.280874e-01   4.146797e-01        50.0
+             5     8.386311e-01   4.648859e-01        50.0
+             6     9.429946e-01   4.556419e-01        50.0
+             7     9.809939e-01   5.012437e-01        50.0
+             8     1.089373e+00   5.019022e-01        50.0
+             9     1.014879e+00   5.114612e-01        50.0
+            10     1.085129e+00   4.999862e-01        50.0
+            20     1.001210e+00   4.784856e-01        50.0
+            30     9.148283e-01   4.446387e-01        50.0
+            40     8.500405e-01   4.028358e-01        50.0
+            50     8.091270e-01   3.611941e-01        50.0
+            60     7.818933e-01   3.222495e-01        50.0
+            70     7.620655e-01   2.858303e-01        50.0
+            80     7.469867e-01   2.517710e-01        50.0
+            90     7.353999e-01   2.201599e-01        50.0
+           100     7.265346e-01   1.911460e-01        50.0
+           200     7.022120e-01   3.085081e-02        50.0
+           300     7.015357e-01   1.549863e-03        50.0
+           400     7.014509e-01   5.784968e-04        50.0
+           500     7.013684e-01   5.799085e-04        50.0
+           600     7.012868e-01   5.770036e-04        50.0
+           700     7.012059e-01   5.741024e-04        50.0
+           800     7.011258e-01   5.712150e-04        50.0
+           900     7.010466e-01   5.683414e-04        50.0
+          1000     7.009681e-01   5.654815e-04        50.0
+          2000     7.002250e-01   5.376188e-04        50.0
+          3000     6.995525e-01   5.110466e-04        50.0
+          4000     6.989438e-01   4.856989e-04        50.0
+          5000     6.983930e-01   4.615145e-04        50.0
+          6000     6.978945e-01   4.384374e-04        50.0
+          7000     6.974433e-01   4.164160e-04        50.0
+          8000     6.970349e-01   3.954038e-04        50.0
+          9000     6.966653e-01   3.753587e-04        50.0
+         10000     6.963308e-01   3.562428e-04        50.0
+         20000     6.943186e-01   2.136096e-04        50.0
+         30000     6.935788e-01   1.305425e-04        50.0
+         40000     6.933065e-01   7.863147e-05        50.0
+         50000     6.932060e-01   4.819124e-05        50.0
+         60000     6.931688e-01   2.988784e-05        50.0
+         70000     6.931552e-01   1.840083e-05        50.0
+         80000     6.931501e-01   1.126446e-05        50.0
+         90000     6.931483e-01   6.870600e-06        50.0
+        100000     6.931476e-01   4.181298e-06        50.0
+        200000     6.931472e-01   2.831658e-08        50.0
+The maximum absolute gradient became lower than 1.0e-06.
+
+Total iterations = 200000
+
+Final X-entropy error in the training set = 6.931472e-01.
+Log likelihood = -2.772589e+00
+
+Training set:
+-------------
+Classification accuracy: 50.0%
+Sensitivity: 50.0%
+Specificity: 50.0%
+Predictive value positive: 50.0%
+Predictive value negative: 50.0%
+Classification table for training set:
+----------------------------------
+         Predicted T   Predicted F
+         -----------   -----------
+Known T:           1             1
+Known F:           1             1
+----------------------------------
+Cannot calculate ROC statistically, not enough data points (10)
+By trapezoidal method, ROC area = 0.500000
+Number thresholds = 4
+Kolmogorov-Smirnov goodness of fit D = 0, p = 0
+Pearson's Chi-Square goodness of fit p = 0
+Hosmer-Lemeshow goodness of fit p = Could not calculate Hosmer-Lemeshow goodness of fit: a too large, ITMAX too small in gcf
+
+Error prior network = 0.0132348
+Error this subnetwork = 0.693147
+Chi-square = 5.4393, degrees of freedom = 3
+p = 0.142315
+
+p-value of each removed variable in pass 0:
+Variable:     p-value:
+        1  1.423146e-01
+        0  1.423146e-01
+the largest was variable 0
+
+p-values of all removed variables:
+Variable:     p-value:
+        0  1.423146e-01
+
+Removing variable(s) 0 1  = node(s) 0 1 :
+I'm running an iterative model:
+SimpleProp
+Bias nodes on all layers by definition
+0 input nodes
+1 hidden layer by definition
+3 hidden nodes
+1 output node by definition
+Number of exemplars in training set: 4
+Training algorithm is canonical backpropagation
+Training is off-line (batch/epoch is on)
+Learning rate eta: 1
+Weight decay term lambda: 5e-05
+Error checking routines in effect:
+Maximum number of iterations: 1000000
+Stop if maximum absolute gradient decreases below 1e-06
+
+    Iteration: X-entropy error:  Max abs grad:  CA Train %
+             1     1.807953e+00   4.717168e-01        50.0
+             2     1.115163e+00   3.749210e-01        50.0
+             3     7.451109e-01   1.443726e-01        50.0
+             4     7.016120e-01   9.016336e-03        50.0
+             5     7.014429e-01   6.185670e-04        50.0
+             6     7.014421e-01   6.191993e-04        50.0
+             7     7.014413e-01   6.191675e-04        50.0
+             8     7.014405e-01   6.191367e-04        50.0
+             9     7.014396e-01   6.191059e-04        50.0
+            10     7.014388e-01   6.190752e-04        50.0
+            20     7.014306e-01   6.187674e-04        50.0
+            30     7.014224e-01   6.184598e-04        50.0
+            40     7.014142e-01   6.181523e-04        50.0
+            50     7.014060e-01   6.178450e-04        50.0
+            60     7.013978e-01   6.175378e-04        50.0
+            70     7.013896e-01   6.172308e-04        50.0
+            80     7.013814e-01   6.169240e-04        50.0
+            90     7.013733e-01   6.166173e-04        50.0
+           100     7.013651e-01   6.163107e-04        50.0
+           200     7.012840e-01   6.132536e-04        50.0
+           300     7.012037e-01   6.102116e-04        50.0
+           400     7.011242e-01   6.071846e-04        50.0
+           500     7.010454e-01   6.041726e-04        50.0
+           600     7.009675e-01   6.011756e-04        50.0
+           700     7.008903e-01   5.981934e-04        50.0
+           800     7.008139e-01   5.952259e-04        50.0
+           900     7.007382e-01   5.922731e-04        50.0
+          1000     7.006633e-01   5.893350e-04        50.0
+          2000     6.999539e-01   5.607417e-04        50.0
+          3000     6.993117e-01   5.335333e-04        50.0
+          4000     6.987303e-01   5.076432e-04        50.0
+          5000     6.982039e-01   4.830084e-04        50.0
+          6000     6.977273e-01   4.595686e-04        50.0
+          7000     6.972958e-01   4.372664e-04        50.0
+          8000     6.969050e-01   4.160473e-04        50.0
+          9000     6.965512e-01   3.958589e-04        50.0
+         10000     6.962308e-01   3.766513e-04        50.0
+         20000     6.942968e-01   2.289994e-04        50.0
+         30000     6.935766e-01   1.385858e-04        50.0
+         40000     6.933072e-01   8.290210e-05        50.0
+         50000     6.932065e-01   4.993669e-05        50.0
+         60000     6.931691e-01   3.139009e-05        50.0
+         70000     6.931552e-01   1.947362e-05        50.0
+         80000     6.931502e-01   1.197326e-05        50.0
+         90000     6.931483e-01   7.321430e-06        50.0
+        100000     6.931476e-01   4.462300e-06        50.0
+        200000     6.931472e-01   3.028432e-08        50.0
+The maximum absolute gradient became lower than 1.0e-06.
+
+Total iterations = 200000
+
+Final X-entropy error in the training set = 6.931472e-01.
+Log likelihood = -2.772589e+00
+
+Training set:
+-------------
+Classification accuracy: 50.0%
+Sensitivity: 0.0%
+Specificity: 100.0%
+Predictive value positive: division by zero
+Predictive value negative: 50.0%
+Classification table for training set:
+----------------------------------
+         Predicted T   Predicted F
+         -----------   -----------
+Known T:           0             2
+Known F:           0             2
+----------------------------------
+Cannot calculate ROC statistically, not enough data points (10)
+By trapezoidal method, ROC area = 0.000000
+Number thresholds = 4
+Kolmogorov-Smirnov goodness of fit D = 0, p = 0
+Pearson's Chi-Square goodness of fit p = 0
+Hosmer-Lemeshow goodness of fit p = Could not calculate Hosmer-Lemeshow goodness of fit: a too large, ITMAX too small in gcf
+
+Error prior network = 6.931472e-01
+Error this subnetwork = 6.931472e-01
+Chi-square = 7.017498e-12, degrees of freedom = 3
+p = 1.000000e+00
+
+p-value of each removed variable in pass 1:
+Variable:     p-value:
+        1  1.000000e+00
+the largest was variable 1
+
+p-values of all removed variables:
+Variable:     p-value:
+        0  1.423146e-01
+        1  1.000000e+00
+
+( 1 ) Specify variables
+( 2 ) Stepwise reverse regression
+( 3 ) Stepwise forward regression
+( 4 ) Return to previous menu
+Menu choice: 
+( 1 ) Randomize weights
+( 2 ) Set learning rate: 1
+( 3 ) Set stopping conditions
+( 4 ) Set batch/epoch (currently on)
+( 5 ) Set weight decay (lambda = 5e-05)
+( 6 ) Print counter: logarithmic
+( 7 ) Train model
+( 8 ) Save the network to a file
+( 9 ) Stepwise Regression
+( 10 ) Return to main menu
+Menu choice: 
+( 1 ) Specify dataset
+( 2 ) Specify model
+( 3 ) Use model
+( 4 ) Discriminant function analysis
+( 9 ) Quit
+Menu choice: Are you sure you want to quit (yes/no)? 
+Thank you for using neuron 3.0
