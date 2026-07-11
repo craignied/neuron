@@ -1,0 +1,12 @@
+SimpleProp
+Bias nodes on all layers by definition
+2 input nodes
+1 hidden layer by definition
+3 hidden nodes
+1 output node by definition
+Hidden layer:
+3.43267 3.43267 3.00534 
+4.03055 4.03055 -3.56294 
+3.43333 3.43333 3.00593 
+Output layer:
+6.72444 -13.2692 6.72834 -6.36322 

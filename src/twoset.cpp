@@ -785,15 +785,18 @@ void TwoSet::KScalc()
 		sort( zeros.begin(), zeros.end() );
 		sort( ones.begin(), ones.end() );
 
-		unsigned long n1 = zeros.size(), n2 = ones.size(), j1 = 1,j2 = 1;
+		// Numerical Recipes uses 1-based arrays; these vectors are 0-based.
+		// The 2.x code kept NR's 1-based indices, skipping element 0 and
+		// reading one past the end (undefined behavior). Fixed for 3.0.
+		unsigned long n1 = zeros.size(), n2 = ones.size(), j1 = 0, j2 = 0;
 		double d = 0.0, d1, d2, dt, en1 = n1, en2 = n2, fn1 = 0.0, fn2 = 0.0;
 
-		while ( j1 <= n1 && j2 <= n2 )
+		while ( j1 < n1 && j2 < n2 )
 		{
 			if ( ( d1 = zeros[ j1 ] ) <= ( d2 = ones[ j2 ] ) )
-				fn1 = ( double ) j1++ / en1;
+				fn1 = ( double ) ++j1 / en1;
 			if ( d2 <= d1 )
-				fn2 = ( double ) j2++ / en2;
+				fn2 = ( double ) ++j2 / en2;
 			if ( ( dt = fabs( fn2 - fn1 ) ) > d )
 				d = dt;
 		}

@@ -49,11 +49,11 @@ The engine is C++17 with no dependencies beyond GSL — it builds anywhere those
 
 ## Layout
 
-- `src/` — the C++ engine (carried forward from neUROn2++ 2.6.4, modernized
-  incrementally in place)
-- `tests/oracle/` — the legacy oracle harness: builds the original 2.6.4 binary from
-  its release tarball and cross-checks the 3.0 engine against it (`verify_oracle.sh`
-  requires numerically identical output)
+- `src/` — the C++ engine (carried forward from neUROn2++, modernized incrementally
+  in place)
+- `tests/oracle/` — the legacy oracle harness: builds the original neUROn2++ binary
+  from its release tarball and cross-checks the 3.0 engine against it
+  (`verify_oracle.sh` requires numerically identical output)
 - `docs/` — the neUROn2++ documentation: `manifest.pdf` is the full manual,
   `spin.html` the tutorial, `tex/` the LaTeX sources
 - `tools/` — Python utilities for data preparation (planned)

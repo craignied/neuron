@@ -1,22 +1,35 @@
 #!/bin/bash
 # Deterministic oracle cross-check for the 3.0 engine.
-# 1. Train XOR with the legacy oracle and save the network (xor_train_save.in).
-# 2. Load the identical saved weights into BOTH binaries (xor_verify.in); entering
-#    "Use model" runs one eta-0 forward pass, printing error and statistics.
-# 3. Diff the two sessions (version banner/farewell excluded). Any numeric drift fails.
+# Loads the committed reference network (xor_net.txt) into BOTH binaries; entering
+# "Use model" runs one eta-0 forward pass, printing error and statistics. The two
+# sessions must be identical except for the Kolmogorov-Smirnov line:
+#
+#   KNOWN ORACLE BUG (fixed in 3.0, found 2026-07-11): legacy KScalc() kept
+#   Numerical Recipes' 1-based indices on 0-based vectors, skipping element 0 and
+#   reading one past the end — its K-S statistic is partly heap garbage. The oracle's
+#   K-S line is therefore excluded from the diff; 3.0's K-S is instead checked
+#   against the known-correct value for this network (D = 1 for perfectly
+#   separated XOR).
+#
+# To regenerate the reference network (shouldn't normally be needed):
+#   cd runs && ../bin/oracle < ../xor_train_save.in && cp xor_net.txt ../
 set -e
 cd "$(dirname "$0")"
-ORACLE=bin/neuron-2.64
+ORACLE=bin/oracle
 NEW=../../build/neuron
 [ -x "$ORACLE" ] || { echo "Oracle not built — run ./build_oracle.sh" >&2; exit 1; }
 [ -x "$NEW" ] || { echo "3.0 engine not built — cmake -B build && cmake --build build (repo root)" >&2; exit 1; }
 mkdir -p runs && cd runs
-../"$ORACLE" < ../xor_train_save.in > /dev/null
-../"$ORACLE" < ../xor_verify.in > verify_legacy.txt
+cp ../xor_net.txt .
+../"$ORACLE" < ../xor_verify.in > verify_oracle.txt
 ../"$NEW"    < ../xor_verify.in > verify_30.txt
-strip() { grep -v -e 'Welcome to' -e 'Thank you for using' "$1"; }
-if diff <(strip verify_legacy.txt) <(strip verify_30.txt); then
-    echo "OK: legacy and 3.0 outputs are numerically identical"
+strip() { grep -v -e 'Welcome to' -e 'Thank you for using' -e 'Kolmogorov-Smirnov' "$1"; }
+fail=0
+diff <(strip verify_oracle.txt) <(strip verify_30.txt) || fail=1
+grep -q 'Kolmogorov-Smirnov goodness of fit D = 1, p = 0.0970269' verify_30.txt \
+    || { echo "FAIL: 3.0 K-S line differs from known-correct value" >&2; fail=1; }
+if [ $fail -eq 0 ]; then
+    echo "OK: oracle and 3.0 outputs identical (K-S checked against known-correct value)"
 else
     echo "FAIL: outputs differ (see tests/oracle/runs/verify_*.txt)" >&2
     exit 1

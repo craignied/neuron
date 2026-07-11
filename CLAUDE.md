@@ -9,7 +9,8 @@ modern project. This directory is the new home; the legacy code is read-only ref
 
 - **neUROn** (1992) — original, begun by Craig Niederberger
 - **neUROn2++** (1996 → C++, 2000 → full OO redesign, 2007 → GNU autotools distribution)
-- Last release: **2.6.4** (Sep 2016, macOS/Homebrew build instructions). configure.ac says 2.64.
+- Final release: Sep 2016 (`../distro/neuron-2.64.tar.gz` — the only place the old
+  version number matters; inside this repo the legacy build is just called **the oracle**).
 - Substantial contributors over the years: Vinod Kutty, Yuan Qin, Joe Jovero, Young Hong,
   Kai Liu, Richard Schoor, Gaurav Bansal, Ashay Kparker, Hui Liu, Tony Makhlouf.
 - **neuron-3.0** (2026) — this reanimation.
@@ -44,20 +45,22 @@ GSL 1.9–1.10; modern GSL is 2.x — untested).
   **Not carried forward** (see decisions).
 - `../distro/data/` — sample datasets: PSA (`psa_defs.txt`, `ordata`), low birthweight
   (`lowbwt2-2*`), XOR, BP40 train/test.
-- `../distro/neuron-2.6*.tar.gz` — release tarballs 2.6 through 2.64.
+- `../distro/*.tar.gz` — release tarballs; the newest one feeds `tests/oracle/build_oracle.sh`.
 
-### Legacy build status on this machine (verified 2026-07-11)
+### The oracle (verified 2026-07-11)
 
-- **2.64 builds clean on Apple Silicon** — zero source changes, modern clang++ (C++14
-  default) + Homebrew GSL 2.8. Only warnings: `std::unary_function` deprecation in
-  `function_defs.h` (would break under `-std=c++17`).
-- Reference build + scripted XOR smoke test live in `tests/oracle/` (see its README).
+- **The legacy source builds clean on Apple Silicon** — zero changes, modern clang++
+  (C++14 default) + Homebrew GSL 2.8. Only warnings: `std::unary_function` deprecation
+  in `function_defs.h` (would break under `-std=c++17`; fixed in our `src/`).
+- Oracle build + scripted XOR smoke test live in `tests/oracle/` (see its README).
   XOR trains to 100% CA with full stats output; weight randomization is unseeded, so
-  runs are nondeterministic — compare endpoint statistics, not traces.
+  runs are nondeterministic — compare endpoint statistics, not traces
+  (`verify_oracle.sh` avoids this by forward-passing identical saved weights).
 - The old `../distro/src/neuron` binary is x86_64; ignore it, rebuild via
-  `tests/oracle/build_oracle.sh`.
-- Program quirks: greets as "2.63" (stale pre-generated configure in the 2.64 tarball);
-  writes `model.txt` + `neuron.log` logs into its cwd.
+  `tests/oracle/build_oracle.sh` (→ `tests/oracle/bin/oracle`).
+- Program quirks: the oracle's welcome banner shows a stale older version string
+  (pre-generated configure predates the final bump — cosmetic); the program writes
+  `model.txt` + `neuron.log` logs into its cwd.
 
 ## neuron-3.0 direction — DECIDED (2026-07-11)
 
@@ -94,7 +97,7 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
 - **2026-07-11** — Project reanimated: explored `../distro`, wrote CLAUDE.md + README.md,
   initialized git (branch `main`). Direction decided (see above); legacy docs pulled into
   `docs/`.
-- **2026-07-11 (later)** — Legacy 2.64 verified working as the numerical oracle: built
+- **2026-07-11 (later)** — Legacy binary verified working as the numerical oracle: built
   arm64 against GSL 2.8, ran a scripted XOR session end-to-end (100% CA, ROC 1.0, K-S /
   Pearson / H-L stats all exercised). Harness committed in `tests/oracle/` (originally `baseline/`, reorganized same day).
 - **2026-07-11 (evening)** — **neuron 3.0.0-dev is alive.** Strategy: carry the legacy
@@ -111,3 +114,15 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   Next: modernization passes on the engine (memory safety — raw new/delete →
   smart pointers; `matrix.h` templates; seedable RNG for reproducible training),
   then start `tools/` (Python data grooming, replacing mkdataset.pl).
+- **2026-07-11 (night)** — Version-reference cleanup + **first real bug fix**. The
+  legacy build is now just "the oracle" everywhere (`tests/oracle/bin/oracle`); the
+  old version number appears only in the tarball path inside `build_oracle.sh`.
+  While re-verifying, the harness caught a genuine ~20-year-old bug: `TwoSet::KScalc()`
+  kept Numerical Recipes' 1-based indexing on 0-based vectors → skipped element 0 and
+  read past the end of both arrays (heap-garbage K-S values; oracle showed D=0.5 vs
+  correct D=1 on identical weights). Fixed in `src/twoset.cpp`; oracle keeps the bug,
+  so `verify_oracle.sh` excludes the K-S line from the diff and asserts 3.0's K-S
+  against the known-correct value. Verify is now fully deterministic — it loads the
+  committed reference network `tests/oracle/xor_net.txt` instead of retraining.
+  Audited `stats.cpp` for sibling 1-based NR bugs: none found (`fit()` is 0-based;
+  the `1..ITMAX` loops are iteration counters).
