@@ -86,11 +86,11 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   `manifest.tex` references multi-MB `.bmp` scans that were deliberately NOT copied;
   a rebuild would need `\includegraphics` switched to the PDF figures.
 
-## Housekeeping deferred by Craig
+## Housekeeping
 
-- **No GitHub remote and no global-memory writes yet** — Craig wants to work a while first;
-  if the project proves worth it, he'll create a GitHub repo and then we enroll memory
-  (claude-memory symlink) and push. Don't do either until he says so.
+- **GitHub:** https://github.com/craignied/neuron (HTTPS remote per the locker's
+  Mac Studio SSH-push note). Created 2026-07-11; push freely on session handoff.
+- **Memory:** enrolled in `~/code/claude-memory/` as `neuron-3.0` (2026-07-11).
 
 ## Status
 
