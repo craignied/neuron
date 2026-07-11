@@ -47,6 +47,10 @@ cmake --build build
 
 The engine is C++17 with no dependencies beyond GSL — it builds anywhere those exist.
 
+> **If you copied or moved this directory:** delete any `build/` that came along
+> before configuring (`rm -rf build`). CMake caches the absolute source path and
+> refuses to reuse a cache created at a different location.
+
 ## Layout
 
 - `src/` — the C++ engine (carried forward from neUROn2++, modernized incrementally
