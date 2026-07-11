@@ -1,9 +1,11 @@
 #!/bin/sh
-# Run the scripted XOR training session against the legacy binary.
-# Usage: ./run_xor.sh [> my_output.txt]
+# Run the scripted XOR training session.
+# Usage: ./run_xor.sh [path-to-neuron-binary]
+# Default binary is the legacy oracle; pass ../build/neuron to test the 3.0 engine.
 set -e
 cd "$(dirname "$0")"
-BIN=build/neuron-2.64/src/neuron
-[ -x "$BIN" ] || { echo "Legacy binary not built — run ./build_legacy.sh first" >&2; exit 1; }
+BIN=${1:-build/neuron-2.64/src/neuron}
+BIN=$(cd "$(dirname "$BIN")" && pwd)/$(basename "$BIN")
+[ -x "$BIN" ] || { echo "Binary not found: $BIN (for the legacy oracle, run ./build_legacy.sh first)" >&2; exit 1; }
 mkdir -p runs && cd runs
-../"$BIN" < ../xor.in
+"$BIN" < ../xor.in

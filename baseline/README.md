@@ -7,11 +7,19 @@ changes needed (verified 2026-07-11).
 ## Usage
 
 ```sh
-./build_legacy.sh    # extracts ../../distro/neuron-2.64.tar.gz into build/, configure + make
-./run_xor.sh         # scripted XOR training session (input: xor.in), runs in runs/
+./build_legacy.sh              # extracts ../../distro/neuron-2.64.tar.gz into build/, configure + make
+./run_xor.sh                   # scripted XOR training session against the legacy oracle
+./run_xor.sh ../build/neuron   # same session against the 3.0 engine
+./verify_oracle.sh             # deterministic cross-check: legacy vs 3.0 must match exactly
 ```
 
 `xor_reference_output.txt` is a captured session for reference.
+
+`verify_oracle.sh` is the real acceptance test: it trains XOR with the legacy binary,
+saves the network, loads the identical weights into both binaries (which triggers one
+eta-0 forward pass printing error + statistics), and diffs the sessions. Passing means
+the 3.0 engine is numerically identical to neUROn2++ on that path.
+First passed 2026-07-11.
 
 ## Files
 
@@ -19,8 +27,11 @@ changes needed (verified 2026-07-11).
 - `xor.in` — line-by-line menu answers driving a full session: load
   `distro/data/xor_discrete.set` (2 in / 1 out), SimpleProp with 3 hidden nodes,
   X-entropy error, randomize weights, canonical backprop, quit
-- `run_xor.sh` — pipes `xor.in` into the binary from `runs/` (gitignored — the program
-  writes `model.txt` and `neuron.log` into its cwd)
+- `xor_train_save.in` / `xor_verify.in` — the train-and-save / load-and-forward-pass
+  scripts used by `verify_oracle.sh`
+- `run_xor.sh` — pipes `xor.in` into a binary (default: legacy) from `runs/`
+  (gitignored — the program writes `model.txt` and `neuron.log` into its cwd)
+- `verify_oracle.sh` — deterministic legacy-vs-3.0 comparison (see Usage)
 - `xor_reference_output.txt` — one captured run
 
 ## Notes

@@ -96,8 +96,18 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   `docs/`.
 - **2026-07-11 (later)** — Legacy 2.64 verified working as the numerical oracle: built
   arm64 against GSL 2.8, ran a scripted XOR session end-to-end (100% CA, ROC 1.0, K-S /
-  Pearson / H-L stats all exercised). Harness committed in `baseline/`. No 3.0 code yet.
-  Next: design the 3.0 layout (C++ engine + Python tooling, simple portable CLI) —
-  decide repo structure (CMake?), file formats (keep legacy dataset/model formats for
-  oracle comparability?), and a deterministic-comparison path (saved-network forward
-  pass, e.g. `distro/data/Run9`).
+  Pearson / H-L stats all exercised). Harness committed in `baseline/`.
+- **2026-07-11 (evening)** — **neuron 3.0.0-dev is alive.** Strategy: carry the legacy
+  engine forward as the 3.0 base and modernize in place (not a ground-up rewrite).
+  Done: legacy source copied to `engine/src/`, made C++17-clean (dropped 5
+  `unary_function` inheritances in function_defs.h, stripped 6 `throw(DivisionByZero)`
+  specs in twoset.{h,cpp}), `config.h` → `version.h` (NEURON_PACKAGE_STRING),
+  top-level CMakeLists.txt (C++17, `find_package(GSL)`), builds with **zero warnings**.
+  Verified two ways: (1) XOR training run — same endpoint stats as legacy;
+  (2) `baseline/verify_oracle.sh` — legacy trains & saves a network, both binaries load
+  the same weights and do an eta-0 forward pass, outputs **numerically identical**
+  (diff-clean). Note: `distro/data/Run9` (11-input SimpleProp) has no matching dataset
+  in distro/data (BP40 files are 13-col), so the oracle check generates its own network.
+  Next: modernization passes on the engine (memory safety — raw new/delete →
+  smart pointers; `matrix.h` templates; seedable RNG for reproducible training),
+  then start `tools/` (Python data grooming, replacing mkdataset.pl).

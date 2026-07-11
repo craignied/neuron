@@ -1,0 +1,166 @@
+// Header file for DataSet, the object which handles dataset entry and manipulation
+
+#ifndef DATASET_H
+#define DATASET_H
+
+#include "matrix.h"
+#include "vector_ops.h"
+#include "twoset.h"
+
+#include <iostream>
+#include <iomanip>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <algorithm>
+
+using namespace std;
+
+class DataSet {
+public:
+	DataSet(); // default constructor
+	~DataSet(); // destructor
+	DataSet( const DataSet& ); // copy constructor
+	DataSet& operator= ( const DataSet& ); // = operator
+
+	// Raw dataset accessors and methods
+	void loadRaw( string& ); // load file into raw dataset
+	bool rawLoaded() { return rawLoadedFlag; } // return flag if raw dataset loaded
+	Matrix< double >& getRawMatrix() { return Raw; } // accesses raw dataset
+	void setRawMatrix( Matrix< double >& ); // load Matrix into raw dataset
+
+	// Training set accessors and methods
+	void loadTrain( string& ); // load file into training set
+	bool trainLoaded() { return trainLoadedFlag; } // return flag if training set loaded
+	bool saveTrain( string& ); // save training set to file
+	bool saveScales( string& ); // save scaling factors to a file
+	Matrix< double >& getTrainMatrix() { return TrainSetData; } // accesses training set
+	void setTrainMatrix( Matrix< double >& ); // load Matrix into training set
+
+	// Training set TwoSet object accessors
+	// Construct a TwoSet object from training set, return true if successful
+	bool setTrainTwoSet(); 
+	// Return the TwoSet object from training set
+	TwoSet& getTrainTwoSet() { return TrainTwoSet; } 
+	// Flag if training set TwoSet object loaded
+	bool TrainTwoSetLoaded() { return trainTwoSetFlag; }
+	// Save the TwoSet object to a file
+	bool saveTrainTwoSet( string& );
+
+	// Test set accessors and methods
+	void loadTest( string& ); // load file into test set
+	bool testLoaded() { return testLoadedFlag; } // return flag if test set loaded
+	bool saveTest( string& ); // save test set to file
+	Matrix< double >& getTestMatrix() { return TestSetData; } // accesses test set
+	void setTestMatrix( Matrix< double >& ); // load Matrix into test set
+
+	// Test set TwoSet object accessors
+	// Construct a TwoSet object from test set, return true if successful
+	bool setTestTwoSet();
+	// Return the TwoSet object from test set
+	TwoSet& getTestTwoSet() { return TestTwoSet; }
+	// Flag if test set TwoSet object loaded
+	bool TestTwoSetLoaded() { return testTwoSetFlag; }
+	// Save the TwoSet object to a file
+	bool saveTestTwoSet( string& );
+
+	// Accessors for number input, output nodes
+	void setInput( const unsigned ); // set the number of input nodes
+	void setOutput( const unsigned ); // set the number of output nodes
+	unsigned getInput() { return nInput; } // return number input nodes
+	unsigned getOutput() { return nOutput; } // return number output nodes
+
+	// Get the number of examples in the training & test sets
+	unsigned getNumTrain() { return TrainSetData.rows(); } // training set
+	unsigned getNumTest() { return TestSetData.rows(); } // test set
+
+	// Accessors related to normalizing dataset variates
+	// Set, get upper limit of input variates
+	void setInUpper( const double x ) { inUpperLimit = x; }
+	double getInUpper() { return inUpperLimit; }
+	// Set, get lower limit of input variates
+	void setInLower( const double x ) { inLowerLimit = x; }
+	double getInLower() { return inLowerLimit; }
+	// Set, get upper limit of output variates
+	void setOutUpper( const double );
+	double getOutUpper() { return outUpperLimit; }
+	// Set, get lower limit of output variates
+	void setOutLower( const double );
+	double getOutLower() { return outLowerLimit; }
+
+	// Accessors related to discrete output
+	void setDiscrete( const bool ); // set discrete output
+	bool getDiscrete() { return discreteFlag; } // get state of discrete output
+	void setThreshold( const double ); // set threshold value
+	double getThreshold() { return threshold; } // get threshold value
+
+	// Dataset manipulation methods
+	bool raw2train(); // converts the raw dataset into a training set
+	// Randomizes a raw dataset into training and test sets
+	bool randomize( const unsigned );
+	bool randomize( const unsigned, const unsigned );
+	bool randomizeD( const double );
+
+	// Logging to history file accessors
+	void setHistory( const bool flag ) { historyFlag = flag; } // set history logging
+	bool getHistory() { return historyFlag; } // get history logging
+	// Set name of history file
+	void setHistoryFilename( const string& filename ) { historyFilename = filename; }
+
+	// Append ostringstream to history file
+	bool addHistory( ostringstream& );
+
+	// Output TwoSet metrics for a 1-output model, takes an ostream as argument
+	void metricsReport( ostream& );
+
+	// Method to remove inputs from a dataset
+	void removeInputs( const vector< unsigned >& );
+
+private:
+	Matrix< double > Raw, // the raw dataset
+		TrainSetData, // the training set
+		TestSetData; // the test set
+
+	TwoSet TrainTwoSet, // the TwoSet object for the training set
+		TestTwoSet; // the TwoSet object for the test set
+
+	vector< double > minima, // minimum values in a dataset
+		maxima; // maximum values in a dataset
+	
+	unsigned nInput, // number of input nodes
+		nOutput, // number of output nodes
+		ROCthresholds; // number of ROC thresholds
+
+	double threshold, // threshold for discrete output
+		inUpperLimit, // upper limit for a normalized input variate
+		inLowerLimit, // lower limit for a normalized input variate
+		outUpperLimit, // upper limit for a normalized output variate
+		outLowerLimit; // lower limit for a normalized output variate
+
+	bool discreteFlag, // flag to indicate if output in dataset is discrete (0,1)
+		rawLoadedFlag, // flag to indicate if raw dataset loaded
+		trainLoadedFlag, // flag to indicate if training set loaded
+		testLoadedFlag, // flag to indicate if test set loaded
+		trainTwoSetFlag, // flag to indicate if training set TwoSet object loaded
+		testTwoSetFlag, // flag to indicate if test set TwoSet object loaded
+		minimaxFlag, // flag to indicate if minima and maxima vectors are set 
+		historyFlag; // flag to indicate if logging to history file set
+
+	string historyFilename; // name of history file
+
+	void copy( const DataSet& rhs ); // utility function for copy ctor and =
+
+	// Utility method to compute minima and maxima vectors from a data Matrix
+	void minimax( const Matrix< double >& );
+
+	// Utility method to insure outputs are discrete
+	bool checkDiscrete( const Matrix< double >& );
+
+	// Utility method to normalize a dataset Matrix
+	void normalize( Matrix< double >& );
+
+	// Utility method to clear dataset Matrix members and flags
+	void clear();
+};
+
+#endif

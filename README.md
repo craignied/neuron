@@ -34,21 +34,33 @@ in urology and reproductive medicine.
 - **Full engine scope** — the neural networks and all of the statistical machinery
   (the novel and useful core) are carried forward; the legacy model exporters are not
 
-## Status
+## Building
 
-Early reanimation. The legacy 2.6.4 codebase (C++, GSL, autotools) is preserved alongside
-this repository as reference, and its documentation lives in `docs/` — `manifest.pdf` is
-the full manual, `spin.html` the tutorial. See `CLAUDE.md` for current project state.
-
-## Legacy build (reference)
-
-neUROn2++ 2.6.4 builds with the standard GNU procedure and requires the
-[GNU Scientific Library](https://www.gnu.org/software/gsl/):
+Requires CMake and the [GNU Scientific Library](https://www.gnu.org/software/gsl/):
 
 ```sh
-brew install gsl        # macOS
-./configure && make && sudo make install
+brew install gsl cmake    # macOS
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+./build/neuron
 ```
 
-Documentation for the legacy system: `doc/manifest.pdf` (manual) and `doc/spin.html`
-(tutorial) in the neUROn2++ distribution.
+The engine is C++17 with no dependencies beyond GSL — it builds anywhere those exist.
+
+## Layout
+
+- `engine/src/` — the C++ engine (carried forward from neUROn2++ 2.6.4, modernized
+  incrementally in place)
+- `baseline/` — the legacy oracle: builds the original 2.6.4 binary from its release
+  tarball and cross-checks the 3.0 engine against it (`verify_oracle.sh` requires
+  numerically identical output)
+- `docs/` — the neUROn2++ documentation: `manifest.pdf` is the full manual,
+  `spin.html` the tutorial, `tex/` the LaTeX sources
+- `tools/` — Python utilities for data preparation (planned)
+
+## Status
+
+The full neUROn2++ engine builds as `neuron 3.0.0-dev` — C++17-clean, zero warnings,
+verified numerically identical to the legacy binary on a saved-network forward pass
+and equivalent on endpoint statistics for XOR training. Modernization proceeds from
+this verified base. See `CLAUDE.md` for current project state.
