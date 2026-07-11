@@ -1,28 +1,28 @@
 <html>
 	<head>
-		<title>neUROn2++ Spin Tutorial</title>
+		<title>neuron 3.0 Spin Tutorial</title>
 	</head>
 
 	<body bgcolor="#ffffff">
-		<p>If you haven't already done so, follow the instructions in the README file to install neUROn2++ on your system.</p>
-		<p>Let's take neUROn2++ for a spin.  In the following exercise, you will train a neural network on the classic &quot;exclusive-or&quot; (xor) problem.</p>
-		<p>You will use the file &quot;xor.csv&quot; found in the <b>doc</b> directory of your neUROn2++ distribution.  To see what this file &quot;looks like&quot;, type &quot;cat xor.csv&quot;:</p>
+		<p>If you haven't already done so, follow the instructions in the README file to build neuron 3.0 on your system (the binary will be at &quot;build/neuron&quot;).</p>
+		<p>Let's take neuron 3.0 for a spin.  In the following exercise, you will train a neural network on the classic &quot;exclusive-or&quot; (xor) problem.</p>
+		<p>You will use the file &quot;xor.csv&quot; found in the <b>docs</b> directory of neuron 3.0.  To see what this file &quot;looks like&quot;, type &quot;cat xor.csv&quot;:</p>
 
 		<pre ...>
-$ cat xor.csv			
-0,0,0
+$ cat xor.csv
 0,0,0
 0,1,1
 1,0,1
 1,1,0
 		</pre>
 
-		<p>Create a directory called &quot;xor&quot;, and put <i>only</i> the data file &quot;xor.csv&quot; in it. In general, you should have a different directory for each experiment. </p>
-		<p>Now type &quot;neuron&quot; to run the program:</p>
+		<p>Create a directory called &quot;xor&quot;, and put <i>only</i> the data file &quot;xor.csv&quot; in it. In general, you should have a different directory for each experiment. (The program writes its logs, &quot;neuron.log&quot; and &quot;model.txt&quot;, into whatever directory you run it from — another reason each experiment deserves its own.)</p>
+		<p>Now run the program from inside that directory, giving the path to the binary you built:</p>
 
 		<pre ...>
-$ neuron
-Welcome to neuron 2.6
+$ cd xor
+$ ../neuron-3.0/build/neuron
+Welcome to neuron 3.0.0-dev
 
 ( 1 ) Specify dataset
 ( 2 ) Specify model
@@ -102,7 +102,7 @@ Menu choice:
 		<p>Note that you've been informed of how many rows and columns are in your dataset.  Check this every time you load a dataset.  In this case, it is correct.</p>
 		<p>Now you must convert the raw dataset into a training set, so choose option 4, and when prompted, choose &quot;yes&quot; to save the training set
 		and scaling factors, do so.  Here I've named the training set &quot;trainset&quot; and the scaling factors &quot;scales&quot;. Get in the habit of <i>always</i>
-		saving your training set and scaling factors when you convert raw data.  If you don't you <i>will not</i> be able to deploy your model on the web in html or on devices such as the iphone.</p>
+		saving your training set and scaling factors when you convert raw data.  Without the scaling factors you <i>will not</i> be able to apply your trained model to new, unscaled data later.</p>
 		<pre ...>
 Menu choice: 4
 Would you like to save the training set to a file? (yes/no)? yes
@@ -331,7 +331,7 @@ Would you like to save this model (yes/no)?
 		Because your initial random weights will be different, what will appear on your screen will be different than this picture.  If your classification accuracy is not 100%, enter option 7 repeatedly until it becomes 100%.  If after several tries it does not appear to be learning, choose option 1 to re-randomize your initial weights, and try option 7 again.</p>
 		<p>When you are finished, choose the option to return to the main menu, and then the option to quit.</p>
 		<p>Examine the newly created file in your directory called &quot;neuron.log&quot;.  You should see a log of all of your operations in &quot;neuron.log&quot;.</p>
-		<p>Congratulations, and welcome to the neUROn2++ team!</p>
+		<p>Congratulations, and welcome to the neuron 3.0 team!</p>
 		<hr>
 		<p><font size="+1">Exercises </font></p>
 		<p>Complete the following exercises:</p>
