@@ -46,11 +46,18 @@ GSL 1.9–1.10; modern GSL is 2.x — untested).
   (`lowbwt2-2*`), XOR, BP40 train/test.
 - `../distro/neuron-2.6*.tar.gz` — release tarballs 2.6 through 2.64.
 
-### Legacy build status on this machine (checked 2026-07-11)
+### Legacy build status on this machine (verified 2026-07-11)
 
-- `../distro/src/neuron` binary is **x86_64** (pre-Apple-Silicon) — would need Rosetta.
-- **GSL is not installed** (`brew install gsl` would be needed to rebuild).
-- Untested whether 2.64 compiles under modern clang++ / GSL 2.x.
+- **2.64 builds clean on Apple Silicon** — zero source changes, modern clang++ (C++14
+  default) + Homebrew GSL 2.8. Only warnings: `std::unary_function` deprecation in
+  `function_defs.h` (would break under `-std=c++17`).
+- Reference build + scripted XOR smoke test live in `baseline/` (see its README).
+  XOR trains to 100% CA with full stats output; weight randomization is unseeded, so
+  runs are nondeterministic — compare endpoint statistics, not traces.
+- The old `../distro/src/neuron` binary is x86_64; ignore it, rebuild via
+  `baseline/build_legacy.sh`.
+- Program quirks: greets as "2.63" (stale pre-generated configure in the 2.64 tarball);
+  writes `model.txt` + `neuron.log` logs into its cwd.
 
 ## neuron-3.0 direction — DECIDED (2026-07-11)
 
@@ -86,6 +93,11 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
 
 - **2026-07-11** — Project reanimated: explored `../distro`, wrote CLAUDE.md + README.md,
   initialized git (branch `main`). Direction decided (see above); legacy docs pulled into
-  `docs/`. No code yet. Next: verify the legacy build as a baseline (install GSL via brew,
-  try compiling 2.64 under modern clang++/GSL 2.x — expect some porting friction), then
-  design the 3.0 layout (C++ engine + Python tooling).
+  `docs/`.
+- **2026-07-11 (later)** — Legacy 2.64 verified working as the numerical oracle: built
+  arm64 against GSL 2.8, ran a scripted XOR session end-to-end (100% CA, ROC 1.0, K-S /
+  Pearson / H-L stats all exercised). Harness committed in `baseline/`. No 3.0 code yet.
+  Next: design the 3.0 layout (C++ engine + Python tooling, simple portable CLI) —
+  decide repo structure (CMake?), file formats (keep legacy dataset/model formats for
+  oracle comparability?), and a deterministic-comparison path (saved-network forward
+  pass, e.g. `distro/data/Run9`).

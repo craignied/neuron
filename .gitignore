@@ -8,3 +8,5 @@ client_secrets.json
 __pycache__/
 *.pyc
 venv/
+baseline/build/
+baseline/runs/
