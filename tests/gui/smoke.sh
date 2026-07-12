@@ -32,7 +32,13 @@ curl -s "$URL/" | grep -q "<title>neuron</title>" || fail "page not served"
 
 curl -s -X POST "$URL/api/load" \
     -d "mode=train&path=xor_discrete.set&inputs=2&outputs=1" \
-    | grep -q '"ok":true' || fail "load endpoint"
+    | grep -q '"ok":true' || fail "load endpoint (path)"
+
+# The page's file picker uploads content as multipart — test that path too
+curl -s -X POST "$URL/api/load" -F "file=@xor_discrete.set;filename=uploaded.set" \
+    -F mode=train -F inputs=2 -F outputs=1 \
+    | grep -q '"ok":true' || fail "load endpoint (multipart upload)"
+[ -f uploaded.set ] || fail "upload was not saved beside the server"
 
 curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=3" \
     | grep -q '"ok":true' || fail "model endpoint"

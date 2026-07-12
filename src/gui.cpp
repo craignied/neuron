@@ -96,6 +96,24 @@ bool fileExists( const string& path )
 	return ( bool ) f;
 }
 
+// A request field, whether the POST was form-encoded or multipart
+string param( const httplib::Request& req, const string& name )
+{
+	if ( req.has_param( name ) )
+		return req.get_param_value( name );
+	if ( req.has_file( name ) )
+		return req.get_file_value( name ).content;
+	return "";
+}
+
+// Just the final component of a picked file's name — no directory parts
+string safeBasename( const string& name )
+{
+	string::size_type slash = name.find_last_of( "/\\" );
+	string base = ( slash == string::npos ? name : name.substr( slash + 1 ) );
+	return base.empty() ? "upload.txt" : base;
+}
+
 // Match the driver: an appropriate number of trapezoid thresholds per set
 void tuneThresholds( DataSet& d )
 {
@@ -121,11 +139,29 @@ struct Capture
 
 string handleLoad( const httplib::Request& req )
 {
-	string mode = req.get_param_value( "mode" ),
-		path = req.get_param_value( "path" );
-	unsigned nI = ( unsigned ) atol( req.get_param_value( "inputs" ).c_str() ),
-		nO = ( unsigned ) atol( req.get_param_value( "outputs" ).c_str() );
-	double fraction = atof( req.get_param_value( "fraction" ).c_str() );
+	string mode = param( req, "mode" ),
+		path = param( req, "path" ),
+		saved; // set when the page uploaded the file's content
+	unsigned nI = ( unsigned ) atol( param( req, "inputs" ).c_str() ),
+		nO = ( unsigned ) atol( param( req, "outputs" ).c_str() );
+	double fraction = atof( param( req, "fraction" ).c_str() );
+
+	// The page's file picker uploads the picked file's CONTENT (browsers
+	//    never reveal paths); save it into the server's directory and load
+	//    it from there. A "path" field (curl, scripts) still works.
+	if ( req.has_file( "file" ) )
+	{
+		const auto& upload = req.get_file_value( "file" );
+		if ( upload.content.empty() )
+			return jsonMsg( false, "the uploaded file is empty" );
+		path = safeBasename( upload.filename );
+		ofstream out( path.c_str(), ios::out | ios::trunc | ios::binary );
+		if ( !out.is_open() )
+			return jsonMsg( false, "can't save the upload as " + path );
+		out << upload.content;
+		out.close();
+		saved = path;
+	}
 
 	if ( path.empty() || !fileExists( path ) )
 		// Checked here because the engine's missing-file recovery prompts
@@ -167,6 +203,8 @@ string handleLoad( const httplib::Request& req )
 	if ( ds->testLoaded() )
 		msg << ", " << ds->getNumTest() << " test exemplars";
 	msg << " loaded";
+	if ( !saved.empty() )
+		msg << " (copy saved as " << saved << " beside the server)";
 
 	dataPtr = std::move( ds );
 	modelPtr.reset(); // a new dataset invalidates any existing model
@@ -176,8 +214,8 @@ string handleLoad( const httplib::Request& req )
 
 string handleModel( const httplib::Request& req )
 {
-	string type = req.get_param_value( "type" );
-	unsigned hidden = ( unsigned ) atol( req.get_param_value( "hidden" ).c_str() );
+	string type = param( req, "type" );
+	unsigned hidden = ( unsigned ) atol( param( req, "hidden" ).c_str() );
 
 	if ( !dataPtr )
 		return jsonMsg( false, "load a dataset first" );
@@ -218,9 +256,9 @@ string handleModel( const httplib::Request& req )
 
 string handleTrain( const httplib::Request& req )
 {
-	unsigned algorithm = ( unsigned ) atol( req.get_param_value( "algorithm" ).c_str() ),
-		maxIter = ( unsigned ) atol( req.get_param_value( "maxiter" ).c_str() );
-	string seed = req.get_param_value( "seed" );
+	unsigned algorithm = ( unsigned ) atol( param( req, "algorithm" ).c_str() ),
+		maxIter = ( unsigned ) atol( param( req, "maxiter" ).c_str() );
+	string seed = param( req, "seed" );
 
 	if ( !modelPtr )
 		return jsonMsg( false, "create a model first" );

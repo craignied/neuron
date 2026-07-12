@@ -31,7 +31,7 @@ button { padding: .35rem .9rem; cursor: pointer; }
 <fieldset>
 <legend>1 &mdash; Dataset</legend>
 <div class="row">
-  <label>Data file <input type="text" id="path" placeholder="/path/to/data.txt"></label>
+  <label>Data file <input type="file" id="file"></label>
 </div>
 <div class="row">
   <label>Inputs <input class="num" type="number" id="inputs" value="2" min="1"></label>
@@ -106,10 +106,19 @@ $("mtype").onchange = () => {
   $("hiddenbox").style.display = $("mtype").value === "simpleprop" ? "" : "none";
 };
 async function loadData() {
+  if (!$("file").files.length) {
+    setStatus("dstatus", false, "choose a data file first");
+    return;
+  }
   setStatus("dstatus", true, "loading…");
-  const j = await api("/api/load", { mode: $("mode").value, path: $("path").value,
-    inputs: $("inputs").value, outputs: $("outputs").value,
-    fraction: $("fraction").value });
+  const fd = new FormData();
+  fd.append("file", $("file").files[0]);
+  fd.append("mode", $("mode").value);
+  fd.append("inputs", $("inputs").value);
+  fd.append("outputs", $("outputs").value);
+  fd.append("fraction", $("fraction").value);
+  const r = await fetch("/api/load", { method: "POST", body: fd });
+  const j = await r.json();
   setStatus("dstatus", j.ok, j.message);
 }
 async function setModel() {
