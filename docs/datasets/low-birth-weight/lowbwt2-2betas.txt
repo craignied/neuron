@@ -1,0 +1,7 @@
+Binary logistic
+5 inputs
+1 output by definition
+y-intercept:
+-1.40374
+Beta weights:
+-0.410286 -1.34532 -0.240616 0.317105 -0.164353 

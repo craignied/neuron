@@ -1,0 +1,32 @@
+4 columns found on first line
+WARNING: Ignoring line 7, missing output
+WARNING: Column 2 has blanks, which --refcat makes indistinguishable from the reference level
+
+Column labels:
+Column 1: age
+Column 2: color
+Column 3: score
+Column 4: y
+
+Populated report:
+Column 1: completely populated
+Column 2: 1 rows blank
+Column 3: 1 rows blank
+Column 4: completely populated
+
+One-hot encoding:
+Column 2 (color): 3 levels, reference = blue: green, red
+Outcome column 4 (y): no -> 0, yes -> 1
+
+File ref_data.txt will record output
+
+Number of rows recorded in ref_data.txt is 6
+Number of columns was 6, which would be 5 input nodes in a 1-output dataset
+File ref_inputs.txt will record input node structure (assuming 1 output node)
+Writing key to file ref_key.txt
+
+Column labels in output file:
+Column 1: age
+Columns 2-3: color (one-hot, reference = blue: green, red)
+Columns 4, 5: score
+Column 6: y (no = 0, yes = 1)

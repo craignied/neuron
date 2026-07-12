@@ -5,7 +5,8 @@ Example datasets for learning and testing neuron 3.0.
 | Directory | Task | Format | Notes |
 |---|---|---|---|
 | `prostate-biopsy/` | Predict cancer on prostate biopsy (binary) | neuron-ready (scaled) | Real clinical modeling data from the neUROn2++ era; loads directly |
-| `bank-marketing/` | Predict term-deposit subscription (binary) | raw `.csv` (needs grooming) | Public UCI dataset; a realistic "messy data" example for `tools/mkdataset.py` |
+| `low-birth-weight/` | Predict low birth weight (binary) | neuron-ready (scaled) | The Hosmer & Lemeshow classic, with committed reference betas that double as a logistic-regression engine check |
+| `bank-marketing/` | Predict term-deposit subscription (binary) | raw `.csv` (needs grooming) | Public UCI dataset; the grooming WALKTHROUGH.md starts here |
 
 See each directory's README for columns, provenance, and how to use it.
 

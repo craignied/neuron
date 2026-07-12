@@ -35,11 +35,13 @@ See `bank-names.txt` for the full attribute list and citation request.
 
 neuron's engine consumes numeric matrices, so this data must first be encoded: convert
 the delimiter, one-hot-encode the categorical variables into indicator columns, and map
-the outcome to 1/0. `tools/mkdataset.py` handles delimiter/blank/missing-value mechanics
-and emits the `--inputs` variable structure, but **categorical text encoding is not yet
-automated** — that's a natural next tool (or `mkdataset.py` extension). Until then this
-dataset is a worked example of the grooming problem, and a motivating target for the
-tooling.
+the outcome to 1/0. `tools/mkdataset.py` does all of this — `--delimiter ';'` for the
+semicolons, `--onehot` for the categorical columns and the yes/no outcome, `--refcat`
+for reference-category coding when the model has an intercept.
+
+**See [`WALKTHROUGH.md`](WALKTHROUGH.md)** for the complete worked example: this file,
+one grooming command, and trained logistic-regression and neural-network models with
+their ROC reports — every step verified by actually running it.
 
 This dataset is redistributed for research/education under the terms described at the
 UCI link above; please cite Moro et al. (2011) if you use it.

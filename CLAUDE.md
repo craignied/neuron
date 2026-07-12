@@ -42,7 +42,10 @@ GSL 1.9–1.10; modern GSL is 2.x — untested).
   **Copied into `docs/` here** (see below).
 - `../distro/scripts/` — model exporters: `neuron2html.pl` (model → standalone HTML calculator),
   `neuron2palm.pl`, `neuron2iphone.rb`, plus `mkdataset.pl`. Documented in manifest.pdf ch. 11.
-  **Not carried forward** (see decisions).
+  The HTML exporter idea is reborn as the planned `tools/neuron2web.py` (see roadmap);
+  its inputs are the same trio (weights file, scaling-factors file, label spec), and
+  `perl-html_creator_spec.txt` in that directory defines the label-spec tag format we
+  carry forward. Palm/iPhone exporters stay dead.
 - `../distro/data/` — sample datasets: PSA (`psa_defs.txt`, `ordata`), low birthweight
   (`lowbwt2-2*`), XOR, BP40 train/test.
 - `../distro/*.tar.gz` — release tarballs; the newest one feeds `tests/oracle/build_oracle.sh`.
@@ -71,8 +74,9 @@ GSL 1.9–1.10; modern GSL is 2.x — untested).
 3. **Scope: full engine port.** The statistical parts (goodness-of-fit, ROC, Wald,
    condition numbers, DFA, logistic regression, stepwise) are the novel and useful pieces —
    they all come along, together with the neural nets.
-4. **Exporters: dropped.** The HTML/Palm/iPhone exporters are not carried forward — in the
-   current era an LLM can generate a calculator from a saved model directly.
+4. **Exporters: dropped** *(superseded 2026-07-13)*. Originally: not carried forward.
+   Craig revived the HTML-calculator idea as a first-class deployment path — see the
+   roadmap's **deployment phase** (`tools/neuron2web.py`). Palm/iPhone stay dead.
 
 ## Docs (`docs/`)
 
@@ -213,7 +217,27 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
     before leaning on it in print. Methods-section language + this caveat live in
     `docs/roc_theory.md` and README.
 
-## ROADMAP (agreed with Craig 2026-07-13, pre-compaction)
+- **2026-07-13 (Phase 1 complete: bank walkthrough)** — `mkdataset.py` gained
+  `--delimiter`, `--onehot` (auto-detect or explicit columns; two-valued text outcome
+  → single 0/1 column; blank categorical = all zeros), and `--refcat` (k−1 reference-
+  category coding; first bank logistic run proved why: full one-hot + intercept =
+  perfect collinearity, Shanno ground 15+ CPU-min without converging). Fixtures now
+  cover all three invocations; original expected files untouched (default path is
+  byte-identical). `docs/datasets/bank-marketing/WALKTHROUGH.md` written from real
+  verified transcripts: groom (42 inputs) → seed-42 stratified 75/25 split → logistic
+  (canonical GD, 20k-iter cap, 12 s, converged MLE, test ROC 0.874 both methods) and
+  SimpleProp 42-5-1 (canonical, 2k cap, 4 s, test ROC 0.871). **Training-recipe
+  lesson baked into the doc:** default stop conditions (1M iters) are wrong for
+  thousands of rows — uncapped CGD ran 80 min and ended worse than useless (test ROC
+  0.57, auto-step instability + "Numerical out of bounds"); cap iterations, prefer
+  canonical GD; Shanno/CGD line searches are expensive here. Known quirk surfaced:
+  binormal search can fail with "a too large, ITMAX too small in gcf" (legacy message,
+  in spin.html too) — trapezoid+H-M CI is the fallback. Also imported
+  `docs/datasets/low-birth-weight/` (H&L classic): committed betas are the converged
+  MLE (max grad 3.4e-07 on load) and LL = −111.2865 matches H&L's published −111.286
+  — a self-verifying logistic reference check. CI/README builds now use `--parallel`.
+
+## ROADMAP (agreed with Craig 2026-07-13, pre-compaction; Phase 2 deployment added 2026-07-13)
 
 Work these in order; each phase lands independently with tests + CI green.
 
@@ -233,7 +257,44 @@ Work these in order; each phase lands independently with tests + CI green.
    (Hosmer-Lemeshow low-birth-weight classic; the betas file is a reference-coefficient
    check for logistic regression). Optional, cheap.
 
-### Phase 2 — Engine/UI decoupling survey (groundwork for GUI)
+### Phase 2 — Model deployment: `tools/neuron2web.py` (planned with Craig 2026-07-13)
+The neuron2html.pl idea reborn: pick up a trained network and deploy it as a
+calculator anyone can open in a browser. Lives in `tools/` (Craig's call, and right:
+it's tooling around the engine, stdlib-only Python, no engine changes).
+1. **Inputs (the same trio as neuron2html.pl):**
+   - the saved network file (menu "Save the network"; SimpleProp/BareProp/BackProp/
+     Logistic — parse the type from line 1 exactly like the engine's loader);
+   - the scaling-factors file (menu "Save scaling factors"; format:
+     `x_norm = S*(x - x_min) + lbound`, one S row + one x_min row) — required
+     because deployed inputs arrive in natural units;
+   - a **label spec** telling the page how to present inputs/output. Format = the
+     legacy tag spec (`distro/scripts/perl-html_creator_spec.txt`, manifest ch. 11):
+     `N %% name %% units`, `C %% name %% choice1 %% choice2...`, `B %% name %%
+     true-label %% false-label`, `K %%` prefix for missing-indicator pairs,
+     `O %% 0-label %% 1-label`, `R %% odds label`. Extension for --refcat grooming:
+     a `*`-marked choice is the reference level (no column). The tool validates that
+     the spec's expanded column count equals the network's input count and says
+     exactly what mismatches if not.
+2. **Output: one self-contained HTML file** (inline CSS/JS, zero external requests):
+   form generated from the spec (numeric fields with units, dropdowns, yes/no,
+   "unknown" toggles for K pairs), JS applies the scaling factors and runs the
+   forward pass (activation functions must match function_defs.h exactly), displays
+   probability + odds and the outcome labels. Works from file:// — deployment can be
+   "email the file".
+3. **`--serve` flag**: stdlib `http.server` on 127.0.0.1, **port 0** (OS-assigned,
+   same decision as the GUI), print the URL, open the browser via `webbrowser`.
+   No non-stdlib anything.
+4. **Verification**: the tool re-implements the forward pass in Python; a fixture
+   test deploys a committed network (e.g. tests/oracle/xor_net.txt + a tiny spec)
+   and asserts the Python-computed outputs against engine eta-0 output; the
+   generated HTML is byte-compared (--bless pattern). The JS and Python paths are
+   generated from the same coefficients, so testing Python + embedding verified
+   constants covers the page without needing node in CI.
+5. **Documentation**: `docs/deploy.md` — spec-format reference (adapted from the
+   perl spec + manifest ch. 11), end-to-end example, and a WALKTHROUGH.md addendum
+   deploying the trained bank model (groom → train → save → deploy, the full arc).
+
+### Phase 3 — Engine/UI decoupling survey (groundwork for GUI)
 1. Inventory where the engine prints directly to cout vs. takes an ostream&
    (dataset.cpp report methods already take ostream&; Iterative/train() progress
    printing is the main cout offender) and where it reads via util::ask*.
@@ -244,7 +305,7 @@ Work these in order; each phase lands independently with tests + CI green.
    (~10 lines in the trapezoid walk) + expose a getter. Output-neutral (goldens/oracle
    unaffected). Needed for GUI ROC plots.
 
-### Phase 3 — Embedded web GUI (`neuron --gui`)
+### Phase 4 — Embedded web GUI (`neuron --gui`)
 Decisions already made by Craig: embedded HTTP server IN the binary (no Python
 server); bind 127.0.0.1 with **port 0 = OS-assigned free port** (no collisions, no
 PORTS.md entry needed); loopback only (LAN exposure only ever as explicit opt-in
@@ -255,7 +316,7 @@ flag); browser is the display layer; CLI stays fully functional alongside.
 3. Serve a single self-contained HTML/JS page embedded in the binary (CMake
    string-embed step). JSON endpoints: load dataset, configure model, train
    (serialized by one mutex — engine is single-threaded), fetch report + ROC curve
-   (ROCx/ROCy from Phase 2).
+   (ROCx/ROCy from Phase 3).
 4. Golden transcripts + oracle keep guarding the CLI; add a curl-based smoke test for
    the endpoints if practical in CI.
 Longer-term idea (parked): compile engine to WebAssembly → GUI as a static page on

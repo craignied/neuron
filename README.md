@@ -43,7 +43,7 @@ Requires CMake and the [GNU Scientific Library](https://www.gnu.org/software/gsl
 ```sh
 brew install gsl cmake    # macOS
 cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+cmake --build build --parallel
 ./build/neuron
 ```
 

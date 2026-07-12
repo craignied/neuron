@@ -1,0 +1,4 @@
+Column 1: age
+Columns 2-4: color (one-hot: blue, green, red)
+Columns 5, 6: score
+Column 7: y (no = 0, yes = 1)
