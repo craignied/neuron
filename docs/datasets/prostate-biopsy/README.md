@@ -55,8 +55,9 @@ confidence interval, plus the goodness-of-fit statistics) actually fires — see
 
 **In the GUI** (`./build/neuron --gui`): set the dataset mode to *already a
 training set*, pick `BP40train.txt` as the data file and `BP40test.txt` in the
-*Test set (optional)* picker, set Inputs = 11, and Load — the pair loads
-together (218 train + 144 test) so training reports a held-out test ROC.
+*Test set (optional)* picker, and Load — the input count (11) is read from the
+file, and the pair loads together (218 train + 144 test) so training reports a
+held-out test ROC.
 
 ## The 11 input columns
 

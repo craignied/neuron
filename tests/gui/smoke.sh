@@ -30,13 +30,16 @@ fail() { echo "FAIL: $1" >&2; exit 1; }
 curl -s "$URL/api/version" | grep -q "neuron" || fail "version endpoint"
 curl -s "$URL/" | grep -q "<title>neuron</title>" || fail "page not served"
 
-curl -s -X POST "$URL/api/load" \
-    -d "mode=train&path=xor_discrete.set&inputs=2&outputs=1" \
-    | grep -q '"ok":true' || fail "load endpoint (path)"
+# No inputs/outputs given: the server derives them from the file's columns
+#    (xor_discrete.set is 2 inputs + 1 output) — the page relies on this
+load1=$(curl -s -X POST "$URL/api/load" -d "mode=train&path=xor_discrete.set")
+echo "$load1" | grep -q '"ok":true' || fail "load endpoint (path)"
+echo "$load1" | grep -q '2 inputs, 1 output' || fail "input count not derived from file"
 
-# The page's file picker uploads content as multipart — test that path too
+# The page's file picker uploads content as multipart — test that path too.
+#    An explicit inputs= override must still be honored (scripts rely on it).
 curl -s -X POST "$URL/api/load" -F "file=@xor_discrete.set;filename=uploaded.set" \
-    -F mode=train -F inputs=2 -F outputs=1 \
+    -F mode=train -F inputs=2 \
     | grep -q '"ok":true' || fail "load endpoint (multipart upload)"
 [ -f uploaded.set ] || fail "upload was not saved beside the server"
 
@@ -81,7 +84,7 @@ curl -s "$URL/api/save/test_set" | grep -q '"ok":false' \
 curl -s -X POST "$URL/api/load" \
     -F "file=@xor_discrete.set;filename=pair_train.set" \
     -F "testfile=@xor_discrete.set;filename=pair_test.set" \
-    -F mode=train -F inputs=2 -F outputs=1 > pair.json
+    -F mode=train > pair.json
 grep -q '"ok":true' pair.json || fail "pre-split pair load"
 grep -q 'test exemplars' pair.json || fail "test set not loaded from the pair"
 [ -f pair_test.set ] || fail "uploaded test set not saved beside the server"

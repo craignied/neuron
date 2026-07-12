@@ -173,6 +173,12 @@ string handleLoad( const httplib::Request& req )
 		nO = ( unsigned ) atol( param( req, "outputs" ).c_str() );
 	double fraction = atof( param( req, "fraction" ).c_str() );
 
+	// neuron is a 1-output system: the raw->train split and every ROC /
+	//    classification statistic refuse anything but a single output. So the
+	//    output count is fixed at 1 (a caller may still pass it explicitly).
+	if ( nO < 1 )
+		nO = 1;
+
 	string path = resolveFile( req, "file", "path", savedTrain, err );
 	if ( !err.empty() )
 		return jsonMsg( false, err );
@@ -181,8 +187,22 @@ string handleLoad( const httplib::Request& req )
 		// Checked here because the engine's missing-file recovery prompts
 		//    on stdin, which the GUI must never touch
 		return jsonMsg( false, "can't open file: " + path );
-	if ( nI < 1 || nO < 1 )
-		return jsonMsg( false, "inputs and outputs must be at least 1" );
+
+	// The data file already carries its own shape: it has exactly
+	//    nInput + nOutput columns. With the output count fixed, the input
+	//    count is just (columns - nOutput) — derive it rather than make the
+	//    user count columns. (A caller may still pass "inputs" to override.)
+	if ( nI < 1 )
+	{
+		Capture probeCap; // keep the probe load's report off the screen
+		Matrix< double > probe;
+		probe.loadfile( false, path );
+		unsigned cols = probe.cols();
+		if ( cols <= nO )
+			return jsonMsg( false, "the file has too few columns to hold "
+				"inputs and an output" );
+		nI = cols - nO;
+	}
 
 	auto ds = make_unique< DataSet >();
 	ds->setInput( nI );
@@ -234,7 +254,8 @@ string handleLoad( const httplib::Request& req )
 	tuneThresholds( *ds );
 
 	ostringstream msg;
-	msg << ds->getNumTrain() << " training exemplars";
+	msg << ds->getInput() << " inputs, 1 output; "
+		<< ds->getNumTrain() << " training exemplars";
 	if ( ds->testLoaded() )
 		msg << ", " << ds->getNumTest() << " test exemplars";
 	msg << " loaded";
