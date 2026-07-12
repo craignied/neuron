@@ -17,6 +17,7 @@ specification example is literally "Odds of cancer on prostate biopsy."
 | `BP40test.txt` | 144 | Held-out test set (50 cancer, 94 no-cancer) |
 | `psa_defs.txt` | — | Input-structure specification: `0;1-4;5;6,7;8;9;10` |
 | `psa_spec.txt` | — | Label spec for `tools/neuron2web.py` — deploys a trained model as a web calculator |
+| `psa_scales.txt` | — | Natural-units scaling factors for this model (see "Deploying," below) |
 | `Run9` | — | A saved SimpleProp network (11 inputs, 3 hidden nodes) trained on this data |
 
 ## Format
@@ -68,14 +69,54 @@ app's input vector, the authoritative record:
 
 ## Deploying a trained model
 
-`psa_spec.txt` is the ready-made label spec for `tools/neuron2web.py`. After
-training a model and saving its network + scaling factors (the GUI's
-"Session files", or the CLI save prompts):
+Deploying to natural units (age in years, PSA in ng/mL) needs three files:
+the network, a **label spec** (`psa_spec.txt`, ready-made), and a
+**scaling-factors file** that maps natural units into the network's
+normalized input space. All three are committed, so the model deploys with
+one command:
 
 ```
-python3 tools/neuron2web.py --network network.txt --scales scales.txt \
-    --spec docs/datasets/prostate-biopsy/psa_spec.txt -o psa_calculator.html
+python3 tools/neuron2web.py --network Run9 --scales psa_scales.txt \
+    --spec psa_spec.txt -o psa_calculator.html
 ```
+
+Verify before shipping — `--eval` takes a row in natural units, in
+network-column order (no outcome column):
+
+```
+$ python3 tools/neuron2web.py --network Run9 --scales psa_scales.txt \
+      --spec psa_spec.txt --eval "65, 1,0,0,0, 0, 1, 8, 4.2, 1.1, 0"
+0.193435
+```
+
+That 0.193435 (65 y/o, Caucasian, no family history, IPSS 8, total PSA 4.2,
+complexed PSA 1.1, normal DRE) reproduces the PSAnet iPhone app's own
+forward pass for the same inputs to six significant figures — `Run9` **is**
+the app's network, and `psa_scales.txt` **is** its scaling.
+
+### Why the scaling factors are a separate file here
+
+`BP40train.txt`/`BP40test.txt` arrived **already normalized** to
+[−0.9, 0.9] — the natural-units values were scaled away before the dataset
+was ever saved. So you cannot recover deployment scaling by loading BP40 and
+saving factors: that run only sees normalized numbers and would produce a
+near-identity mapping, and the resulting calculator would demand
+already-normalized inputs (useless to a clinician typing an age and a PSA).
+
+The genuine natural→normalized mapping survived only in the PSAnet iPhone
+app (`~/code/iPhone/PSAnet`), which takes real clinical values and predicts.
+`psa_scales.txt` is that mapping, transcribed into the engine's
+scaling-file format:
+
+- `S`      = `0.0529412 1.8 1.8 1.8 1.8 1.8 1.8 0.0545455 0.00188547 0.0024129 1.8`
+- `x_min`  = `50 0 0 0 0 0 0 0 0.33 0.21 0`
+- `lbound` = `−0.9`   (`x_norm = S·(x − x_min) + lbound`)
+
+The lesson generalizes: to deploy in natural units you need the scaling from
+the run that first normalized the data. When you groom a raw CSV yourself,
+save the scaling factors at that point (the CLI's menu 8, or the GUI's
+Session files) — for a dataset that was normalized upstream, hunt down
+wherever that normalization was recorded.
 
 The spec uses full 4-column one-hot for ethnicity (no reference level),
 matching a SimpleProp network like `Run9`. If you train **logistic

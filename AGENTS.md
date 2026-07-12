@@ -153,7 +153,14 @@ score ~90% by always predicting "no". Judge by the ROC area and its CI.
 Needs the three files from step 2's session: `network.txt`, `scales.txt`
 (both saves are marked REQUIRED in the template — if the user's earlier
 session skipped them, re-run it with the saves), and a **label spec** you
-write for the user. Full spec reference: `docs/deploy.md`. Short form —
+write for the user. **Caveat — pre-normalized data:** if the dataset was
+already scaled to roughly [−0.9, 0.9] before you got it (like
+`docs/datasets/prostate-biopsy`), saving scaling factors from a training
+run is useless — that run only sees normalized numbers and records a
+near-identity mapping, so the calculator would demand normalized inputs. The
+real natural→normalized scaling lives wherever the data was first normalized;
+find it and hand-write a scales file in the engine's format (worked example:
+`docs/datasets/prostate-biopsy/README.md`, "Deploying a trained model"). Full spec reference: `docs/deploy.md`. Short form —
 one line per variable **in groomed-column order** (copy from the key
 file), then outcome labels:
 

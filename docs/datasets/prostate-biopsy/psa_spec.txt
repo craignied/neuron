@@ -9,6 +9,13 @@
 # model is a SimpleProp neural network (Run9), which tolerates it — so no
 # '*' markers. If you instead train LOGISTIC regression on this data, groom
 # with --refcat and star one ethnicity level here.
+#
+# Deploy (natural units) with the committed network + scaling factors:
+#   python3 tools/neuron2web.py --network Run9 --scales psa_scales.txt \
+#       --spec psa_spec.txt -o psa_calculator.html
+# (BP40 is pre-normalized, so psa_scales.txt — the natural->normalized
+#  mapping recovered from the PSAnet app — is what makes deployment work;
+#  see this directory's README.)
 
 N %% Age %% years
 C %% Ethnicity %% Caucasian %% African American %% Hispanic %% Asian / Other
