@@ -64,9 +64,10 @@ function run() {
   cols.push(num("v1"));
   const xs = cols.map((x, i) => S[i] * (x - XMIN[i]) + LB);
   const p = model(xs);
-  const pct = (100 * p).toFixed(1);
+  const win = p >= 0.5;
+  const pct = (100 * (win ? p : 1 - p)).toFixed(1);
   document.getElementById("prob").textContent =
-    "XOR is true: " + pct + "% probability";
+    (win ? "XOR is true" : "XOR is false") + ": " + pct + "% probability";
   const odds = p / (1 - p);
   document.getElementById("oddsline").textContent = "Odds that XOR is true: " + (odds >= 1 ? odds.toFixed(2) + " to 1" : "1 to " + (1 / odds).toFixed(2));
   document.getElementById("out").style.display = "block";

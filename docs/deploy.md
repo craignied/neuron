@@ -115,6 +115,8 @@ Serving the calculator at http://127.0.0.1:<OS-assigned port>/  (Ctrl-C to stop)
 The embedded JavaScript is a line-for-line mirror of the engine's forward
 pass (`src/function_defs.h` sigmoids, bias as the last weight of each
 row): scale each column, then for logistic `p = σ(β·x + b)`, for SimpleProp
-`p = σ(w·σ(Hx + h) + b)`. Probability and odds are displayed with your `O`
-and `R` labels. The numbers agree with the engine to the precision the
-engine saves its weights with (6 significant digits).
+`p = σ(w·σ(Hx + h) + b)`. The headline names whichever outcome is more
+probable ("Cancer absent: 99.7%" rather than "Cancer present: 0.3%"); the
+second line shows the odds with your `R` label, or the complementary
+outcome if no `R` tag was given. The numbers agree with the engine to the
+precision the engine saves its weights with (6 significant digits).

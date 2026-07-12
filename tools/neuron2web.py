@@ -359,9 +359,10 @@ function run() {{
 {collect_js}
   const xs = cols.map((x, i) => S[i] * (x - XMIN[i]) + LB);
   const p = model(xs);
-  const pct = (100 * p).toFixed(1);
+  const win = p >= 0.5;
+  const pct = (100 * (win ? p : 1 - p)).toFixed(1);
   document.getElementById("prob").textContent =
-    "{label1}: " + pct + "% probability";
+    (win ? "{label1}" : "{label0}") + ": " + pct + "% probability";
   const odds = p / (1 - p);
   document.getElementById("oddsline").textContent = {odds_expr};
   document.getElementById("out").style.display = "block";
@@ -380,8 +381,11 @@ def build_page(net, netfile, lbound, S, xmin, variables, outcome, odds,
                      '(odds >= 1 ? odds.toFixed(2) + " to 1"'
                      ' : "1 to " + (1 / odds).toFixed(2))')
     else:
-        odds_expr = (f'"{html.escape(outcome[0])}: " + '
-                     '(100 * (1 - p)).toFixed(1) + "% probability"')
+        # No R tag: the second line carries the *less* probable outcome,
+        # complementing the headline.
+        odds_expr = ('(win ? "' + html.escape(outcome[0]) + '"'
+                     ' : "' + html.escape(outcome[1]) + '") + ": " + '
+                     '(100 * (win ? 1 - p : p)).toFixed(1) + "% probability"')
     return PAGE.format(
         title=html.escape(title),
         netfile=html.escape(netfile),
@@ -391,6 +395,7 @@ def build_page(net, netfile, lbound, S, xmin, variables, outcome, odds,
         xmin=js_list(xmin),
         model_js=build_model_js(net),
         collect_js=collect_js,
+        label0=html.escape(outcome[0]),
         label1=html.escape(outcome[1]),
         odds_expr=odds_expr,
     )
