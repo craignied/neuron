@@ -62,6 +62,61 @@ static bool check( double mu1, double s1, unsigned nPerClass, double tol )
 	return false;
 }
 
+// Verifies the delta-method SE of Az against simulation: the mean reported SE
+// over replicate samples should be on the scale of the empirical SD of Az.
+// (The covariance term is unavailable on the binned fitexy path, so we accept
+// a generous calibration window rather than exact agreement.)
+static bool check_se( double mu1, double s1, unsigned nPerClass, unsigned reps )
+{
+	mt19937 gen( 6789 );
+	normal_distribution< double > negative( 0.0, 1.0 ), positive( mu1, s1 );
+
+	double sumAz = 0, sumAz2 = 0, sumSE = 0,
+		sumT = 0, sumT2 = 0, sumHM = 0;
+	for ( unsigned r = 0; r < reps; r++ )
+	{
+		Matrix< double > M( 2 * nPerClass, 2 );
+		for ( unsigned i = 0; i < nPerClass; i++ )
+		{
+			M( 2 * i, 0 ) = 0;
+			M( 2 * i, 1 ) = negative( gen );
+			M( 2 * i + 1, 0 ) = 1;
+			M( 2 * i + 1, 1 ) = positive( gen );
+		}
+		TwoSet assay( M );
+		double az = assay.getStatROCarea();
+		sumAz += az;
+		sumAz2 += az * az;
+		sumSE += assay.getStatAzSE();
+		double t = assay.getTrapROCarea();
+		sumT += t;
+		sumT2 += t * t;
+		sumHM += assay.getTrapSE();
+	}
+	double meanAz = sumAz / reps;
+	double empSD = sqrt( sumAz2 / reps - meanAz * meanAz );
+	double ratio = ( sumSE / reps ) / empSD;
+
+	double meanT = sumT / reps;
+	double empSDT = sqrt( sumT2 / reps - meanT * meanT );
+	double ratioHM = ( sumHM / reps ) / empSDT;
+
+	cout << "SE calibration (delta): empirical SD(Az)=" << empSD
+		<< "  mean reported SE=" << sumSE / reps << "  ratio=" << ratio << endl;
+	cout << "SE calibration (Hanley-McNeil): empirical SD(trap)=" << empSDT
+		<< "  mean reported SE=" << sumHM / reps << "  ratio=" << ratioHM;
+
+	// Delta method drops the a-b covariance on the binned path — generous
+	// window; Hanley-McNeil should be well calibrated — tight window.
+	if ( ratio > 0.4 && ratio < 2.5 && ratioHM > 0.7 && ratioHM < 1.4 )
+	{
+		cout << "  OK" << endl;
+		return true;
+	}
+	cout << "  FAIL (delta want 0.4-2.5, H-M want 0.7-1.4)" << endl;
+	return false;
+}
+
 int main()
 {
 	bool ok = true;
@@ -72,6 +127,8 @@ int main()
 	ok &= check( 2.0, 1.5, 2000, 0.02 );
 	// Weak separation
 	ok &= check( 0.5, 1.0, 2000, 0.02 );
+	// Delta-method SE roughly matches sampling variability
+	ok &= check_se( 1.0, 1.0, 300, 80 );
 
 	if ( ok )
 	{

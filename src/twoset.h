@@ -95,6 +95,8 @@ public:
 	double getStatROCarea(); // returns statistical ROC area
 	double getStatP(); // returns p-value for fitted line, smaller is worse
 	double getStatChi2(); // returns chi-squared value for fitted line
+	double getStatAzSE(); // returns delta-method standard error of Az
+	double getTrapSE(); // returns Hanley-McNeil SE of the trapezoidal area
 
 	// Outputs to ostream an ROC report with statistical method and/or
 	//    trapezoidal method depending on flag set by setReportFlag() accessor
@@ -158,6 +160,7 @@ public:
 	double threshold, // threshold value
 		statP, // p-value for fitted line for statistical ROC calculation
 		statChi2, // chi-squared value for fitted line for statistical ROC calculation
+		statAzSE, // delta-method standard error of the statistical ROC area (Az)
 		KSD, // Kolmogorov-Smirnov test D value
 		KSP, // Kolmogorov-Smirnov test p-value
 	    PKX2P, // Pearson's Chi-Square test p-value   Hui Liu added 08/15/2004
@@ -188,7 +191,13 @@ public:
 	void copy( const TwoSet& rhs );
 
 	// Utility method for ROCarea, outputs statistical report
-	void statReport( ostream&, unsigned, unsigned, double, double, double );
+	void statReport( ostream&, unsigned, unsigned, double, double, double, double );
+
+	// Delta-method standard error of Az from a fitted zROC line
+	double azSE( XY& );
+
+	// Hanley-McNeil standard error of an empirical (trapezoidal) ROC area
+	double hmSE( double );
 
 	// Utility method to calculate Kolmogorov-Smirnov test Numerical Recipes in C p. 623
 	void KScalc();

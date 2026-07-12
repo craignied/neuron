@@ -196,3 +196,19 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   when the GUI lands: ROCx/ROCy curve-point capture (for plotting). GUI decisions
   so far: embedded server in binary (`neuron --gui`), bind port 0 (OS-assigned),
   loopback only.
+- **2026-07-13 (ROC CIs)** — **95% confidence intervals on every ROC area.** Binormal
+  Az: **delta method** — propagates the z-ROC fit's siga/sigb through Az=Φ(a/√(1+b²))
+  via the analytic gradient (`TwoSet::azSE`). Trapezoidal: **Hanley-McNeil** closed-form
+  variance from the Mann-Whitney U equivalence (`TwoSet::hmSE`). NEITHER is a bootstrap —
+  both analytic/parametric. Printed in `statReport` and after the trapezoid line; new
+  public getters `getStatAzSE()`/`getTrapSE()`. `check_az` now also validates SE
+  calibration by simulation. Oracle diff excludes "95% CI" (new in 3.0). Fixed a latent
+  bug found on the way: `XY` fitexy ctor left `_r` uninitialized.
+  - **Caveat for publication:** the binormal delta-method interval has a known
+    approximation here — on the binned fitexy path the routine doesn't expose the a–b
+    covariance, so that cross term is set to zero. In calibration testing the delta SE
+    ran a bit narrow (reported SE ≈ 0.56× empirical SD — anti-conservative); Hanley-McNeil
+    calibrated cleanly (ratio ≈ 1.09). The trapezoidal CI is the more trustworthy of the
+    two as it stands; recover the covariance term or validate the binormal CI further
+    before leaning on it in print. Methods-section language + this caveat live in
+    `docs/roc_theory.md` and README.

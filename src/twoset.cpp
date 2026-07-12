@@ -38,7 +38,7 @@ void TwoSet::initialize()
 	maxBins = 10;
 	// Zero the cached statistic values so no path can ever print
 	//    uninitialized memory (2.x left these uninitialized)
-	statP = statChi2 = KSD = KSP = PKX2P = HLX2P = 0;
+	statP = statChi2 = statAzSE = KSD = KSP = PKX2P = HLX2P = 0;
 }
 
 // Copy constructor
@@ -75,6 +75,7 @@ void TwoSet::copy( const TwoSet& rhs )
 	maxBins = rhs.maxBins;
 	statP = rhs.statP;
 	statChi2 = rhs.statChi2;
+	statAzSE = rhs.statAzSE;
 	loadedFlag = rhs.loadedFlag;
 	thresholdFlag = rhs.thresholdFlag;
 	nBinFlag = rhs.nBinFlag;
@@ -539,6 +540,7 @@ double TwoSet::getStatROCarea()
 				rocArea = stats::Zarea( line.a() / sqrt( 1 + ( line.b() * line.b() ) ) );
 				statP = 1;
 				statChi2 = line.chi2();
+				statAzSE = azSE( line );
 				binnedFlag = false;
 			}
 			else // data is to be binned
@@ -573,6 +575,7 @@ double TwoSet::getStatROCarea()
 				rocArea = stats::Zarea( line.a() / sqrt( 1 + ( line.b() * line.b() ) ) );
 				statP = line.q();
 				statChi2 = line.chi2();
+				statAzSE = azSE( line );
 				binnedFlag = true;
 			}
 		}
@@ -581,6 +584,64 @@ double TwoSet::getStatROCarea()
 	}
 	statROCcalcFlag = true; // ROC area has now been statistically calculated
 	return rocArea;
+}
+
+// Delta-method standard error of Az = Zarea( a / sqrt(1+b^2) ), propagating
+//    the zROC fit's parameter uncertainties. Uses the a-b correlation when the
+//    fit provides it (plain fit); fitexy does not, so the covariance term is 0
+//    on the binned path.
+double TwoSet::azSE( XY& line )
+{
+	const double INV_SQRT_2PI = 0.3989422804014327; // 1/sqrt(2*pi)
+
+	double a = line.a(), b = line.b(),
+		sa = line.siga(), sb = line.sigb();
+	double s2 = 1 + b * b;
+	double u = a / sqrt( s2 );
+	double pdf = INV_SQRT_2PI * exp( -0.5 * u * u ); // standard normal density at u
+	double dA = pdf / sqrt( s2 ); // dAz/da
+	double dB = -pdf * a * b / ( s2 * sqrt( s2 ) ); // dAz/db
+	double cov = line.r() * sa * sb; // 0 when fit was fitexy
+
+	return sqrt( dA * dA * sa * sa + dB * dB * sb * sb + 2 * dA * dB * cov );
+}
+
+// Hanley-McNeil standard error of an empirical (trapezoidal) ROC area A:
+//    SE^2 = ( A(1-A) + (n1-1)(Q1-A^2) + (n0-1)(Q2-A^2) ) / (n0*n1),
+//    Q1 = A/(2-A), Q2 = 2A^2/(1+A)   [Hanley & McNeil, Radiology 1982]
+double TwoSet::hmSE( double A )
+{
+	// Count the classes from the "known" column
+	unsigned n0 = 0, n1 = 0;
+	for ( unsigned row = 0; row < this->A.rows(); row++ )
+		if ( this->A( row, 0 ) == 0 )
+			n0++;
+		else
+			n1++;
+
+	if ( n0 == 0 || n1 == 0 )
+		return 0;
+
+	double Q1 = A / ( 2 - A ), Q2 = 2 * A * A / ( 1 + A );
+	double var = ( A * ( 1 - A ) + ( n1 - 1 ) * ( Q1 - A * A )
+		+ ( n0 - 1 ) * ( Q2 - A * A ) ) / ( ( double ) n0 * n1 );
+
+	return var > 0 ? sqrt( var ) : 0;
+}
+
+// Get Hanley-McNeil standard error of the trapezoidal ROC area
+double TwoSet::getTrapSE()
+{
+	return hmSE( getTrapROCarea() );
+}
+
+// Get delta-method standard error of the statistical ROC area
+double TwoSet::getStatAzSE()
+{
+	if ( !statROCcalcFlag ) // calculate ROC area first
+		getStatROCarea();
+
+	return statAzSE;
 }
 
 // Get p value for fitted line, smaller is worse
@@ -624,8 +685,8 @@ void TwoSet::ROCarea( ostream& outputStream )
 	string errorMsg;
 
 	// Search for best AUC and p values from statistical method
-	double bestAUC = 0, bestAUCchi2 = 0, bestAUCp = 0,
-		bestP = 0, bestPchi2 = 0, bestPAUC = 0;
+	double bestAUC = 0, bestAUCchi2 = 0, bestAUCp = 0, bestAUCse = 0,
+		bestP = 0, bestPchi2 = 0, bestPAUC = 0, bestPse = 0;
 	unsigned bestPnBins = 0, bestAUCnBins = 0;
 	if ( searchFlag )
 	{
@@ -655,6 +716,7 @@ void TwoSet::ROCarea( ostream& outputStream )
 				bestAUC = AUC;
 				bestAUCchi2 = statChi2;
 				bestAUCp = statP;
+				bestAUCse = statAzSE;
 				bestAUCnBins = nBins;
 			}
 			if ( statP > bestP ) // record best p value
@@ -662,6 +724,7 @@ void TwoSet::ROCarea( ostream& outputStream )
 				bestPAUC = AUC;
 				bestPchi2 = statChi2;
 				bestP = statP;
+				bestPse = statAzSE;
 				bestPnBins = nBins;
 			}
 		}
@@ -678,9 +741,9 @@ void TwoSet::ROCarea( ostream& outputStream )
 				if ( !statErrorFlag )
 				{
 					// Use utility method
-					statReport( outputStream, goodData, bestPnBins, bestPAUC, bestPchi2, bestP );
+					statReport( outputStream, goodData, bestPnBins, bestPAUC, bestPchi2, bestP, bestPse );
 					outputStream << "Searching for best AUC:" << endl;
-					statReport( outputStream, goodData, bestAUCnBins, bestAUC, bestAUCchi2, bestAUCp );
+					statReport( outputStream, goodData, bestAUCnBins, bestAUC, bestAUCchi2, bestAUCp, bestAUCse );
 				}
 				else
 					outputStream << errorMsg << endl;
@@ -691,7 +754,7 @@ void TwoSet::ROCarea( ostream& outputStream )
 				try  // calculate ROC AUC to get chi2, p values
 				{
 					AUC = getStatROCarea();
-					statReport( outputStream, goodData, nBins, AUC, statChi2, statP ); // use utility method
+					statReport( outputStream, goodData, nBins, AUC, statChi2, statP, statAzSE ); // use utility method
 				}
 				catch ( TwoSet::twoSetErr& e )
 				{
@@ -703,6 +766,14 @@ void TwoSet::ROCarea( ostream& outputStream )
 		{
 		outputStream << "ROC area = " << resetiosflags( ios::scientific )
 			<< setiosflags( ios::fixed | ios::showpoint ) << setprecision( 6 ) << getTrapROCarea() << endl;
+		{
+			double A = getTrapROCarea(), se = hmSE( A );
+			double lo = A - 1.96 * se, hi = A + 1.96 * se;
+			if ( lo < 0 ) lo = 0;
+			if ( hi > 1 ) hi = 1;
+			outputStream << "95% CI = " << lo << " - " << hi
+				<< " (SE = " << se << ", Hanley-McNeil)" << endl;
+		}
 			outputStream << "WARNING: TRAPEZOIDAL METHOD USED" << endl;
 			outputStream << "Number thresholds = " << nThresholds << endl;
 			outputStream << resetiosflags( ios::fixed | ios::showpoint );
@@ -719,9 +790,9 @@ void TwoSet::ROCarea( ostream& outputStream )
 				if ( !statErrorFlag )
 				{
 					// Use utility method
-					statReport( outputStream, goodData, bestPnBins, bestPAUC, bestPchi2, bestP );
+					statReport( outputStream, goodData, bestPnBins, bestPAUC, bestPchi2, bestP, bestPse );
 					outputStream << "Searching for best AUC:" << endl;
-					statReport( outputStream, goodData, bestAUCnBins, bestAUC, bestAUCchi2, bestAUCp );
+					statReport( outputStream, goodData, bestAUCnBins, bestAUC, bestAUCchi2, bestAUCp, bestAUCse );
 				}
 				else
 					outputStream << errorMsg << endl;
@@ -732,7 +803,7 @@ void TwoSet::ROCarea( ostream& outputStream )
 				try  // calculate ROC AUC to get chi2, p values
 				{
 					AUC = getStatROCarea();
-					statReport( outputStream, goodData, nBins, AUC, statChi2, statP ); // use utility method
+					statReport( outputStream, goodData, nBins, AUC, statChi2, statP, statAzSE ); // use utility method
 				}
 				catch ( TwoSet::twoSetErr& e )
 				{
@@ -747,6 +818,14 @@ void TwoSet::ROCarea( ostream& outputStream )
 		}
 		outputStream << "By trapezoidal method, ROC area = " << resetiosflags( ios::scientific )
 			<< setiosflags( ios::fixed | ios::showpoint ) << setprecision( 6 ) << getTrapROCarea() << endl;
+		{
+			double A = getTrapROCarea(), se = hmSE( A );
+			double lo = A - 1.96 * se, hi = A + 1.96 * se;
+			if ( lo < 0 ) lo = 0;
+			if ( hi > 1 ) hi = 1;
+			outputStream << "95% CI = " << lo << " - " << hi
+				<< " (SE = " << se << ", Hanley-McNeil)" << endl;
+		}
 		outputStream << "Number thresholds = " << nThresholds << endl;
 		outputStream << resetiosflags( ios::fixed | ios::showpoint );
 	}
@@ -754,11 +833,18 @@ void TwoSet::ROCarea( ostream& outputStream )
 
 // Utility method for ROCarea, outputs statistical report
 void TwoSet::statReport( ostream& outputStream, unsigned goodData, unsigned nBins, double AUC,
-	double chi2, double p )
+	double chi2, double p, double se )
 {
 	outputStream << resetiosflags( ios::scientific ) << setiosflags( ios::fixed | ios::showpoint )
 		<< setprecision( 6 );
 	outputStream << "ROC area = " << AUC << endl;
+
+	// 95% confidence interval by the delta method, clamped to [0,1]
+	double lo = AUC - 1.96 * se, hi = AUC + 1.96 * se;
+	if ( lo < 0 ) lo = 0;
+	if ( hi > 1 ) hi = 1;
+	outputStream << "95% CI = " << lo << " - " << hi
+		<< " (SE = " << se << ", delta method)" << endl;
 	outputStream << "Chi-squared = " << chi2 << endl;
 	outputStream << resetiosflags( ios::fixed ) << setiosflags( ios::scientific );
 	outputStream << "p = " << p << " (closer to 1 is better)" << endl;

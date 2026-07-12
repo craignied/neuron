@@ -212,6 +212,7 @@ WARNING: Maximum number of bins to be searched (10) exceeds data (0),
 Setting Maximum number of bins to 0
 Cannot calculate ROC statistically, not enough data points (10)
 By trapezoidal method, ROC area = 1.000000
+95% CI = 1.000000 - 1.000000 (SE = 0.000000, Hanley-McNeil)
 Number thresholds = 4
 Kolmogorov-Smirnov goodness of fit D = 1, p = 0.0970269
 Pearson's Chi-Square goodness of fit p = 0.997129
@@ -342,6 +343,7 @@ Known F:           1             1
 ----------------------------------
 Cannot calculate ROC statistically, not enough data points (10)
 By trapezoidal method, ROC area = 0.500000
+95% CI = 0.000000 - 1.000000 (SE = 0.322749, Hanley-McNeil)
 Number thresholds = 4
 Kolmogorov-Smirnov goodness of fit D = 0, p = 1
 Pearson's Chi-Square goodness of fit p = 0.318907
@@ -440,6 +442,7 @@ Known F:           1             1
 ----------------------------------
 Cannot calculate ROC statistically, not enough data points (10)
 By trapezoidal method, ROC area = 0.500000
+95% CI = 0.000000 - 1.000000 (SE = 0.322749, Hanley-McNeil)
 Number thresholds = 4
 Kolmogorov-Smirnov goodness of fit D = 0, p = 1
 Pearson's Chi-Square goodness of fit p = 0.318907
@@ -548,6 +551,7 @@ Known F:           0             2
 ----------------------------------
 Cannot calculate ROC statistically, not enough data points (10)
 By trapezoidal method, ROC area = 0.000000
+95% CI = 0.000000 - 0.000000 (SE = 0.000000, Hanley-McNeil)
 Number thresholds = 4
 Kolmogorov-Smirnov goodness of fit D = 0, p = 1
 Pearson's Chi-Square goodness of fit p = 0.318907

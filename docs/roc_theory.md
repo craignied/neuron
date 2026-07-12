@@ -178,6 +178,42 @@ default 10), the engine reports the empirical **trapezoidal** area instead —
 that is the "Cannot calculate ROC statistically" message followed by
 "By trapezoidal method, ROC area = ...".
 
+## Confidence intervals on the ROC area
+
+Every ROC area the engine prints carries a 95% confidence interval, by an
+**analytic (parametric)** method in both cases — neither is a bootstrap:
+
+- **Binormal Az → delta method.** The z-ROC line fit yields the intercept *a*
+  and slope *b* with standard errors; since Az = Φ(a/√(1+b²)) is a smooth
+  function of those two parameters, its first-order Taylor expansion propagates
+  the parameter variances through the analytic gradient (`TwoSet::azSE`).
+- **Trapezoidal area → Hanley–McNeil.** The closed-form variance for the
+  empirical area, from its equivalence to the Mann–Whitney U statistic
+  (Hanley & McNeil, *Radiology* 1982; `TwoSet::hmSE`).
+
+### Methods-section language
+
+> A 95% confidence interval for the binormal area under the ROC curve (Az) was
+> obtained by the delta method, propagating the standard errors of the fitted
+> z-ROC intercept and slope through Az = Φ(a/√(1+b²)). For empirical
+> (trapezoidal) areas, the confidence interval used the Hanley–McNeil variance
+> estimator based on the equivalence of the area to the Mann–Whitney U
+> statistic.
+
+### Caveat before relying on the binormal interval in print
+
+The binormal delta-method interval has a known approximation in this
+implementation: on the binned fit path (fitexy, errors in both coordinates),
+the routine doesn't expose the a–b covariance, so the cross term is set to
+zero. In the calibration test the delta-method SE ran a bit narrow (reported
+SE ≈ 0.56× the empirical SD) — i.e., somewhat anti-conservative. The
+Hanley–McNeil interval, by contrast, calibrated cleanly (ratio ≈ 1.09). So the
+trapezoidal CI is the more trustworthy of the two as it stands; recover that
+covariance term, or validate the binormal CI further, before leaning on it in
+print. Both intervals' calibration is checked by simulation in
+`tests/binormal/check_az.cpp` (the delta method under a generous window, the
+Hanley–McNeil under a tight one).
+
 **This is tested.** `tests/binormal/check_az.cpp` draws large Gaussian samples
 with known (μ, σ), runs them through `getStatROCarea()`, and requires the
 result to match Φ((μ₁−μ₀)/√(σ₀²+σ₁²)) within sampling tolerance — including an

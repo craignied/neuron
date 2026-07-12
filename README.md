@@ -78,6 +78,30 @@ in the engine fails the build. After an intentional output change, regenerate wi
 A second, local-only check (`tests/oracle/`) cross-verifies the engine against the
 original neUROn2++ binary; see its README.
 
+## ROC area confidence intervals
+
+Every ROC area the engine reports carries a 95% confidence interval, computed by an
+**analytic (parametric) method** in each case — not a bootstrap. `docs/roc_theory.md`
+gives the full account; the signal-detection-theory basis of the binormal area is
+Wickens, *Elementary Signal Detection Theory* (Oxford, 2002).
+
+**Methods-section language:**
+
+> A 95% confidence interval for the binormal area under the ROC curve (Az) was
+> obtained by the delta method, propagating the standard errors of the fitted z-ROC
+> intercept and slope through Az = Φ(a/√(1+b²)). For empirical (trapezoidal) areas,
+> the confidence interval used the Hanley–McNeil variance estimator based on the
+> equivalence of the area to the Mann–Whitney U statistic.
+
+**Caveat before relying on the binormal interval in print:** on the binned fit path
+(fitexy, errors in both coordinates) the routine doesn't expose the a–b covariance, so
+that cross term is set to zero. In the calibration test the delta-method SE ran a bit
+narrow (reported SE ≈ 0.56× the empirical SD) — somewhat anti-conservative — while the
+Hanley–McNeil interval calibrated cleanly (ratio ≈ 1.09). The trapezoidal CI is the more
+trustworthy of the two as it stands; recover the covariance term, or validate the
+binormal CI further, before leaning on it in print. Both are calibration-checked by
+simulation in `tests/binormal/check_az.cpp`.
+
 ## Layout
 
 - `src/` — the C++ engine (carried forward from neUROn2++, modernized incrementally
@@ -88,7 +112,8 @@ original neUROn2++ binary; see its README.
 - `docs/` — the neUROn2++ documentation: `manifest.pdf` is the full manual,
   `spin.html` the tutorial, `tex/` the LaTeX sources; `roc_theory.md` explains
   the signal-detection-theory (Wickens) basis of the statistical ROC area and
-  how the engine implements it
+  how the engine implements it; `datasets/` holds sample datasets with READMEs
+  (prostate-biopsy, ready to load; bank-marketing, a raw-data grooming example)
 - `tools/` — Python data-preparation utilities. **Standard library only** — they
   run on a bare `python3`, no pip installs or venv ever required (CI enforces
   this on all three platforms). First tool: `mkdataset.py`, converting Excel

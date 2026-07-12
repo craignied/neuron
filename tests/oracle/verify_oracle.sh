@@ -23,7 +23,10 @@ mkdir -p runs && cd runs
 cp ../xor_net.txt .
 ../"$ORACLE" < ../xor_verify.in > verify_oracle.txt
 ../"$NEW"    < ../xor_verify.in > verify_30.txt
-strip() { grep -v -e 'Welcome to' -e 'Thank you for using' -e 'Kolmogorov-Smirnov' "$1"; }
+# Excluded lines: version banner/farewell; Kolmogorov-Smirnov (known oracle
+# bug, see README); "95% CI" (3.0 enhancement — the oracle never reported
+# confidence intervals on ROC areas).
+strip() { grep -v -e 'Welcome to' -e 'Thank you for using' -e 'Kolmogorov-Smirnov' -e '95% CI' "$1"; }
 fail=0
 diff <(strip verify_oracle.txt) <(strip verify_30.txt) || fail=1
 grep -q 'Kolmogorov-Smirnov goodness of fit D = 1, p = 0.0970269' verify_30.txt \

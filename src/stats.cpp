@@ -861,6 +861,10 @@ XY::XY( vector< double >& __x, vector< double >& __y, vector< double >& sigx,
 	
 	x = __x, y = __y;
 
+	// NR's fitexy does not provide the a-b parameter correlation; set it to 0
+	//    so r() never returns uninitialized memory on this path
+	_r = 0;
+
 	// Insure correct size vectors
 	assert ( ( x.size() == y.size() ) && ( sigx.size() == sigy.size() )
 		&& ( x.size() == sigx.size() ) );
