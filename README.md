@@ -87,7 +87,10 @@ original neUROn2++ binary; see its README.
   (`verify_oracle.sh` requires numerically identical output)
 - `docs/` — the neUROn2++ documentation: `manifest.pdf` is the full manual,
   `spin.html` the tutorial, `tex/` the LaTeX sources
-- `tools/` — Python utilities for data preparation (planned)
+- `tools/` — Python data-preparation utilities. **Standard library only** — they
+  run on a bare `python3`, no pip installs or venv ever required (CI enforces
+  this on all three platforms). First tool: `mkdataset.py`, converting Excel
+  `.csv` exports into neuron-ready datasets with missing-value indicator columns.
 
 ## Status
 

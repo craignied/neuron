@@ -45,3 +45,7 @@ jobs:
       - name: Golden transcript test
         shell: bash
         run: ./tests/golden/run_golden.sh
+
+      - name: Python tools test (stdlib-only, system python3)
+        shell: bash
+        run: ./tests/tools/run_tools.sh
