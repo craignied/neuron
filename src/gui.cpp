@@ -26,6 +26,7 @@
 #include "simpleprop.h"
 #include "network.h"
 #include "iterative.h"
+#include "regressnet.h"
 #include "utility.h"
 #include "version.h"
 
@@ -41,6 +42,9 @@ unique_ptr< DataSet > dataPtr;
 unique_ptr< Model > modelPtr;
 // The last training run's captured report, downloadable as report.txt
 string lastReport;
+// The last training run's final error, the baseline for stepwise regression
+//    (RegressNet's Wilks GLRT); -1 until a model has been trained
+double lastTrainError = -1;
 
 // --- JSON helpers (responses only; requests arrive form-encoded) ---------
 
@@ -244,6 +248,7 @@ string handleLoad( const httplib::Request& req )
 
 	dataPtr = std::move( ds );
 	modelPtr.reset(); // a new dataset invalidates any existing model
+	lastTrainError = -1; // and any prior training
 
 	return jsonMsg( true, msg.str() );
 }
@@ -259,6 +264,7 @@ string handleModel( const httplib::Request& req )
 		return jsonMsg( false, "the GUI supports 1-output models" );
 
 	Capture cap;
+	lastTrainError = -1; // a fresh model has not been trained yet
 
 	if ( type == "logistic" )
 	{
@@ -342,9 +348,78 @@ string handleTrain( const httplib::Request& req )
 	msg << "trained; final error " << finalError;
 
 	lastReport = cap.text.str(); // downloadable afterwards as report.txt
+	lastTrainError = finalError; // baseline for stepwise regression
 
 	return string( "{\"ok\":true,\"message\":\"" ) + jsonEscape( msg.str() )
 		+ "\",\"output\":\"" + jsonEscape( lastReport ) + "\"" + roc + "}";
+}
+
+string handleRegress( const httplib::Request& req )
+{
+	string structure = param( req, "structure" ),
+		direction = param( req, "direction" );
+	double threshold = atof( param( req, "threshold" ).c_str() );
+
+	Network* net = modelPtr ? dynamic_cast< Network* >( modelPtr.get() ) : nullptr;
+	if ( !net )
+		return jsonMsg( false, "train a network or logistic model first" );
+	if ( !net->getWeightsSet() )
+		return jsonMsg( false, "the network must be trained before regression" );
+	if ( lastTrainError < 0 )
+		return jsonMsg( false, "train the model before regression" );
+	if ( structure.empty() )
+		return jsonMsg( false, "specify the input-variable structure "
+			"(e.g. 0;1-4;5;6,7;8;9;10)" );
+	if ( direction != "reverse" && direction != "forward" )
+		return jsonMsg( false, "direction must be reverse or forward" );
+	if ( threshold <= 0 || threshold >= 1 )
+		return jsonMsg( false, "the p-value threshold must be between 0 and 1" );
+
+	// Parse the variable structure exactly as the CLI does
+	vector< vector< unsigned > > variable_defs;
+	try
+	{
+		variable_defs = util::variable_parse( structure );
+	}
+	catch ( const util::utilErr& e )
+	{
+		return jsonMsg( false, string( "variable structure: " ) + e.what() );
+	}
+	if ( variable_defs.empty() )
+		return jsonMsg( false, "variable structure parsed to nothing" );
+
+	RegressNet regressionObj;
+	regressionObj.setNetwork( net, lastTrainError );
+	try
+	{
+		regressionObj.setInputStructure( variable_defs );
+	}
+	catch ( const RegressNet::RegressNetErr& e )
+	{
+		return jsonMsg( false, e.what() );
+	}
+	regressionObj.setThreshold( threshold ); // no stdin prompt in the GUI
+
+	Capture cap;
+	try
+	{
+		if ( direction == "reverse" )
+			regressionObj.reverse_regress();
+		else
+			regressionObj.forward_regress();
+	}
+	catch ( const RegressNet::RegressNetErr& e )
+	{
+		return string( "{\"ok\":false,\"message\":\"" ) + jsonEscape( e.what() )
+			+ "\",\"output\":\"" + jsonEscape( cap.text.str() ) + "\"}";
+	}
+
+	// Note: the training report (lastReport, the Report download) is left
+	//    intact; the regression output is shown on the page and, when history
+	//    logging is on, also appended to neuron.log in the workspace.
+	return string( "{\"ok\":true,\"message\":\"" )
+		+ jsonEscape( direction + " stepwise regression complete" )
+		+ "\",\"output\":\"" + jsonEscape( cap.text.str() ) + "\"}";
 }
 
 // Produce one session artifact as a file in the workspace (the server's
@@ -454,6 +529,12 @@ int run_gui( bool openBrowser )
 	{
 		lock_guard< mutex > lock( engineMutex );
 		res.set_content( handleTrain( req ), "application/json" );
+	} );
+
+	svr.Post( "/api/regress", []( const httplib::Request& req, httplib::Response& res )
+	{
+		lock_guard< mutex > lock( engineMutex );
+		res.set_content( handleRegress( req ), "application/json" );
 	} );
 
 	// Session artifacts: written into the workspace by the engine's own

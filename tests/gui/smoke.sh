@@ -48,6 +48,23 @@ curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=100000&seed=42" \
 grep -q '"ok":true' train.json || fail "train endpoint"
 grep -q '"area":' train.json || fail "no ROC area in train response"
 
+# Stepwise regression on the trained network (XOR: 2 inputs -> 2 variables)
+curl -s -X POST "$URL/api/regress" \
+    --data-urlencode "structure=0;1" \
+    --data-urlencode "direction=reverse" \
+    --data-urlencode "threshold=0.05" > regress.json
+grep -q '"ok":true' regress.json || fail "regress endpoint"
+grep -q 'Reverse regressing' regress.json || fail "no regression report"
+# Untrained-model guard: a fresh model must refuse regression
+curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=3" > /dev/null
+curl -s -X POST "$URL/api/regress" \
+    --data-urlencode "structure=0;1" --data-urlencode "direction=reverse" \
+    --data-urlencode "threshold=0.05" | grep -q '"ok":false' \
+    || fail "regress should refuse an untrained model"
+# Re-train so the later save checks still have a trained network
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=100000&seed=42" \
+    | grep -q '"ok":true' || fail "re-train after regress"
+
 # Session artifacts: written into the workspace AND served as downloads
 curl -s "$URL/api/save/network" -o dl_network
 head -1 dl_network | grep -q "SimpleProp" || fail "network download"
@@ -69,4 +86,4 @@ grep -q '"ok":true' pair.json || fail "pre-split pair load"
 grep -q 'test exemplars' pair.json || fail "test set not loaded from the pair"
 [ -f pair_test.set ] || fail "uploaded test set not saved beside the server"
 
-echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC JSON, saves)"
+echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC JSON, regress, saves)"

@@ -18,7 +18,8 @@
 
 // Default constructor
 RegressNet::RegressNet() : netPtr ( 0 ),
-	historyFlag ( false ), errorString ( "RegressNet error: " ) { }
+	historyFlag ( false ), regressThreshold ( 0 ), thresholdSet ( false ),
+	errorString ( "RegressNet error: " ) { }
 
 // Copy constructor
 RegressNet::RegressNet( const RegressNet& rhs )
@@ -42,6 +43,15 @@ void RegressNet::copy( const RegressNet& rhs )
 	netPtr = rhs.netPtr;
 	e_in = rhs.e_in;
 	variable_defs = rhs.variable_defs;
+	regressThreshold = rhs.regressThreshold;
+	thresholdSet = rhs.thresholdSet;
+}
+
+// Supply the p-value threshold up front, bypassing the interactive prompt
+void RegressNet::setThreshold( double t )
+{
+	regressThreshold = t;
+	thresholdSet = true;
 }
 
 // Accessor for data structure representing input variables,
@@ -191,7 +201,8 @@ void RegressNet::reverse_regress()
 		// Get the threshold
 		string question = "\nWhat is the smallest p-value at which variables should\n";
 		question += "stop being removed in the stepwise regression? ";
-		double threshold = util::askD( question, 0, 1 ); 
+		double threshold = thresholdSet ? regressThreshold
+			: util::askD( question, 0, 1 );
 		
 		// Print message reporting what kind of Network is being regressed
 		out << endl << "Reverse regressing a " << network_name() << " Network:" << endl;
@@ -332,7 +343,8 @@ void RegressNet::forward_regress()
 		// Get the threshold
 		string question = "\nWhat is the largest p-value at which variables should\n";
 		question += "stop being added in the stepwise regression? ";
-		double threshold = util::askD( question, 0, 1 ); 
+		double threshold = thresholdSet ? regressThreshold
+			: util::askD( question, 0, 1 );
 		
 		// Print message reporting what kind of Network is being regressed
 		out << endl << "Forward regressing a " << network_name() << " Network:" << endl;

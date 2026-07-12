@@ -212,6 +212,17 @@ experiment keeps everything together. After training, the "Session files"
 buttons save/download the network + scaling factors (deployment trio
 minus the spec) and the train/test sets, guesses, and report.
 
+The GUI also runs **stepwise regression** on a trained network (the
+"Stepwise regression" panel): give it the input-variable structure — the
+same grouping string `mkdataset.py --inputs` writes and `psa_defs.txt`
+holds, e.g. `0;1-4;5;6,7;8;9;10` (semicolons separate variables, commas
+join nodes, hyphens give ranges) — a direction (reverse drops the least
+significant variable at a time, forward adds the most significant), and a
+p-value threshold. It refits subnetworks with each variable removed/added
+and reports the Wilks-GLRT p-values, the engine's classic input-selection
+tool. The network must be trained first; output appears in the report pane
+and, with history logging on, is appended to `neuron.log`.
+
 ## 4. Verifying the installation
 
 - Quick: `./tests/tools/run_tools.sh` (Python tools vs committed outputs,

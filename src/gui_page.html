@@ -82,7 +82,28 @@ button { padding: .35rem .9rem; cursor: pointer; }
 </fieldset>
 
 <fieldset>
-<legend>4 &mdash; Session files</legend>
+<legend>4 &mdash; Stepwise regression</legend>
+<div class="row">
+  <label>Variables <input type="text" id="structure"
+    placeholder="e.g. 0;1-4;5;6,7;8;9;10"></label>
+</div>
+<div class="row">
+  <label><select id="rdir">
+    <option value="reverse">reverse (drop least significant)</option>
+    <option value="forward">forward (add most significant)</option>
+  </select></label>
+  <label>p-value <input class="num" type="number" id="pthreshold"
+    value="0.05" min="0" max="1" step="0.01"></label>
+  <button id="regressbtn" onclick="regress()">Run regression</button>
+  <span class="status" id="rstatus"></span>
+</div>
+<div class="row"><span class="status">Groups of input nodes make one variable:
+semicolons separate variables, commas join nodes, hyphens give ranges. The
+network must be trained first; the report appears below.</span></div>
+</fieldset>
+
+<fieldset>
+<legend>5 &mdash; Session files</legend>
 <div class="row">
   <button onclick="saveFile('network')">Network</button>
   <button onclick="saveFile('scales')">Scaling factors</button>
@@ -161,6 +182,16 @@ async function train() {
     if (j.output) { $("report").textContent = j.output; $("report").style.display = "block"; }
     if (j.ok && j.roc) drawROC(j.roc);
   } finally { $("trainbtn").disabled = false; }
+}
+async function regress() {
+  $("regressbtn").disabled = true;
+  setStatus("rstatus", true, "regressing…");
+  try {
+    const j = await api("/api/regress", { structure: $("structure").value,
+      direction: $("rdir").value, threshold: $("pthreshold").value });
+    setStatus("rstatus", j.ok, j.message);
+    if (j.output) { $("report").textContent = j.output; $("report").style.display = "block"; }
+  } finally { $("regressbtn").disabled = false; }
 }
 function drawROC(roc) {
   $("rocbox").style.display = "block";

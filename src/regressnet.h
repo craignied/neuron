@@ -39,6 +39,11 @@ public:
 	// Accessor for Network, takes Network & last error as arguments
 	void setNetwork( Network*, const double );
 
+	// Supply the p-value threshold up front (non-interactive callers such as
+	//    the GUI). When set, reverse_regress/forward_regress use it instead of
+	//    prompting on stdin. Unset (the default), the CLI prompt is unchanged.
+	void setThreshold( double t );
+
 	// Stepwise regression methods
 	void reverse_regress();	// stepwise reverse regression
 	void forward_regress(); // stepwise forward regression
@@ -56,6 +61,9 @@ private:
 	bool historyFlag; // indicates logging to history file
 
 	double e_in; // incoming Network's error
+
+	double regressThreshold; // p-value threshold supplied via setThreshold()
+	bool thresholdSet; // true once setThreshold() has been called
 
 	// Data structure representing input variables
 	vector< vector< unsigned > > variable_defs;

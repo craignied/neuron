@@ -32,7 +32,9 @@ stepwise regression (the same format `tools/mkdataset.py --inputs` produces): ea
 semicolon-separated group is one conceptual variable. Groups spanning several columns
 (e.g. `1-4`) are one categorical variable one-hot-encoded across those columns; a pair
 like `6,7` is a missing-value indicator pair (`0,0` absent / `1,value` present). So the
-11 raw input columns represent 7 underlying clinical variables.
+11 raw input columns represent 7 underlying clinical variables. Paste that string into
+the GUI's **Stepwise regression** panel (or the CLI's "Specify variables") to rank the
+seven variables by significance on a trained network.
 
 ## Quick start
 
