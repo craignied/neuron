@@ -93,14 +93,14 @@ void DataSet::setRawMatrix( Matrix< double >& inMatrix )
 
 	if ( inMatrix.cols() != ( nInput + nOutput ) ) // check incoming Matrix columns
 		// Inform user that dataset will not be loaded
-		cout << "I'm sorry, but I can't load the Matrix into a raw dataset:"
+		util::screen() << "I'm sorry, but I can't load the Matrix into a raw dataset:"
 			<< endl << "The number of columns in the Matrix doesn't match"
 			<< endl << "the number of inputs and outputs." << endl;
 	
 	// If discrete output set, insure all outputs are 0 or 1
 	else if ( discreteFlag && !checkDiscrete( inMatrix ) )
 		// Inform user that dataset will not be loaded
-		cout << "I'm sorry, but I can't load the Matrix into a raw dataset:"
+		util::screen() << "I'm sorry, but I can't load the Matrix into a raw dataset:"
 			<< endl << "Discrete output is specified, but there were outputs that"
 			<< endl << "were neither 0 nor 1 in the Matrix." << endl;	
 	
@@ -166,14 +166,14 @@ void DataSet::setTrainMatrix( Matrix< double >& inMatrix )
 	
 	if ( inMatrix.cols() != ( nInput + nOutput ) ) // check incoming Matrix columns
 		// Inform user that dataset will not be loaded
-		cout << "I'm sorry, but I can't load the Matrix into a training set:"
+		util::screen() << "I'm sorry, but I can't load the Matrix into a training set:"
 		<< endl << "The number of columns in the Matrix doesn't match"
 		<< endl << "the number of inputs and outputs." << endl;
 	
 	// If discrete output set, insure all outputs are 0 or 1
 	else if ( discreteFlag && !checkDiscrete( inMatrix ) )
 		// Inform user that dataset will not be loaded
-		cout << "I'm sorry, but I can't load the Matrix into a training set:"
+		util::screen() << "I'm sorry, but I can't load the Matrix into a training set:"
 		<< endl << "Discrete output is specified, but there were outputs that"
 		<< endl << "were neither 0 nor 1 in the Matrix." << endl;	
 	
@@ -207,14 +207,14 @@ bool DataSet::saveTrain( string& filename )
 	
 	// Test to insure it was opened
 	if ( !savefile.is_open() )
-		cout << "Error in opening file to save training set!" << endl;
+		util::screen() << "Error in opening file to save training set!" << endl;
 	else
 	{
 		// Output the Matrix to the file without a header
 		savefile << TrainSetData.setHeader( false );
 
 		// Print message to user notifying successful save to file
-		cout << "The training set was successfully saved to the file " << filename
+		util::screen() << "The training set was successfully saved to the file " << filename
 			<< "." << endl;
 
 		savefile.close(); // close output file
@@ -246,9 +246,9 @@ bool DataSet::saveScales( string& filename )
 	
 	// Test to insure it was opened
 	if ( !savefile.is_open() )
-		cout << "Error in opening file to save scaling factors!" << endl;
+		util::screen() << "Error in opening file to save scaling factors!" << endl;
 	else if ( !minimaxFlag ) // minima and maxima vectors must have been computed
-		cout << "Error in saving scaling factors: a training set must first be derived from a raw dataset" << endl;
+		util::screen() << "Error in saving scaling factors: a training set must first be derived from a raw dataset" << endl;
 	else
 	{
 		// Output the explanation of scaling factors to the file
@@ -270,7 +270,7 @@ bool DataSet::saveScales( string& filename )
 		savefile << endl;
 
 		// Print message to user notifying successful save to file
-		cout << "Scaling factors were successfully saved to the file " << filename
+		util::screen() << "Scaling factors were successfully saved to the file " << filename
 			<< "." << endl;
 
 		savefile.close(); // close output file
@@ -297,16 +297,16 @@ bool DataSet::setTrainTwoSet()
 	trainTwoSetFlag = false; // flag to indicate successful operation
 	
 	if ( nOutput != 1 ) // must have only 1 output
-		cout << "I can't construct a TwoSet object from the DataSet training set:"
+		util::screen() << "I can't construct a TwoSet object from the DataSet training set:"
 			<< endl << "there is more than 1 output." << endl;
 
 	else if ( !trainLoadedFlag ) // the training set must have been loaded
-		cout << "I can't construct a TwoSet object from the DataSet training set:"
+		util::screen() << "I can't construct a TwoSet object from the DataSet training set:"
 			<< endl << "the training set is not loaded into the DataSet object."
 			<< endl;
 
 	else if ( !discreteFlag ) // the output must be discrete
-		cout << "I can't construct a TwoSet object from the DataSet training set:"
+		util::screen() << "I can't construct a TwoSet object from the DataSet training set:"
 			<< endl << "the output must be discrete." << endl;
 
 	else // everything checks out, so construct the TwoSet object
@@ -384,14 +384,14 @@ void DataSet::setTestMatrix( Matrix< double >& inMatrix )
 	
 	if ( inMatrix.cols() != ( nInput + nOutput ) ) // check incoming Matrix columns
 		// Inform user that dataset will not be loaded
-		cout << "I'm sorry, but I can't load the Matrix into a test set:"
+		util::screen() << "I'm sorry, but I can't load the Matrix into a test set:"
 		<< endl << "The number of columns in the Matrix doesn't match"
 		<< endl << "the number of inputs and outputs." << endl;
 	
 	// If discrete output set, insure all outputs are 0 or 1
 	else if ( discreteFlag && !checkDiscrete( inMatrix ) )
 		// Inform user that dataset will not be loaded
-		cout << "I'm sorry, but I can't load the Matrix into a test set:"
+		util::screen() << "I'm sorry, but I can't load the Matrix into a test set:"
 		<< endl << "Discrete output is specified, but there were outputs that"
 		<< endl << "were neither 0 nor 1 in the Matrix." << endl;	
 	
@@ -425,15 +425,15 @@ bool DataSet::saveTest( string& filename )
 	
 	// Test to insure it was opened
 	if ( !savefile.is_open() )
-		cout << "Error in opening file to save test set!" << endl;
+		util::screen() << "Error in opening file to save test set!" << endl;
 	else
 	{
 		// Output the Matrix to the file without a header
 		savefile << TestSetData.setHeader( false );
 
 		// Print message to user notifying successful save to file
-		cout << "The test set was successfully saved to the file " << filename;
-		cout << "." << endl;
+		util::screen() << "The test set was successfully saved to the file " << filename;
+		util::screen() << "." << endl;
 
 		savefile.close(); // close output file
 
@@ -459,16 +459,16 @@ bool DataSet::setTestTwoSet()
 	testTwoSetFlag = false; // flag to indicate successful operation
 	
 	if ( nOutput != 1 ) // must have only 1 output
-		cout << "I can't construct a TwoSet object from the DataSet test set:"
+		util::screen() << "I can't construct a TwoSet object from the DataSet test set:"
 			<< endl << "there is more than 1 output." << endl;
 
 	else if ( !testLoadedFlag ) // the test set must have been loaded
-		cout << "I can't construct a TwoSet object from the DataSet test set:"
+		util::screen() << "I can't construct a TwoSet object from the DataSet test set:"
 			<< endl << "the test set is not loaded into the DataSet object."
 			<< endl;
 
 	else if ( !discreteFlag ) // the output must be discrete
-		cout << "I can't construct a TwoSet object from the DataSet test set:"
+		util::screen() << "I can't construct a TwoSet object from the DataSet test set:"
 			<< endl << "the output must be discrete." << endl;
 
 	else // everything checks out, so construct the TwoSet object
@@ -547,7 +547,7 @@ void DataSet::setDiscrete( const bool flag )
 void DataSet::setThreshold( const double x )
 {
 	if ( !discreteFlag ) // check to make sure output is discrete
-		cout << "I'm sorry, but to set a threshold, the output must be discrete." << endl;
+		util::screen() << "I'm sorry, but to set a threshold, the output must be discrete." << endl;
 
 	else
 		threshold = x; // set threshold value
@@ -557,7 +557,7 @@ void DataSet::setThreshold( const double x )
 void DataSet::setOutUpper( const double x )
 { 
 	if ( discreteFlag ) // check to make sure output is nondiscrete
-		cout << "I'm sorry, but limits don't apply to a discrete output." << endl;
+		util::screen() << "I'm sorry, but limits don't apply to a discrete output." << endl;
 	
 	else	
 		outUpperLimit = x;
@@ -567,7 +567,7 @@ void DataSet::setOutUpper( const double x )
 void DataSet::setOutLower( const double x )
 { 
 	if ( discreteFlag ) // check to make sure output is nondiscrete
-		cout << "I'm sorry, but limits don't apply to a discrete output." << endl;
+		util::screen() << "I'm sorry, but limits don't apply to a discrete output." << endl;
 	
 	else	
 		outLowerLimit = x;
@@ -579,17 +579,17 @@ bool DataSet::raw2train()
 	bool success = false; // flag to indicate if operation successful
 	
 	if ( !rawLoadedFlag ) // check if raw dataset loaded
-		cout << "I'm sorry, but I can't convert the raw dataset into a training set:"
+		util::screen() << "I'm sorry, but I can't convert the raw dataset into a training set:"
 		<< endl << "No raw dataset has been loaded." << endl;
 	
 	else if ( Raw.cols() != ( nInput + nOutput ) ) // check columns in raw dataset
-		cout << "I'm sorry, but I can't convert the raw dataset into a training set:"
+		util::screen() << "I'm sorry, but I can't convert the raw dataset into a training set:"
 		<< endl << "The number of columns in the raw dataset doesn't match"
 		<< endl << "the number of inputs and outputs." << endl;
 	
 	// If discrete output set, insure all outputs are 0 or 1
 	else if ( discreteFlag && !checkDiscrete( Raw ) )
-		cout << "I'm sorry, but I can't convert the raw dataset into a training set:"
+		util::screen() << "I'm sorry, but I can't convert the raw dataset into a training set:"
 		<< endl << "Discrete output is specified, but there were outputs that"
 		<< endl << "were neither 0 nor 1 in the raw dataset." << endl;
 	
@@ -698,29 +698,29 @@ bool DataSet::randomize( const unsigned nTest )
 	bool success = false; // flag to indicate if operation successful
 
 	if ( !rawLoadedFlag ) // check if raw dataset loaded
-		cout << "I'm sorry, but I can't convert the raw dataset into a training set:"
+		util::screen() << "I'm sorry, but I can't convert the raw dataset into a training set:"
 			<< endl << "No raw dataset has been loaded." << endl;
 
 	else if ( Raw.cols() != ( nInput + nOutput ) ) // check columns in raw dataset
-		cout << "I'm sorry, but I can't convert the raw dataset into a training set:"
+		util::screen() << "I'm sorry, but I can't convert the raw dataset into a training set:"
 			<< endl << "The number of columns in the raw dataset doesn't match"
 			<< endl << "the number of inputs and outputs." << endl;
 
 	else if ( nOutput != 1 ) // check 1 output only
-		cout << "I'm sorry, but I can't convert the raw dataset into a training set:"
+		util::screen() << "I'm sorry, but I can't convert the raw dataset into a training set:"
 			<< endl << "the method is only coded for 1 output." << endl;
 
 	else if ( nTest > Raw.rows() ) // bounds check number to place in test set
-		cout << "I'm sorry, but I can't convert the raw dataset into a training set:"
+		util::screen() << "I'm sorry, but I can't convert the raw dataset into a training set:"
 			<< endl << "the number to be placed in the test set must be less than"
 			<< endl << "the number of examplars in the raw dataset." << endl;
 
 	else if ( !discreteFlag ) // check discrete output
-		cout << "I'm sorry, but I can't convert the raw dataset into a training set:"
+		util::screen() << "I'm sorry, but I can't convert the raw dataset into a training set:"
 			<< endl << "the output must be discrete." << endl;
 	
 	else if ( !checkDiscrete( Raw ) ) // insure all outputs really are 0 or 1
-		cout << "I'm sorry, but I can't convert the raw dataset into a training set:"
+		util::screen() << "I'm sorry, but I can't convert the raw dataset into a training set:"
 			<< endl << "Discrete output is specified, but there were outputs that"
 			<< endl << "were neither 0 nor 1 in the raw dataset." << endl;
 
@@ -824,7 +824,7 @@ bool DataSet::randomize( const unsigned nTest )
 			<< ( ( double ) nOnesTest / ( double ) nTest )
 			<< "." << endl << endl;
 
-		cout << fileStream.str(); // report to user
+		util::screen() << fileStream.str(); // report to user
 
 		// Log to history file
 		if ( historyFlag ) // make sure flag for history is set
@@ -844,7 +844,7 @@ bool DataSet::randomize( const unsigned numerator, const unsigned denominator )
 	bool success = false; // flag to indicate if operation successful
 
 	if ( !rawLoadedFlag ) // check if raw dataset loaded
-		cout << "I'm sorry, but I can't convert the raw dataset into a training set:"
+		util::screen() << "I'm sorry, but I can't convert the raw dataset into a training set:"
 			<< endl << "No raw dataset has been loaded." << endl;
 	
 	else
@@ -868,7 +868,7 @@ bool DataSet::randomizeD( const double ratio )
 	bool success = false; // flag to indicate if operation successful
 
 	if ( !rawLoadedFlag ) // check if raw dataset loaded
-		cout << "I'm sorry, but I can't convert the raw dataset into a training set:"
+		util::screen() << "I'm sorry, but I can't convert the raw dataset into a training set:"
 			<< endl << "No raw dataset has been loaded." << endl;
 
 	else
@@ -908,7 +908,7 @@ bool DataSet::addHistory( ostringstream& outputStream )
 		ofstream historyFile( logPath.c_str(), ios::out | ios::app );
 
 		if ( !historyFile.is_open() ) // test to insure it was opened
-			cout << "Error in opening " << logPath << "!" << endl;
+			util::screen() << "Error in opening " << logPath << "!" << endl;
 		else
 		{
 			historyFile << outputStream.str(); // write the output stream to the file
@@ -925,11 +925,11 @@ bool DataSet::addHistory( ostringstream& outputStream )
 void DataSet::metricsReport( ostream& outputStream )
 {
 	if ( !discreteFlag ) // the output must be discrete
-		cout << "I'm sorry, but I can't output DataSet metrics for the TwoSet object:"
+		util::screen() << "I'm sorry, but I can't output DataSet metrics for the TwoSet object:"
 			<< endl << "The output must be discrete" << endl;
 
 	else if ( nOutput != 1 ) // there must only be one output
-		cout << "I'm sorry, but I can't output DataSet metrics for the TwoSet object:"
+		util::screen() << "I'm sorry, but I can't output DataSet metrics for the TwoSet object:"
 			<< endl << "There must be only 1 output" << endl;
 	
 	else

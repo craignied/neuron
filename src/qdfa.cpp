@@ -83,12 +83,12 @@ double QDFA::train()
 	}
 	catch ( Matrix< double >::Singular& e )
 	{
-		cout << "Can't do QDFA: " << e.what() << endl;
+		util::screen() << "Can't do QDFA: " << e.what() << endl;
 	}
 	
 	screenStream << endl; // finish off stream
 	fileStream << screenStream.str(); // stream line into file stream
-	cout << screenStream.str(); // then print to screen
+	util::screen() << screenStream.str(); // then print to screen
 
 	addHistory( fileStream ); // append to history file if specified by flag
 
@@ -99,7 +99,7 @@ double QDFA::train()
 		ofstream lastopFile( logPath.c_str(), ios::out | ios::trunc );
 
 		if ( !lastopFile.is_open() ) // test to insure it was opened
-			cout << "Error in opening " << logPath << "!" << endl;
+			util::screen() << "Error in opening " << logPath << "!" << endl;
 		else
 		{
 			lastopFile << fileStream.str(); // write the file stream
@@ -191,7 +191,7 @@ void QDFA::reportAccuracy( ostream& outputStream )
 			//    output columns, test to make sure it's good
 			if ( !theData.getTestMatrix().submatrix( 0, Test.rows() - 1,
 				nInput, nInput + nOutput - 1 ).rowindex( testClasses ) )
-				cout << "Sorry, that test set had bad output columns."
+				util::screen() << "Sorry, that test set had bad output columns."
 					<< endl;
 
 			else // test set output columns were good

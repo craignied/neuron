@@ -19,3 +19,12 @@ add_executable(check_az
     src/twoset.cpp src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
 target_include_directories(check_az PRIVATE src)
 add_test(NAME binormal_az COMMAND check_az)
+
+# Unit test: engine output is capturable via util::set_screen() (the
+# GUI/server contract). No GSL needed.
+add_executable(check_capture
+    tests/capture/check_capture.cpp
+    src/dataset.cpp src/twoset.cpp src/stats.cpp src/matrix.cpp
+    src/vector_ops.cpp src/utility.cpp)
+target_include_directories(check_capture PRIVATE src)
+add_test(NAME screen_capture COMMAND check_capture)

@@ -56,7 +56,7 @@ void Model::setLMSerror()
 void Model::setXEerror()
 {
 	if ( !theData.getDiscrete() ) // output must be discrete
-		cout << "I'm sorry, output must be discrete for x-entropy error.";
+		util::screen() << "I'm sorry, output must be discrete for x-entropy error.";
 
 	else
 	{
@@ -78,7 +78,7 @@ bool Model::addHistory( ostringstream& outputStream )
 		ofstream historyFile( logPath.c_str(), ios::out | ios::app );
 
 		if ( !historyFile.is_open() ) // test to insure it was opened
-			cout << "Error in opening " << logPath << "!" << endl;
+			util::screen() << "Error in opening " << logPath << "!" << endl;
 		else
 		{
 			historyFile << outputStream.str(); // write the output stream to the file

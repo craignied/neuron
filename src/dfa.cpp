@@ -56,7 +56,7 @@ void DFA::setDataSet( DataSet& dataObj )
 	
 	// For DFA, DataSet output *must be* discrete
 	if ( !theData.getDiscrete() )
-		cout << "WARNING: DFA object NOT constructed, output NOT discrete" << endl;
+		util::screen() << "WARNING: DFA object NOT constructed, output NOT discrete" << endl;
 	else
 	{
 		// Easier on the eyes
@@ -111,7 +111,7 @@ void DFA::setDataSet( DataSet& dataObj )
 				//    output columns, test to make sure it's good
 				if ( !theData.getTrainMatrix().submatrix( 0, Train.rows() - 1,
 					nInput, nInput + nOutput - 1 ).rowindex( trainClasses ) )
-					cout << "Sorry, that training set had bad output columns."
+					util::screen() << "Sorry, that training set had bad output columns."
 						<< endl;
 				else
 				{

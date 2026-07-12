@@ -175,7 +175,7 @@ double Iterative::train()
 	screenStream << endl; // finish off stream for now
 
 	fileStream << screenStream.str(); // stream line into file stream
-	cout << screenStream.str(); // then print to screen
+	util::screen() << screenStream.str(); // then print to screen
 
 	// Format the ostream
 	screenStream << setiosflags( ios::showpoint | ios::right );
@@ -216,7 +216,7 @@ double Iterative::train()
 			screenStream << endl; // finish off stream for now
 
 			fileStream << screenStream.str(); // stream line into file stream
-			cout << screenStream.str(); // then print to screen
+			util::screen() << screenStream.str(); // then print to screen
 
 			// If logarithmic counting requested, and logarithmic counter reached,
 			if ( logPrintFlag && ( iteration == logCounter ) )
@@ -243,7 +243,7 @@ double Iterative::train()
 					<< "." << endl;
 
 				fileStream << screenStream.str(); // stream line into file stream
-				cout << screenStream.str(); // then print to screen
+				util::screen() << screenStream.str(); // then print to screen
 				
 				break;
 			}	
@@ -260,7 +260,7 @@ double Iterative::train()
 					<< "." << endl;
 
 				fileStream << screenStream.str(); // stream line into file stream
-				cout << screenStream.str(); // then print to screen
+				util::screen() << screenStream.str(); // then print to screen
 				
 				break;
 			}
@@ -284,7 +284,7 @@ double Iterative::train()
 						<< window << "." << endl;
 
 					fileStream << screenStream.str(); // stream line into file stream
-					cout << screenStream.str(); // then print to screen
+					util::screen() << screenStream.str(); // then print to screen
 										
 					break;
 				}
@@ -309,7 +309,7 @@ double Iterative::train()
 					<< gradMaxLimit << "." << endl;
 
 				fileStream << screenStream.str(); // stream line into file stream
-				cout << screenStream.str(); // then print to screen
+				util::screen() << screenStream.str(); // then print to screen
 				
 				break;
 			} 
@@ -325,7 +325,7 @@ double Iterative::train()
 		"That took " << timestamp( elapsed_time ) << endl << endl;
 
 	fileStream << screenStream.str(); // stream line into file stream
-	cout << screenStream.str(); // then print to screen
+	util::screen() << screenStream.str(); // then print to screen
 
 	// Print warning message if out of bounds error
 	if ( boundsErrorFlag )
@@ -334,7 +334,7 @@ double Iterative::train()
 		screenStream << "WARNING: Numerical out of bounds encountered when calculating error"
 			<< endl;
 		fileStream << screenStream.str(); // stream line into file stream
-		cout << screenStream.str(); // then print to screen
+		util::screen() << screenStream.str(); // then print to screen
 	}
 
 	// Print accuracy report for trained Iterative Model
@@ -342,7 +342,7 @@ double Iterative::train()
 	reportAccuracy( screenStream ); // report the accuracy
 	screenStream << endl; // end the stream
 	fileStream << screenStream.str(); // stream line into file stream
-	cout << screenStream.str(); // then print to screen
+	util::screen() << screenStream.str(); // then print to screen
 
 	if ( lastopFlag ) // make sure flag for last operation output is set
 	{
@@ -351,7 +351,7 @@ double Iterative::train()
 		ofstream lastopFile( logPath.c_str(), ios::out | ios::trunc );
 
 		if ( !lastopFile.is_open() ) // test to insure it was opened
-			cout << "Error in opening " << logPath << "!" << endl;
+			util::screen() << "Error in opening " << logPath << "!" << endl;
 		else
 		{
 			lastopFile << fileStream.str(); // write the file stream to the file 

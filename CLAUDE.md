@@ -263,6 +263,20 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   byte-identical. neuron.log + model.txt now gitignored; spin.html + AGENTS.md
   updated. Behavior-verified: launch dir stays empty, log lands next to data.
 
+- **2026-07-13 (Phase 3 complete: engine/UI decoupling)** — Inventory: neuron.cpp
+  (189 couts) + util::ask* (23) are the interactive driver, stay cout/cin; 13 engine
+  .cpp files + matrix.h load/save reports (155 sites total) now print via
+  **util::screen()** (settable ostream, default cout; util::set_screen() redirects —
+  the GUI/server capture contract). Conversion was mechanical (regex on code, comments
+  skipped); goldens/oracle byte-identical (default unchanged). New ctest
+  `screen_capture` (tests/capture/) proves both capture paths: internally-routed
+  prints (DataSet refusal message) and ostream&-parameter reports (ClassTable).
+  **ROCx/ROCy curve capture ported** from `code/C++/msvc/roc/roc 2005/twoset.cpp`:
+  getTrapROCarea() fills the vectors (x = 1-spec, y = sens), getROCx()/getROCy()
+  const-ref getters, copy() copies them; asserted in screen_capture (area ~1 on
+  separated data, points in unit square). GUI (Phase 4) now has both prerequisites:
+  capturable reports + plottable curve points.
+
 ## ROADMAP (agreed with Craig 2026-07-13, pre-compaction; Phase 2 deployment added 2026-07-13)
 
 Work these in order; each phase lands independently with tests + CI green.
@@ -320,7 +334,7 @@ it's tooling around the engine, stdlib-only Python, no engine changes).
    perl spec + manifest ch. 11), end-to-end example, and a WALKTHROUGH.md addendum
    deploying the trained bank model (groom → train → save → deploy, the full arc).
 
-### Phase 3 — Engine/UI decoupling survey (groundwork for GUI)
+### Phase 3 — Engine/UI decoupling survey — **DONE 2026-07-13** (see status)
 1. Inventory where the engine prints directly to cout vs. takes an ostream&
    (dataset.cpp report methods already take ostream&; Iterative/train() progress
    printing is the main cout offender) and where it reads via util::ask*.

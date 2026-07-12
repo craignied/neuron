@@ -67,6 +67,13 @@ namespace util {
 	void set_run_dir( const string& ); // remember a dataset file's directory
 	string run_path( const string& ); // resolve a bare log filename into it
 
+	// Engine-core output stream: everything the engine classes print goes
+	//    through screen() (default cout). A GUI/server redirects it with
+	//    set_screen() to capture reports. The menu driver and the ask*
+	//    prompts above deliberately stay on cout/cin.
+	ostream& screen(); // the current engine output stream
+	void set_screen( ostream& ); // redirect engine output
+
 	// Removes carriage return from end of string if exists, returns string
 	string& chopEndl( string& );
 

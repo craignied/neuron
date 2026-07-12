@@ -351,6 +351,19 @@ string util::run_path( const string& filename )
 	return runDir + filename;
 }
 
+// Engine-core output stream, redirectable for GUI/server capture
+static ostream* screenPtr = &cout;
+
+ostream& util::screen()
+{
+	return *screenPtr;
+}
+
+void util::set_screen( ostream& newScreen )
+{
+	screenPtr = &newScreen;
+}
+
 // Utility function which removes carriage return from end of string argument
 //    if exists, returns manipulated string
 string& util::chopEndl( string& stringArg )

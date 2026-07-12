@@ -607,10 +607,10 @@ Matrix< T >& Matrix< T >::loadfile( const bool report, string& filename )
 	// If a report is indicated, begin its header
 	if ( report )
 	{
-		cout << "The loaded matrix has " << nrows_ << " rows and ";
-		cout << ncols_ << " columns." << endl;
+		util::screen() << "The loaded matrix has " << nrows_ << " rows and ";
+		util::screen() << ncols_ << " columns." << endl;
 		if ( notPopulated )
-			cout << "The following rows were not fully populated in the file: " << endl;
+			util::screen() << "The following rows were not fully populated in the file: " << endl;
 	}
 
 	// This while loop loads the matrix and fills the undefined elements by 0, it
@@ -679,7 +679,7 @@ Matrix< T >& Matrix< T >::loadfile( const bool report, string& filename )
 		// Selectively prints the number of rows and columns for the rows that
 		//    are not fully populated
 		if ( report && data_counter != max_columns && data_counter != 0 )
-			cout << "Row " << rows << " has " << data_counter << " columns" <<
+			util::screen() << "Row " << rows << " has " << data_counter << " columns" <<
 			endl;
 
 		// Fill the not fully populated rows with zeros
@@ -700,7 +700,7 @@ Matrix< T >& Matrix< T >::loadfile( const bool report, string& filename )
 
 	// Report if any row not fully populated row
 	if ( report && notPopulated )
-		cout << "Unpopulated elements were filled with zero." << endl;
+		util::screen() << "Unpopulated elements were filled with zero." << endl;
 
 	return *this; // enables use in Matrix formulae
 }
@@ -717,14 +717,14 @@ bool Matrix< T >::savefile( const string& filename )
 
 	// Test to insure it was opened
 	if ( !savefile.is_open() )
-		cout << "Error in opening file to save Matrix!" << endl;
+		util::screen() << "Error in opening file to save Matrix!" << endl;
 	else
 	{
 		savefile << *this; // output this Matrix to the file
 
 		// Print message to user notifying successful save to file
-		cout << "The Matrix was successfully saved to " << filename;
-		cout << "." << endl;
+		util::screen() << "The Matrix was successfully saved to " << filename;
+		util::screen() << "." << endl;
 
 		savefile.close(); // close output file
 

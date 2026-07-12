@@ -36,7 +36,7 @@ double stats::gammln( double xx )
 	unsigned j;
 
 #ifdef STATS_DEBUG
-	cout << "In stats::gammln" << endl;
+	util::screen() << "In stats::gammln" << endl;
 #endif
 	
 	y = x = xx;
@@ -58,7 +58,7 @@ double stats::gcf( double a, double x )
 	double gln = gammln( a );
 
 #ifdef STATS_DEBUG
-	cout << "In stats::gcf" << endl;
+	util::screen() << "In stats::gcf" << endl;
 #endif
 	
 	a1 = x;
@@ -92,7 +92,7 @@ double stats::gser( double a, double x )
 	bool success = false;
 
 #ifdef STATS_DEBUG
-	cout << "In stats::gser" << endl;
+	util::screen() << "In stats::gser" << endl;
 #endif
 	
 	gln = gammln( a );
@@ -135,7 +135,7 @@ double stats::gammp( double a, double x )
 	double result;
 
 #ifdef STATS_DEBUG
-	cout << "In stats::gammp" << endl;
+	util::screen() << "In stats::gammp" << endl;
 #endif
 	
 	if ( x < 0.0 || a <= 0.0 )
@@ -156,7 +156,7 @@ double stats::gammq( double a, double x )
 	double result;
 
 #ifdef STATS_DEBUG
-	cout << "In stats::gammq" << endl;
+	util::screen() << "In stats::gammq" << endl;
 #endif
 	
 	if ( x < 0.0 || a <= 0.0 )
@@ -175,7 +175,7 @@ double stats::gammq( double a, double x )
 double stats::beta( double z, double w )
 {
 #ifdef STATS_DEBUG
-	cout << "In stats::beta" << endl;
+	util::screen() << "In stats::beta" << endl;
 #endif
 	return exp( gammln( z ) + gammln( w ) - gammln( z + w ) );
 }
@@ -184,7 +184,7 @@ double stats::beta( double z, double w )
 double stats::betai( double a, double b, double x )
 {
 #ifdef STATS_DEBUG
-	cout << "In stats::betai" << endl;
+	util::screen() << "In stats::betai" << endl;
 #endif
 	
 	if ( !( x >= 0.0 && x <= 1.0 ) )
@@ -210,7 +210,7 @@ double stats::betacf( double a, double b, double x )
 	double aa, c, d, del, h, qab, qam, qap;
 
 #ifdef STATS_DEBUG
-	cout << "In stats::betacf" << endl;
+	util::screen() << "In stats::betacf" << endl;
 #endif
 	
 	qab = a + b;
@@ -261,7 +261,7 @@ double stats::betacf( double a, double b, double x )
 double stats::pX2( unsigned df, double X2 )
 {
 #ifdef STATS_DEBUG
-	cout << "In stats::pX2" << endl;
+	util::screen() << "In stats::pX2" << endl;
 #endif
 	return gammq( ( double ) df / 2, X2 / 2 );
 }
@@ -270,7 +270,7 @@ double stats::pX2( unsigned df, double X2 )
 double stats::erff( double x )
 {
 #ifdef STATS_DEBUG
-	cout << "In stats::erff" << endl;
+	util::screen() << "In stats::erff" << endl;
 #endif
 	return x < 0.0 ? -gammp( 0.5, x * x ) : gammp( 0.5, x * x );
 }
@@ -279,7 +279,7 @@ double stats::erff( double x )
 double stats::erfc( double x )
 {
 #ifdef STATS_DEBUG
-	cout << "In stats::erfc" << endl;
+	util::screen() << "In stats::erfc" << endl;
 #endif
 	return x < 0.0 ? 1.0 + gammp( 0.5, x * x ) : gammq( 0.5, x * x );
 }
@@ -288,7 +288,7 @@ double stats::erfc( double x )
 double stats::erfcc( double x )
 {
 #ifdef STATS_DEBUG
-	cout << "In stats::erfcc" << endl;
+	util::screen() << "In stats::erfcc" << endl;
 #endif
 	
 	double t, z, ans;
@@ -309,7 +309,7 @@ double stats::erfcc( double x )
 double stats::Zarea( double z )
 {
 #ifdef STATS_DEBUG
-	cout << "In stats::Zarea" << endl;
+	util::screen() << "In stats::Zarea" << endl;
 #endif
 	return 1.0 - ( 0.5 * erfcc( z / sqrt( 2.0 ) ) ); // note complement
 }
@@ -320,7 +320,7 @@ double stats::invErfc( double y )
 	double s, t, u, w, x, z;
 
 #ifdef STATS_DEBUG
-	cout << "In stats::invErfc" << endl;
+	util::screen() << "In stats::invErfc" << endl;
 #endif
 	
 	if ( y <= 0.0 )
@@ -373,7 +373,7 @@ double stats::invErfc( double y )
 double stats::invErff( double y )
 {
 #ifdef STATS_DEBUG
-	cout << "In stats::invErff" << endl;
+	util::screen() << "In stats::invErff" << endl;
 #endif
 	
 	if ( y <= -1.0 )
@@ -390,7 +390,7 @@ double stats::invErff( double y )
 double stats::invZarea( double A )
 {
 #ifdef STATS_DEBUG
-	cout << "In stats::invZarea" << endl;
+	util::screen() << "In stats::invZarea" << endl;
 #endif
 	
 	if ( A <= 0.0 )
@@ -410,7 +410,7 @@ double stats::invZarea( double A )
 double stats::gaussD( double z )
 {
 #ifdef STATS_DEBUG
-	cout << "In stats::gaussD (1 arg)" << endl;
+	util::screen() << "In stats::gaussD (1 arg)" << endl;
 #endif
 	return exp( z * z / - 2.0 ) / sqrt( 2 * 3.14159265359 );
 }
@@ -418,7 +418,7 @@ double stats::gaussD( double z )
 double stats::gaussD( double x, double u, double s )
 {
 #ifdef STATS_DEBUG
-	cout << "In stats::gaussD (3 args)" << endl;
+	util::screen() << "In stats::gaussD (3 args)" << endl;
 #endif
 	return exp( ( x - u ) * ( x - u ) / ( - 2.0 * s * s ) )
 		/ ( s * sqrt( 2 * 3.14159265359 ) );
@@ -432,7 +432,7 @@ double stats::probks( double alam )
 	double a2, fac = 2.0, sum = 0.0, termbf = 0.0;
 	
 #ifdef STATS_DEBUG
-	cout << "In stats::probks" << endl;
+	util::screen() << "In stats::probks" << endl;
 #endif
 
 	a2 = -2.0 * alam * alam;
@@ -460,7 +460,7 @@ double stats::ttest( vector< double >& v1, vector< double >& v2 )
 	double n2 = ( double ) v2.size();
 
 #ifdef STATS_DEBUG
-	cout << "In stats::ttest" << endl;
+	util::screen() << "In stats::ttest" << endl;
 #endif
 	
 	// Sample sizes must be > 1
@@ -481,7 +481,7 @@ double stats::tutest( vector< double >& v1, vector< double >& v2 )
 	double ave1 = s1.mean(), ave2 = s2.mean(), var1 = s1.var(), var2 = s2.var();
 
 #ifdef STATS_DEBUG
-	cout << "In stats::tutest" << endl;
+	util::screen() << "In stats::tutest" << endl;
 #endif
 	
 	// Sample sizes must be > 1
@@ -501,7 +501,7 @@ double stats::tptest( vector< double >& v1, vector< double >& v2 )
 	double n2 = ( double ) v2.size();
 
 #ifdef STATS_DEBUG
-	cout << "In stats::tptest" << endl;
+	util::screen() << "In stats::tptest" << endl;
 #endif
 	
 	// Sample sizes must be > 1 and equal for a paired test
@@ -530,7 +530,7 @@ double stats::ftest( vector< double >& v1, vector< double >& v2 )
 	double n2 = ( double ) v2.size();
 
 #ifdef STATS_DEBUG
-	cout << "In stats::ftest" << endl;
+	util::screen() << "In stats::ftest" << endl;
 #endif
 	
 	// Sample sizes must be > 1
@@ -565,7 +565,7 @@ Population::Population( vector< double >& v_in ) : varFlag ( false ), stddevFlag
 	squaresFlag ( false ), cubesFlag ( false )
 {
 #ifdef STATS_DEBUG
-	cout << "In Population:: constructor" << endl;
+	util::screen() << "In Population:: constructor" << endl;
 #endif
 	assert ( v_in.size() > 1 ); // datasets must have 2 or more points
 
@@ -586,7 +586,7 @@ Population::Population( vector< double >& v_in ) : varFlag ( false ), stddevFlag
 double Population::var()
 {
 #ifdef STATS_DEBUG
-	cout << "In Population::var" << endl;
+	util::screen() << "In Population::var" << endl;
 #endif
 	
 	if ( !squaresFlag ) // calculate sum of squares if necessary
@@ -607,7 +607,7 @@ double Population::var()
 double Population::std()
 {
 #ifdef STATS_DEBUG
-	cout << "In Population::std" << endl;
+	util::screen() << "In Population::std" << endl;
 #endif
 	
 	if ( !varFlag ) // if variance not calculated
@@ -625,7 +625,7 @@ double Population::std()
 double Population::skew()
 {
 #ifdef STATS_DEBUG
-	cout << "In Population::skew" << endl;
+	util::screen() << "In Population::skew" << endl;
 #endif
 	
 	assert ( _n > 2 ); // must have 3 or more data points to calculate skew
@@ -656,7 +656,7 @@ double Population::skew()
 double Population::kurtosis()
 {
 #ifdef STATS_DEBUG
-	cout << "In Population::kurtosis" << endl;
+	util::screen() << "In Population::kurtosis" << endl;
 #endif
 	
 	assert ( _n > 3 ); // must have 4 or more data points to calculate kurtosis
@@ -702,7 +702,7 @@ double Population::sumPowers( unsigned pow )
 	vector< double >::iterator p;
 
 #ifdef STATS_DEBUG
-	cout << "In Population::sumPowers" << endl;
+	util::screen() << "In Population::sumPowers" << endl;
 #endif
 
 	// Do the sum
@@ -728,7 +728,7 @@ double Population::sumPowers( unsigned pow )
 XY::XY( vector< double >& _x, vector< double >& _y )
 {
 #ifdef STATS_DEBUG
-	cout << "In XY:: constructor with X Y vectors" << endl;
+	util::screen() << "In XY:: constructor with X Y vectors" << endl;
 #endif
 	
 	assert ( _x.size() == _y.size() ); // coordinates must match up
@@ -745,7 +745,7 @@ XY::XY( vector< double >& _x, vector< double >& _y )
 XY::XY( vector< double >& _x, vector< double >& _y, vector< double >& _sig )
 {
 #ifdef STATS_DEBUG
-	cout << "In XY:: constructor with X Y and 1 std vectors" << endl;
+	util::screen() << "In XY:: constructor with X Y and 1 std vectors" << endl;
 #endif
 	
 	// Coordinates must match up
@@ -766,7 +766,7 @@ void XY::fit()
 	double wt, t, sxoss, sx = 0.0, sy = 0.0, st2 = 0.0, ss, sigdat;
 	
 #ifdef STATS_DEBUG
-	cout << "In XY::fit" << endl;
+	util::screen() << "In XY::fit" << endl;
 #endif
 
 	// If standard deviations are passed, make sure they're nonzero
@@ -856,7 +856,7 @@ XY::XY( vector< double >& __x, vector< double >& __y, vector< double >& sigx,
 	   vector< double >& sigy )
 {
 #ifdef STATS_DEBUG
-	cout << "In XY:: constructor with X Y and 2 std vectors" << endl;
+	util::screen() << "In XY:: constructor with X Y and 2 std vectors" << endl;
 #endif
 	
 	x = __x, y = __y;
@@ -982,7 +982,7 @@ double XY::chixy( double bang )
 	double ans, avex = 0.0, avey = 0.0, sumw = 0.0, b;
 
 #ifdef STATS_DEBUG
-	cout << "In XY::chixy" << endl;
+	util::screen() << "In XY::chixy" << endl;
 #endif
 	
 	b = tan( bang );

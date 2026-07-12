@@ -92,6 +92,8 @@ void TwoSet::copy( const TwoSet& rhs )
 	KSP = rhs.KSP;
 	PKX2P = rhs.PKX2P;
 	HLX2P = rhs.HLX2P;
+	ROCx = rhs.ROCx;
+	ROCy = rhs.ROCy;
 }
 
 // Loads Matrix into TwoSet object, takes incoming Matrix as argument
@@ -104,11 +106,11 @@ void TwoSet::setMatrix( const Matrix< double >& inMatrix )
 
 	if ( inMatrix.cols() != 2 ) // check incoming Matrix columns
 		// Inform user that Matrix will not be loaded
-		cout << "I'm sorry, but I can't load a non 2-column TwoSet Matrix." << endl;
+		util::screen() << "I'm sorry, but I can't load a non 2-column TwoSet Matrix." << endl;
 
 	else if ( !checkDiscrete( inMatrix ) ) // check to see if real column discrete
 		// Inform user that Matrix will not be loaded
-		cout << "I'm sorry, but the first column of the Matrix must be discrete."
+		util::screen() << "I'm sorry, but the first column of the Matrix must be discrete."
 			<< endl;
 
 	else // Matrix checks out, so complete operation
@@ -140,7 +142,7 @@ bool TwoSet::save( string& filename ) // saves to file
 	bool success = false; // flag to indicate file successfully saved
 
 	if ( !loadedFlag ) // test to see if a TwoSet object has been loaded
-		cout << "A TwoSet object must be loaded before it can be saved!" << endl;
+		util::screen() << "A TwoSet object must be loaded before it can be saved!" << endl;
 	else
 	{
 		// Open the output file to save data, overwrite file if it exists
@@ -148,7 +150,7 @@ bool TwoSet::save( string& filename ) // saves to file
 
 		// Test to insure it was opened
 		if ( !savefile.is_open() )
-			cout << "Error in opening file to save TwoSet object!" << endl;
+			util::screen() << "Error in opening file to save TwoSet object!" << endl;
 
 		else
 		{
@@ -156,7 +158,7 @@ bool TwoSet::save( string& filename ) // saves to file
 			savefile << A.setHeader( false );
 
 			// Print message to user notifying successful save to file
-			cout << "The TwoSet object was successfully saved to the file " << filename
+			util::screen() << "The TwoSet object was successfully saved to the file " << filename
 				<< "." << endl;
 
 			savefile.close(); // close output file
@@ -293,7 +295,7 @@ const double TwoSet::test( const unsigned r ) const
 void TwoSet::setThreshold( const double thresh )
 {
 	if ( !loadedFlag ) // a Matrix must have been loaded
-		cout << "I'm sorry, but a TwoSet Matrix has not yet been defined." << endl;
+		util::screen() << "I'm sorry, but a TwoSet Matrix has not yet been defined." << endl;
 
 	else
 	{
@@ -308,7 +310,7 @@ double TwoSet::getClassAcc()
 	double result = 0;
 
 	if ( !thresholdFlag ) // a threshold must have been set
-		cout << "Classification accuracy cannot be calculated: a threshold has not been set." << endl;
+		util::screen() << "Classification accuracy cannot be calculated: a threshold has not been set." << endl;
 	else // calculate classification accuracy
 	{
 		calculate( threshold ); // calculate tp, fp, tn, fn
@@ -324,7 +326,7 @@ double TwoSet::getSens()
 	double result = 0;
 
 	if ( !thresholdFlag ) // a threshold must have been set
-		cout << "Sensitivity cannot be calculated: a threshold has not been set." << endl;
+		util::screen() << "Sensitivity cannot be calculated: a threshold has not been set." << endl;
 	else // calculate sensitivity
 	{
 		calculate( threshold ); // calculate tp, fp, tn, fn
@@ -342,7 +344,7 @@ double TwoSet::getSpec()
 	double result = 0;
 
 	if ( !thresholdFlag ) // a threshold must have been set
-		cout << "Specificity cannot be calculated: a threshold has not been set." << endl;
+		util::screen() << "Specificity cannot be calculated: a threshold has not been set." << endl;
 	else // calculate specificity
 	{
 		calculate( threshold ); // calculate tp, fp, tn, fn
@@ -360,7 +362,7 @@ double TwoSet::getPVP()
 	double result = 0;
 
 	if ( !thresholdFlag ) // a threshold must have been set
-		cout << "PVP cannot be calculated: a threshold has not been set." << endl;
+		util::screen() << "PVP cannot be calculated: a threshold has not been set." << endl;
 	else // calculate PVP
 	{
 		calculate( threshold ); // calculate tp, fp, tn, fn
@@ -378,7 +380,7 @@ double TwoSet::getPVN()
 	double result = 0;
 
 	if ( !thresholdFlag ) // a threshold must have been set
-		cout << "PVN cannot be calculated: a threshold has not been set." << endl;
+		util::screen() << "PVN cannot be calculated: a threshold has not been set." << endl;
 	else // calculate PVN
 	{
 		calculate( threshold ); // calculate tp, fp, tn, fn
@@ -420,10 +422,14 @@ double TwoSet::getTrapROCarea()
 	double rocArea = 0; // initialize the ROC area
 
 	if ( !loadedFlag ) // a Matrix must have been loaded
-		cout << "I'm sorry, but a TwoSet Matrix has not yet been defined." << endl;
+		util::screen() << "I'm sorry, but a TwoSet Matrix has not yet been defined." << endl;
 
 	else
 	{
+		// Clear the plot vectors (curve capture ported from the 2005 roc app)
+		ROCx.clear();
+		ROCy.clear();
+
 		vector< double > test = A.col( 1 ); // extract the test column
 
 		// Find maximum and minimum of test column
@@ -448,6 +454,10 @@ double TwoSet::getTrapROCarea()
 				rocArea += 0.5 * ( yOld + y ) * ( xOld - x ); // calculate area
 				xOld = x; // reset x & y values
 				yOld = y;
+
+				// For plotting ROC curve
+				ROCx.push_back( x );
+				ROCy.push_back( y );
 			}
 			ROCthreshold += increment; // Next threshold
 		}
@@ -509,7 +519,7 @@ double TwoSet::getStatROCarea()
 	double rocArea = 0;
 
 	if ( !loadedFlag ) // a Matrix must have been loaded
-		cout << "I'm sorry, but a TwoSet Matrix has not yet been defined." << endl;
+		util::screen() << "I'm sorry, but a TwoSet Matrix has not yet been defined." << endl;
 
 	else
 	{
@@ -878,7 +888,7 @@ double TwoSet::getKSP() // returns p-value
 void TwoSet::KScalc()
 {
 	if ( !loadedFlag ) // a Matrix must have been loaded
-		cout << "I'm sorry, but a TwoSet Matrix has not yet been defined." << endl;
+		util::screen() << "I'm sorry, but a TwoSet Matrix has not yet been defined." << endl;
 
 	else try
 	{
@@ -937,7 +947,7 @@ double TwoSet::getPearsonX2()  // returns p-value
 void TwoSet::PKX2calc()
 {
 	if ( !loadedFlag ) // a Matrix must have been loaded
-		cout << "I'm sorry, but a TwoSet Matrix has not yet been defined." << endl;
+		util::screen() << "I'm sorry, but a TwoSet Matrix has not yet been defined." << endl;
 
 	else try
 	{

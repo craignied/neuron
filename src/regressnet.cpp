@@ -78,7 +78,7 @@ void RegressNet::setNetwork( Network* n_p, const double x )
 //    takes ostringstream as argument
 void RegressNet::report( ostringstream& out )
 {
-	cout << out.str(); // write to screen
+	util::screen() << out.str(); // write to screen
 	if ( historyFlag ) // and to history file if specified
 	{
 		ofstream hFile( netPtr->getHistoryFilename().c_str(), ios::out | ios::app );

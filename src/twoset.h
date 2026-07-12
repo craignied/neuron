@@ -98,6 +98,12 @@ public:
 	double getStatAzSE(); // returns delta-method standard error of Az
 	double getTrapSE(); // returns Hanley-McNeil SE of the trapezoidal area
 
+	// ROC curve points captured by the last getTrapROCarea() call, for
+	//    plotting (x = 1 - specificity, y = sensitivity; ported from the
+	//    2005 roc application)
+	const vector< double >& getROCx() { return ROCx; }
+	const vector< double >& getROCy() { return ROCy; }
+
 	// Outputs to ostream an ROC report with statistical method and/or
 	//    trapezoidal method depending on flag set by setReportFlag() accessor
 	void ROCarea( ostream& );
@@ -156,6 +162,9 @@ public:
 		calcThresh, // number of data points under which statistics will not be used
 		minBins, // minimum number of search bins
 		maxBins; // maximum number of search bins
+
+	vector< double > ROCx, // ROC curve x (1 - specificity) for plotting
+		ROCy; // ROC curve y (sensitivity), filled by getTrapROCarea()
 
 	double threshold, // threshold value
 		statP, // p-value for fitted line for statistical ROC calculation

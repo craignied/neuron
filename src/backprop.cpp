@@ -752,7 +752,7 @@ bool BackProp::save( string& filename )
 	
 	// Test to insure it was opened
 	if ( !savefile.is_open() )
-		cout << "Error in opening file to save " << objType << " network!" << endl;
+		util::screen() << "Error in opening file to save " << objType << " network!" << endl;
 	else
 	{
 		outputHeader( savefile ); // output the header to the file
@@ -769,8 +769,8 @@ bool BackProp::save( string& filename )
 		savefile << Weights[ nLayers ].setHeader( false );
 
 		// Print message to user notifying successful save to file
-		cout << "The " << objType << " network was successfully saved to " << filename;
-		cout << "." << endl;
+		util::screen() << "The " << objType << " network was successfully saved to " << filename;
+		util::screen() << "." << endl;
 
 		savefile.close(); // close output file
 
@@ -851,9 +851,9 @@ bool BackProp::load( string& filename )
 	// Make sure number of input nodes matches dataset
 	if ( nInputFromFile != nInput )
 	{
-		cout << "I cannot load this file:" << endl;
-		cout << "The number of input nodes do not match the dataset ( ";
-		cout << nInput << " )" << endl;
+		util::screen() << "I cannot load this file:" << endl;
+		util::screen() << "The number of input nodes do not match the dataset ( ";
+		util::screen() << nInput << " )" << endl;
 	}
 	else
 	{
@@ -878,9 +878,9 @@ bool BackProp::load( string& filename )
 		// Make sure number of output nodes matches dataset
 		if ( nOutputFromFile != nOutput )
 		{
-			cout << "I cannot load this file:" << endl;
-			cout << "The number of output nodes do not match the dataset ( ";
-			cout << nOutput << " )" << endl;
+			util::screen() << "I cannot load this file:" << endl;
+			util::screen() << "The number of output nodes do not match the dataset ( ";
+			util::screen() << nOutput << " )" << endl;
 		}
 		else
 		{
@@ -899,8 +899,8 @@ bool BackProp::load( string& filename )
 
 			weightsSetFlag = true; // set flag to indicate weights now set
 
-			outputHeader( cout ); // report to user
-			cout << "I've loaded the file." << endl;
+			outputHeader( util::screen() ); // report to user
+			util::screen() << "I've loaded the file." << endl;
 
 			// Log to history file
 			if ( historyFlag ) // make sure flag for history is set
