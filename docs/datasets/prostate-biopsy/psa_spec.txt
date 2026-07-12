@@ -1,0 +1,21 @@
+# neuron2web.py label spec for the prostate-biopsy (BP40) model.
+#
+# The variable identities were recovered from the PSAnet iPhone app
+# (~/code/iPhone/PSAnet), whose input vector is the authoritative record of
+# what the 11 columns mean. This spec's structure matches psa_defs.txt
+# (0;1-4;5;6,7;8;9;10 = 7 variables over 11 input columns).
+#
+# Ethnicity is full 4-column one-hot (NO reference level) because the BP40
+# model is a SimpleProp neural network (Run9), which tolerates it — so no
+# '*' markers. If you instead train LOGISTIC regression on this data, groom
+# with --refcat and star one ethnicity level here.
+
+N %% Age %% years
+C %% Ethnicity %% Caucasian %% African American %% Hispanic %% Asian / Other
+B %% Family history of prostate cancer %% yes %% no
+K %% N %% IPSS %% score
+N %% Total PSA %% ng/mL
+N %% Complexed PSA %% ng/mL
+B %% Digital rectal exam %% abnormal %% normal
+O %% Cancer absent on prostate biopsy %% Cancer present on prostate biopsy
+R %% Odds of cancer on prostate biopsy
