@@ -212,3 +212,57 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
     two as it stands; recover the covariance term or validate the binormal CI further
     before leaning on it in print. Methods-section language + this caveat live in
     `docs/roc_theory.md` and README.
+
+## ROADMAP (agreed with Craig 2026-07-13, pre-compaction)
+
+Work these in order; each phase lands independently with tests + CI green.
+
+### Phase 1 — Bank-data grooming walkthrough (do first: self-contained, no engine risk)
+1. Extend `tools/mkdataset.py` (stdlib-only rule holds): `--delimiter` option
+   (bank.csv is semicolon-delimited, quoted fields — csv module handles quotes),
+   **categorical one-hot encoding** (auto-detect non-numeric columns, or explicit
+   column list), and binary text outcome mapping ("yes"/"no" → 1/0). Must still emit
+   `--key` and `--inputs` (variable structure groups one-hot columns, e.g. "1-4" style
+   like psa_defs.txt).
+2. Extend `tests/tools/` fixtures for the new paths (same --bless pattern).
+3. Write `docs/datasets/bank-marketing/WALKTHROUGH.md`: bank.csv → mkdataset.py
+   command → load in neuron (N inputs/1 output) → train (logistic AND SimpleProp,
+   --seed for reproducibility) → read the ROC report incl. 95% CI. Verify every step
+   by actually running it; put the real commands + real output excerpts in the doc.
+4. Consider importing `distro/data/lowbwt2-2*` as a third sample dataset
+   (Hosmer-Lemeshow low-birth-weight classic; the betas file is a reference-coefficient
+   check for logistic regression). Optional, cheap.
+
+### Phase 2 — Engine/UI decoupling survey (groundwork for GUI)
+1. Inventory where the engine prints directly to cout vs. takes an ostream&
+   (dataset.cpp report methods already take ostream&; Iterative/train() progress
+   printing is the main cout offender) and where it reads via util::ask*.
+2. Route engine-core output through ostream& parameters (or a settable stream) so the
+   server can capture reports into strings. Menus/driver keep cout. Golden transcripts
+   must stay byte-identical — they are the refactor's safety net.
+3. Port ROCx/ROCy curve-point capture from `code/C++/msvc/roc/roc 2005/twoset.cpp`
+   (~10 lines in the trapezoid walk) + expose a getter. Output-neutral (goldens/oracle
+   unaffected). Needed for GUI ROC plots.
+
+### Phase 3 — Embedded web GUI (`neuron --gui`)
+Decisions already made by Craig: embedded HTTP server IN the binary (no Python
+server); bind 127.0.0.1 with **port 0 = OS-assigned free port** (no collisions, no
+PORTS.md entry needed); loopback only (LAN exposure only ever as explicit opt-in
+flag); browser is the display layer; CLI stays fully functional alongside.
+1. Vendor cpp-httplib (single MIT header) under `third_party/`; CMake option.
+2. `--gui` flag: start server on port 0, print the URL (http://127.0.0.1:<port>/),
+   auto-open browser (open / xdg-open / start per platform).
+3. Serve a single self-contained HTML/JS page embedded in the binary (CMake
+   string-embed step). JSON endpoints: load dataset, configure model, train
+   (serialized by one mutex — engine is single-threaded), fetch report + ROC curve
+   (ROCx/ROCy from Phase 2).
+4. Golden transcripts + oracle keep guarding the CLI; add a curl-based smoke test for
+   the endpoints if practical in CI.
+Longer-term idea (parked): compile engine to WebAssembly → GUI as a static page on
+GitHub Pages, no install at all (the neuron2html philosophy at full fidelity).
+
+### Backlog (unordered)
+- Binormal CI: recover the a-b covariance on the fitexy path (removes the
+  anti-conservative caveat in docs/roc_theory.md) or validate further by simulation.
+- `getGoodData()` port from the roc app if something needs it.
+- More grooming tools (dataset describe/summary; train/test split outside engine).
