@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>neuron</title>
+<style>
+body { font-family: system-ui, sans-serif; margin: 1.5rem auto; max-width: 60rem;
+       padding: 0 1rem; color: #1a1a2e; background: #fafafa; }
+h1 { font-size: 1.4rem; } h1 small { color: #777; font-weight: 400; font-size: .8rem; }
+fieldset { background: #fff; border: 1px solid #ddd; border-radius: 8px;
+           margin-bottom: 1rem; padding: .9rem 1.1rem; }
+legend { font-weight: 600; padding: 0 .4rem; }
+label { margin-right: 1rem; white-space: nowrap; }
+input[type=text] { width: 22rem; } input.num { width: 5.5rem; }
+button { padding: .35rem .9rem; cursor: pointer; }
+.status { margin-left: .8rem; font-size: .9rem; color: #777; }
+.status.ok { color: #1a7f37; } .status.err { color: #b91c1c; }
+#report { background: #101020; color: #d8f0d8; padding: 1rem; border-radius: 8px;
+          font: .78rem/1.35 ui-monospace, monospace; white-space: pre;
+          overflow-x: auto; max-height: 28rem; overflow-y: auto; display: none; }
+#rocbox { display: none; background: #fff; border: 1px solid #ddd; border-radius: 8px;
+          padding: 1rem; margin-bottom: 1rem; }
+.row { margin: .45rem 0; }
+.foot { margin-top: 1.2rem; font-size: .75rem; color: #777; }
+</style>
+</head>
+<body>
+<h1>neuron <small id="version"></small></h1>
+
+<fieldset>
+<legend>1 &mdash; Dataset</legend>
+<div class="row">
+  <label>Data file <input type="text" id="path" placeholder="/path/to/data.txt"></label>
+</div>
+<div class="row">
+  <label>Inputs <input class="num" type="number" id="inputs" value="2" min="1"></label>
+  <label>Outputs <input class="num" type="number" id="outputs" value="1" min="1"></label>
+  <label><select id="mode">
+    <option value="raw">raw data &rarr; split</option>
+    <option value="train">already a training set</option>
+  </select></label>
+  <label id="fracbox">Test fraction <input class="num" type="number" id="fraction"
+    value="0.25" min="0" max="0.9" step="0.05"></label>
+</div>
+<div class="row">
+  <button onclick="loadData()">Load dataset</button><span class="status" id="dstatus"></span>
+</div>
+</fieldset>
+
+<fieldset>
+<legend>2 &mdash; Model</legend>
+<div class="row">
+  <label><select id="mtype">
+    <option value="simpleprop">Neural network (SimpleProp)</option>
+    <option value="logistic">Binary logistic regression</option>
+  </select></label>
+  <label id="hiddenbox">Hidden nodes <input class="num" type="number" id="hidden"
+    value="5" min="1"></label>
+  <button onclick="setModel()">Create model</button><span class="status" id="mstatus"></span>
+</div>
+</fieldset>
+
+<fieldset>
+<legend>3 &mdash; Train</legend>
+<div class="row">
+  <label><select id="algo">
+    <option value="1">Canonical backpropagation</option>
+    <option value="2">Conjugate gradient descent</option>
+    <option value="3">Shanno's algorithm</option>
+  </select></label>
+  <label>Max iterations <input class="num" type="number" id="maxiter" value="2000"
+    min="1"></label>
+  <label>Seed <input class="num" type="number" id="seed" placeholder="clock"></label>
+  <button id="trainbtn" onclick="train()">Train</button>
+  <span class="status" id="tstatus"></span>
+</div>
+</fieldset>
+
+<div id="rocbox">
+  <canvas id="roc" width="440" height="440"></canvas>
+</div>
+<pre id="report"></pre>
+
+<p class="foot">neuron GUI &mdash; local only (127.0.0.1). The command-line
+interface remains fully available; this page drives the same engine.</p>
+
+<script>
+"use strict";
+function $(id) { return document.getElementById(id); }
+function setStatus(id, ok, text) {
+  const el = $(id);
+  el.textContent = text;
+  el.className = "status " + (ok ? "ok" : "err");
+}
+async function api(path, params) {
+  const r = await fetch(path, { method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(params).toString() });
+  return r.json();
+}
+$("mode").onchange = () => {
+  $("fracbox").style.display = $("mode").value === "raw" ? "" : "none";
+};
+$("mtype").onchange = () => {
+  $("hiddenbox").style.display = $("mtype").value === "simpleprop" ? "" : "none";
+};
+async function loadData() {
+  setStatus("dstatus", true, "loading…");
+  const j = await api("/api/load", { mode: $("mode").value, path: $("path").value,
+    inputs: $("inputs").value, outputs: $("outputs").value,
+    fraction: $("fraction").value });
+  setStatus("dstatus", j.ok, j.message);
+}
+async function setModel() {
+  const j = await api("/api/model", { type: $("mtype").value,
+    hidden: $("hidden").value });
+  setStatus("mstatus", j.ok, j.message);
+}
+async function train() {
+  $("trainbtn").disabled = true;
+  setStatus("tstatus", true, "training…");
+  try {
+    const j = await api("/api/train", { algorithm: $("algo").value,
+      maxiter: $("maxiter").value, seed: $("seed").value });
+    setStatus("tstatus", j.ok, j.message);
+    if (j.output) { $("report").textContent = j.output; $("report").style.display = "block"; }
+    if (j.ok && j.roc) drawROC(j.roc);
+  } finally { $("trainbtn").disabled = false; }
+}
+function drawROC(roc) {
+  $("rocbox").style.display = "block";
+  const c = $("roc"), g = c.getContext("2d");
+  const M = 45, W = c.width - M - 15, H = c.height - M - 15;
+  const X = f => M + f * W, Y = f => 15 + (1 - f) * H;
+  g.clearRect(0, 0, c.width, c.height);
+  g.strokeStyle = "#ccc"; g.strokeRect(X(0), Y(1), W, H);
+  g.beginPath(); g.moveTo(X(0), Y(0)); g.lineTo(X(1), Y(1)); g.stroke();
+  g.fillStyle = "#555"; g.font = "12px system-ui";
+  g.fillText("1 - specificity", X(0.5) - 35, Y(0) + 32);
+  g.save(); g.translate(X(0) - 30, Y(0.5) + 30); g.rotate(-Math.PI / 2);
+  g.fillText("sensitivity", 0, 0); g.restore();
+  for (const t of [0, 0.5, 1]) {
+    g.fillText(t.toFixed(1), X(t) - 8, Y(0) + 16);
+    g.fillText(t.toFixed(1), X(0) - 26, Y(t) + 4);
+  }
+  let ly = 30;
+  for (const [name, series, color] of
+       [["train", roc.train, "#2563eb"], ["test", roc.test, "#dc2626"]]) {
+    if (!series || !series.x.length) continue;
+    g.strokeStyle = color; g.lineWidth = 1.8; g.beginPath();
+    g.moveTo(X(1), Y(1)); // curve counts backwards from (1,1)
+    for (let i = 0; i < series.x.length; i++) g.lineTo(X(series.x[i]), Y(series.y[i]));
+    g.lineTo(X(0), Y(0));
+    g.stroke(); g.lineWidth = 1;
+    g.fillStyle = color;
+    g.fillText(name + " ROC area = " + series.area.toFixed(4), X(0.42), Y(0) - ly);
+    ly -= 18;
+  }
+}
+fetch("/api/version").then(r => r.text()).then(t => $("version").textContent = t);
+</script>
+</body>
+</html>

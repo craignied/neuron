@@ -277,6 +277,25 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   separated data, points in unit square). GUI (Phase 4) now has both prerequisites:
   capturable reports + plottable curve points.
 
+- **2026-07-13 (Phase 4 complete: `neuron --gui`)** — Embedded web GUI shipped.
+  cpp-httplib v0.18.3 vendored (third_party/, MIT + license file); `src/gui.{h,cpp}`
+  + `src/gui_page.html` (embedded via CMake configure_file → raw-string header,
+  CMAKE_CONFIGURE_DEPENDS so page edits re-embed). `--gui [--no-browser]`: binds
+  127.0.0.1 **port 0** (OS-assigned), prints URL, auto-opens browser (open/start/
+  xdg-open). Endpoints (form-encoded POST → JSON): /api/load (raw+randomizeD or
+  training-set file; **pre-checks file existence because getGoodFile would prompt
+  on stdin**), /api/model (logistic | simpleprop+hidden; setDataSet BEFORE
+  setHidden), /api/train (algorithm 1-3, maxiter, optional seed; RAII Capture via
+  util::set_screen returns the full engine report as text; ROC curves from the
+  MODEL's DataSet copy — that's where train() writes guesses — via getTrapROCarea()
+  + getROCx/y from Phase 3). One mutex serializes all engine access. Page: single
+  self-contained HTML/JS, canvas ROC plot (train/test + areas). CMake: Threads;
+  ws2_32 on Windows. Verified: full curl session (XOR → SimpleProp → train → JSON
+  with report + curve); `tests/gui/smoke.sh` (bash+curl, in CI on all 3 OSes).
+  In-browser click-through not yet done (Chrome extension disconnected) — page JS
+  is fetch/canvas, verified only by inspection; if the page misbehaves, that's
+  where to look. Parked idea remains: wasm build on GitHub Pages.
+
 ## ROADMAP (agreed with Craig 2026-07-13, pre-compaction; Phase 2 deployment added 2026-07-13)
 
 Work these in order; each phase lands independently with tests + CI green.
@@ -345,7 +364,7 @@ it's tooling around the engine, stdlib-only Python, no engine changes).
    (~10 lines in the trapezoid walk) + expose a getter. Output-neutral (goldens/oracle
    unaffected). Needed for GUI ROC plots.
 
-### Phase 4 — Embedded web GUI (`neuron --gui`)
+### Phase 4 — Embedded web GUI (`neuron --gui`) — **DONE 2026-07-13** (see status)
 Decisions already made by Craig: embedded HTTP server IN the binary (no Python
 server); bind 127.0.0.1 with **port 0 = OS-assigned free port** (no collisions, no
 PORTS.md entry needed); loopback only (LAN exposure only ever as explicit opt-in

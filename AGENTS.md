@@ -185,6 +185,18 @@ user can open it from disk, email it, or upload it to any static web host
 — it runs entirely in the browser. `--serve` previews it locally on an
 OS-assigned port.
 
+## 3b. The GUI (`neuron --gui`)
+
+For a human who prefers pointing and clicking: `./build/neuron --gui`
+starts a local web page (127.0.0.1, OS-assigned port, URL printed; the
+browser opens automatically — `--no-browser` suppresses that) with the
+same load → model → train flow and a live ROC plot. **As an agent, keep
+using the scripted sessions of §2** — they are reproducible, capturable,
+and testable; suggest `--gui` to the user when they want to explore
+interactively. The GUI's file-path field reads server-side paths, i.e.
+paths on the user's own machine, relative to where `neuron --gui` was
+launched.
+
 ## 4. Verifying the installation
 
 - Quick: `./tests/tools/run_tools.sh` (Python tools vs committed outputs,

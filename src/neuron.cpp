@@ -31,6 +31,7 @@
 #include "dataset.h"    // DataSet for compound objects
 #include "utility.h"    // utility methods
 #include "regressnet.h" // network stepwise regression class
+#include "gui.h"        // the embedded web GUI (neuron --gui)
 
 using namespace std;
 
@@ -56,6 +57,9 @@ bool logLastOp = true, // initial log last operation to file flag
 int main( int argc, char* argv[] )
 {
 	// Parse command-line arguments
+	bool guiFlag = false, // start the embedded web GUI instead of the menus
+		browserFlag = true; // and open the browser on it
+
 	for ( int a = 1; a < argc; a++ )
 	{
 		string arg( argv[ a ] );
@@ -71,12 +75,19 @@ int main( int argc, char* argv[] )
 			cout << "Random seed set to " << argv[ a ]
 				<< " (runs with the same seed and inputs are reproducible)" << endl;
 		}
+		else if ( arg == "--gui" )
+			guiFlag = true;
+		else if ( arg == "--no-browser" )
+			browserFlag = false;
 		else
 		{
-			cerr << "Usage: neuron [--seed N] [--version]" << endl;
+			cerr << "Usage: neuron [--seed N] [--gui [--no-browser]] [--version]" << endl;
 			return 1;
 		}
 	}
+
+	if ( guiFlag ) // the web GUI replaces the menu loop entirely
+		return run_gui( browserFlag );
 
 	// Print welcome message
 	cout << "Welcome to " << NEURON_PACKAGE_STRING << endl;

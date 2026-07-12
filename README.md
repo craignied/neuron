@@ -48,8 +48,15 @@ cmake --build build --parallel
 ```
 
 ```
-Usage: neuron [--seed N] [--version]
+Usage: neuron [--seed N] [--gui [--no-browser]] [--version]
 ```
+
+`--gui` starts the same engine behind a **local web page** instead of the
+menus: the binary embeds a small HTTP server (cpp-httplib, vendored in
+`third_party/`), binds 127.0.0.1 on an **OS-assigned free port** — it can
+never collide with anything else you run — prints the URL, and opens your
+browser. Load a dataset, pick a model, train, and read the captured report
+next to a live ROC plot. Loopback only; the CLI remains fully functional.
 
 `--seed N` makes runs reproducible: the same seed with the same inputs produces
 bit-identical training (weight initialization and train/test splits both draw from
@@ -105,7 +112,8 @@ simulation in `tests/binormal/check_az.cpp`.
 ## Layout
 
 - `src/` — the C++ engine (carried forward from neUROn2++, modernized incrementally
-  in place)
+  in place), including the embedded web GUI (`gui.cpp`, `gui_page.html`)
+- `third_party/` — vendored single-header dependencies (cpp-httplib, MIT)
 - `tests/oracle/` — the legacy oracle harness: builds the original neUROn2++ binary
   from its release tarball and cross-checks the 3.0 engine against it
   (`verify_oracle.sh` requires numerically identical output)

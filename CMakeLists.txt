@@ -6,10 +6,21 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(GSL REQUIRED)
+find_package(Threads REQUIRED)
+
+# Embed the GUI page (src/gui_page.html) into the binary as a raw string
+file(READ src/gui_page.html GUI_PAGE_CONTENT)
+configure_file(src/gui_page.h.in generated/gui_page.h @ONLY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS src/gui_page.html)
 
 file(GLOB ENGINE_SOURCES src/*.cpp)
 add_executable(neuron ${ENGINE_SOURCES})
-target_link_libraries(neuron PRIVATE GSL::gsl GSL::gslcblas)
+target_include_directories(neuron PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}/generated third_party)
+target_link_libraries(neuron PRIVATE GSL::gsl GSL::gslcblas Threads::Threads)
+if(WIN32)
+    target_link_libraries(neuron PRIVATE ws2_32)
+endif()
 
 # Unit test: engine's binormal (Wickens) statistical ROC vs theory.
 # Links only the statistics core — no GSL needed.
