@@ -62,6 +62,11 @@ namespace util {
 	//    filename if it doesn't.
 	string& getGoodFile( string& );
 
+	// Run directory for engine log files (neuron.log, model.txt): they are
+	//    written next to the session's first-loaded dataset file, not the cwd
+	void set_run_dir( const string& ); // remember a dataset file's directory
+	string run_path( const string& ); // resolve a bare log filename into it
+
 	// Removes carriage return from end of string if exists, returns string
 	string& chopEndl( string& );
 

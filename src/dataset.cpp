@@ -68,7 +68,9 @@ void DataSet::copy( const DataSet& rhs )
 void DataSet::loadRaw( string& filename ) // load file into raw dataset
 {
 	Raw.loadfile( true, filename ); // load the raw dataset Matrix
-	
+
+	util::set_run_dir( filename ); // log files follow the data
+
 	this->setRawMatrix( Raw ); // use previously coded setRawMatrix method
 
 	// Construct the message to the output stream
@@ -139,6 +141,8 @@ void DataSet::setRawMatrix( Matrix< double >& inMatrix )
 void DataSet::loadTrain( string& filename ) // load file into training set
 {
 	TrainSetData.loadfile( true, filename ); // load the training set Matrix
+
+	util::set_run_dir( filename ); // log files follow the data
 
 	this->setTrainMatrix( TrainSetData ); // use previously coded setTrainMatrix
 
@@ -355,7 +359,9 @@ bool DataSet::saveTrainTwoSet( string& filename )
 void DataSet::loadTest( string& filename ) // load file into test set
 {
 	TestSetData.loadfile( true, filename ); // load the test set Matrix
-	
+
+	util::set_run_dir( filename ); // log files follow the data
+
 	this->setTestMatrix( TestSetData ); // use previously coded setTestMatrix
 
 	// Construct the message to the output stream
@@ -898,10 +904,11 @@ bool DataSet::addHistory( ostringstream& outputStream )
 	if ( historyFlag ) // only perform if history flag is set
 	{
 		// Open history file for appended output
-		ofstream historyFile( historyFilename.c_str(), ios::out | ios::app );
-	
+		string logPath = util::run_path( historyFilename );
+		ofstream historyFile( logPath.c_str(), ios::out | ios::app );
+
 		if ( !historyFile.is_open() ) // test to insure it was opened
-			cout << "Error in opening " << historyFilename << "!" << endl;
+			cout << "Error in opening " << logPath << "!" << endl;
 		else
 		{
 			historyFile << outputStream.str(); // write the output stream to the file

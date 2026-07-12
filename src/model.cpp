@@ -74,10 +74,11 @@ bool Model::addHistory( ostringstream& outputStream )
 	if ( historyFlag ) // only perform if history flag is set
 	{
 		// Open history file for appended output
-		ofstream historyFile( historyFilename.c_str(), ios::out | ios::app );
-	
+		string logPath = util::run_path( historyFilename );
+		ofstream historyFile( logPath.c_str(), ios::out | ios::app );
+
 		if ( !historyFile.is_open() ) // test to insure it was opened
-			cout << "Error in opening " << historyFilename << "!" << endl;
+			cout << "Error in opening " << logPath << "!" << endl;
 		else
 		{
 			historyFile << outputStream.str(); // write the output stream to the file

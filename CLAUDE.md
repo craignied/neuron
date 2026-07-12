@@ -253,6 +253,16 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   tools, menus, or recipes change, update AGENTS.md in the same commit — its
   recipes are promised to work.
 
+- **2026-07-13 (logs follow the data)** — Craig: run files should land where the
+  input files are. `util::set_run_dir()`/`util::run_path()`: the first dataset file
+  loaded in a session (loadRaw/loadTrain/loadTest — getGoodFile writes the resolved
+  path back into the caller's string) fixes the run directory; all five log-open
+  sites (dataset/model addHistory, iterative/ldfa/qdfa lastop) resolve neuron.log /
+  model.txt through it. Bare names only — explicit paths set via the API are
+  respected; no dataset loaded → cwd as before. stdout unchanged → goldens/oracle
+  byte-identical. neuron.log + model.txt now gitignored; spin.html + AGENTS.md
+  updated. Behavior-verified: launch dir stays empty, log lands next to data.
+
 ## ROADMAP (agreed with Craig 2026-07-13, pre-compaction; Phase 2 deployment added 2026-07-13)
 
 Work these in order; each phase lands independently with tests + CI green.

@@ -19,9 +19,10 @@ Ground rules:
   an error or an unanswered prompt).
 - The Python tools in `tools/` run on bare `python3` — never pip-install
   anything for them.
-- The engine writes `model.txt` and `neuron.log` into the current
-  directory; run sessions in a scratch directory or the user's data
-  directory, not the repo root.
+- The engine writes its logs (`model.txt`, `neuron.log`) into the
+  directory of the first dataset file the session loads (falling back to
+  the current directory if none is ever loaded) — so the run's artifacts
+  end up next to the user's data, where they expect them.
 - Costs: grooming is instant; the trainings below take seconds. If a
   training runs for more than ~2 minutes, something is wrong — kill it and
   re-check the recipe (usually a missing iteration cap or missing

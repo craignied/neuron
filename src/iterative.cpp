@@ -347,10 +347,11 @@ double Iterative::train()
 	if ( lastopFlag ) // make sure flag for last operation output is set
 	{
 		// Open last operation file for output, overwrite if it exists
-		ofstream lastopFile( lastopFilename.c_str(), ios::out | ios::trunc );
-	
+		string logPath = util::run_path( lastopFilename );
+		ofstream lastopFile( logPath.c_str(), ios::out | ios::trunc );
+
 		if ( !lastopFile.is_open() ) // test to insure it was opened
-			cout << "Error in opening " << lastopFilename << "!" << endl;
+			cout << "Error in opening " << logPath << "!" << endl;
 		else
 		{
 			lastopFile << fileStream.str(); // write the file stream to the file 

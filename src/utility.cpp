@@ -327,6 +327,30 @@ string& util::getGoodFile( string& filename )
 	return filename;
 }
 
+// Run directory: log files follow the data. The first dataset file loaded
+//    in a session fixes the directory; later loads don't move it.
+static string runDir;
+static bool runDirSet = false;
+
+void util::set_run_dir( const string& fromFile )
+{
+	if ( runDirSet ) // first dataset load wins
+		return;
+
+	string::size_type slash = fromFile.find_last_of( "/\\" );
+	runDir = ( slash == string::npos ? "" : fromFile.substr( 0, slash + 1 ) );
+	runDirSet = true;
+}
+
+string util::run_path( const string& filename )
+{
+	// Only bare names are redirected; an explicit path is respected
+	if ( filename.find_first_of( "/\\" ) != string::npos )
+		return filename;
+
+	return runDir + filename;
+}
+
 // Utility function which removes carriage return from end of string argument
 //    if exists, returns manipulated string
 string& util::chopEndl( string& stringArg )
