@@ -55,8 +55,17 @@ Usage: neuron [--seed N] [--gui [--no-browser]] [--version]
 menus: the binary embeds a small HTTP server (cpp-httplib, vendored in
 `third_party/`), binds 127.0.0.1 on an **OS-assigned free port** — it can
 never collide with anything else you run — prints the URL, and opens your
-browser. Load a dataset, pick a model, train, and read the captured report
-next to a live ROC plot. Loopback only; the CLI remains fully functional.
+browser. Pick a data file, pick a model, train, read the captured report
+next to a live ROC plot, then save the **session files**: the network and
+scaling factors (everything `tools/neuron2web.py` needs to deploy the
+model) plus the training/test sets, guesses, and report (everything a
+write-up needs). Each file is written into the directory you started
+`neuron` from and downloaded by the browser. Loopback only; the CLI
+remains fully functional.
+
+The binary is self-contained (the GUI page is embedded), so a good habit
+is one directory per experiment: `cd` there — or copy `build/neuron`
+there — and everything the session produces stays together.
 
 `--seed N` makes runs reproducible: the same seed with the same inputs produces
 bit-identical training (weight initialization and train/test splits both draw from

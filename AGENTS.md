@@ -193,9 +193,12 @@ browser opens automatically — `--no-browser` suppresses that) with the
 same load → model → train flow and a live ROC plot. **As an agent, keep
 using the scripted sessions of §2** — they are reproducible, capturable,
 and testable; suggest `--gui` to the user when they want to explore
-interactively. The GUI's file-path field reads server-side paths, i.e.
-paths on the user's own machine, relative to where `neuron --gui` was
-launched.
+interactively. The GUI's file picker uploads the chosen file to the local
+server, which saves a copy — and all logs and session files — in the
+directory where `neuron --gui` was launched, so one directory per
+experiment keeps everything together. After training, the "Session files"
+buttons save/download the network + scaling factors (deployment trio
+minus the spec) and the train/test sets, guesses, and report.
 
 ## 4. Verifying the installation
 

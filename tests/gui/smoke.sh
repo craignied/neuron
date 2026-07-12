@@ -48,4 +48,16 @@ curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=100000&seed=42" \
 grep -q '"ok":true' train.json || fail "train endpoint"
 grep -q '"area":' train.json || fail "no ROC area in train response"
 
-echo "OK: GUI endpoints (version, page, load, model, train + ROC JSON)"
+# Session artifacts: written into the workspace AND served as downloads
+curl -s "$URL/api/save/network" -o dl_network
+head -1 dl_network | grep -q "SimpleProp" || fail "network download"
+[ -f network.txt ] || fail "network.txt not written to the workspace"
+curl -s "$URL/api/save/train_guesses" -o dl_guesses
+[ -s dl_guesses ] || fail "train guesses download"
+curl -s "$URL/api/save/report" -o dl_report
+grep -q "Iteration" dl_report || fail "report download"
+# No test set was loaded, so its artifact must refuse cleanly
+curl -s "$URL/api/save/test_set" | grep -q '"ok":false' \
+    || fail "test_set should refuse when no test set exists"
+
+echo "OK: GUI endpoints (version, page, load, model, train + ROC JSON, saves)"

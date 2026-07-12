@@ -787,7 +787,9 @@ bool DataSet::randomize( const unsigned nTest )
 		//    the training set
 		normalize( TestSetData );
 
-		testLoadedFlag = true; // set the test data loaded flag
+		// A test set only exists if it received rows: flagging an empty one
+		//    as loaded made later training underflow on ( nTest - 1 )
+		testLoadedFlag = ( TestSetData.rows() > 0 );
 
 		// Easier on the eyes
 		unsigned nTrain = TrainSetData.rows(), // number of examples in training set

@@ -296,6 +296,22 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   is fetch/canvas, verified only by inspection; if the page misbehaves, that's
   where to look. Parked idea remains: wasm build on GitHub Pages.
 
+- **2026-07-13 (GUI session files + legacy bug #5)** — Craig: the GUI must output
+  everything the CLI could (deployment trio + paper trail), and asked about binary
+  relocatability (yes: page embedded, GSL by absolute path — same-machine relocatable;
+  outputs land in the CWD it's run from, so one dir per experiment). GUI gained
+  `/api/save/:what` (network, scales, train_set, test_set, train_guesses,
+  test_guesses, report): the engine's own save methods write into the workspace AND
+  the browser downloads a copy (page section 4). test_set guarded in the GUI —
+  DataSet::saveTest doesn't check testLoadedFlag itself. File picker (same day):
+  uploads content (browsers hide paths), server saves beside itself. **Legacy bug
+  #5 found by the fraction=0 path: DataSet::randomize flagged an EMPTY test set as
+  loaded → Model::extractInputMatrices underflowed (nTest-1) → crash.** Fixed:
+  testLoadedFlag = (rows > 0). Verified end-to-end: bank 42-input logistic through
+  the GUI (upload → split → train → all saves) → downloaded network+scales deploy
+  cleanly via neuron2web.py (0.118488 for the known-no first client). smoke.sh
+  covers saves + the no-test-set refusal.
+
 ## ROADMAP (agreed with Craig 2026-07-13, pre-compaction; Phase 2 deployment added 2026-07-13)
 
 Work these in order; each phase lands independently with tests + CI green.

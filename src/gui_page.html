@@ -77,6 +77,23 @@ button { padding: .35rem .9rem; cursor: pointer; }
 </div>
 </fieldset>
 
+<fieldset>
+<legend>4 &mdash; Session files</legend>
+<div class="row">
+  <button onclick="saveFile('network')">Network</button>
+  <button onclick="saveFile('scales')">Scaling factors</button>
+  <button onclick="saveFile('train_set')">Training set</button>
+  <button onclick="saveFile('test_set')">Test set</button>
+  <button onclick="saveFile('train_guesses')">Train guesses</button>
+  <button onclick="saveFile('test_guesses')">Test guesses</button>
+  <button onclick="saveFile('report')">Report</button>
+</div>
+<div class="row"><span class="status" id="sstatus">Each file is written into
+the working directory where neuron was started, and downloaded by your
+browser. Network + scaling factors are what tools/neuron2web.py needs to
+deploy the model; training/test sets and guesses document the run.</span></div>
+</fieldset>
+
 <div id="rocbox">
   <canvas id="roc" width="440" height="440"></canvas>
 </div>
@@ -166,6 +183,24 @@ function drawROC(roc) {
     g.fillText(name + " ROC area = " + series.area.toFixed(4), X(0.42), Y(0) - ly);
     ly -= 18;
   }
+}
+async function saveFile(what) {
+  const r = await fetch("/api/save/" + what);
+  if (!r.ok) {
+    const j = await r.json();
+    setStatus("sstatus", false, j.message);
+    return;
+  }
+  const cd = r.headers.get("Content-Disposition") || "";
+  const m = cd.match(/filename=([^;]+)/);
+  const fname = m ? m[1] : what + ".txt";
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(await r.blob());
+  a.download = fname;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  setStatus("sstatus", true,
+    fname + " downloaded; a copy is in the working directory");
 }
 fetch("/api/version").then(r => r.text()).then(t => $("version").textContent = t);
 </script>

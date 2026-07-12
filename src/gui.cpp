@@ -39,6 +39,8 @@ namespace {
 mutex engineMutex;
 unique_ptr< DataSet > dataPtr;
 unique_ptr< Model > modelPtr;
+// The last training run's captured report, downloadable as report.txt
+string lastReport;
 
 // --- JSON helpers (responses only; requests arrive form-encoded) ---------
 
@@ -305,8 +307,74 @@ string handleTrain( const httplib::Request& req )
 	msg.precision( 6 );
 	msg << "trained; final error " << finalError;
 
+	lastReport = cap.text.str(); // downloadable afterwards as report.txt
+
 	return string( "{\"ok\":true,\"message\":\"" ) + jsonEscape( msg.str() )
-		+ "\",\"output\":\"" + jsonEscape( cap.text.str() ) + "\"" + roc + "}";
+		+ "\",\"output\":\"" + jsonEscape( lastReport ) + "\"" + roc + "}";
+}
+
+// Produce one session artifact as a file in the workspace (the server's
+//    directory), using the same engine save methods the CLI menus call.
+//    Returns true and the filename on success; the engine's own message
+//    (captured) becomes the error otherwise.
+bool saveArtifact( const string& what, string& name, string& err )
+{
+	static const struct { const char *what, *file; } names[] = {
+		{ "network", "network.txt" }, { "scales", "scales.txt" },
+		{ "train_set", "train_set.txt" }, { "test_set", "test_set.txt" },
+		{ "train_guesses", "train_guesses.txt" },
+		{ "test_guesses", "test_guesses.txt" } };
+	name.clear();
+	for ( const auto& n : names )
+		if ( what == n.what )
+			name = n.file;
+	if ( name.empty() )
+	{
+		err = "unknown artifact: " + what;
+		return false;
+	}
+
+	Capture cap;
+	bool ok = false;
+
+	if ( what == "network" )
+	{
+		Network* net = modelPtr ? dynamic_cast< Network* >( modelPtr.get() ) : nullptr;
+		if ( !net || !net->getWeightsSet() )
+			err = "no trained network to save yet";
+		else
+			ok = net->save( name );
+	}
+	else if ( what == "scales" || what == "train_set" || what == "test_set" )
+	{
+		if ( !dataPtr )
+			err = "load a dataset first";
+		else if ( what == "scales" )
+			ok = dataPtr->saveScales( name );
+		else if ( what == "train_set" )
+			ok = dataPtr->saveTrain( name );
+		else if ( !dataPtr->testLoaded() ) // saveTest doesn't check this itself
+			err = "no test set in this session";
+		else
+			ok = dataPtr->saveTest( name );
+	}
+	else // guesses live in the model's DataSet copy, written by train()
+	{
+		if ( !modelPtr )
+			err = "train a model first";
+		else if ( what == "train_guesses" )
+			ok = modelPtr->getDataSet().saveTrainTwoSet( name );
+		else
+			ok = modelPtr->getDataSet().saveTestTwoSet( name );
+	}
+
+	if ( !ok && err.empty() )
+	{
+		err = cap.text.str();
+		if ( err.empty() )
+			err = "could not save " + what;
+	}
+	return ok;
 }
 
 void openInBrowser( const string& url )
@@ -352,6 +420,44 @@ int run_gui( bool openBrowser )
 	{
 		lock_guard< mutex > lock( engineMutex );
 		res.set_content( handleTrain( req ), "application/json" );
+	} );
+
+	// Session artifacts: written into the workspace by the engine's own
+	//    save methods AND sent to the browser as a download
+	svr.Get( "/api/save/:what", []( const httplib::Request& req, httplib::Response& res )
+	{
+		lock_guard< mutex > lock( engineMutex );
+		string what = req.path_params.at( "what" );
+
+		if ( what == "report" ) // the last training run's captured output
+		{
+			if ( lastReport.empty() )
+			{
+				res.status = 400;
+				res.set_content( jsonMsg( false, "no training run yet" ),
+					"application/json" );
+				return;
+			}
+			res.set_header( "Content-Disposition",
+				"attachment; filename=report.txt" );
+			res.set_content( lastReport, "text/plain" );
+			return;
+		}
+
+		string name, err;
+		if ( !saveArtifact( what, name, err ) )
+		{
+			res.status = 400;
+			res.set_content( jsonMsg( false, err ), "application/json" );
+			return;
+		}
+
+		ifstream in( name.c_str(), ios::in | ios::binary );
+		stringstream bytes;
+		bytes << in.rdbuf();
+		res.set_header( "Content-Disposition",
+			( "attachment; filename=" + name ).c_str() );
+		res.set_content( bytes.str(), "text/plain" );
 	} );
 
 	// Port 0: the OS assigns a free port — no collisions, ever
