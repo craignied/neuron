@@ -12,3 +12,4 @@ build/
 tests/oracle/bin/
 tests/oracle/runs/
 tests/golden/runs/
+tests/tools/runs/

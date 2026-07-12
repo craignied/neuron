@@ -1,4 +1,0 @@
-Column 1: age
-Columns 2, 3: weight
-Column 4: smoker
-Column 5: outcome
