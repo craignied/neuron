@@ -7,7 +7,12 @@
 // Engine output is captured per-request through util::set_screen() and
 // returned to the page as text.
 
-#include "stdafx.h" // For MSVC, must be first!
+// httplib must be included BEFORE the engine headers: on Windows it pulls
+//    in the SDK headers, whose global 'byte' typedef becomes ambiguous with
+//    C++17 std::byte once the engine headers' using-directives are in scope
+#include "httplib.h"
+
+#include "stdafx.h" // For MSVC, must be first among the engine headers!
 
 #include <cstdlib>
 #include <fstream>
@@ -25,7 +30,6 @@
 #include "version.h"
 
 #include "gui_page.h" // generated from src/gui_page.html by CMake
-#include "httplib.h"
 
 using namespace std;
 
