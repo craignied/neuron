@@ -332,3 +332,40 @@ documentation itself warns that a realistic pre-call model should discard
 it. Two good exercises: re-groom without that column and compare ROC areas,
 or keep it and let **stepwise regression** (Use model → `9`, feeding it
 `bank_inputs.txt`) tell you which variables actually carry the signal.
+
+## 9. Deploying the model as a web calculator
+
+To deploy, the training session must save two files the walkthrough's
+earlier sessions skipped: the **scaling factors** (dataset menu option `8`,
+available right after the randomize) and the **network** (answer `yes` to
+the save prompt after training). With `--seed 42` the training is identical
+to §4 — the extra saves consume no randomness.
+
+Then one command turns them into a standalone page, using the committed
+label spec `bank_spec.txt` (written from `bank_key.txt`; every `*` marks a
+reference level from `--refcat`):
+
+```
+$ python3 tools/neuron2web.py \
+      --network bank_logistic_net.txt --scales bank_scales.txt \
+      --spec docs/datasets/bank-marketing/bank_spec.txt \
+      -o bank_calculator.html
+Deployed Binary logistic (42 inputs) to bank_calculator.html
+```
+
+`bank_calculator.html` is self-contained — form, scaling, weights, and
+forward pass all inline. Open it from disk, or upload it to any static web
+host and share the URL; the computation runs in the visitor's browser and
+no data leaves their machine. Add `--serve` to preview it locally on an
+OS-assigned port. Spot-check before publishing:
+
+```
+$ python3 tools/neuron2web.py --network bank_logistic_net.txt \
+      --scales bank_scales.txt --spec .../bank_spec.txt \
+      --eval "30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, ..."
+0.153694
+```
+
+(That's the first client in `bank.csv` — a 79-second October call, true
+outcome "no": 15.4%, correctly below threshold.) The spec format reference
+is `docs/deploy.md`.

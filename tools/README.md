@@ -48,3 +48,24 @@ bank-marketing data — see `docs/datasets/bank-marketing/WALKTHROUGH.md`):
   full k columns.
 
 Tested by `tests/tools/run_tools.sh` against committed expected outputs.
+
+## neuron2web.py
+
+The successor to neUROn2++'s `neuron2html.pl`: deploys a trained model
+(SimpleProp or Binary logistic) as **one self-contained HTML calculator** —
+form, scaling factors, weights, and forward pass all inline JavaScript.
+Open it from disk, email it, or upload it to any static web host; it runs
+entirely in the browser.
+
+```sh
+python3 tools/neuron2web.py --network net.txt --scales scales.txt \
+    --spec spec.txt -o calculator.html [--serve] [--eval "row"]
+```
+
+- Inputs: the engine's saved network + saved scaling factors + a label
+  spec in the legacy tag format (`N`/`C`/`B`/`K`/`O`/`R`, with `*` marking
+  a `--refcat` reference level). Full reference: `docs/deploy.md`.
+- `--serve` previews on 127.0.0.1 with an OS-assigned free port.
+- `--eval` prints the probability for one natural-unit input row — the
+  fixture test uses it to hold the tool's forward pass equal to the
+  engine's guesses on the committed XOR reference network.

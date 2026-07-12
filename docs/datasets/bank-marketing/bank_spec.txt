@@ -1,0 +1,21 @@
+# neuron2web.py label spec for the bank-marketing model of WALKTHROUGH.md.
+# The variables appear in groomed-column order (see bank_key.txt); starred
+# choices are the --refcat reference levels (shown in the menu, no column).
+N %% Age %% years
+C %% Job %% *admin. %% blue-collar %% entrepreneur %% housemaid %% management %% retired %% self-employed %% services %% student %% technician %% unemployed %% unknown
+C %% Marital status %% *divorced %% married %% single
+C %% Education %% *primary %% secondary %% tertiary %% unknown
+B %% Credit in default %% yes %% no
+N %% Average yearly balance %% euros
+B %% Housing loan %% yes %% no
+B %% Personal loan %% yes %% no
+C %% Contact type %% *cellular %% telephone %% unknown
+N %% Day of month of last contact %% day
+C %% Month of last contact %% *apr %% aug %% dec %% feb %% jan %% jul %% jun %% mar %% may %% nov %% oct %% sep
+N %% Last call duration %% seconds
+N %% Contacts during this campaign %% calls
+N %% Days since previous campaign contact (-1 = never) %% days
+N %% Contacts before this campaign %% calls
+C %% Previous campaign outcome %% *failure %% other %% success %% unknown
+O %% No subscription %% Term deposit subscription
+R %% Odds of subscription

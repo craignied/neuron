@@ -1,0 +1,5 @@
+# Label spec for the committed XOR reference network (tests/oracle/xor_net.txt)
+B %% Input A %% on (1) %% off (0)
+B %% Input B %% on (1) %% off (0)
+O %% XOR is false %% XOR is true
+R %% Odds that XOR is true

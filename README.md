@@ -114,10 +114,16 @@ simulation in `tests/binormal/check_az.cpp`.
   the signal-detection-theory (Wickens) basis of the statistical ROC area and
   how the engine implements it; `datasets/` holds sample datasets with READMEs
   (prostate-biopsy, ready to load; bank-marketing, a raw-data grooming example)
-- `tools/` — Python data-preparation utilities. **Standard library only** — they
+- `tools/` — Python utilities around the engine. **Standard library only** — they
   run on a bare `python3`, no pip installs or venv ever required (CI enforces
-  this on all three platforms). First tool: `mkdataset.py`, converting Excel
-  `.csv` exports into neuron-ready datasets with missing-value indicator columns.
+  this on all three platforms). `mkdataset.py` converts `.csv` exports into
+  neuron-ready datasets (delimiters, one-hot encoding, reference-category
+  coding, missing-value indicator pairs); `neuron2web.py` deploys a trained
+  model as a single self-contained HTML calculator you can open from disk or
+  post on any static web host (`docs/deploy.md`).
+- `AGENTS.md` — the operating manual for AI assistants: verified recipes that
+  take "I have a dataset" to a groomed file, a trained model, and a deployed
+  calculator.
 
 ## Status
 

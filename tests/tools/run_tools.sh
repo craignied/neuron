@@ -28,12 +28,39 @@ mkdir -p runs && cd runs
     --key ref_key.txt --inputs ref_inputs.txt -o ref_data.txt \
     ../sample_categorical.csv > ref_stdout.txt 2>&1
 
+# neuron2web.py: deploy the committed XOR reference network. The scaling
+# and guesses files were produced by the engine itself (raw2train on
+# docs/xor.csv; eta-0 pass over tests/oracle/xor_net.txt).
+"$PY" ../../../tools/neuron2web.py --network ../../oracle/xor_net.txt \
+    --scales ../xor_scales.txt --spec ../xor_spec.txt \
+    -o xor.html > xor_stdout.txt 2>&1
+
+# Cross-check the tool's forward pass against the engine's saved guesses
+# for all four XOR rows (max abs difference must be < 1e-6).
+{
+  while read -r outcome guess; do
+    [ -n "$guess" ] && echo "$guess"
+  done < ../xor_guesses.txt
+  for row in "0,0" "0,1" "1,0" "1,1"; do
+    "$PY" ../../../tools/neuron2web.py --network ../../oracle/xor_net.txt \
+        --scales ../xor_scales.txt --spec ../xor_spec.txt --eval "$row"
+  done
+} | "$PY" -c '
+import sys
+v = [float(x) for x in sys.stdin.read().split()]
+n = len(v) // 2
+worst = max(abs(a - b) for a, b in zip(v[:n], v[n:]))
+print(f"forward pass vs engine guesses: max |diff| = {worst:.2e}")
+sys.exit(0 if worst < 1e-6 else 1)
+' || { echo "FAIL: neuron2web forward pass disagrees with the engine" >&2; exit 1; }
+
 strip() { sed 's/\r$//' "$1"; }
 
 fail=0
 for f in data.txt key.txt inputs.txt stdout.txt \
          cat_data.txt cat_key.txt cat_inputs.txt cat_stdout.txt \
-         ref_data.txt ref_key.txt ref_inputs.txt ref_stdout.txt; do
+         ref_data.txt ref_key.txt ref_inputs.txt ref_stdout.txt \
+         xor.html xor_stdout.txt; do
     if [ $BLESS -eq 1 ]; then
         strip $f > ../expected_$f
         echo "blessed expected_$f"

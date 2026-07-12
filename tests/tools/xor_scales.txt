@@ -1,0 +1,5 @@
+Where x_norm = ( S * ( x - x_min ) ) + lbound,
+lbound = -0.9, and for each x, S =
+1.8 1.8 
+x_min = 
+0 0 
