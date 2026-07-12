@@ -185,3 +185,14 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   test `tests/tools/run_tools.sh` (--bless pattern) diffs 4 outputs against committed
   expected; output verified loadable by the engine (3x5 raw load). Windows note:
   scripts locate python3 OR python; output files written with newline='\n'.
+- **2026-07-13** — **Wickens ROC verified + documented.** Investigated
+  `code/C++/msvc/roc` (MFC app, 2001/2005): it IS the Wickens binormal Az method —
+  and the engine already contains it (`TwoSet::getStatROCarea`, cites Wickens
+  pp. 60-74; merged pre-2.6, engine copy is newer than the app's). New unit test
+  `tests/binormal/check_az.cpp` (ctest, no GSL): Gaussian populations with known
+  mu/sigma → engine Az matches Phi(dmu/sqrt(s0²+s1²)) to ~4 decimals incl. unequal
+  variance; runs in CI. Craig's theory notes adapted into `docs/roc_theory.md` with
+  an implementation-mapping + provenance section. Still to port from the roc app
+  when the GUI lands: ROCx/ROCy curve-point capture (for plotting). GUI decisions
+  so far: embedded server in binary (`neuron --gui`), bind port 0 (OS-assigned),
+  loopback only.

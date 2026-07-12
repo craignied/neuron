@@ -86,7 +86,9 @@ original neUROn2++ binary; see its README.
   from its release tarball and cross-checks the 3.0 engine against it
   (`verify_oracle.sh` requires numerically identical output)
 - `docs/` — the neUROn2++ documentation: `manifest.pdf` is the full manual,
-  `spin.html` the tutorial, `tex/` the LaTeX sources
+  `spin.html` the tutorial, `tex/` the LaTeX sources; `roc_theory.md` explains
+  the signal-detection-theory (Wickens) basis of the statistical ROC area and
+  how the engine implements it
 - `tools/` — Python data-preparation utilities. **Standard library only** — they
   run on a bare `python3`, no pip installs or venv ever required (CI enforces
   this on all three platforms). First tool: `mkdataset.py`, converting Excel
