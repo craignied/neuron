@@ -137,33 +137,41 @@ struct Capture
 	~Capture() { util::set_screen( cout ); }
 };
 
+// Resolve a file argument: prefer an uploaded multipart part (browsers hide
+//    paths, so the page sends the file's CONTENT), else a "path"-style field
+//    (curl, scripts). An upload is written into the server's directory and its
+//    on-disk name recorded in 'saved'. Returns "" (with 'err' set) on failure,
+//    or "" (err empty) when the field is simply absent.
+static string resolveFile( const httplib::Request& req, const string& fileField,
+	const string& pathField, string& saved, string& err )
+{
+	if ( req.has_file( fileField ) )
+	{
+		const auto& upload = req.get_file_value( fileField );
+		if ( upload.content.empty() ) { err = "the uploaded file is empty"; return ""; }
+		string p = safeBasename( upload.filename );
+		ofstream out( p.c_str(), ios::out | ios::trunc | ios::binary );
+		if ( !out.is_open() ) { err = "can't save the upload as " + p; return ""; }
+		out << upload.content;
+		out.close();
+		saved = p;
+		return p;
+	}
+	return param( req, pathField );
+}
+
 // --- Handlers --------------------------------------------------------------
 
 string handleLoad( const httplib::Request& req )
 {
-	string mode = param( req, "mode" ),
-		path = param( req, "path" ),
-		saved; // set when the page uploaded the file's content
+	string mode = param( req, "mode" ), savedTrain, savedTest, err;
 	unsigned nI = ( unsigned ) atol( param( req, "inputs" ).c_str() ),
 		nO = ( unsigned ) atol( param( req, "outputs" ).c_str() );
 	double fraction = atof( param( req, "fraction" ).c_str() );
 
-	// The page's file picker uploads the picked file's CONTENT (browsers
-	//    never reveal paths); save it into the server's directory and load
-	//    it from there. A "path" field (curl, scripts) still works.
-	if ( req.has_file( "file" ) )
-	{
-		const auto& upload = req.get_file_value( "file" );
-		if ( upload.content.empty() )
-			return jsonMsg( false, "the uploaded file is empty" );
-		path = safeBasename( upload.filename );
-		ofstream out( path.c_str(), ios::out | ios::trunc | ios::binary );
-		if ( !out.is_open() )
-			return jsonMsg( false, "can't save the upload as " + path );
-		out << upload.content;
-		out.close();
-		saved = path;
-	}
+	string path = resolveFile( req, "file", "path", savedTrain, err );
+	if ( !err.empty() )
+		return jsonMsg( false, err );
 
 	if ( path.empty() || !fileExists( path ) )
 		// Checked here because the engine's missing-file recovery prompts
@@ -189,6 +197,27 @@ string handleLoad( const httplib::Request& req )
 	{
 		ds->loadTrain( path );
 		ok = ds->trainLoaded();
+
+		// Optional matched, already-split test set (a pre-split pair like
+		//    BP40train.txt + BP40test.txt). Only meaningful in "train" mode;
+		//    "raw" makes its own split.
+		if ( ok )
+		{
+			string testPath = resolveFile( req, "testfile", "testpath", savedTest, err );
+			if ( !err.empty() )
+				return jsonMsg( false, err );
+			if ( !testPath.empty() )
+			{
+				if ( !fileExists( testPath ) )
+					return jsonMsg( false, "can't open test file: " + testPath );
+				ds->loadTest( testPath );
+				if ( !ds->testLoaded() )
+				{
+					string why = cap.text.str();
+					return jsonMsg( false, why.empty() ? "test set load failed" : why );
+				}
+			}
+		}
 	}
 
 	if ( !ok )
@@ -205,8 +234,13 @@ string handleLoad( const httplib::Request& req )
 	if ( ds->testLoaded() )
 		msg << ", " << ds->getNumTest() << " test exemplars";
 	msg << " loaded";
-	if ( !saved.empty() )
-		msg << " (copy saved as " << saved << " beside the server)";
+	if ( !savedTrain.empty() || !savedTest.empty() )
+	{
+		msg << " (saved beside the server:";
+		if ( !savedTrain.empty() ) msg << " " << savedTrain;
+		if ( !savedTest.empty() ) msg << " " << savedTest;
+		msg << ")";
+	}
 
 	dataPtr = std::move( ds );
 	modelPtr.reset(); // a new dataset invalidates any existing model

@@ -60,4 +60,13 @@ grep -q "Iteration" dl_report || fail "report download"
 curl -s "$URL/api/save/test_set" | grep -q '"ok":false' \
     || fail "test_set should refuse when no test set exists"
 
-echo "OK: GUI endpoints (version, page, load, model, train + ROC JSON, saves)"
+# A matched, pre-split train/test pair loads through one call (both uploads)
+curl -s -X POST "$URL/api/load" \
+    -F "file=@xor_discrete.set;filename=pair_train.set" \
+    -F "testfile=@xor_discrete.set;filename=pair_test.set" \
+    -F mode=train -F inputs=2 -F outputs=1 > pair.json
+grep -q '"ok":true' pair.json || fail "pre-split pair load"
+grep -q 'test exemplars' pair.json || fail "test set not loaded from the pair"
+[ -f pair_test.set ] || fail "uploaded test set not saved beside the server"
+
+echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC JSON, saves)"

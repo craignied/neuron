@@ -197,7 +197,12 @@ OS-assigned port.
 For a human who prefers pointing and clicking: `./build/neuron --gui`
 starts a local web page (127.0.0.1, OS-assigned port, URL printed; the
 browser opens automatically — `--no-browser` suppresses that) with the
-same load → model → train flow and a live ROC plot. **As an agent, keep
+same load → model → train flow and a live ROC plot. The dataset panel
+loads either a raw file (split by test fraction) or an **already-split
+training set** — and in the latter mode a second picker takes an optional
+**matched test set**, so a pre-split pair like
+`docs/datasets/prostate-biopsy/BP40train.txt` + `BP40test.txt` loads in one
+step and trains with a proper held-out test evaluation. **As an agent, keep
 using the scripted sessions of §2** — they are reproducible, capturable,
 and testable; suggest `--gui` to the user when they want to explore
 interactively. The GUI's file picker uploads the chosen file to the local

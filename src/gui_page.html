@@ -43,6 +43,10 @@ button { padding: .35rem .9rem; cursor: pointer; }
   <label id="fracbox">Test fraction <input class="num" type="number" id="fraction"
     value="0.25" min="0" max="0.9" step="0.05"></label>
 </div>
+<div class="row" id="testbox" style="display:none">
+  <label>Test set (optional) <input type="file" id="testfile"></label>
+  <span class="status">a matched, already-split held-out set &mdash; e.g. BP40test.txt</span>
+</div>
 <div class="row">
   <button onclick="loadData()">Load dataset</button><span class="status" id="dstatus"></span>
 </div>
@@ -117,7 +121,9 @@ async function api(path, params) {
   return r.json();
 }
 $("mode").onchange = () => {
-  $("fracbox").style.display = $("mode").value === "raw" ? "" : "none";
+  const raw = $("mode").value === "raw";
+  $("fracbox").style.display = raw ? "" : "none";
+  $("testbox").style.display = raw ? "none" : "";
 };
 $("mtype").onchange = () => {
   $("hiddenbox").style.display = $("mtype").value === "simpleprop" ? "" : "none";
@@ -134,6 +140,8 @@ async function loadData() {
   fd.append("inputs", $("inputs").value);
   fd.append("outputs", $("outputs").value);
   fd.append("fraction", $("fraction").value);
+  if ($("mode").value === "train" && $("testfile").files.length)
+    fd.append("testfile", $("testfile").files[0]);
   const r = await fetch("/api/load", { method: "POST", body: fd });
   const j = await r.json();
   setStatus("dstatus", j.ok, j.message);

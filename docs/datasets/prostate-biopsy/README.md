@@ -51,6 +51,11 @@ With enough exemplars this is where the statistical ROC report (binormal Az with
 confidence interval, plus the goodness-of-fit statistics) actually fires — see
 `docs/roc_theory.md`. For reproducible training, add `--seed N`.
 
+**In the GUI** (`./build/neuron --gui`): set the dataset mode to *already a
+training set*, pick `BP40train.txt` as the data file and `BP40test.txt` in the
+*Test set (optional)* picker, set Inputs = 11, and Load — the pair loads
+together (218 train + 144 test) so training reports a held-out test ROC.
+
 ## The 11 input columns
 
 The eleven columns group into seven clinical variables (`psa_defs.txt`:
