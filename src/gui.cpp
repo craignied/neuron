@@ -85,12 +85,22 @@ string jsonNumbers( const vector< double >& v )
 //    fills the ROCx/ROCy plot vectors (Phase 3.3)
 string jsonROCSeries( TwoSet& t )
 {
-	double area = t.getTrapROCarea();
+	double area = t.getTrapROCarea(); // also fills the curve points and SE
+	double se = t.getTrapSE();        // Hanley-McNeil SE (matches the plotted area)
+	double acc = t.getClassAcc();
+	// sensitivity/specificity throw DivisionByZero if a class is empty
+	double sens = -1, spec = -1;
+	try { sens = t.getSens(); } catch ( ... ) { sens = -1; }
+	try { spec = t.getSpec(); } catch ( ... ) { spec = -1; }
 	ostringstream out;
 	out.precision( 6 );
 	out << "{\"x\":" << jsonNumbers( t.getROCx() )
 		<< ",\"y\":" << jsonNumbers( t.getROCy() )
-		<< ",\"area\":" << area << "}";
+		<< ",\"area\":" << area
+		<< ",\"se\":" << se
+		<< ",\"acc\":" << acc
+		<< ",\"sens\":" << sens
+		<< ",\"spec\":" << spec << "}";
 	return out.str();
 }
 
@@ -317,6 +327,26 @@ string handleModel( const httplib::Request& req )
 	return jsonMsg( false, "unknown model type: " + type );
 }
 
+string handleRandomize( const httplib::Request& req )
+{
+	string seed = param( req, "seed" );
+
+	if ( !modelPtr )
+		return jsonMsg( false, "create a model first" );
+	Network* net = dynamic_cast< Network* >( modelPtr.get() );
+	if ( !net )
+		return jsonMsg( false, "this model type has no trainable weights" );
+
+	if ( !seed.empty() )
+		util::set_seed( ( unsigned ) atol( seed.c_str() ) );
+	net->randomize();
+	lastTrainError = -1; // fresh weights invalidate any prior training
+
+	return jsonMsg( true, seed.empty()
+		? "weights randomized \xe2\x80\x94 the next Train starts fresh"
+		: "weights randomized from the seed \xe2\x80\x94 the next Train starts fresh" );
+}
+
 string handleTrain( const httplib::Request& req )
 {
 	unsigned algorithm = ( unsigned ) atol( param( req, "algorithm" ).c_str() ),
@@ -335,7 +365,15 @@ string handleTrain( const httplib::Request& req )
 	Network* net = dynamic_cast< Network* >( modelPtr.get() );
 	Iterative* iter = dynamic_cast< Iterative* >( modelPtr.get() );
 
-	net->randomize();
+	// Training does NOT re-randomize: a second Train continues from the
+	//    current weights (pick up where it left off). Only a model that has
+	//    never had weights set gets randomized here, so the first Train after
+	//    "Create model" just works; use /api/randomize to start over.
+	//    "continued" (for the message) means previously *trained*, not merely
+	//    randomized -- lastTrainError is -1 after model creation or randomize.
+	bool continued = ( lastTrainError >= 0 );
+	if ( !net->getWeightsSet() )
+		net->randomize();
 	iter->setMaxIterations( maxIter );
 	net->setTrainingType( algorithm - 1 );
 
@@ -366,7 +404,8 @@ string handleTrain( const httplib::Request& req )
 
 	ostringstream msg;
 	msg.precision( 6 );
-	msg << "trained; final error " << finalError;
+	msg << ( continued ? "continued training; final error "
+		: "trained; final error " ) << finalError;
 
 	lastReport = cap.text.str(); // downloadable afterwards as report.txt
 	lastTrainError = finalError; // baseline for stepwise regression
@@ -544,6 +583,12 @@ int run_gui( bool openBrowser )
 	{
 		lock_guard< mutex > lock( engineMutex );
 		res.set_content( handleModel( req ), "application/json" );
+	} );
+
+	svr.Post( "/api/randomize", []( const httplib::Request& req, httplib::Response& res )
+	{
+		lock_guard< mutex > lock( engineMutex );
+		res.set_content( handleRandomize( req ), "application/json" );
 	} );
 
 	svr.Post( "/api/train", []( const httplib::Request& req, httplib::Response& res )

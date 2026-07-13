@@ -204,7 +204,12 @@ training set** — and in the latter mode a second picker takes an optional
 `docs/datasets/prostate-biopsy/BP40train.txt` + `BP40test.txt` loads in one
 step and trains with a proper held-out test evaluation. The input count is
 read from the file (columns minus the single output), so there is nothing to
-type — neuron is a one-output system throughout. **As an agent, keep
+type — neuron is a one-output system throughout. **Train continues from the
+current weights**, so clicking Train again runs more iterations from where it
+left off; **Randomize weights** (honoring the seed) resets to a fresh random
+start. After each run the key results — ROC area with its 95% CI, accuracy,
+sensitivity/specificity for train and test — appear beside the ROC plot, with
+the full statistical report below. **As an agent, keep
 using the scripted sessions of §2** — they are reproducible, capturable,
 and testable; suggest `--gui` to the user when they want to explore
 interactively. The GUI's file picker uploads the chosen file to the local

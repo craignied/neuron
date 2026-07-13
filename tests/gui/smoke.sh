@@ -50,6 +50,20 @@ curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=100000&seed=42" \
     > train.json
 grep -q '"ok":true' train.json || fail "train endpoint"
 grep -q '"area":' train.json || fail "no ROC area in train response"
+grep -q '"acc":' train.json || fail "no structured stats (acc) in train response"
+grep -q '"se":' train.json || fail "no ROC SE in train response"
+
+# Train continues from the current weights: a second Train reports so
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=1&seed=42" \
+    | grep -q 'continued training' || fail "second train should continue, not restart"
+# Randomize weights explicitly (with and without a seed), then Train restarts
+curl -s -X POST "$URL/api/randomize" -d "seed=7" \
+    | grep -q '"ok":true' || fail "randomize endpoint (seeded)"
+curl -s -X POST "$URL/api/randomize" -d "" \
+    | grep -q '"ok":true' || fail "randomize endpoint (no seed)"
+# Re-train (fresh weights just set count as continued) to restore trained state
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=100000&seed=42" \
+    | grep -q '"ok":true' || fail "train after randomize"
 
 # Stepwise regression on the trained network (XOR: 2 inputs -> 2 variables)
 curl -s -X POST "$URL/api/regress" \

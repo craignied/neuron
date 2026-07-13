@@ -20,7 +20,15 @@ button { padding: .35rem .9rem; cursor: pointer; }
           font: .78rem/1.35 ui-monospace, monospace; white-space: pre;
           overflow-x: auto; max-height: 28rem; overflow-y: auto; display: none; }
 #rocbox { display: none; background: #fff; border: 1px solid #ddd; border-radius: 8px;
-          padding: 1rem; margin-bottom: 1rem; }
+          padding: 1rem; margin-bottom: 1rem; gap: 1.5rem; align-items: flex-start;
+          flex-wrap: wrap; }
+#rocstats { flex: 1; min-width: 15rem; font-size: .9rem; }
+#rocstats h3 { font-size: .95rem; margin: .2rem 0 .6rem; }
+#rocstats .sblk { margin-bottom: 1rem; }
+#rocstats .sname { font-weight: 600; margin-bottom: .15rem; }
+#rocstats .big { font-size: 1.15rem; font-weight: 600; }
+#rocstats .ci { color: #777; }
+#rocstats .muted { color: #777; }
 .row { margin: .45rem 0; }
 .foot { margin-top: 1.2rem; font-size: .75rem; color: #777; }
 </style>
@@ -75,9 +83,13 @@ button { padding: .35rem .9rem; cursor: pointer; }
   <label>Max iterations <input class="num" type="number" id="maxiter" value="2000"
     min="1"></label>
   <label>Seed <input class="num" type="number" id="seed" placeholder="clock"></label>
+  <button id="randbtn" onclick="randomizeWeights()">Randomize weights</button>
   <button id="trainbtn" onclick="train()">Train</button>
   <span class="status" id="tstatus"></span>
 </div>
+<div class="row"><span class="status">Train picks up from the current weights,
+so clicking it again continues for more iterations. Randomize weights (with
+the seed, if set) to start over from a fresh random point.</span></div>
 </fieldset>
 
 <fieldset>
@@ -120,6 +132,7 @@ deploy the model; training/test sets and guesses document the run.</span></div>
 
 <div id="rocbox">
   <canvas id="roc" width="440" height="440"></canvas>
+  <div id="rocstats"></div>
 </div>
 <pre id="report"></pre>
 
@@ -169,6 +182,13 @@ async function setModel() {
     hidden: $("hidden").value });
   setStatus("mstatus", j.ok, j.message);
 }
+async function randomizeWeights() {
+  $("randbtn").disabled = true;
+  try {
+    const j = await api("/api/randomize", { seed: $("seed").value });
+    setStatus("tstatus", j.ok, j.message);
+  } finally { $("randbtn").disabled = false; }
+}
 async function train() {
   $("trainbtn").disabled = true;
   setStatus("tstatus", true, "training…");
@@ -177,8 +197,25 @@ async function train() {
       maxiter: $("maxiter").value, seed: $("seed").value });
     setStatus("tstatus", j.ok, j.message);
     if (j.output) { $("report").textContent = j.output; $("report").style.display = "block"; }
-    if (j.ok && j.roc) drawROC(j.roc);
+    if (j.ok && j.roc) { drawROC(j.roc); renderStats(j.roc); }
   } finally { $("trainbtn").disabled = false; }
+}
+function renderStats(roc) {
+  const pct = v => (v < 0 ? "n/a" : (v * 100).toFixed(1) + "%");
+  let html = "<h3>Results at a glance</h3>";
+  for (const [name, s] of [["Training set", roc.train], ["Test set", roc.test]]) {
+    if (!s) continue;
+    const lo = Math.max(0, s.area - 1.96 * s.se), hi = Math.min(1, s.area + 1.96 * s.se);
+    html += `<div class="sblk"><div class="sname">${name}</div>`
+      + `<div><span class="big">ROC ${s.area.toFixed(3)}</span> `
+      + `<span class="ci">95% CI ${lo.toFixed(3)}&ndash;${hi.toFixed(3)}</span></div>`
+      + `<div>Accuracy ${pct(s.acc)}</div>`
+      + `<div class="muted">Sensitivity ${pct(s.sens)} &middot; Specificity ${pct(s.spec)}</div>`
+      + `</div>`;
+  }
+  html += `<div class="muted">Trapezoidal area, Hanley&ndash;McNeil CI. `
+    + `Full statistics in the report below.</div>`;
+  $("rocstats").innerHTML = html;
 }
 async function regress() {
   $("regressbtn").disabled = true;
@@ -191,7 +228,7 @@ async function regress() {
   } finally { $("regressbtn").disabled = false; }
 }
 function drawROC(roc) {
-  $("rocbox").style.display = "block";
+  $("rocbox").style.display = "flex";
   const c = $("roc"), g = c.getContext("2d");
   const M = 45, W = c.width - M - 15, H = c.height - M - 15;
   const X = f => M + f * W, Y = f => 15 + (1 - f) * H;
