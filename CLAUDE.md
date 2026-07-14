@@ -312,7 +312,135 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   cleanly via neuron2web.py (0.118488 for the known-no first client). smoke.sh
   covers saves + the no-test-set refusal.
 
-## ROADMAP (agreed with Craig 2026-07-13, pre-compaction; Phase 2 deployment added 2026-07-13)
+- **2026-07-14 (ROADMAP 2 planned)** — Session spent in plan mode; nothing implemented
+  yet. Craig set five priorities: (1) GUI overhaul — drop the log pane, surface ALL stats
+  beside the ROC plot, realtime error-vs-iteration chart (dashboard-card style per his
+  DQN dashboard screenshot); (2) auto algorithm selection (probe GD/CGD/Shanno, pick,
+  report); (3) plateau auto-stop; (4) automated OBD hidden-layer sizing (hybrid
+  grow→prune, Craig's choice); (5) new optimizers from the literature (Rprop/Adam/
+  L-BFGS/LM; Muon experimental). Key decision: **CLI menus sunset as the human driver**
+  — GUI for humans, HTTP API for LLMs/scripts (curl); menus frozen but working, goldens
+  stay byte-identical. Full approved plan → ROADMAP 2 below. Exploration verified:
+  train() has no hook, screenPtr is a process-global (thread_local fix planned),
+  Wald/condNum/confusion counts are print-only today, setHidden is destructive.
+  Phase 1a is on the session task list, not started.
+
+## ROADMAP 2 (agreed with Craig 2026-07-14) — training automation & GUI overhaul
+
+Plan-mode approved 2026-07-14. Work the phases in order; each lands independently with
+tests green. **Task #1 (Phase 1a) is already on the session task list — start there.**
+
+**Decisions made with Craig:**
+- **OBD strategy: hybrid** — grow until overlearning (test diverging from train), prune
+  back by saliency, confirm.
+- **CLI menus are sunset as the human driver.** The GUI is the human interface; the
+  **HTTP API is the permanent headless/LLM access path** (curl, documented in AGENTS.md).
+  Menus keep working unchanged for now (goldens byte-identical) but get no new features.
+- UI visual reference: Craig's DQN dashboard (screenshot 2026-07-14) — white cards with
+  titled live line charts, big current-value readout, big-number stat tiles, status chip.
+
+**Standing constraints:** engine features UI-agnostic (engine → HTTP API → page); zero new
+dependencies; goldens/oracle/smoke green each phase; AGENTS.md updated in the same commit
+as any API change. Invoke the `dataviz` skill before writing chart code (Phase 1b).
+
+### Architecture decisions (apply across phases)
+
+- **Async training** (enabler for everything realtime): add `Iterative::Observer`
+  (`onIteration(iteration, setError) → bool`, false = stop) called at the *bottom* of the
+  train loop after all existing stop checks — no-observer runs bit-identical (goldens
+  safe). `StopReason` enum + `getStopReason()`, set at each existing `break` site (zero
+  output change). **`Iterative::copy()` must null the observer** (clones must not drive
+  GUI buffers). `Network::sampleTestError(stride)` mirrors reportAccuracy's test loop;
+  GUI observer samples on a wall-clock schedule (≥250 ms apart, ≤~1000 exemplars/sample).
+  gui.cpp `TrainJob`: worker `std::thread`, `atomic<bool> cancel`, `progressMutex`-guarded
+  decimated series (cap 2000 points, halve+double-stride when full). Worker does NOT hold
+  `engineMutex` while training; `job.running` (toggled under `engineMutex`) gates every
+  mutating handler → HTTP 409 `{"ok":false,...,"busy":true}`, no queueing.
+  `POST /api/train` stays **blocking by default** (smoke.sh contract intact); page passes
+  `async=1` → returns immediately. New: `GET /api/train/status` (poll 400 ms),
+  `POST /api/train/stop`. Cancellation falls through to the normal epilogue
+  (reportAccuracy, logs, lastTrainError) → a cancelled run is a completed run,
+  `stopReason:"cancelled"`. **Race fix: make `screenPtr` `thread_local`**
+  (utility.cpp:355) — CLI unchanged; each request thread + worker get independent
+  Captures; extend tests/capture with a two-thread assertion. Rule: any new engine
+  thread must set its own screen redirection first.
+- **Stats surfacing** (print-only → getters; printed bytes identical): TwoSet
+  `getTP/getTN/getFP/getFN`; Logistic `Bstderr`/`WaldP` promoted to members (+ copy()) with
+  getters; Network `reportCondNum` split into `computeCondNum()` + members/getters +
+  identical prints. gui.cpp `jsonStatsSeries(TwoSet&)` — **every stat individually
+  try/caught → null** (binormal/K-S/H-L/sens/spec throw on degenerate sets). `stats`
+  object added to train JSON (additive; `roc` kept verbatim) + new `GET /api/stats`
+  (recompute w/o retraining; 409 while training). Shape: per-set `{n, confusion{tp,tn,
+  fp,fn}, acc, sens, spec, pvp, pvn, trap{area,se}, binormal{az,se,p,chi2}, ks{d,p},
+  pearsonP, hlP}` + `logistic{condNumber, coefficients[{input,beta,se,waldP}]}`.
+- **Auto algorithm** (engine-side): new `src/netclone.{h,cpp}` `cloneNetwork()` — the
+  RegressNet::copy_network typeid dispatch generalized (refactor RegressNet to use it;
+  pure refactor, goldens hold). New `src/autoalgo.{h,cpp}` `pick(start, budgetMs,
+  cancel)`: clone ×3 from identical weights, set trainingType per clone AFTER copying,
+  force `setBatchEpoch(true)` for CGD/Shanno probes, **equal wall-clock budget (default
+  750 ms/probe)** via a small Observer; probes train into a discard stream, then one
+  compact decision summary via `util::screen()`. Winner = lowest final training error
+  (NaN/diverged last; tie → simpler algorithm). **Adopt the winning clone** (swap into
+  modelPtr; probe progress kept) and continue training to the user's maxiter. API:
+  `algorithm=auto`; JSON `autoAlgo{selected, selectedName, probes[]}`.
+- **Plateau auto-stop**: new header-only `src/plateau.h` `PlateauDetector(window, tol,
+  patience)` — two-window moving-average comparison; relative improvement < tol = strike
+  (flat OR rising both count); patience consecutive strikes → stop. Sawtooth robustness:
+  `W_eff = max(window, 2·plateauPeriodHint())`, Network overrides hint to `df()`
+  (CGD/Shanno restart period). Defaults 100 / 1e-4 / 3. New flag family in Iterative,
+  **default OFF** → goldens untouched; distinct "The error plateaued…" line;
+  `STOP_PLATEAU`. API: `autostop=1` (+ `autostop_tol`, `autostop_window`); JSON
+  `stopReason` string on every result.
+- **OBD hybrid driver**: SimpleProp `growHidden(extra)` (new units: small random hidden
+  weights, **zero outgoing weights** → function unchanged at growth = warm start),
+  `shrinkHidden(keep)`, `hiddenSaliency()` = `|oW[j]|·std(hO_j over train set)`. Clear
+  `stackG/lastG/lastF` on resize; `weightsSetFlag` stays true. New `src/obd.{h,cpp}`
+  `ObdDriver` (engine-side, RegressNet-style; **requires a test set**, refuse otherwise):
+  optional autoalgo probe once → GROW from h=2 by 1 (each size: plateau-stop forced on +
+  iterBudget cap — features 3+4 compose), overlearning = test error above
+  `bestTestErr·(1+riseTol)` for 2 consecutive sizes while train error non-increasing →
+  PRUNE from best net: remove argmin saliency, brief confirm retrain, accept within
+  pruneTol else restore and stop. Emits size-vs-metrics table into the report. API:
+  `POST /api/obd` (async-only, shared job machinery; result `selectedHidden`, `history[]`
+  + normal output/roc/stats).
+- **Page overhaul**: report `<pre>` **deleted** (report stays on disk +
+  `/api/save/report`); full stats panel (tiles + 2×2 confusion tables + coefficient
+  table) beside the ROC canvas; realtime error-vs-iteration canvas (log-y, train +
+  sampled test); Train button becomes Start/Stop toggle; OBD button + size-vs-error chart.
+
+### Phases
+- **1a — stats getters + full stats panel** (training still blocking). Files: twoset,
+  logistic, network, gui.cpp, gui_page.html. Smoke asserts `stats`/`confusion`/`waldP`/
+  `condNumber`; `/api/stats` round-trip; goldens byte-identical through print refactors.
+- **1b — async training + realtime graph**. Files: utility.cpp (thread_local),
+  iterative (Observer/StopReason), network (sampleTestError), gui.cpp (TrainJob, 409,
+  async=1, status/stop), gui_page.html. Smoke: existing lines unchanged + async
+  poll-to-done, 409 busy, stop → `"cancelled"`; capture ctest two-thread assertion.
+- **2 — auto algorithm**. New netclone + autoalgo; regressnet refactor. Smoke:
+  `algorithm=auto` → `autoAlgo` w/ 3 probes + `Selected` in report; goldens hold.
+- **3 — plateau auto-stop**. New plateau.h + tests/plateau ctest (4 synthetic traces:
+  improving decay no-trigger, decay-then-flat trigger, flat sawtooth w/ window ≥2p
+  trigger, sawtooth+slow-decay no-trigger). Smoke `autostop=1` → `stopReason`. Also
+  document (AGENTS.md) the pre-existing quirk: gradMax stop only refreshes on print
+  iterations — leave as-is.
+- **4 — OBD**. simpleprop grow/shrink/saliency + obd driver + `/api/obd` +
+  tests/obd ctest (grow-with-zero-oW → `forward()` bit-identical; grow-then-shrink-back
+  restores outputs; zeroed unit saliency 0). Smoke: raw load fraction=0.25 → obd →
+  `selectedHidden`+`history`; refusal without test set.
+- **5 (later) — new training algorithms from the literature**: Rprop (ideal full-batch),
+  Adam, L-BFGS (`gsl_multimin_fdfminimizer_vector_bfgs2`), optional Levenberg–Marquardt;
+  Muon = experimental novel candidate (2026 tabular-MLP benchmark, arXiv 2604.15297).
+  Slot in as trainingType 3+ in `Network::engine` dispatch; runHeader naming extended;
+  autoalgo::pick iterates the extended list automatically; batch-only methods force
+  batchEpochFlag like CGD/Shanno probes.
+
+### Verification (end of every phase)
+Zero-warning build → `tests/golden/run_golden.sh` byte-identical → `tests/gui/smoke.sh`
+(extended per phase) → `ctest` → `tests/oracle/verify_oracle.sh` (local) → live
+`neuron --gui` click-through on the bank dataset. AGENTS.md + this file updated in the
+same commits.
+
+## ROADMAP 1 (agreed with Craig 2026-07-13) — ALL FOUR PHASES DONE, kept for reference
 
 Work these in order; each phase lands independently with tests + CI green.
 
