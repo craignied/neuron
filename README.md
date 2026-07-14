@@ -80,6 +80,42 @@ The engine is C++17 with no dependencies beyond GSL — it builds anywhere those
 > before configuring (`rm -rf build`). CMake caches the absolute source path and
 > refuses to reuse a cache created at a different location.
 
+## Training algorithms
+
+Every gradient-trained model — the feed-forward neural nets (SimpleProp, BareProp,
+BackProp) and binary logistic regression — can be trained by any of **three
+optimization algorithms**, offered at train time as a menu (and as `algorithm` 1–3
+in the GUI). All three minimize the same error over the same weights; they differ
+only in how each iteration chooses its search direction. (The DFA and stepwise
+models are not trained by this trio.)
+
+1. **Canonical backpropagation (gradient descent)** — textbook backprop: step
+   directly downhill along the negative gradient, scaled by the step size. Cheapest
+   per iteration and the most robust in practice; the workhorse.
+2. **Conjugate gradient descent (CGD)** — each direction is the negative gradient
+   plus a correction from the previous direction, so successive steps stay conjugate
+   (Golden pp. 221–222). Fewer *iterations* on well-behaved problems, but more work
+   per iteration.
+3. **Shanno's algorithm** — a memoryless quasi-Newton method that approximates
+   curvature from the last gradient/direction pair, without storing a full Hessian
+   (Golden pp. 217–218). Strongest convergence per iteration when it works, most
+   expensive per iteration.
+
+**Batch/epoch training is required for CGD and Shanno.** Both assume a true (batch)
+gradient accumulated over the whole training set; on an online/per-exemplar update
+their conjugacy and curvature estimates are meaningless. The engine warns you if you
+select either without epoch training on. Canonical gradient descent is fine either
+way.
+
+**Fewer iterations is not less wall-clock, and can be worse.** The per-iteration cost
+of CGD and Shanno (line searches, automatic step-size selection) is high, and their
+step control can go unstable on large datasets. On the bank-marketing walkthrough,
+canonical GD reached the logistic MLE in about 12 seconds, while **uncapped CGD ran
+80 minutes and ended worse than useless** (test ROC 0.57, step-size instability,
+"Numerical out of bounds"). The practical recipe: **cap the iteration count** and
+prefer canonical gradient descent unless you have a specific reason not to. See
+`docs/datasets/bank-marketing/WALKTHROUGH.md` for the full comparison.
+
 ## Testing
 
 Every push is built and tested on macOS, Linux, and Windows by the GitHub Actions
