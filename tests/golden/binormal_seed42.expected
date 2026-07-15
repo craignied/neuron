@@ -245,17 +245,17 @@ Known T:           2            42
 Known F:           0            98
 ----------------------------------
 By statistical method, Searching for best p:
-ROC area = 0.618420
-95% CI = 0.512846 - 0.721280 (SE = 0.052367, 2000 bootstrap resamples)
-Chi-squared = 0.580702
-p = 9.990941e-01 (closer to 1 is better)
-Bin size = 15 Number bins = 9
+ROC area = 0.620527
+95% CI = 0.515316 - 0.720378 (SE = 0.050920, 2000 bootstrap resamples)
+Chi-squared = 15.092772
+p = 1.000000e+00 (closer to 1 is better)
+Operating points fitted = 127
 Searching for best AUC:
-ROC area = 0.620688
-95% CI = 0.517278 - 0.727405 (SE = 0.052119, 2000 bootstrap resamples)
-Chi-squared = 0.336512
-p = 9.968995e-01 (closer to 1 is better)
-Bin size = 19 Number bins = 7
+ROC area = 0.620527
+95% CI = 0.515316 - 0.720378 (SE = 0.050920, 2000 bootstrap resamples)
+Chi-squared = 15.092772
+p = 1.000000e+00 (closer to 1 is better)
+Operating points fitted = 127
 By trapezoidal method, ROC area = 0.623609
 95% CI = 0.521339 - 0.725878 (SE = 0.052178, Hanley-McNeil)
 Number thresholds = 100
@@ -278,17 +278,17 @@ Known T:           0            15
 Known F:           0            32
 ----------------------------------
 By statistical method, Searching for best p:
-ROC area = 0.675294
-95% CI = 0.488622 - 0.813508 (SE = 0.084412, 2000 bootstrap resamples)
-Chi-squared = 0.770333
+ROC area = 0.669981
+95% CI = 0.486106 - 0.814210 (SE = 0.085369, 2000 bootstrap resamples)
+Chi-squared = 3.741584
 p = 1.000000e+00 (closer to 1 is better)
-WARNING: DATA WAS NOT BINNED
+Operating points fitted = 37
 Searching for best AUC:
-ROC area = 0.675294
-95% CI = 0.488622 - 0.813508 (SE = 0.084412, 2000 bootstrap resamples)
-Chi-squared = 0.770333
+ROC area = 0.669981
+95% CI = 0.486106 - 0.814210 (SE = 0.085369, 2000 bootstrap resamples)
+Chi-squared = 3.741584
 p = 1.000000e+00 (closer to 1 is better)
-WARNING: DATA WAS NOT BINNED
+Operating points fitted = 37
 By trapezoidal method, ROC area = 0.689583
 95% CI = 0.519083 - 0.860084 (SE = 0.086990, Hanley-McNeil)
 Number thresholds = 47

@@ -183,12 +183,17 @@ isosensitivity contours are bowed — and the bias grows when points are few or 
 A_z is preferable (p. 72). The trapezoidal area is retained because its variance
 estimator rests on different assumptions, making agreement between the two meaningful.
 
-**Known limitation (until ROADMAP 3 Phase 2):** the z-points are grouped into
-fixed-count bins whose within-bin standard deviations serve as error bars — a device
-with no counterpart in Wickens, which measures bin width rather than sampling error.
-A_z therefore depends slightly on the bin count (0.616 at 9 bins vs 0.618 at 5 bins on
-the low-birth-weight data). Quote the bin count with the area. The fix is Wickens' own
-binomial error bar (Eq. 11.2 + 11.3, p. 202), after which binning becomes unnecessary.
+**Validated against the literature.** Wickens' own worked example (Table 5.1, p. 84 —
+rating data he analyses by hand through chapter 5, publishing A_z = 0.784 on p. 90) is a
+ctest: the engine answers **0.7839**. Each operating point carries Wickens' binomial
+error bar, σ²_z ≈ p(1−p)/N ÷ φ²(z) (Eq. 11.2 + 11.3, p. 202), and the z-ROC line is
+fitted to the distinct operating points directly — there is no binning.
+
+Until 2026-07-15 the z-points were grouped into fixed-count bins whose within-bin
+standard deviations served as error bars, a device with no counterpart in Wickens that
+measured bin width rather than sampling error. On Wickens' data that was worth 0.011 of
+A_z — as much as the whole confidence interval — with the arbitrary bin count deciding
+the answer. It is gone.
 
 ## Layout
 

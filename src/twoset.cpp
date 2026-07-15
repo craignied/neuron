@@ -49,6 +49,7 @@ void TwoSet::initialize()
 	// Zero the cached statistic values so no path can ever print
 	//    uninitialized memory (2.x left these uninitialized)
 	statP = statChi2 = KSD = KSP = PKX2P = HLX2P = 0;
+	statPoints = 0;
 }
 
 // Copy constructor
@@ -86,6 +87,7 @@ void TwoSet::copy( const TwoSet& rhs )
 	bootB = rhs.bootB;
 	statP = rhs.statP;
 	statChi2 = rhs.statChi2;
+	statPoints = rhs.statPoints;
 	loadedFlag = rhs.loadedFlag;
 	thresholdFlag = rhs.thresholdFlag;
 	nBinFlag = rhs.nBinFlag;
@@ -570,83 +572,75 @@ bool TwoSet::checkDiscrete( const Matrix< double >& M ) const
 // Statistically calculates and returns the ROC area
 // See Wickens, Thomas D., Elementary Signal Detection Theory,
 // Oxford University Press, New York, NY 2002, pp. 60-74
+// Wickens' binomial error bar on the z scale: the rate p is binomial with
+//    variance p(1-p)/N (Eq. 11.2, p. 202), and the delta method carries it
+//    through the z transform (Eq. 11.3, p. 202), dividing by the squared normal
+//    density at z. Points near 0 or 1 have a tiny density and so a huge error
+//    bar -- which is correct, and is exactly the down-weighting the within-bin
+//    standard deviation could never express.
+static double zErrorBar( double p, unsigned N )
+{
+	const double INV_SQRT_2PI = 0.3989422804014327; // 1/sqrt(2*pi)
+	double z = stats::invZarea( p );
+	double density = INV_SQRT_2PI * exp( -0.5 * z * z );
+	return sqrt( p * ( 1 - p ) / N ) / density;
+}
+
 double TwoSet::getStatROCarea()
  {
 	double rocArea = 0;
 
-	if ( !loadedFlag ) // a Matrix must have been loaded
+	if ( !loadedFlag )
 		util::screen() << "I'm sorry, but a TwoSet Matrix has not yet been defined." << endl;
-
 	else
 	{
 		try
 		{
-			// First, make zH (hit, sens) and zF (false alarm, 1-spec) vectors
-			vector< double > zH, zF, real = A.col( 1 ); // extract the "real" column
-			vector< double >::iterator pR; // to iterate through real vector
-			sort( real.begin(), real.end() ); // order the "real" column
-			reverse( real.begin(), real.end() ); // to make x- and y-axis below go from 0->1 rather than 1->0
+			unsigned n0 = 0, n1 = 0; // class sizes: the binomial denominators
+			for ( unsigned row = 0; row < A.rows(); row++ )
+				if ( A( row, 0 ) == 0 ) n0++; else n1++;
+
+			vector< double > zH, zF, sH, sF, real = A.col( 1 );
+			vector< double >::iterator pR;
+			sort( real.begin(), real.end() );
+			reverse( real.begin(), real.end() );
+
+			double previous = 0; bool havePrevious = false;
 			for ( pR = real.begin(); pR != real.end(); pR++ )
 			{
-				calculate( *pR ); // get tp, fp, tn, fn from vector of "reals"
-				double F = static_cast< double >( fp ) / ( tn + fp ); // x-axis, "false alarm rate", 1 - specificity
-				double H = static_cast< double >( tp ) / ( tp + fn ); // y-axis, "hit rate", sensitivity
-				// Convert to z coordinates only if >0 && <1
+				// One point per DISTINCT threshold. Repeating a tied score's point
+				//    once per exemplar does not add information -- it is the same
+				//    operating point -- it just replicates it in the fit.
+				if ( havePrevious && *pR == previous ) continue;
+				previous = *pR; havePrevious = true;
+
+				calculate( *pR );
+				double F = static_cast< double >( fp ) / ( tn + fp );
+				double H = static_cast< double >( tp ) / ( tp + fn );
 				if ( ( F != 0 ) && ( H != 0 ) && ( F != 1 ) && ( H != 1 ) )
 				{
 					zF.push_back( stats::invZarea( F ) );
 					zH.push_back( stats::invZarea( H ) );
+					sF.push_back( zErrorBar( F, n0 ) );
+					sH.push_back( zErrorBar( H, n1 ) );
 				}
 			}
 
-			if ( zF.size() < binThresh ) // not enough data to bin
-			{
-				// Model the zH vs zF line
-				XY line( zF, zH );
-				rocArea = stats::Zarea( line.a() / sqrt( 1 + ( line.b() * line.b() ) ) );
-				statP = 1;
-				statChi2 = line.chi2();
-				binnedFlag = false;
-			}
-			else // data is to be binned
-			{
-				// Compute bin size binN
-				unsigned binN; // number of elements per bin
-				if ( nBinFlag ) // number of bins sets bin size
-					binN = zF.size() / nBins;
-				else
-					binN = binSize;
+			if ( zF.size() < 3 )
+				throw twoSetErr( "Too few distinct operating points to fit a zROC line" );
 
-				// Bin zF and zH data, originally static for Cygwin bug
-				// Tony Makhlouf comments out static Nov 8 2005 in bug fix's bug fix
-				/* static */ vector< vector< double > > vvF = bin( zF, binN, true ),
-					vvH = bin( zH, binN, true );
-				// Clear zF & zH vectors to contain new mean values of data
-				zF.clear();
-				zH.clear();
-				vector< double > sF, sH; // to hold standard deviations
-				// Compute means and standard deviations of bins
-				for ( unsigned i = 0; i < vvF.size(); i++ )
-				{
-					Population popF( vvF[ i ] ), popH( vvH[ i ] );
-					zF.push_back( popF.mean() );
-					zH.push_back( popH.mean() );
-					sF.push_back( popF.std() );
-					sH.push_back( popH.std() );
-				}
+			statPoints = ( unsigned ) zF.size();
 
-				// Model the zH vs zF line
-				XY line( zF, zH, sF, sH );
-				rocArea = stats::Zarea( line.a() / sqrt( 1 + ( line.b() * line.b() ) ) );
-				statP = line.q();
-				statChi2 = line.chi2();
-				binnedFlag = true;
-			}
+			XY line( zF, zH, sF, sH );
+			rocArea = stats::Zarea( line.a() / sqrt( 1 + ( line.b() * line.b() ) ) );
+			statP = line.q();
+			statChi2 = line.chi2();
+			binnedFlag = false;
 		}
 		catch ( stats::statsErr& e ) { throw twoSetErr( e.what() ); }
 		catch ( XY::XYErr& e ) { throw twoSetErr( e.what() ); }
 	}
-	statROCcalcFlag = true; // ROC area has now been statistically calculated
+	statROCcalcFlag = true;
 	return rocArea;
 }
 
@@ -1123,11 +1117,12 @@ void TwoSet::statReport( ostream& outputStream, unsigned goodData, unsigned nBin
 		outputStream << "p = " << p << " (closer to 1 is better)" << endl;
 	else
 		outputStream << "p = not available (fit probability did not converge)" << endl;
-	if ( binnedFlag == false ) // data was not binned
-		outputStream << "WARNING: DATA WAS NOT BINNED" << endl;
-	else
-		outputStream << "Bin size = " << ( nBinFlag ? goodData / nBins : binSize )
-			<< " Number bins = " << ( nBinFlag ? nBins : goodData / binSize ) << endl;
+	// The zROC line is fitted to the distinct operating points themselves, so
+	//    the count of them is what a reader needs -- an Az from five points and
+	//    an Az from five hundred are not the same claim. (This line used to
+	//    report the bin size and count, or warn that the data "was not binned";
+	//    binning is gone, so both were obsolete.)
+	outputStream << "Operating points fitted = " << statPoints << endl;
 	outputStream << resetiosflags( ios::scientific );
 }
 

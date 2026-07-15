@@ -213,6 +213,7 @@ public:
 		fp, // false positives
 		fn, // false negatives
 		nThresholds, // number of thresholds for trapezoidal method
+		statPoints, // distinct operating points the last zROC line was fitted to
 		nBins, // number of bins for statistical ROC
 		binSize, // bin size for statistical ROC
 		binThresh, // number of data points under which data will not be binned

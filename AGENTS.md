@@ -147,13 +147,20 @@ Harvest from `session.out` and report to the user:
     track ties rather than occurring at random, so a nonzero count means a
     slightly narrow interval. On current builds this is normally "2000 bootstrap
     resamples" with no failures.
-  - Also quote the **bin count** with any binormal A_z — it depends on the binning
-    until Phase 2. The report gives two fits ("best p" and "best AUC"); an A_z
-    without its bin count is meaningless.
+  - The report gives two fits ("best p" and "best AUC"). Since 2026-07-15 they are
+    **the same number** — the binning they searched over is gone, so the search has
+    nothing left to choose between; the duplication is vestigial and is being removed.
+    Quote the area once. (Older advice to quote a bin count with every A_z is obsolete:
+    there are no bins. The report now gives "Operating points fitted", which is worth
+    quoting — an A_z from five points and one from five hundred are different claims.)
   - `ITMAX too small in gcf` should no longer appear (its cause was fixed
     2026-07-15). If you see it on a current build, that is a real finding worth
     reporting, not a quirk to shrug at. `p = not available` is benign by design:
     goodness of fit never gates the area (Wickens §11.5, p. 217).
+  - **Do not over-read the fit p on continuous data.** With a swept continuous score
+    it rounds to 1.000 because the operating points are cumulated and so scatter far
+    less than their own error bars — not because the fit is perfect. It is a real
+    diagnostic only for rating-style data with few distinct scores.
   - Background for all of this: `docs/roc_theory.md`, which is the authority.
 - For logistic: notable Wald rows (smallest p-values) — translate the
   input numbers to variable names via the key file — and the condition

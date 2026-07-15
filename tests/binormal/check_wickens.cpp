@@ -52,22 +52,18 @@ static const unsigned SIGNAL[ 6 ] = { 47, 65, 66, 92, 136, 294 };    // 700 tria
 // Wickens' published Az for these data (p. 90)
 static const double WICKENS_AZ = 0.784;
 
-// How close the engine must come to it.
+// How close the engine must come to it. Phase 2 landed the binomial error bar
+// (Wickens Eq. 11.2 + 11.3, p. 202) and stopped binning, and the engine now
+// answers 0.7839 against his 0.784 -- so this ratchet is at 0.002, and the
+// binning that used to be worth 0.011 of Az is worth nothing at all.
 //
-// **THIS IS A RATCHET.** The binning is arbitrary, and it is worth 0.011 of Az on
-// this dataset: the search's eight binnings span 0.7783 to 0.7893 around a truth
-// of 0.784, and the bin count alone decides which. Worse, both selection criteria
-// choose badly -- "best p" takes 5 bins (Az 0.7785, one of the furthest) and
-// "best AUC" takes 7 bins (Az 0.7893, the furthest, on a fit whose p is 0.000,
-// since maximising the area selects for a bad fit by construction). So the
-// tolerance today can only be loose enough to admit whichever binning is chosen.
-//
-// ROADMAP 3 Phase 2 replaces the within-bin standard deviations with Wickens' own
-// binomial error bar (Eq. 11.2 + 11.3, p. 202) and drops binning entirely, fitting
-// the operating points themselves. **When it lands, tighten this to 0.002 and
-// delete the paragraph above.** If Phase 2 cannot hold 0.002 on published data
-// analysed by hand, it has not worked.
-static const double AZ_TOL = 0.012;
+// For the record, since it is the whole reason Phase 2 happened: before it, the
+// eight binnings spanned 0.7783 to 0.7893 around this same 0.784, with the bin
+// count alone deciding which, and both selection criteria choosing badly --
+// "best p" took 5 bins (0.7785) and "best AUC" took 7 bins (0.7893, the furthest,
+// on a fit whose p was 0.000, since maximising the area selects for a poor fit by
+// construction). The tolerance then had to be 0.012 to admit either.
+static const double AZ_TOL = 0.002;
 
 static bool nearly( double got, double want, double tol )
 {
@@ -146,20 +142,16 @@ int main()
 	TwoSet points( m );
 	ok &= check_operating_points( points );
 
-	// Every binning, printed as a diagnostic: the spread IS the artifact Phase 2
-	//    removes, and seeing it beats describing it.
-	//
-	// These lines are NOT asserted, and they are not stable across builds. The fit
-	//    is ill-conditioned on tied data: binning 1399 exemplars that hold only six
-	//    distinct scores produces bins of identical z values, whose standard
-	//    deviation is legitimately zero, which chixy() weights BIG (1e30). The
-	//    objective is then dominated by 1e30 terms and brent balances on the last
-	//    bits. Measured: the same source at -O0 and -O3 gives Az 0.7793 vs 0.7789
-	//    at 4 bins, and at 10 bins one converges while the other cannot bracket a
-	//    root -- floating-point contraction alone. That fragility is another count
-	//    against the binning, and Phase 2 removes its cause rather than tuning it:
-	//    five real points, five analytic error bars, no zeros, no BIG.
-	cout << "\nAz by bin count (Wickens: " << WICKENS_AZ << "):" << endl;
+	// Sweeping the bin count is now a NULL TEST, and that is the point: the
+	//    estimator no longer bins, so every one of these must come back with the
+	//    same Az. Before Phase 2 they spanned 0.011 -- and the fit was so
+	//    ill-conditioned in this tied regime (bins of identical z values have SD
+	//    zero, which chixy weights BIG=1e30, leaving brent balancing on the last
+	//    bits) that -O0 and -O3 disagreed in the fourth decimal and disagreed about
+	//    whether 10 bins converged at all. Asserted below, not just printed.
+	cout << "\nAz by bin count -- must not vary (Wickens: " << WICKENS_AZ << "):" << endl;
+	double firstAz = 0;
+	bool binningInert = true;
 	TwoSet sweep( m );
 	for ( unsigned nb = 3; nb <= 10; nb++ )
 	{
@@ -169,16 +161,22 @@ int main()
 		try
 		{
 			double az = sweep.getStatROCarea();
+			if ( nb == 3 )
+				firstAz = az;
+			else if ( fabs( az - firstAz ) > 1e-9 )
+				binningInert = false;
 			cout << "  " << setw( 2 ) << nb << " bins  Az=" << az
 				<< "  diff=" << showpos << az - WICKENS_AZ << noshowpos
 				<< "  fit p=" << sweep.getStatP() << endl;
 		}
 		catch ( exception& e )
 		{
-			// Non-fatal by design: one binning failing must not cost the others
 			cout << "  " << setw( 2 ) << nb << " bins  no fit (" << e.what() << ")" << endl;
+			binningInert = false; // it used to throw here; it must not now
 		}
 	}
+	cout << "  bin count does not move Az" << ( binningInert ? "  OK" : "  FAIL" ) << endl;
+	ok &= binningInert;
 
 	// The reported fits must land near Wickens' published area
 	TwoSet assay( m );

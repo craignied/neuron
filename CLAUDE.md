@@ -492,8 +492,41 @@ Rationale, citations, and Methods language: **`docs/roc_theory.md`**. Work in or
   low-birth-weight Az 0.618420/0.620688 before and after. Only the *interval* widened
   (0.513–0.711 → 0.513–0.721), which was the point.
 
-### Phase 2 — fix the error bars (medium; Az moves)
-- Replace within-bin SD with **σ²_z ≈ p(1−p)/N ÷ φ²(z)** (Wickens Eq 11.2+11.3 p. 202).
+### Phase 2 — fix the error bars (**estimator DONE** 2026-07-15; cleanup remains)
+- **DONE — Replaced within-bin SD with σ²_z ≈ p(1−p)/N ÷ φ²(z)** (Wickens Eq 11.2+11.3
+  p. 202), and stopped binning: `getStatROCarea()` now sweeps **distinct** thresholds
+  (a tied score repeated per exemplar is the same operating point) and fits those points
+  directly with fitexy. **Result on Wickens' own published data: Az = 0.7839 vs his
+  0.784** — was 0.7785/0.7893 depending on the binning. The bin count is now **inert**
+  (asserted as a null test in check_wickens), `AZ_TOL` ratcheted 0.012 → **0.002**, and
+  the zero-SD/`BIG`/FMA fragility is gone with it (no error bar is zero any more).
+  Report line "Bin size = X Number bins = Y" / "WARNING: DATA WAS NOT BINNED" →
+  **"Operating points fitted = N"** (new `statPoints`), which is the number a reader
+  actually needs. Goldens re-blessed: lbw train Az 0.618420/0.620688 → **0.620527**
+  (127 points), test 0.675294 → 0.669981 (37 points); 18 lines moved, rest identical.
+- **The oracle needed NO exclusion** — the plan predicted one ("Az changes → oracle needs
+  a documented exclusion, same pattern as the KScalc fix"). **Wrong, for the same reason
+  the "goldens re-bless" step was a no-op**: the oracle check has *0* "By statistical
+  method" lines (its xor_net has 4 exemplars → "Cannot calculate ROC statistically"). It
+  never tested this path. Only `binormal_seed42` — added the day before for exactly this
+  — actually saw the change. Third time a plan step written from "the invariants cover
+  this" has proved hollow; check what a test executes before believing it guards you.
+- **Metz/LABROC ROC-corner categorisation turned out NOT to be needed** and is not
+  implemented (the plan assumed it would be). Its purpose is to categorise for a
+  *maximum-likelihood* fit; a least-squares line over the distinct operating points needs
+  no categories at all. It returns with ML (Phase 3) or not at all.
+- **Known and documented, not a regression:** the fit χ² is a weak diagnostic on
+  continuous data — cumulated points scatter far less than their own marginal error
+  bars, so χ² ≪ df and p rounds to 1.000 (lbw train: χ²=15.1, df=125). Wickens says the
+  dependence invalidates it (p. 212). It *is* meaningful in the rating regime: Wickens'
+  Table 5.1 gives χ²=1.93 on 3 df, p=0.587. The area never depends on it (§11.5 p. 217).
+- **REMAINING (cleanup commit):** the binning machinery is now dead weight — `searchROC`
+  runs 8 identical fits (and the bootstrap does that *per resample*), the report prints
+  the same fit twice under "Searching for best p:"/"Searching for best AUC:", and the GUI
+  panel shows two identical rows. Remove: the 3..10 search, `nBins`/`binSize`/`binThresh`/
+  `nBinFlag`/`getBinned`, the best-p/best-AUC pair (→ one `ROCfit`/one `CI`), the CLI
+  submenu's min/max-search-bins options, `bin()` if unused elsewhere. Touches the menus →
+  goldens re-bless again (that diff should be report *shape* only, no numbers moving).
 - **Drop fixed-count binning** — unnecessary once error bars are analytic. Categorise by
   the **corners of the empirical ROC** (Metz/LABROC: truth-state runs are the natural
   categorisation; flat runs carry no information). This removes the 3..10 search,

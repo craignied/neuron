@@ -154,19 +154,31 @@ function.
 
 `TwoSet::getStatROCarea()` (`src/twoset.cpp`, which cites Wickens directly):
 
-1. Walk every observed score as a threshold, computing the false-alarm rate
-   F = fp/(tn+fp) and hit rate H = tp/(tp+fn) at each — the empirical ROC.
+1. Walk each **distinct** observed score as a threshold, computing the false-alarm
+   rate F = fp/(tn+fp) and hit rate H = tp/(tp+fn) at each — the empirical ROC.
+   One point per distinct threshold: a tied score repeated across exemplars gives
+   the *same* operating point, and replicating it adds no information.
 2. Convert each interior point to z-coordinates: `zF = invZarea(F)`,
    `zH = invZarea(H)` (`stats::invZarea` is the inverse normal CDF, built on
    Takuya Ooura's 1996 inverse-erfc).
-3. Fit the **zROC line** `zH = a + b·zF`. With enough points (≥ `binThresh`),
-   the z-points are grouped into bins; each bin contributes its mean and
-   standard deviation, and the line is fit with *errors in both coordinates*
+3. Give each point Wickens' **binomial error bar**: a rate p is binomial with
+   variance p(1−p)/N (Eq. 11.2, p. 202), and the delta method carries that
+   through the z transform (Eq. 11.3, p. 202):
+
+       σ²_z ≈ p(1−p)/N ÷ φ²(z)
+
+   Points near 0 or 1 sit where the normal density φ is tiny, so they earn a
+   huge error bar and little weight — which is right, and is the down-weighting
+   no within-bin standard deviation could ever express.
+4. Fit the **zROC line** `zH = a + b·zF` with *errors in both coordinates*
    (`XY` in `src/stats.cpp`, Numerical Recipes' fitexy), yielding a χ² and
-   p-value for the fit (`getStatChi2()`, `getStatP()`).
-   *The binning and the within-bin SD are the one part of this pipeline with no
-   source in Wickens — see "The binning artifact" below before relying on them.*
-4. Report **Az = Φ( a / √(1 + b²) )** via `stats::Zarea`.
+   p-value for the fit (`getStatChi2()`, `getStatP()` — but read
+   "What the fit χ² is worth" below before quoting them).
+5. Report **Az = Φ( a / √(1 + b²) )** via `stats::Zarea`.
+
+There is **no binning**. Steps 3–5 replaced it on 2026-07-15; the account of what
+binning was and what it cost is kept below, because it is the reason this design
+is what it is.
 
 The equivalence to the Gaussian formulas above: under the binormal model the
 zROC intercept is a = (μ₁−μ₀)/σ₁ and the slope is b = σ₀/σ₁, so
@@ -303,18 +315,41 @@ The trapezoidal area keeps its **Hanley–McNeil** closed-form interval (the
 Mann–Whitney U equivalence; Hanley & McNeil 1982). It calibrated cleanly
 (ratio ≈ 1.09) and is retained as an independent cross-check.
 
-### The binning artifact (why the error bars are next)
+### What the fit χ² is worth (read before quoting it)
 
-`getStatROCarea()` currently groups the z-points into fixed-count bins and feeds
-fitexy each bin's **mean and within-bin standard deviation** as the point and its
-error bar. **This has no counterpart in Wickens.** Table 5.3 (p. 90) carries no
-error-bar column; Example 5.1 fits by eye. The within-bin SD was introduced to
-give fitexy something to weight with — the rating case supplies no independent
+The χ² and its p are a **weak diagnostic on continuous data, and no more**. With
+the binomial error bars in place, a swept continuous score gives χ² far *below*
+its degrees of freedom — on the low-birth-weight training set, χ² = 15.1 against
+127 points (df = 125), so p rounds to 1.000. That is not a perfect fit; it is the
+cumulation dependence showing through. Adjacent operating points differ by one
+exemplar, so the scatter of the points *about the line* is far smaller than each
+point's own marginal sampling error, which is what the error bar describes.
+Wickens says the dependence invalidates such calculations (p. 212).
+
+Where the χ² **is** meaningful is the rating case with few categories: on Wickens'
+Table 5.1 (six categories, five points) the engine reports χ² = 1.93 on 3 df,
+p = 0.587 — a sensible goodness of fit, of the same character as the one Wickens
+himself computes for these data in Example 11.8 (p. 214), though not the same
+statistic (see `tests/binormal/check_wickens.cpp` on why his is not implementable
+here). Quote it in that regime; read nothing into a p of 1.000 from a continuous
+sweep. The area does not depend on it either way (§11.5, p. 217).
+
+### The binning artifact — removed 2026-07-15, kept here as the reason why
+
+**This section is history.** It is retained because it is the entire justification
+for the design above, and because the measurements in it are the evidence that the
+replacement works.
+
+Until 2026-07-15, `getStatROCarea()` grouped the z-points into fixed-count bins and
+fed fitexy each bin's **mean and within-bin standard deviation** as the point and
+its error bar. **This had no counterpart in Wickens.** Table 5.3 (p. 90) carries no
+error-bar column; Example 5.1 fits by eye. The within-bin SD was invented to give
+fitexy something to weight with — the rating case supplies no independent
 per-point sample the way the bias case does.
 
-Because the bins are chunks of adjacent values from a sorted, monotone z
-sequence, that "standard deviation" measures **bin width**, not sampling error.
-Consequences, all measured 2026-07-15:
+Because the bins were chunks of adjacent values from a sorted, monotone z
+sequence, that "standard deviation" measured **bin width**, not sampling error.
+Consequences, all measured 2026-07-15 before the fix:
 
 - The delta SE tracked the **bin count**, not the sample size: n = 142 and n = 47
   gave 0.0102 and 0.0103, while Hanley–McNeil correctly gave 0.049 and 0.091.
@@ -363,22 +398,27 @@ where the other cannot bracket a root. Bins of identical z values have SD zero, 
 `chixy` weights `BIG` = 1e30, so the objective is dominated by 1e30 terms and `brent`
 balances on the last bits.
 
-The principled error bar is Wickens' own: binomial rate variance (Eq. 11.2,
-p. 202) pushed through the delta method (Eq. 11.3, p. 202) to the z scale, giving
+**The fix, landed 2026-07-15.** The principled error bar is Wickens' own: binomial
+rate variance (Eq. 11.2, p. 202) pushed through the delta method (Eq. 11.3, p. 202)
+to the z scale, σ²_z ≈ p(1−p)/N ÷ φ²(z). Once each point carries an analytic error
+bar, **binning is unnecessary** — its only purpose was to have several values to
+take an SD of. Sweeping distinct thresholds and fitting those points directly gives,
+on Wickens' own data, **A_z = 0.7839 against his published 0.784**: the bin count no
+longer moves the answer at all (it is now inert, asserted as a null test in
+`check_wickens`), and the estimate is ~50× closer than either binned criterion
+managed. The zero-SD/`BIG`-weight fragility goes with it, since no error bar is zero
+any more.
 
-    σ²_z ≈ p(1−p)/N ÷ φ²(z)
-
-Once each point carries an analytic error bar, **binning is unnecessary** — its
-only purpose was to have several values to take an SD of. The categorisation then
-follows Metz's LABROC insight: the natural categories of continuous data are the
-**corners of the empirical ROC**, retained without loss of information relevant to
-ROC estimation (Metz, Herman & Shen 1998); flat runs contribute nothing. That
-removes the arbitrary bin count, the 3..10 search, and the zero-SD failure class
-together. See the plan in CLAUDE.md (ROC inference, Phase 2).
+Metz's LABROC categorisation — the natural categories of continuous data are the
+**corners of the empirical ROC** (Metz, Herman & Shen 1998) — turned out **not to be
+needed** for this estimator, and is not implemented. Its purpose is to categorise for
+a maximum-likelihood fit; a least-squares line over the distinct operating points
+needs no categories at all. It would return with ML (Phase 3).
 
 Wickens independently condemns the small-expected-frequency regime that
-fixed-count binning creates: distrust these χ² tests when many expected
-frequencies fall below four or five (§11.5, p. 216).
+fixed-count binning created: distrust these χ² tests when many expected
+frequencies fall below four or five (§11.5, p. 216) — another reason the binning
+had to go rather than be tuned.
 
 ### Errors in both coordinates
 
