@@ -123,12 +123,18 @@ prefer canonical gradient descent unless you have a specific reason not to. See
 
 Every push is built and tested on macOS, Linux, and Windows by the GitHub Actions
 matrix in `.github/workflows/ci.yml`. The core check is the **golden transcript
-test** (`tests/golden/run_golden.sh`): two fully seeded sessions — XOR training and
-stepwise reverse regression — must reproduce their committed transcripts byte for
-byte (only the elapsed-time line is excluded). Because the RNG is `std::mt19937`,
-the same transcripts must match on all three platforms; any numerical drift anywhere
-in the engine fails the build. After an intentional output change, regenerate with
-`./tests/golden/run_golden.sh --bless`.
+test** (`tests/golden/run_golden.sh`): fully seeded sessions must reproduce their
+committed transcripts byte for byte (only the elapsed-time line is excluded). Because
+the RNG is `std::mt19937`, the same transcripts must match on all three platforms;
+any numerical drift anywhere in the engine fails the build. After an intentional
+output change, regenerate with `./tests/golden/run_golden.sh --bless`.
+
+The suite has three cases: `xor_seed42` (SimpleProp training and statistics),
+`regress_seed42` (plus stepwise regression), and `binormal_seed42`, which runs the
+low-birth-weight data through a seeded logistic fit to cover the **statistical ROC
+report** — the binormal areas, the bin search, and the bootstrap intervals. The first
+two are too small to reach that path at all, so before the third existed the entire ROC
+report was invisible to the goldens.
 
 A second, local-only check (`tests/oracle/`) cross-verifies the engine against the
 original neUROn2++ binary; see its README.

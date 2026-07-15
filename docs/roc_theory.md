@@ -504,12 +504,23 @@ algorithm (Wickens 2002, §3.6, p. 57)."*
 
 ### What is tested, and what is not
 
-**The golden transcripts do not reach this code at all.** `xor_seed42` and
-`regress_seed42` have too few exemplars (`goodData < calcThresh`), so they print
-"Cannot calculate ROC statistically" and contain **zero** "By statistical method"
-lines; `verify_oracle.sh` likewise. A green golden run therefore says *nothing*
-about anything on this page — which is exactly how the delta method was replaced
-with all five invariants passing. The coverage that does exist:
+**`binormal_seed42` is the golden that covers this page.** It runs the
+Hosmer–Lemeshow low-birth-weight data (189 rows, split 142/47) through a seeded
+logistic fit and freezes the whole printed ROC report byte-for-byte: both
+searched fits with their bin counts, the χ² and fit p, the bootstrap intervals,
+the Hanley–McNeil interval, and both the binned (train) and unbinned (test)
+paths. Its resolution is the report's own 6 decimals: a 0.01% change in A_z is
+caught, 1e-7 is not.
+
+It exists because the other two goldens **do not reach this code at all**:
+`xor_seed42` and `regress_seed42` have too few exemplars (`goodData <
+calcThresh`), so they print "Cannot calculate ROC statistically" and contain
+**zero** "By statistical method" lines; `verify_oracle.sh` likewise. That is
+exactly how the delta method came to be replaced with every invariant green.
+Demonstrated, not assumed: perturbing A_z by 0.01% fails `binormal_seed42` while
+both older goldens still pass.
+
+The rest of the coverage:
 
 `tests/binormal/check_az.cpp` (ctest, runs in CI on every push):
 
@@ -530,8 +541,9 @@ possible (four exemplars) and carries both fits — each with its bin count and
 bootstrap interval — on the low-birth-weight data, which is large enough to be
 binned. Both assertions were verified to fail against the pre-fix binary.
 
-Still uncovered: no seeded golden transcript reaches the statistical path, so
-byte-level regressions in the printed ROC report are not caught.
+**When Phase 2 moves A_z, `binormal_seed42` is the record of what moved.** Re-bless
+it only after the literature acceptance test (Wickens Table 5.1) passes, and read
+the diff: it is the only place the change becomes visible line by line.
 
 ### Provenance
 

@@ -9,6 +9,14 @@
 #
 # Cases: xor_seed42 (dataset load, SimpleProp training, full statistics)
 #        regress_seed42 (same + stepwise reverse regression through RegressNet)
+#        binormal_seed42 (the statistical ROC path: binormal Az, the bin search,
+#          and the bootstrap intervals — NONE of which the two cases above reach.
+#          They have too few exemplars (goodData < calcThresh) and print "Cannot
+#          calculate ROC statistically" instead, so before this case existed the
+#          whole ROC report was invisible to the goldens: the delta-method
+#          interval was replaced by a bootstrap with every invariant green.
+#          Low-birth-weight is 189 rows, split 142/47, which reaches the binned
+#          path on train and the unbinned one on test — both in one transcript.)
 set -e
 cd "$(dirname "$0")"
 
@@ -31,7 +39,7 @@ mkdir -p runs && cd runs
 strip() { grep -v 'That took' "$1" | sed 's/\r$//'; }
 
 fail=0
-for case in xor_seed42 regress_seed42; do
+for case in xor_seed42 regress_seed42 binormal_seed42; do
     "$BIN" --seed 42 < ../$case.in > $case.out 2>&1 \
         || { echo "FAIL: $case exited nonzero" >&2; fail=1; continue; }
     if [ $BLESS -eq 1 ]; then

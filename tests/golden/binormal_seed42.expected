@@ -1,0 +1,334 @@
+Random seed set to 42 (runs with the same seed and inputs are reproducible)
+Welcome to neuron 3.0.0-dev
+
+( 1 ) Specify dataset
+( 2 ) Specify model
+( 3 ) Use model
+( 4 ) Discriminant function analysis
+( 9 ) Quit
+Menu choice: 
+( 1 ) Number of input nodes: 1
+( 2 ) Number of output nodes: 1
+( 3 ) Load raw dataset
+( 4 ) Convert a raw dataset into a training set
+( 5 ) Randomize a raw dataset into training and test sets
+( 6 ) Load training set
+( 7 ) Save training set
+( 8 ) Save scaling factors
+( 9 ) Load test set
+( 10 ) Save test set
+( 11 ) Log dataset operations to history file: yes
+( 12 ) Specify variate bounds and types
+( 13 ) ROC area reporting
+( 14 ) Return to main menu
+Menu choice: How many input nodes? 
+( 1 ) Number of input nodes: 5
+( 2 ) Number of output nodes: 1
+( 3 ) Load raw dataset
+( 4 ) Convert a raw dataset into a training set
+( 5 ) Randomize a raw dataset into training and test sets
+( 6 ) Load training set
+( 7 ) Save training set
+( 8 ) Save scaling factors
+( 9 ) Load test set
+( 10 ) Save test set
+( 11 ) Log dataset operations to history file: yes
+( 12 ) Specify variate bounds and types
+( 13 ) ROC area reporting
+( 14 ) Return to main menu
+Menu choice: How many output nodes? 
+( 1 ) Number of input nodes: 5
+( 2 ) Number of output nodes: 1
+( 3 ) Load raw dataset
+( 4 ) Convert a raw dataset into a training set
+( 5 ) Randomize a raw dataset into training and test sets
+( 6 ) Load training set
+( 7 ) Save training set
+( 8 ) Save scaling factors
+( 9 ) Load test set
+( 10 ) Save test set
+( 11 ) Log dataset operations to history file: yes
+( 12 ) Specify variate bounds and types
+( 13 ) ROC area reporting
+( 14 ) Return to main menu
+Menu choice: What is the name of the raw data file? The loaded matrix has 189 rows and 6 columns.
+
+( 1 ) Number of input nodes: 5
+( 2 ) Number of output nodes: 1
+( 3 ) Load raw dataset
+( 4 ) Convert a raw dataset into a training set
+( 5 ) Randomize a raw dataset into training and test sets
+( 6 ) Load training set
+( 7 ) Save training set
+( 8 ) Save scaling factors
+( 9 ) Load test set
+( 10 ) Save test set
+( 11 ) Log dataset operations to history file: yes
+( 12 ) Specify variate bounds and types
+( 13 ) ROC area reporting
+( 14 ) Return to main menu
+Menu choice: 
+Specify number of exemplars to be placed in the test set:
+( 1 ) As a whole number
+( 2 ) As a fraction with a numerator and denominator
+( 3 ) As a decimal fraction
+Menu choice: Fraction to be placed in test set = I've randomized a raw dataset into training and test sets.
+The raw dataset had 189 exemplars.
+   The number of 0s in the raw dataset was 130.
+   The frequency of 0s in the raw dataset was 0.687831.
+   The number of 1s in the raw dataset was 59.
+   The frequency of 1s in the raw dataset was 0.312169.
+The training set has 142 exemplars.
+   The number of 0s in the training set is 98.
+   The frequency of 0s in the training set is 0.690141.
+   The number of 1s in the training set is 44.
+   The frequency of 1s in the training set is 0.309859.
+The test set has 47 exemplars.
+   The number of 0s in the test set is 32.
+   The frequency of 0s in the test set is 0.680851.
+   The number of 1s in the test set is 15.
+   The frequency of 1s in the test set is 0.319149.
+
+Would you like to save the training set to a file (yes/no)? Would you like to save the test set to a file (yes/no)? 
+( 1 ) Number of input nodes: 5
+( 2 ) Number of output nodes: 1
+( 3 ) Load raw dataset
+( 4 ) Convert a raw dataset into a training set
+( 5 ) Randomize a raw dataset into training and test sets
+( 6 ) Load training set
+( 7 ) Save training set
+( 8 ) Save scaling factors
+( 9 ) Load test set
+( 10 ) Save test set
+( 11 ) Log dataset operations to history file: yes
+( 12 ) Specify variate bounds and types
+( 13 ) ROC area reporting
+( 14 ) Return to main menu
+Menu choice: 
+( 1 ) Specify dataset
+( 2 ) Specify model
+( 3 ) Use model
+( 4 ) Discriminant function analysis
+( 9 ) Quit
+Menu choice: 
+( 1 ) Bias nodes: yes
+( 2 ) Number of hidden layers: 1
+         Layer 1: 1 node(s)
+( 3 ) Output error function: X-entropy
+( 4 ) Load network from a file
+( 5 ) Binary logistic regression
+( 6 ) Log last operation to file: yes
+( 7 ) Log to history file: yes
+( 8 ) Return to main menu
+Menu choice: 
+( 1 ) Specify dataset
+( 2 ) Specify model
+( 3 ) Use model
+( 4 ) Discriminant function analysis
+( 9 ) Quit
+Menu choice: 
+( 1 ) Randomize weights
+( 2 ) Set learning rate: automatic
+( 3 ) Set stopping conditions
+( 4 ) Set batch/epoch (currently on)
+( 5 ) Set weight decay (currently off)
+( 6 ) Print counter: logarithmic
+( 7 ) Train model
+( 8 ) Save the network to a file
+( 9 ) Stepwise Regression
+( 10 ) Return to main menu
+Menu choice: 
+( 1 ) Randomize weights
+( 2 ) Set learning rate: automatic
+( 3 ) Set stopping conditions
+( 4 ) Set batch/epoch (currently on)
+( 5 ) Set weight decay (currently off)
+( 6 ) Print counter: logarithmic
+( 7 ) Train model
+( 8 ) Save the network to a file
+( 9 ) Stepwise Regression
+( 10 ) Return to main menu
+Menu choice: 
+( 1 ) Set maximum number of iterations: 1000000
+( 2 ) Lower error limit: no
+( 3 ) Limit of change in error over 1 iteration: no
+( 4 ) Stop if increase over error window width: no
+( 5 ) Maximum absolute gradient limit: 1e-06
+( 6 ) Return to previous menu
+Menu choice: What will the maximum number of iterations be? 
+( 1 ) Set maximum number of iterations: 20000
+( 2 ) Lower error limit: no
+( 3 ) Limit of change in error over 1 iteration: no
+( 4 ) Stop if increase over error window width: no
+( 5 ) Maximum absolute gradient limit: 1e-06
+( 6 ) Return to previous menu
+Menu choice: 
+( 1 ) Randomize weights
+( 2 ) Set learning rate: automatic
+( 3 ) Set stopping conditions
+( 4 ) Set batch/epoch (currently on)
+( 5 ) Set weight decay (currently off)
+( 6 ) Print counter: logarithmic
+( 7 ) Train model
+( 8 ) Save the network to a file
+( 9 ) Stepwise Regression
+( 10 ) Return to main menu
+Menu choice: Choose training algorithm:
+( 1 ) Canonical backpropagation (gradient descent)
+( 2 ) Conjugate gradient descent
+( 3 ) Shanno's algorithm
+Menu choice: I'm running an iterative model:
+Binary logistic
+5 inputs
+1 output by definition
+Number of exemplars in training set: 142
+Number of exemplars in test set: 47
+Training algorithm is canonical backpropagation
+Training is off-line (batch/epoch is on)
+Automatic stepsize selection is on
+Weight decay is off
+Error checking routines in effect:
+Maximum number of iterations: 20000
+Stop if maximum absolute gradient decreases below 1e-06
+
+    Iteration: X-entropy error:  Max abs grad:  CA Train %   CA Test %
+             1     6.980772e-01   1.382235e-01        61.3        51.1
+             2     6.790562e-01   1.201581e-01        63.4        57.4
+             3     6.661219e-01   1.050991e-01        66.2        59.6
+             4     6.569549e-01   9.248602e-02        66.2        59.6
+             5     6.501891e-01   8.182202e-02        66.9        59.6
+             6     6.450078e-01   7.271169e-02        68.3        63.8
+             7     6.409109e-01   6.485216e-02        68.3        63.8
+             8     6.375829e-01   5.801353e-02        68.3        63.8
+             9     6.348181e-01   5.202050e-02        68.3        63.8
+            10     6.324779e-01   4.673771e-02        68.3        63.8
+            20     6.197764e-01   2.413686e-02        69.0        66.0
+            30     6.137767e-01   2.030119e-02        69.0        66.0
+            40     6.098955e-01   1.750301e-02        69.0        66.0
+            50     6.071662e-01   1.531776e-02        69.0        66.0
+            60     6.051849e-01   1.352581e-02        69.0        68.1
+            70     6.037163e-01   1.201755e-02        69.0        68.1
+            80     6.026091e-01   1.072811e-02        69.7        68.1
+            90     6.017622e-01   9.613661e-03        69.7        68.1
+           100     6.011065e-01   8.642282e-03        69.7        68.1
+           200     5.988131e-01   3.285066e-03        70.4        68.1
+           300     5.985019e-01   1.346082e-03        70.4        68.1
+           400     5.984499e-01   5.652419e-04        70.4        68.1
+           500     5.984407e-01   2.397222e-04        70.4        68.1
+           600     5.984390e-01   1.021176e-04        70.4        68.1
+           700     5.984387e-01   4.358969e-05        70.4        68.1
+           800     5.984386e-01   1.862473e-05        70.4        68.1
+           900     5.984386e-01   7.961601e-06        70.4        68.1
+          1000     5.984386e-01   3.404165e-06        70.4        68.1
+          2000     5.984386e-01   6.966292e-10        70.4        68.1
+The maximum absolute gradient became lower than 1.0e-06.
+
+Total iterations = 2000
+
+Final X-entropy error in the training set = 5.984386e-01.
+Log likelihood = -8.497828e+01
+Final X-entropy error in the test set = 5.815851e-01.
+Log likelihood = -2.733450e+01
+
+Training set:
+-------------
+Classification accuracy: 70.4%
+Sensitivity: 4.5%
+Specificity: 100.0%
+Predictive value positive: 100.0%
+Predictive value negative: 70.0%
+Classification table for training set:
+----------------------------------
+         Predicted T   Predicted F
+         -----------   -----------
+Known T:           2            42
+Known F:           0            98
+----------------------------------
+By statistical method, Searching for best p:
+ROC area = 0.618420
+95% CI = 0.512846 - 0.721280 (SE = 0.052367, 2000 bootstrap resamples)
+Chi-squared = 0.580702
+p = 9.990941e-01 (closer to 1 is better)
+Bin size = 15 Number bins = 9
+Searching for best AUC:
+ROC area = 0.620688
+95% CI = 0.517278 - 0.727405 (SE = 0.052119, 2000 bootstrap resamples)
+Chi-squared = 0.336512
+p = 9.968995e-01 (closer to 1 is better)
+Bin size = 19 Number bins = 7
+By trapezoidal method, ROC area = 0.623609
+95% CI = 0.521339 - 0.725878 (SE = 0.052178, Hanley-McNeil)
+Number thresholds = 100
+Kolmogorov-Smirnov goodness of fit D = 0.204082, p = 0.139907
+Pearson's Chi-Square goodness of fit p = 3.08593e-22
+Hosmer-Lemeshow goodness of fit p = 0.639248
+
+Test set:
+---------
+Classification accuracy: 68.1%
+Sensitivity: 0.0%
+Specificity: 100.0%
+Predictive value positive: division by zero
+Predictive value negative: 68.1%
+Classification table for test set:
+----------------------------------
+         Predicted T   Predicted F
+         -----------   -----------
+Known T:           0            15
+Known F:           0            32
+----------------------------------
+By statistical method, Searching for best p:
+ROC area = 0.675294
+95% CI = 0.488622 - 0.813508 (SE = 0.084412, 2000 bootstrap resamples)
+Chi-squared = 0.770333
+p = 1.000000e+00 (closer to 1 is better)
+WARNING: DATA WAS NOT BINNED
+Searching for best AUC:
+ROC area = 0.675294
+95% CI = 0.488622 - 0.813508 (SE = 0.084412, 2000 bootstrap resamples)
+Chi-squared = 0.770333
+p = 1.000000e+00 (closer to 1 is better)
+WARNING: DATA WAS NOT BINNED
+By trapezoidal method, ROC area = 0.689583
+95% CI = 0.519083 - 0.860084 (SE = 0.086990, Hanley-McNeil)
+Number thresholds = 47
+Kolmogorov-Smirnov goodness of fit D = 0.310417, p = 0.229615
+Pearson's Chi-Square goodness of fit p = 1.24926e-07
+Hosmer-Lemeshow goodness of fit p = 0.420914
+
+   Input:       Beta weight:     Std Err:    Wald p(W!=0):
+-----------    -------------   ------------  -------------
+          0        -0.294871       0.481895           0.54
+          1        -0.853205       0.612047           0.16
+          2        -0.262444       0.236300           0.27
+          3        0.0929009       0.327097           0.78
+          4         0.267006       0.427679           0.53
+y-intercept        -0.985722       0.371225         0.0079
+
+B matrix maximum eigenvalue = 0.42
+         minimum eigenvalue = 0.017
+Condition number = 25.
+
+Would you like to save this model (yes/no)? 
+( 1 ) Randomize weights
+( 2 ) Set learning rate: automatic
+( 3 ) Set stopping conditions
+( 4 ) Set batch/epoch (currently on)
+( 5 ) Set weight decay (currently off)
+( 6 ) Print counter: logarithmic
+( 7 ) Train model
+( 8 ) Save the network to a file
+( 9 ) Stepwise Regression
+( 10 ) Return to main menu
+Menu choice: Let's try that again: your answer must be at least 1, but not greater than 10,
+and it must be an integer.
+Menu choice: Let's try that again: your answer must be at least 1, but not greater than 10,
+and it must be an integer.
+Menu choice: 
+( 1 ) Specify dataset
+( 2 ) Specify model
+( 3 ) Use model
+( 4 ) Discriminant function analysis
+( 9 ) Quit
+Menu choice: Are you sure you want to quit (yes/no)? 
+Thank you for using neuron 3.0

@@ -478,9 +478,16 @@ Rationale, citations, and Methods language: **`docs/roc_theory.md`**. Work in or
 4. **Coverage added where the hole was**: `check_az` now drives the binormal path incl.
    ties/degenerate binnings; `smoke.sh` asserts `binormal:null` on 4 exemplars and real
    fits+CI on low-birth-weight. **Both were verified to FAIL against the pre-fix
-   binary** — they are not vacuous. Still open: no seeded *golden transcript* reaches
-   the statistical path, so byte-level regressions in the printed ROC report are
-   uncaught (the goldens' hole itself is unchanged).
+   binary** — they are not vacuous.
+5. **THE GOLDEN HOLE IS CLOSED** — `tests/golden/binormal_seed42` (added before starting
+   Phase 2, deliberately: see below). Low-birth-weight 189 rows → 142/47, seeded
+   logistic, 0.9 s. Freezes the entire printed ROC report byte-for-byte — both searched
+   fits + bin counts, χ², fit p, both bootstrap CIs, the H-M CI, and *both* the binned
+   (train) and unbinned (test) paths. Resolution = the report's 6 decimals: a **0.01%
+   change in Az fails it while xor_seed42 and regress_seed42 both still pass** —
+   demonstrated by perturbing Az, not assumed. Cross-platform stability (fitexy/brent/
+   gammq/erfc are more libm-dependent than anything the old goldens touch) is proven by
+   CI, not by argument — if it ever flaps on one OS, that is the thing to reconsider.
 - **Az did not move**: oracle numerically identical, goldens byte-identical, and
   low-birth-weight Az 0.618420/0.620688 before and after. Only the *interval* widened
   (0.513–0.711 → 0.513–0.721), which was the point.
@@ -502,7 +509,14 @@ Rationale, citations, and Methods language: **`docs/roc_theory.md`**. Work in or
   Ex 11.1 se(Âz)=0.042 for the single-point path (p. 204). Same self-verifying pattern
   as the H-L low-birth-weight LL = −111.286 check.
 - Az changes → **oracle needs a documented exclusion** (same pattern as the KScalc fix)
-  and goldens re-bless.
+  and **`binormal_seed42` re-bless — read that diff, it is the whole record of what
+  moved**. *(This line used to say just "goldens re-bless", which was a **no-op**: no
+  golden printed a single ROC line. The re-bless step looked like a safety check and was
+  not one. `binormal_seed42` was added 2026-07-15, before starting Phase 2, precisely so
+  that this step means something — a golden blessed AFTER a change that moves Az would
+  only enshrine whatever Phase 2 produced, bugs included. It was frozen while the current
+  Az is independently corroborated from two directions: the oracle says it matches the
+  legacy engine bit-for-bit, and check_az says it matches SDT theory.)*
 
 ### Phase 3 (backlog, not scheduled) — Dorfman–Alf ML
 Wickens' own prescription (§3.6 p. 57; ref. notes p. 58), and it dissolves the
