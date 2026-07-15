@@ -539,7 +539,14 @@ algorithm (Wickens 2002, §3.6, p. 57)."*
   supplies the standard errors — a need the bootstrap meets independently. The
   least-squares route is Chapter 5's own hand method (Example 5.1, p. 89) and
   Wickens carries its estimates into his own goodness-of-fit test (p. 214), so it
-  is defensible; it is not the reference estimator.
+  is defensible; it is not the reference estimator. It is also validated here
+  against his published A_z to ±0.0001 (`check_wickens`).
+- **The fitted curve is "improper"** and nothing guards against it. Any binormal
+  curve with slope b ≠ 1 crosses the chance line and hooks (Metz & Pan 1999).
+  Measured on Wickens' own fit (a = 0.970, b = 0.729): H falls below F beyond
+  F ≈ 0.9999 — far outside any observed operating point, so it does not affect
+  A_z on data like this. It matters when b is far from 1 or the data are sparse
+  or lopsided. PROPROC is the remedy, and it needs ML (see the roadmap's Phase 3).
 - Until Phase 2 lands, the **binning is arbitrary** and A_z depends on it
   (0.616 at 9 bins vs 0.618 at 5 bins on the low-birth-weight data — small, but
   real). Quote the bin count with the area, or use the trapezoidal area.

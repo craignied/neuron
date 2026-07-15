@@ -599,10 +599,38 @@ Rationale, citations, and Methods language: **`docs/roc_theory.md`**. Work in or
   legacy engine bit-for-bit, and check_az says it matches SDT theory.)*
 
 ### Phase 3 (backlog, not scheduled) — Dorfman–Alf ML
-Wickens' own prescription (§3.6 p. 57; ref. notes p. 58), and it dissolves the
-categorisation question entirely. Deferred because its stated advantage — supplying the
-SEs — is already met by the bootstrap. Metz's suite (ROCFIT/LABROC4/PROPROC/ROCKIT) and
-Swets (1996) survey the implementations.
+
+**Rationale rewritten 2026-07-15 — Craig asked whether Phase 3 was now irrelevant and
+should be deleted. As it was written, yes: both its stated reasons were dead.** It said
+ML "dissolves the categorisation question entirely" (Phase 2 just did that *without* ML)
+and that it was deferred because "its stated advantage — supplying the SEs — is already
+met by the bootstrap" (still true). Neither is a reason to keep an item. The reasons that
+actually survive were never written down, so here they are:
+
+1. **Degeneracy / the "proper" binormal** (Metz & Pan 1999) — the real one, and entirely
+   unaddressed. A binormal curve with slope b ≠ 1 is *improper*: it crosses the chance
+   line and hooks. Ours does. Measured on Wickens' Table 5.1 fit (a=0.970, b=0.729): H
+   drops below F beyond **F ≈ 0.9999** — real, but far outside any observed point (his
+   largest f is 0.762), so it does not bite on well-behaved data. It bites when b is far
+   from 1, or the data are sparse/lopsided. Least squares has **no guard whatsoever**;
+   PROPROC exists for this.
+2. **Efficiency** — ML is the efficient estimator. Least squares with marginal-variance
+   weights on cumulated (correlated) points is *consistent* but not efficient. The
+   bootstrap gives us honest intervals around a slightly noisier point estimate.
+3. **It would make the fit χ² mean something.** Ours is uninterpretable on continuous
+   data (χ² ≪ df, p → 1.000; see the Phase 2 notes) — and the GUI panel prints
+   "fit p 1.000" with no caveat, which reads as "perfect fit" to anyone who has not read
+   `docs/roc_theory.md`. ML with a proper categorisation gives Wickens' own multinomial
+   GOF — **Example 11.8, X² = 5.93 unequal vs 35.85 equal (p. 214)** — which is exactly
+   the acceptance-test item `check_wickens` had to document as un-implementable.
+4. **Publication standard.** Metz's suite (ROCFIT/LABROC4/PROPROC/ROCKIT) is what medical
+   ROC reviewers know; Swets (1996) surveys the implementations. `docs/roc_theory.md`
+   already ships the Methods substitution paragraph for when this lands.
+
+**Still not scheduled**, and that is deliberate: the current estimator is validated
+against published data to ±0.0001, its interval is bootstrap-validated two ways, and the
+degeneracy is confined to a region no dataset reaches. Phase 3 is a real improvement with
+no live defect forcing it — which is the definition of backlog, not of dead.
 
 ## ROADMAP 2 (agreed with Craig 2026-07-14) — training automation & GUI overhaul
 
