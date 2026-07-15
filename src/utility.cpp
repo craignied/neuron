@@ -34,13 +34,23 @@ using namespace std;
 //    std::uniform_real_distribution, whose implementation may vary.
 static mt19937 rng;
 
+// Second, independent generator used only for resampling (the bootstrap).
+//    Drawing from it must not advance rng above: otherwise printing a
+//    confidence interval would shift the weights of the next training run.
+static mt19937 resampleRng;
+
+// Offset so the resampling stream never mirrors the training stream from the
+//    same seed (the golden ratio constant, as used in hash mixing)
+static const unsigned RESAMPLE_SEED_OFFSET = 0x9E3779B9u;
+
 // Set when the user supplies an explicit seed (--seed); suppresses timestamp seeding
 static bool userSeededFlag = false;
 
-// Seeds the generator with a user-specified seed for reproducible runs
+// Seeds both generators from a user-specified seed for reproducible runs
 void util::set_seed( unsigned seed )
 {
 	rng.seed( seed );
+	resampleRng.seed( seed ^ RESAMPLE_SEED_OFFSET );
 	userSeededFlag = true;
 }
 
@@ -51,7 +61,11 @@ void util::d_random()
 	static bool firstFlag = true;
 
 	if ( firstFlag && !userSeededFlag )
-		rng.seed( ( unsigned ) time( 0 ) );
+	{
+		unsigned clockSeed = ( unsigned ) time( 0 );
+		rng.seed( clockSeed );
+		resampleRng.seed( clockSeed ^ RESAMPLE_SEED_OFFSET );
+	}
 
 	firstFlag = false;
 }
@@ -73,6 +87,13 @@ double util::d_random( double lower, double upper )
 unsigned util::i_random( unsigned n )
 {
 	return ( unsigned )( rng() % n );
+}
+
+// Uniform random integer in [0, n-1] from the independent resampling stream
+unsigned util::i_resample( unsigned n )
+{
+	d_random(); // insure a generator is seeded, exactly as the callers above do
+	return ( unsigned )( resampleRng() % n );
 }
 
 // Rounds to number of significant digits, first argument is number

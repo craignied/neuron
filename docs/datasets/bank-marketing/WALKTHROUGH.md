@@ -265,13 +265,17 @@ Every model prints, for the training set and the test set:
   values at the 0.5 cutoff.
 - **Statistical (binormal) ROC area** — the Wickens signal-detection-theory
   method: fit a line to the ROC curve in z-space, then
-  Az = Φ(a/√(1+b²)). Reported twice (best-p and best-AUC bin searches),
-  each with a **95% CI by the delta method**.
+  Az = Φ(a/√(1+b²)) (Wickens 2002, Eq. 4.7, p. 68). Reported twice (best-p and
+  best-AUC bin searches), each with its bin count.
 - **Trapezoidal ROC area** — the empirical area, with a **95% CI by
-  Hanley–McNeil**. As documented in `docs/roc_theory.md`, the trapezoidal
-  CI is currently the more trustworthy of the two (the binormal delta
-  interval omits an a–b covariance term on the binned fit path and runs
-  somewhat narrow).
+  Hanley–McNeil**.
+- **On the intervals, read `docs/roc_theory.md` before quoting one.** The binormal
+  **delta-method CI is mis-specified** (it assumes the z-ROC points are independent;
+  they are cumulated from one sample and are not — Wickens pp. 87–88) and measured
+  ~5× too narrow. It is being replaced by a bootstrap (ROADMAP 3, CLAUDE.md). Until
+  that lands, **report the trapezoidal Hanley–McNeil interval** — but note that this
+  is a statement about the *interval*, not the *area*: Wickens holds the trapezoidal
+  area to be negatively biased and A_z to be the primary measure (pp. 70–72).
 - **Goodness-of-fit** — Kolmogorov–Smirnov, Pearson chi-square, and
   Hosmer–Lemeshow.
 - For logistic regression: **Wald tests** on every coefficient and the

@@ -208,14 +208,16 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   public getters `getStatAzSE()`/`getTrapSE()`. `check_az` now also validates SE
   calibration by simulation. Oracle diff excludes "95% CI" (new in 3.0). Fixed a latent
   bug found on the way: `XY` fitexy ctor left `_r` uninitialized.
-  - **Caveat for publication:** the binormal delta-method interval has a known
-    approximation here — on the binned fitexy path the routine doesn't expose the a–b
-    covariance, so that cross term is set to zero. In calibration testing the delta SE
-    ran a bit narrow (reported SE ≈ 0.56× empirical SD — anti-conservative); Hanley-McNeil
-    calibrated cleanly (ratio ≈ 1.09). The trapezoidal CI is the more trustworthy of the
-    two as it stands; recover the covariance term or validate the binormal CI further
-    before leaning on it in print. Methods-section language + this caveat live in
-    `docs/roc_theory.md` and README.
+  - **Caveat for publication — SUPERSEDED 2026-07-15, see the entry below and
+    `docs/roc_theory.md`.** *(Kept for the record; do not act on it.)* It read: the
+    delta interval omits the a–b covariance on the binned fitexy path and runs
+    ≈0.56× narrow, so prefer the trapezoidal CI and recover the covariance term.
+    **Both prescriptions were wrong.** The covariance term is not the defect — the
+    delta method assumes independent z-ROC points, and neuron's are cumulated from
+    one sample (Wickens pp. 87-88); the SE is ~5× narrow, not 0.56×, and tracks bin
+    count rather than n. And "prefer the trapezoidal" conflates interval with
+    estimate: its CI is sound, but Wickens holds the trapezoidal *area* negatively
+    biased and A_z primary (pp. 70-72).
 
 - **2026-07-13 (Phase 1 complete: bank walkthrough)** — `mkdataset.py` gained
   `--delimiter`, `--onehot` (auto-detect or explicit columns; two-valued text outcome
@@ -354,6 +356,116 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   Gates: zero-warning build, goldens byte-identical, smoke (+3 binormal assertions),
   ctest, verify_oracle, live click-through. **Lesson: a binormal Az is meaningless
   without the nBins that produced it — never quote one without the other.**
+
+- **2026-07-15 (later) — ROC inference audited against Wickens; delta method retired.**
+  Craig supplied photographs of Wickens ch. 3, 4, 5, and 11; every ROC interval was
+  traced to the page. **The full account + Methods-section language + a page-level
+  citation table now live in `docs/roc_theory.md` — read that before touching ROC
+  code or quoting an interval.** Headline findings:
+  1. **neuron's data is the RATING case, not the bias case.** Wickens gets several
+     operating points either from independent bias conditions (Fig 4.1 p. 61 — each
+     point its own sample, points independent) or from one condition with graded
+     responses (§5.2 pp. 85–87 — points cumulated from the same observations, **not**
+     independent). A continuous classifier score swept over thresholds is the latter.
+     He ships two programs for this reason (FitRoc vs FitRating) and says to use the
+     right one (§5.3 p. 88). neuron computed rating data with a bias-style fit.
+  2. **The point estimate is faithful — keep it.** Wickens fits the same line to the
+     same cumulated z-points by eye (Ex 5.1 p. 89: zH = 0.735zF + 0.974 → μ̂ₛ=1.325,
+     σ̂ₛ=1.360, Az=0.784 p. 90) and carries those estimates into his own GOF test
+     (Ex 11.8 p. 214). `getStatROCarea()` is his Eq 4.7 (p. 68).
+  3. **The delta-method CI was mis-specified, not merely imprecise.** It assumed
+     independent points (contradicted, pp. 87–88); it was symmetric when Wickens says
+     estimate±z·se is only valid for constant SE and Az's SE varies (§11.4 pp. 206–207);
+     and analytic/multinomial intervals run short under overdispersion anyway (§11.2
+     p. 201, p. 210). **Wickens offers no analytic SE for a least-squares z-ROC line** —
+     his closed forms stop where parameters = data points (p. 205) and he routes the
+     rest to ML, which supplies the SEs (§3.6 p. 57; Dorfman & Alf, ref. notes p. 58).
+     Measured: delta SE ≈5× too narrow, and it tracked **bin count** not n.
+  4. **Bootstrap is right, and was Craig's original intent** (Fable built delta+H-M
+     instead; commit d9a3e73 says so in its own body: "Both analytic, not bootstrap").
+     Resampling cases reproduces the cumulation dependence — exactly the accommodation
+     §5.3 p. 88 demands — and the percentile interval is asymmetric by construction,
+     delivering free what Wickens' endpoint iteration (p. 207) approximates.
+  5. **The within-bin SD error bars have NO source in Wickens.** Table 5.3 (p. 90) has
+     no error-bar column; Ex 5.1 fits by eye. They were invented to feed fitexy, and
+     because bins are chunks of a sorted monotone sequence they measure *bin width* —
+     hence SE∝bin count, zero-SD bins on flat ROC runs, NaN χ², `gammq` throws.
+     Wickens' own binomial z error bar (Eq 11.2+11.3 p. 202: σ²_z ≈ p(1−p)/N ÷ φ²(z))
+     is the fix, and it makes binning unnecessary.
+  6. **fitexy (2-axis) is Wickens' own** (p. 56: y-only regression is unsatisfactory;
+     regression-to-mean flattens b, overestimating σ̂ₛ). Keep it.
+  7. **MLE demoted from "destination" to backlog.** Wickens routes to ML *because ML
+     gives the SEs* — a need the bootstrap already meets. ML stays better (efficiency,
+     no arbitrary categorisation, publication standard) but is no longer urgent.
+  Wickens' supplementary programs are still live at `twickens.bol.ucla.edu/sdt.htm`
+  (HTTP only — WebFetch forces HTTPS and fails; use curl. Last modified 2002-04-11).
+
+## ROADMAP 3 (agreed with Craig 2026-07-15) — ROC inference
+
+Rationale, citations, and Methods language: **`docs/roc_theory.md`**. Work in order.
+
+### Phase 1 — land the interval (PARTIAL, committed 2026-07-15; finish this next)
+
+**DONE (in `main`):**
+- **Bootstrap CI** replaces the delta method in `statReport`: `TwoSet::bootstrapROC()`
+  + `CI` struct + `getBestPci()`/`getBestAUCci()`/`getStatCi()`. Stratified within
+  class (preserves n0/n1, so every resample has an ROC), B=2000 (`setBootstrapResamples`,
+  0 disables), percentile interval, bootstrap SD reported as SE, **the whole procedure
+  re-run per resample including the bin search** (Craig's call: choosing the binning is
+  part of the procedure, so it belongs in the spread).
+- **`util::i_resample()`** — an RNG stream *independent* of `d_random()`, so computing
+  an interval can never perturb weight init or train/test splits. `set_seed()` seeds
+  both (`seed ^ 0x9E3779B9`); clock-seeding likewise. **Rule: any new resampling must
+  use this stream, never `i_random`.**
+- Validated: bootstrap SE vs Hanley-McNeil on low-birth-weight = 0.0497/0.0522 (n=142)
+  and 0.0844/0.0870 (n=47) — two methods, different assumptions, agreeing; and it scales
+  with n, which the delta SE never did. Cost ≈1 s for 2×2000 resamples on 142 rows.
+
+**REMAINING (Phase 1 is not finished):**
+1. **χ² p-value must become non-fatal** (§11.5 p. 217). Today a `gammq` failure kills the
+   whole area, which **discards 27% of resamples** on the low-birth-weight test set.
+   The discards are **not random** (they correlate with ties → zero-SD bins), so the
+   interval is conditioned on tie-poor resamples and biased narrow. Empirically the bias
+   looks small (the 1448-resample interval still matched H-M), but it is the same class
+   of flaw we just removed. **Do this first.**
+2. **GUI**: the `binormal` JSON still carries only the fit's numbers — expose the CI,
+   and show it in the stats panel.
+3. **`tests/binormal/check_az.cpp` still asserts delta-SE calibration** — vestigial now
+   that `azSE` is no longer printed. Replace with bootstrap coverage checks. (`azSE`
+   and `statAzSE` are still computed but unused by the report; decide whether to remove.)
+4. **THE GOLDENS DO NOT COVER THE BINORMAL PATH AT ALL** (found 2026-07-15). xor_seed42
+   and regress_seed42 print "Cannot calculate ROC statistically" (4 exemplars / small
+   sets, `goodData < calcThresh=10`) — **zero** "By statistical method" lines between
+   them. So goldens passing says *nothing* about ROC intervals; the safety net has a
+   hole exactly where ROADMAP 3 works. **Add a seeded golden (or ctest) that reaches the
+   statistical path before trusting any re-bless.** This is also why the bootstrap could
+   land with all five invariants green.
+- **Az does not move** in Phase 1 → `verify_oracle.sh` stays clean (already excludes
+  "95% CI"); goldens unaffected (see #4 — they never reach the path).
+- Verify: build → goldens → smoke → ctest → oracle → bank click-through.
+
+### Phase 2 — fix the error bars (medium; Az moves)
+- Replace within-bin SD with **σ²_z ≈ p(1−p)/N ÷ φ²(z)** (Wickens Eq 11.2+11.3 p. 202).
+- **Drop fixed-count binning** — unnecessary once error bars are analytic. Categorise by
+  the **corners of the empirical ROC** (Metz/LABROC: truth-state runs are the natural
+  categorisation; flat runs carry no information). This removes the 3..10 search,
+  `nBins`, the best-p/best-AUC pair, and the zero-SD/NaN class **together** — and
+  obsoletes the two-fit stats panel added 2026-07-15 (that reconciliation was correct
+  for the old design; it becomes moot, not wasted).
+- **Gate on a literature acceptance test before re-blessing anything**: implement
+  Wickens' Table 5.1 (p. 84) as a ctest fixture and require the printed values —
+  zH = 0.735zF + 0.974, μ̂ₛ=1.325, σ̂ₛ=1.360, Az=0.784, criteria −0.714, −0.067, 0.423,
+  0.979, 1.590 (pp. 89–90); Ex 11.8 X²=5.93 unequal vs 35.85 equal (p. 214);
+  Ex 11.1 se(Âz)=0.042 for the single-point path (p. 204). Same self-verifying pattern
+  as the H-L low-birth-weight LL = −111.286 check.
+- Az changes → **oracle needs a documented exclusion** (same pattern as the KScalc fix)
+  and goldens re-bless.
+
+### Phase 3 (backlog, not scheduled) — Dorfman–Alf ML
+Wickens' own prescription (§3.6 p. 57; ref. notes p. 58), and it dissolves the
+categorisation question entirely. Deferred because its stated advantage — supplying the
+SEs — is already met by the bootstrap. Metz's suite (ROCFIT/LABROC4/PROPROC/ROCKIT) and
+Swets (1996) survey the implementations.
 
 ## ROADMAP 2 (agreed with Craig 2026-07-14) — training automation & GUI overhaul
 
@@ -559,7 +671,11 @@ Longer-term idea (parked): compile engine to WebAssembly → GUI as a static pag
 GitHub Pages, no install at all (the neuron2html philosophy at full fidelity).
 
 ### Backlog (unordered)
-- Binormal CI: recover the a-b covariance on the fitexy path (removes the
-  anti-conservative caveat in docs/roc_theory.md) or validate further by simulation.
+- ~~Binormal CI: recover the a-b covariance on the fitexy path~~ — **REJECTED
+  2026-07-15, do not attempt.** The delta method assumed the z-ROC points were
+  independent; they are cumulated from one sample and are not (Wickens pp. 87-88).
+  A missing covariance term is not the defect — the correlation structure is absent
+  from the model entirely, so no cross term rescues it. Superseded by ROADMAP 3
+  (bootstrap). Reasoning: `docs/roc_theory.md`.
 - `getGoodData()` port from the roc app if something needs it.
 - More grooming tools (dataset describe/summary; train/test split outside engine).

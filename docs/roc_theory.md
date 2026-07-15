@@ -164,6 +164,8 @@ function.
    standard deviation, and the line is fit with *errors in both coordinates*
    (`XY` in `src/stats.cpp`, Numerical Recipes' fitexy), yielding a χ² and
    p-value for the fit (`getStatChi2()`, `getStatP()`).
+   *The binning and the within-bin SD are the one part of this pipeline with no
+   source in Wickens — see "The binning artifact" below before relying on them.*
 4. Report **Az = Φ( a / √(1 + b²) )** via `stats::Zarea`.
 
 The equivalence to the Gaussian formulas above: under the binormal model the
@@ -180,59 +182,290 @@ that is the "Cannot calculate ROC statistically" message followed by
 
 ## Confidence intervals on the ROC area
 
-Every ROC area the engine prints carries a 95% confidence interval, by an
-**analytic (parametric)** method in both cases — neither is a bootstrap:
+**Read this section before quoting an interval in print.** It records a 2026-07-15
+audit that traced every ROC interval back to Wickens page by page, found the
+original delta-method interval to be mis-specified, and replaced it. The
+citation trail is preserved because the reasoning is not reconstructible from
+the code alone.
 
-- **Binormal Az → delta method.** The z-ROC line fit yields the intercept *a*
-  and slope *b* with standard errors; since Az = Φ(a/√(1+b²)) is a smooth
-  function of those two parameters, its first-order Taylor expansion propagates
-  the parameter variances through the analytic gradient (`TwoSet::azSE`).
-- **Trapezoidal area → Hanley–McNeil.** The closed-form variance for the
-  empirical area, from its equivalence to the Mann–Whitney U statistic
-  (Hanley & McNeil, *Radiology* 1982; `TwoSet::hmSE`).
+### What kind of data neuron actually has
+
+This distinction drives everything below, and getting it wrong is what produced
+the defective interval.
+
+Wickens describes two ways to obtain several points on one isosensitivity
+contour:
+
+- **Several independent bias conditions** (his Figure 4.1, p. 61): four separate
+  conditions, 200 signal + 200 noise trials each. Each point comes from *its own*
+  sample, so the points are **statistically independent**.
+- **A single condition with graded (rating) responses** (§5.1–5.2, pp. 83–87):
+  one sample, several criteria cutting the evidence axis at once. The points are
+  formed by *cumulating* the same observations, so they are **not independent**
+  (Wickens states this explicitly, pp. 87–88).
+
+neuron sweeps ~100 thresholds across one continuous classifier score on one
+sample. That is structurally the **rating case**, not the bias case. Wickens
+ships two different programs for exactly this reason — FitRoc for independent
+conditions, FitRating for rating data — and says to be sure to use the right one
+for one's data (§5.3, p. 88).
+
+Two consequences he states directly:
+
+1. The dependence must be accommodated **in the fitting algorithm** (§5.3, p. 88).
+2. The dependence **increases** the sampling variability of the parameter
+   estimates relative to independent points (pp. 87–88).
+
+So an interval computed as if the points were independent is not merely
+imprecise — it is biased **narrow**, and Wickens says so before we ever measured
+it.
+
+### The estimator is faithful; the interval was not
+
+The point estimate needs no apology. Wickens fits the same line to the same
+cumulated z-points *by eye* in Example 5.1 (p. 89), obtaining
+zH = 0.735·zF + 0.974, converts it to μ̂ₛ = a/b = 1.325 and σ̂ₛ = 1/b = 1.360
+(p. 90), and reports Az = Φ(a/√(1+b²)) = 0.784 — then carries those very
+estimates into the goodness-of-fit test of Example 11.8 (p. 214). He remarks
+that a by-eye fit is nearly as accurate as a computer program (p. 89).
+`getStatROCarea()` computes Az by his Eq. 4.7 (p. 68). That path is correct.
+
+What was wrong was everything downstream of it:
+
+- **The delta-method interval assumed independence.** It propagated the z-ROC
+  fit's parameter SEs through Az, which is only valid if the fitted points are
+  independent observations. They are cumulated (§5.2–5.3). No amount of
+  recovering the a–b covariance term fixes a correlation structure that is
+  absent from the model.
+- **It was symmetric.** Wickens is explicit (§11.4, p. 206) that estimate ± z·se
+  (his Eq. 11.9) is correct only when the standard error does not vary with the
+  parameter, and that neither d′ nor Az has a constant SE (Figure 11.1, p. 205);
+  the asymmetry for Az runs *opposite* to that for d′. His analytic remedy is to
+  iterate — re-evaluate the SE at the interval endpoints and recompute (p. 207).
+  The implementation instead clamped a symmetric interval to [0,1].
+- **Analytic intervals run short anyway.** Real data are overdispersed relative
+  to the multinomial, so calculations based on it underestimate variability and
+  confidence intervals come out too short (§11.2, p. 201). Wickens calls such
+  standard errors optimistically too small (p. 210).
+- **Wickens never offered an analytic SE for this fit.** His closed forms
+  (Eqs. 11.2–11.7, pp. 202–203) apply where the parameter count equals the data
+  point count — the single-point case. Where data exceed parameters (rating data,
+  several bias conditions) he routes estimation to the §3.6 fitting algorithms,
+  which supply approximate sampling variances from the product-multinomial model
+  (p. 205). Those algorithms are maximum likelihood, and he names the standard
+  one: Dorfman & Alf (§3.6, pp. 57–58). **The SE was always meant to come out of
+  the fit itself.** There is no sanctioned analytic interval for a least-squares
+  z-ROC line, which is why the delta method had to be invented and why it failed.
+
+Measured on the Hosmer–Lemeshow low-birth-weight data, the delta SE was ~5×
+too narrow (≈0.010 where the bootstrap and Hanley–McNeil both give ≈0.05),
+and it did not scale with n at all — see "The binning artifact" below.
+
+### What neuron does now: bootstrap
+
+The binormal Az interval is a **stratified bootstrap percentile interval**.
+Exemplars are resampled with replacement within each class (so every resample
+preserves the observed class sizes and always has an ROC), the **entire Wickens
+procedure is re-run on each resample**, and the 2.5th/97.5th percentiles of the
+resampled areas form the interval; the SD of the resampled areas is reported as
+the standard error.
+
+Why this is the right answer rather than a convenience:
+
+- Resampling **cases** reproduces the cumulation-induced dependence
+  automatically. That is precisely the accommodation §5.3 (p. 88) demands, without
+  having to model the correlation.
+- The percentile interval is **asymmetric by construction** — it delivers for
+  free what Wickens' endpoint iteration (p. 207) exists to approximate.
+- It does not rely on the multinomial variance that §11.2 (p. 201) warns is
+  optimistic.
+
+Implementation notes: draws come from `util::i_resample()`, a generator kept
+**independent of the training stream**, so computing an interval can never
+perturb weight initialisation or train/test splits; `--seed N` seeds both.
+Resamples on which the fit cannot be computed are counted and reported rather
+than silently dropped. B = 2000 by default (`setBootstrapResamples`; 0 disables).
+
+**Validation.** On the low-birth-weight data the bootstrap SE agrees with the
+independent Hanley–McNeil estimate to within ~5% (train: 0.0497 vs 0.0522 at
+n = 142; test: 0.0844 vs 0.0870 at n = 47), and scales with n as it must. Two
+methods resting on different assumptions agreeing is the calibration evidence;
+the delta method agreed with neither.
+
+The trapezoidal area keeps its **Hanley–McNeil** closed-form interval (the
+Mann–Whitney U equivalence; Hanley & McNeil 1982). It calibrated cleanly
+(ratio ≈ 1.09) and is retained as an independent cross-check.
+
+### The binning artifact (why the error bars are next)
+
+`getStatROCarea()` currently groups the z-points into fixed-count bins and feeds
+fitexy each bin's **mean and within-bin standard deviation** as the point and its
+error bar. **This has no counterpart in Wickens.** Table 5.3 (p. 90) carries no
+error-bar column; Example 5.1 fits by eye. The within-bin SD was introduced to
+give fitexy something to weight with — the rating case supplies no independent
+per-point sample the way the bias case does.
+
+Because the bins are chunks of adjacent values from a sorted, monotone z
+sequence, that "standard deviation" measures **bin width**, not sampling error.
+Consequences, all measured 2026-07-15:
+
+- The delta SE tracked the **bin count**, not the sample size: n = 142 and n = 47
+  gave 0.0102 and 0.0103, while Hanley–McNeil correctly gave 0.049 and 0.091.
+- Within one dataset it moved with the binning alone: the same 142 exemplars gave
+  SE 0.014 at 9 bins and 0.034 at 5 bins.
+- Flat runs of the empirical ROC (thresholds where the hit rate does not move)
+  produce bins with **zero** SD, degenerate fitexy weights, a non-finite χ², and
+  a `gammq` failure ("a too large, ITMAX too small in gcf") — which discarded 27%
+  of bootstrap resamples until the p-value was made non-fatal.
+
+The principled error bar is Wickens' own: binomial rate variance (Eq. 11.2,
+p. 202) pushed through the delta method (Eq. 11.3, p. 202) to the z scale, giving
+
+    σ²_z ≈ p(1−p)/N ÷ φ²(z)
+
+Once each point carries an analytic error bar, **binning is unnecessary** — its
+only purpose was to have several values to take an SD of. The categorisation then
+follows Metz's LABROC insight: the natural categories of continuous data are the
+**corners of the empirical ROC**, retained without loss of information relevant to
+ROC estimation (Metz, Herman & Shen 1998); flat runs contribute nothing. That
+removes the arbitrary bin count, the 3..10 search, and the zero-SD failure class
+together. See the plan in CLAUDE.md (ROC inference, Phase 2).
+
+Wickens independently condemns the small-expected-frequency regime that
+fixed-count binning creates: distrust these χ² tests when many expected
+frequencies fall below four or five (§11.5, p. 216).
+
+### Errors in both coordinates
+
+The choice to fit with errors in *both* z-coordinates (fitexy) is Wickens' own
+and worth keeping. He calls the ordinary regression model — x exact, all
+uncertainty in y — unsatisfactory for detection data, because both Z(h) and Z(f)
+carry sampling error (p. 56). Regression to the mean flattens such a line, giving
+too small a slope b and hence an overestimated σ̂ₛ, which with enough scatter can
+get the equal-variance model rejected when it is appropriate.
+
+Note the limit of that endorsement: he invokes the both-coordinates line to show
+why regression is biased, then routes three-or-more-point data to maximum
+likelihood (§3.6, p. 57). The 2-axis fit is better than regression; it is not the
+estimator he recommends.
+
+### Goodness of fit does not gate the area
+
+The χ² fit probability is a **diagnostic**, never a precondition for reporting
+Az. Wickens states that even had the model been strictly rejected on goodness of
+fit, it would still be appropriate to use statistics like Az to describe
+performance (§11.5, p. 217). A `gammq` failure or a poor fit therefore marks the
+p-value unavailable and leaves the area intact.
 
 ### Methods-section language
 
-> A 95% confidence interval for the binormal area under the ROC curve (Az) was
-> obtained by the delta method, propagating the standard errors of the fitted
-> z-ROC intercept and slope through Az = Φ(a/√(1+b²)). For empirical
-> (trapezoidal) areas, the confidence interval used the Hanley–McNeil variance
-> estimator based on the equivalence of the area to the Mann–Whitney U
-> statistic.
+Every methodological claim below is cited to its source and is a property of the
+*method*, so it travels to any dataset. Three things do **not** travel — fix them
+before this goes near a manuscript:
 
-### Caveat before relying on the binormal interval in print
+1. **Check ROADMAP 3 Phase 1 in CLAUDE.md first — it is PARTIAL.** The bootstrap
+   landed 2026-07-15, so a current build reports it and this text describes what
+   the code does. But one Phase 1 item is outstanding and it bears on publication:
+   a χ² convergence failure still discards the whole resample, dropping ~27% of them
+   on the low-birth-weight test set. Those discards correlate with ties rather than
+   occurring at random, so the interval is conditioned on tie-poor resamples and is
+   **biased slightly narrow**. The engine prints the effective resample count and the
+   failure count — **report them**, and if failures are more than a few percent, say
+   so or wait for the fix. A build *predating* 2026-07-15 reports the delta-method
+   interval, which is mis-specified: do not publish an A_z interval from one; use the
+   trapezoidal Hanley–McNeil interval. Describe the code you actually ran.
+2. **"B = 2000 resamples"** is the default (`setBootstrapResamples`). If you
+   changed it, change it here.
+3. **"the two interval methods agreed to within ~5%"** is a measurement on the
+   Hosmer–Lemeshow low-birth-weight data (0.0497 vs 0.0522 at n = 142; 0.0844 vs
+   0.0870 at n = 47). It is **not** a property of the method and **not** a
+   guarantee. Recompute it on your data or delete the sentence. Agreement can fail
+   — the two estimators rest on different assumptions, which is the entire reason
+   the comparison is worth reporting.
 
-The binormal delta-method interval has a known approximation in this
-implementation: on the binned fit path (fitexy, errors in both coordinates),
-the routine doesn't expose the a–b covariance, so the cross term is set to
-zero. In the calibration test the delta-method SE ran a bit narrow (reported
-SE ≈ 0.56× the empirical SD) — i.e., somewhat anti-conservative. The
-Hanley–McNeil interval, by contrast, calibrated cleanly (ratio ≈ 1.09). So the
-trapezoidal CI is the more trustworthy of the two as it stands; recover that
-covariance term, or validate the binormal CI further, before leaning on it in
-print. Both intervals' calibration is checked by simulation in
-`tests/binormal/check_az.cpp` (the delta method under a generous window, the
-Hanley–McNeil under a tight one).
+Then read **"What to disclose, honestly"** immediately below the block: it lists the
+limitations a reviewer is entitled to know about, and they belong in the paper too.
 
-**The delta-method SE scales with the bin count, not the sample size**
-(observed 2026-07-15). Because the z-ROC line is fitted to *binned* points, the
-delta SE reflects the uncertainty of a fit through a handful of bin means and
-never sees the number of exemplars behind them. Two consequences, both real:
+> Discrimination was summarised by the area under the ROC curve. The binormal
+> area A_z was estimated under the unequal-variance Gaussian signal-detection
+> model following Wickens (2002): the empirical operating points were transformed
+> to Gaussian coordinates, a straight isosensitivity contour zH = a + b·zF was
+> fitted, and the area computed as A_z = Φ(a/√(1+b²)) (Wickens 2002, Eq. 4.7,
+> p. 68). Because the operating points derive from a single sample and are formed
+> by cumulating the same observations, they are not statistically independent
+> (Wickens 2002, pp. 87–88); the line was therefore fitted treating both
+> coordinates as subject to sampling error (Wickens 2002, p. 56; Press et al.
+> 1992, fitexy), and no analytic standard error was derived from the fit.
+>
+> A 95% confidence interval for A_z was obtained by a stratified bootstrap
+> percentile method (Efron & Tibshirani 1993) with B = 2000 resamples. Exemplars
+> were resampled with replacement within each outcome class, preserving the
+> observed class sizes, and the complete estimation procedure was re-run on each
+> resample, so that the dependence among operating points is reproduced in the
+> resampling distribution rather than modelled. Resampling was chosen over an
+> analytic interval because the parametric variance underlying such intervals
+> assumes independent operating points and, being multinomial-based, underestimates
+> variability in overdispersed data (Wickens 2002, §11.2, p. 201, and p. 210), and
+> because a symmetric estimate ± z·se interval is inappropriate for A_z, whose
+> standard error varies with the parameter (Wickens 2002, §11.4, pp. 206–207).
+> The percentile interval is asymmetric by construction.
+>
+> The empirical (trapezoidal) area was reported alongside A_z with a 95% interval
+> from the Hanley–McNeil variance estimator, based on the equivalence of the
+> empirical area to the Mann–Whitney U statistic (Hanley & McNeil 1982). The
+> trapezoidal area is known to be negatively biased, underestimating the true area
+> when operating points are few or unevenly spread (Wickens 2002, pp. 70–71); A_z
+> is therefore the primary measure (Wickens 2002, p. 72), with the trapezoidal
+> area serving as a distribution-light cross-check. On the present data the two
+> interval methods agreed to within ~5%. **[← RECOMPUTE ON YOUR DATA OR DELETE —
+> this figure is from the low-birth-weight set, not a property of the method]**
+>
+> Goodness of fit of the binormal model was assessed by a χ² statistic on the
+> fitted contour; a poor fit was reported as a diagnostic but did not preclude
+> reporting A_z (Wickens 2002, §11.5, p. 217).
 
-- Across datasets it barely moves with n. On the low-birth-weight set, n = 142
-  and n = 47 gave SEs of 0.0102 and 0.0103 — while Hanley–McNeil correctly gave
-  0.049 and 0.091, a ratio of 1.85 against the expected √(142/47) = 1.74.
-- Within one dataset it moves with the binning alone. The same 142 exemplars
-  gave SE 0.014 at 9 bins and 0.034 at 5 bins.
+If the analysis instead uses a maximum-likelihood binormal fit (see the roadmap),
+substitute: *"A_z and its standard error were estimated by maximum likelihood
+under the binormal model (Dorfman & Alf 1968; Metz, Herman & Shen 1998), which
+accommodates the dependence among operating points within the estimation
+algorithm (Wickens 2002, §3.6, p. 57)."*
 
-So a binormal Az is only interpretable **alongside the nBins that produced it**,
-which is why `ROCarea` and the GUI stats panel both label every fit with its bin
-count, and why `TwoSet::getBestPfit()`/`getBestAUCfit()` return `nBins` as part
-of the `ROCfit`. Quote the bin count whenever you quote the Az. This makes the
-"0.56× narrow" figure above a floor rather than a fixed correction: how narrow
-depends on how many bins the search happened to land on.
+### What to disclose, honestly
 
-**This is tested.** `tests/binormal/check_az.cpp` draws large Gaussian samples
+- The estimator is a **least-squares z-ROC line**, not maximum likelihood.
+  Wickens routes multi-point data to ML (§3.6, p. 57) principally because ML
+  supplies the standard errors — a need the bootstrap meets independently. The
+  least-squares route is Chapter 5's own hand method (Example 5.1, p. 89) and
+  Wickens carries its estimates into his own goodness-of-fit test (p. 214), so it
+  is defensible; it is not the reference estimator.
+- Until Phase 2 lands, the **binning is arbitrary** and A_z depends on it
+  (0.616 at 9 bins vs 0.618 at 5 bins on the low-birth-weight data — small, but
+  real). Quote the bin count with the area, or use the trapezoidal area.
+- The bootstrap resamples exemplars, so it captures sampling variability of the
+  cases. It does not capture model-selection variability from choices made
+  outside the resampled procedure.
+
+### References
+
+| Source | Used for |
+|---|---|
+| Wickens, T. D. (2002). *Elementary Signal Detection Theory*. Oxford University Press. | The model and estimator throughout. Az = Φ(a/√(1+b²)) Eq. 4.7 p. 68; Az = Φ(d_a/√2) Eq. 4.8 p. 68; A_trap Eq. 4.9 p. 69 and its negative bias pp. 70–71; A_z preferred p. 72; errors in both coordinates p. 56; ML for 3+ points and ML supplies SEs §3.6 p. 57; rating model §5.2 pp. 85–87, Eqs. 5.3–5.5 p. 86; rating points not independent, dependence increases sampling variability pp. 87–88; fitting algorithm must accommodate dependence, use the correct program §5.3 p. 88; worked fit Example 5.1 p. 89 and Table 5.3 p. 90; seven parameters and GOF p. 91; overdispersion → intervals too short §11.2 p. 201; binomial rate variance Eq. 11.2 p. 202; delta method Eq. 11.3 p. 202 and σ²_z = σ²_p/φ²(z) p. 202; var(Az) Eq. 11.7 p. 203; large-sample caveats p. 203; se(Âz) worked Example 11.1 p. 204; SE varies with parameter Figure 11.1 p. 205; closed forms limited to parameters = data points, else use §3.6 algorithms p. 205; symmetric interval only valid for constant SE, endpoint iteration §11.4 pp. 206–207; SEs optimistically too small p. 210; dependence invalidates SEs p. 212; GOF df Eq. 11.12 p. 213; Example 11.8 X² = 5.93 vs 35.85 p. 214; distrust GOF at small expected frequencies p. 216; rejected model still permits A_z p. 217. |
+| Dorfman, D. D., & Alf, E. (1968a, 1968b) | The standard ML algorithm for fitting the SDT model to several conditions, as cited by Wickens' reference notes, p. 58. (Commonly cited elsewhere as Dorfman & Alf 1969, *J. Math. Psych.* 6:487–496; Wickens gives 1968a/1968b.) |
+| Hanley, J. A., & McNeil, B. J. (1982). *Radiology* 143:29–36. | Closed-form variance of the empirical (trapezoidal) area via the Mann–Whitney U equivalence; `TwoSet::hmSE`. |
+| Efron, B., & Tibshirani, R. J. (1993). *An Introduction to the Bootstrap*. | Bootstrap percentile intervals. |
+| Metz, C. E., Herman, B. A., & Shen, J. H. (1998). *Statistics in Medicine* 17:1033–1053. | LABROC4/LABROC5; truth-state runs in rank-ordered data as the natural categorisation of continuous data, retaining the ROC's corners without loss of information relevant to ROC estimation. The basis of the Phase 2 categorisation. |
+| Metz, C. E., & Pan, X. (1999). | The "proper" binormal model; degeneracy (fits of unphysical shape crossing the chance line) and its remedy. |
+| Pesce, L. L., & Metz, C. E. (2007). | Reliable, computationally efficient ML estimation of proper binormal ROC curves. |
+| Hsieh, F., & Turnbull, B. W. (1996). *Annals of Statistics* 24:25–40. | Generalized least squares for grouped data; minimum-distance estimator that avoids grouping entirely. |
+| Swets, J. A. (1996). *Signal Detection Theory and ROC Analysis in Psychology and Diagnostics*. Lawrence Erlbaum. | Summary of published ROC-fitting programs, per Wickens' reference notes p. 58 (print only; not digitised). |
+| Chakraborty, D. P. *Modeling ROC Data*, ch. 6. | Modern critique of least-squares z-ROC fitting (non-independence of cumulative points; error in the x-direction; rigid thresholds) and of degeneracy. Note its first objection targets *cumulative rating-type* data — it does not apply to Wickens' independent-bias-condition design. |
+| Press, W. H., et al. (1992). *Numerical Recipes in C*, 2nd ed. | `fit` p. 665, `fitexy` pp. 668–670 (errors in both coordinates), `gammq`; the basis of `XY` in `src/stats.cpp`. |
+| Metz ROC software, University of Chicago. | ROCFIT, LABROC4, PROPROC, CORROC, INDROC, ROCKIT, LABMRMC, DBM-MRMC — the living descendant of Swets' program summary. |
+| Wickens' supplementary programs, `twickens.bol.ucla.edu/sdt.htm` (still live; last modified 11 April 2002). | GAUSSW, DPRIMEW, and — the relevant pair — **FitRoc** (a series of independent detection conditions) and **FitRating** (a single condition with rating-scale responses). Their existence as two separate programs is the clearest statement that neuron's data type has its own fitting algorithm. neuron's case is FitRating. |
+
+### The area estimate is tested
+
+`tests/binormal/check_az.cpp` draws large Gaussian samples
 with known (μ, σ), runs them through `getStatROCarea()`, and requires the
 result to match Φ((μ₁−μ₀)/√(σ₀²+σ₁²)) within sampling tolerance — including an
 unequal-variance case. It runs in CI on every push (`ctest`).

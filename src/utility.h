@@ -42,6 +42,14 @@ namespace util {
 	// Returns a uniform random integer in [0, n-1]
 	unsigned i_random( unsigned );
 
+	// Independent stream for resampling (the bootstrap). Kept separate from
+	//    the generator above on purpose: statistics must never perturb the
+	//    weight-init / train-test-split draws, or computing a confidence
+	//    interval would change the next model trained. set_seed() seeds both,
+	//    so --seed N stays fully reproducible.
+	// Returns a uniform random integer in [0, n-1] from the resampling stream
+	unsigned i_resample( unsigned );
+
 	// Rounds to number of significant digits
 	double round( double, unsigned );
 

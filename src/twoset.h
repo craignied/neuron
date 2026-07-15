@@ -124,6 +124,15 @@ public:
 		unsigned nBins = 0; // number of bins this fit used
 	};
 
+	// A bootstrap percentile confidence interval for an ROC area
+	struct CI {
+		double lo = 0, hi = 0; // 2.5th / 97.5th percentile of the resampled areas
+		double se = 0; // standard deviation of the resampled areas
+		unsigned resamples = 0; // resamples that produced an area
+		unsigned failures = 0; // resamples the fit could not be computed on
+		bool valid = false; // false when too few resamples succeeded
+	};
+
 	// Runs the best-p / best-AUC binning search that ROCarea reports, caching
 	//    both fits. ROCarea calls this; callers wanting the same two fits
 	//    without the report (the GUI stats panel) use the getters below, which
@@ -133,6 +142,21 @@ public:
 	ROCfit getBestPfit(); // fit with the largest fit p
 	ROCfit getBestAUCfit(); // fit with the largest ROC area
 	bool getROCsearchFailed(); // true if the search hit a statistics error
+
+	// Bootstrap confidence intervals for the binormal areas. Resamples the
+	//    exemplars with replacement (stratified: the class sizes are held at
+	//    their observed values) and re-runs the WHOLE Wickens procedure on each
+	//    resample -- including the bin search -- so the interval carries the
+	//    variability of choosing the binning, not just of fitting at a fixed
+	//    one. Percentile method. Draws come from util::i_resample(), an
+	//    independent stream, so computing an interval never perturbs training.
+	void bootstrapROC();
+	CI getBestPci(); // interval for the best-p area
+	CI getBestAUCci(); // interval for the best-AUC area
+	CI getStatCi(); // interval for the fixed-binning area (when not searching)
+	// Number of resamples; 0 disables the bootstrap and its CI lines
+	void setBootstrapResamples( const unsigned n ) { bootB = n; }
+	unsigned getBootstrapResamples() { return bootB; }
 
 	// Outputs to ostream an ROC report with statistical method and/or
 	//    trapezoidal method depending on flag set by setReportFlag() accessor
@@ -191,7 +215,8 @@ public:
 		binThresh, // number of data points under which data will not be binned
 		calcThresh, // number of data points under which statistics will not be used
 		minBins, // minimum number of search bins
-		maxBins; // maximum number of search bins
+		maxBins, // maximum number of search bins
+		bootB; // number of bootstrap resamples for the ROC confidence intervals
 
 	vector< double > ROCx, // ROC curve x (1 - specificity) for plotting
 		ROCy; // ROC curve y (sensitivity), filled by getTrapROCarea()
@@ -208,6 +233,10 @@ public:
 	ROCfit bestPfit, // cached search result: fit with the largest fit p
 		bestAUCfit; // cached search result: fit with the largest ROC area
 
+	CI bestPci, // cached bootstrap interval for the best-p area
+		bestAUCci, // cached bootstrap interval for the best-AUC area
+		statCi; // cached bootstrap interval for the fixed-binning area
+
 	string searchErrorMsg; // message from a failed binning search
 
 	bool loadedFlag, // flag to indicate if Matrix loaded
@@ -217,6 +246,7 @@ public:
 		statROCcalcFlag, // flag indicates if statistical ROC area calculated
 		searchCalcFlag, // flag indicates if the binning search results are current
 		searchErrorFlag, // flag indicates the binning search hit a statistics error
+		bootCalcFlag, // flag indicates if the bootstrap intervals are current
 		reportFlag, // flag directs how to report statistical and/or trapezoidal ROC
 		searchFlag, // flag indicates if largest p, largest ROC is searched
 		KScalcFlag, // flag indicates if Kolmogorov-Smirnov test calculated
@@ -240,7 +270,7 @@ public:
 	void copy( const TwoSet& rhs );
 
 	// Utility method for ROCarea, outputs statistical report
-	void statReport( ostream&, unsigned, unsigned, double, double, double, double );
+	void statReport( ostream&, unsigned, unsigned, double, double, double, const CI& );
 
 	// Delta-method standard error of Az from a fitted zROC line
 	double azSE( XY& );

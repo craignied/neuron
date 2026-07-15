@@ -33,6 +33,11 @@ void TwoSet::initialize()
 	searchErrorMsg.clear();
 	bestPfit = ROCfit();
 	bestAUCfit = ROCfit();
+	bootCalcFlag = false;
+	bootB = 2000; // resamples for the ROC confidence intervals
+	bestPci = CI();
+	bestAUCci = CI();
+	statCi = CI();
 	calcThresh = 10;
 	reportFlag = true;
 	searchFlag = true;
@@ -78,6 +83,7 @@ void TwoSet::copy( const TwoSet& rhs )
 	nThresholds = rhs.nThresholds;
 	minBins = rhs.minBins;
 	maxBins = rhs.maxBins;
+	bootB = rhs.bootB;
 	statP = rhs.statP;
 	statChi2 = rhs.statChi2;
 	statAzSE = rhs.statAzSE;
@@ -88,6 +94,7 @@ void TwoSet::copy( const TwoSet& rhs )
 	statROCcalcFlag = rhs.statROCcalcFlag;
 	searchCalcFlag = rhs.searchCalcFlag;
 	searchErrorFlag = rhs.searchErrorFlag;
+	bootCalcFlag = rhs.bootCalcFlag;
 	reportFlag = rhs.reportFlag;
 	searchFlag = rhs.searchFlag;
 	KScalcFlag = rhs.KScalcFlag;
@@ -101,6 +108,9 @@ void TwoSet::copy( const TwoSet& rhs )
 	HLX2P = rhs.HLX2P;
 	bestPfit = rhs.bestPfit;
 	bestAUCfit = rhs.bestAUCfit;
+	bestPci = rhs.bestPci;
+	bestAUCci = rhs.bestAUCci;
+	statCi = rhs.statCi;
 	searchErrorMsg = rhs.searchErrorMsg;
 	ROCx = rhs.ROCx;
 	ROCy = rhs.ROCy;
@@ -286,6 +296,7 @@ void TwoSet::invalidate()
 {
 	statROCcalcFlag = false;
 	searchCalcFlag = false; // the cached binning search describes the old guesses
+	bootCalcFlag = false; // and so do the cached bootstrap intervals
 	KScalcFlag = false;
 	PKX2calcFlag = false;
 	HLX2calcFlag = false;
@@ -790,6 +801,133 @@ void TwoSet::searchROC( ostream& outputStream )
 	searchCalcFlag = true;
 }
 
+// Percentile interval (and spread) of a set of resampled ROC areas
+static TwoSet::CI percentileCI( vector< double >& area, unsigned failures )
+{
+	TwoSet::CI ci;
+	ci.failures = failures;
+	ci.resamples = ( unsigned ) area.size();
+
+	if ( area.size() < 20 ) // too few to say anything honest
+		return ci;
+
+	sort( area.begin(), area.end() );
+
+	// Linearly interpolated percentile of the sorted areas
+	auto pct = [ &area ]( double p )
+	{
+		double idx = p * ( area.size() - 1 );
+		unsigned lo = ( unsigned ) floor( idx ), hi = ( unsigned ) ceil( idx );
+		double frac = idx - lo;
+		return area[ lo ] * ( 1 - frac ) + area[ hi ] * frac;
+	};
+
+	ci.lo = pct( 0.025 );
+	ci.hi = pct( 0.975 );
+
+	Population spread( area );
+	ci.se = spread.std(); // the bootstrap SD is the standard error
+
+	ci.valid = true;
+	return ci;
+}
+
+// Bootstrap the binormal ROC areas. Craig's original intent for these
+//    intervals (the delta method that stood here was an analytic substitute,
+//    and a poor one: its SE tracked the bin count rather than the sample
+//    size, because the z-ROC line is fitted to binned points whose error bars
+//    measure bin width). Resampling re-runs the whole Wickens procedure and
+//    so is indifferent to what happens inside it.
+void TwoSet::bootstrapROC()
+{
+	if ( bootCalcFlag ) // intervals already current
+		return;
+
+	bestPci = CI();
+	bestAUCci = CI();
+	statCi = CI();
+	bootCalcFlag = true; // even a refusal below is a current answer
+
+	if ( bootB == 0 || !loadedFlag )
+		return;
+
+	// Stratified: resample within each class so every resample keeps the
+	//    observed class sizes (an unstratified draw can yield a resample with
+	//    no positives at all, which has no ROC)
+	vector< unsigned > known0, known1;
+	for ( unsigned row = 0; row < A.rows(); row++ )
+		if ( A( row, 0 ) == 0 )
+			known0.push_back( row );
+		else
+			known1.push_back( row );
+
+	if ( known0.empty() || known1.empty() ) // single-class data has no ROC
+		return;
+
+	vector< double > azBestP, azBestAUC, azStat;
+	unsigned failures = 0;
+
+	for ( unsigned b = 0; b < bootB; b++ )
+	{
+		// Draw with replacement inside each class
+		Matrix< double > M( n, 2 );
+		unsigned row = 0;
+		for ( unsigned i = 0; i < known0.size(); i++, row++ )
+		{
+			unsigned pick = known0[ util::i_resample( ( unsigned ) known0.size() ) ];
+			M( row, 0 ) = A( pick, 0 );
+			M( row, 1 ) = A( pick, 1 );
+		}
+		for ( unsigned i = 0; i < known1.size(); i++, row++ )
+		{
+			unsigned pick = known1[ util::i_resample( ( unsigned ) known1.size() ) ];
+			M( row, 0 ) = A( pick, 0 );
+			M( row, 1 ) = A( pick, 1 );
+		}
+
+		try
+		{
+			TwoSet resample( M );
+			// The resample must be scored exactly as this set is scored
+			resample.setBinSize( binSize );
+			resample.setNbins( nBins );
+			resample.setNbinsSetsSize( nBinFlag );
+			resample.NbinThreshold( binThresh );
+			resample.setROCthresh( calcThresh );
+			resample.setMinROCSearchBins( minBins );
+			resample.setMaxROCSearchBins( maxBins );
+			resample.setBootstrapResamples( 0 ); // no bootstrap within a bootstrap
+
+			if ( searchFlag ) // re-run the search: choosing the binning is part
+			{                 //    of the procedure, so it is part of the spread
+				ostringstream discard; // a resample's warnings are not the user's
+				resample.searchROC( discard );
+				if ( resample.getROCsearchFailed() )
+				{
+					failures++;
+					continue;
+				}
+				azBestP.push_back( resample.getBestPfit().az );
+				azBestAUC.push_back( resample.getBestAUCfit().az );
+			}
+			else
+				azStat.push_back( resample.getStatROCarea() );
+		}
+		catch ( ... ) // a degenerate resample the fit cannot be computed on
+		{
+			failures++;
+		}
+	}
+
+	if ( searchFlag )
+	{
+		bestPci = percentileCI( azBestP, failures );
+		bestAUCci = percentileCI( azBestAUC, failures );
+	}
+	else
+		statCi = percentileCI( azStat, failures );
+}
+
 // Search on demand for callers that want the fits without the report. The
 //    search only runs when the cache is stale, so asking for these never
 //    changes what a later ROCarea() prints.
@@ -823,6 +961,25 @@ bool TwoSet::getROCsearchFailed()
 	return searchErrorFlag;
 }
 
+// Bootstrap on demand, same contract as the fit getters above
+TwoSet::CI TwoSet::getBestPci()
+{
+	bootstrapROC();
+	return bestPci;
+}
+
+TwoSet::CI TwoSet::getBestAUCci()
+{
+	bootstrapROC();
+	return bestAUCci;
+}
+
+TwoSet::CI TwoSet::getStatCi()
+{
+	bootstrapROC();
+	return statCi;
+}
+
 // Outputs to ostream an ROC report which if reportFlag is false uses either the
 //    trapezoidal method if number of data points < threshold (calcThresh)
 //    or statistical method if >= threshold, and uses both if reportFlag is true
@@ -834,6 +991,10 @@ void TwoSet::ROCarea( ostream& outputStream )
 	if ( searchFlag )
 		searchROC( outputStream );
 
+	// The intervals the report is about to print
+	if ( goodData >= calcThresh )
+		bootstrapROC();
+
 	if ( !reportFlag ) // report only one
 	{
 		if ( goodData >= calcThresh ) // enough data points for statistical calculation
@@ -844,9 +1005,9 @@ void TwoSet::ROCarea( ostream& outputStream )
 				if ( !searchErrorFlag )
 				{
 					// Use utility method
-					statReport( outputStream, goodData, bestPfit.nBins, bestPfit.az, bestPfit.chi2, bestPfit.p, bestPfit.se );
+					statReport( outputStream, goodData, bestPfit.nBins, bestPfit.az, bestPfit.chi2, bestPfit.p, bestPci );
 					outputStream << "Searching for best AUC:" << endl;
-					statReport( outputStream, goodData, bestAUCfit.nBins, bestAUCfit.az, bestAUCfit.chi2, bestAUCfit.p, bestAUCfit.se );
+					statReport( outputStream, goodData, bestAUCfit.nBins, bestAUCfit.az, bestAUCfit.chi2, bestAUCfit.p, bestAUCci );
 				}
 				else
 					outputStream << searchErrorMsg << endl;
@@ -857,7 +1018,7 @@ void TwoSet::ROCarea( ostream& outputStream )
 				try  // calculate ROC AUC to get chi2, p values
 				{
 					AUC = getStatROCarea();
-					statReport( outputStream, goodData, nBins, AUC, statChi2, statP, statAzSE ); // use utility method
+					statReport( outputStream, goodData, nBins, AUC, statChi2, statP, statCi ); // use utility method
 				}
 				catch ( TwoSet::twoSetErr& e )
 				{
@@ -893,9 +1054,9 @@ void TwoSet::ROCarea( ostream& outputStream )
 				if ( !searchErrorFlag )
 				{
 					// Use utility method
-					statReport( outputStream, goodData, bestPfit.nBins, bestPfit.az, bestPfit.chi2, bestPfit.p, bestPfit.se );
+					statReport( outputStream, goodData, bestPfit.nBins, bestPfit.az, bestPfit.chi2, bestPfit.p, bestPci );
 					outputStream << "Searching for best AUC:" << endl;
-					statReport( outputStream, goodData, bestAUCfit.nBins, bestAUCfit.az, bestAUCfit.chi2, bestAUCfit.p, bestAUCfit.se );
+					statReport( outputStream, goodData, bestAUCfit.nBins, bestAUCfit.az, bestAUCfit.chi2, bestAUCfit.p, bestAUCci );
 				}
 				else
 					outputStream << searchErrorMsg << endl;
@@ -906,7 +1067,7 @@ void TwoSet::ROCarea( ostream& outputStream )
 				try  // calculate ROC AUC to get chi2, p values
 				{
 					AUC = getStatROCarea();
-					statReport( outputStream, goodData, nBins, AUC, statChi2, statP, statAzSE ); // use utility method
+					statReport( outputStream, goodData, nBins, AUC, statChi2, statP, statCi ); // use utility method
 				}
 				catch ( TwoSet::twoSetErr& e )
 				{
@@ -936,18 +1097,24 @@ void TwoSet::ROCarea( ostream& outputStream )
 
 // Utility method for ROCarea, outputs statistical report
 void TwoSet::statReport( ostream& outputStream, unsigned goodData, unsigned nBins, double AUC,
-	double chi2, double p, double se )
+	double chi2, double p, const CI& ci )
 {
 	outputStream << resetiosflags( ios::scientific ) << setiosflags( ios::fixed | ios::showpoint )
 		<< setprecision( 6 );
 	outputStream << "ROC area = " << AUC << endl;
 
-	// 95% confidence interval by the delta method, clamped to [0,1]
-	double lo = AUC - 1.96 * se, hi = AUC + 1.96 * se;
-	if ( lo < 0 ) lo = 0;
-	if ( hi > 1 ) hi = 1;
-	outputStream << "95% CI = " << lo << " - " << hi
-		<< " (SE = " << se << ", delta method)" << endl;
+	// 95% bootstrap percentile confidence interval
+	if ( ci.valid )
+	{
+		outputStream << "95% CI = " << ci.lo << " - " << ci.hi
+			<< " (SE = " << ci.se << ", " << ci.resamples
+			<< " bootstrap resamples";
+		if ( ci.failures > 0 )
+			outputStream << ", " << ci.failures << " failed";
+		outputStream << ")" << endl;
+	}
+	else
+		outputStream << "95% CI = not available (too few usable resamples)" << endl;
 	outputStream << "Chi-squared = " << chi2 << endl;
 	outputStream << resetiosflags( ios::fixed ) << setiosflags( ios::scientific );
 	outputStream << "p = " << p << " (closer to 1 is better)" << endl;

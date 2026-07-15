@@ -135,36 +135,51 @@ original neUROn2++ binary; see its README.
 
 ## ROC area confidence intervals
 
-Every ROC area the engine reports carries a 95% confidence interval, computed by an
-**analytic (parametric) method** in each case — not a bootstrap. `docs/roc_theory.md`
-gives the full account; the signal-detection-theory basis of the binormal area is
-Wickens, *Elementary Signal Detection Theory* (Oxford, 2002).
+Every ROC area the engine reports carries a 95% confidence interval. The binormal
+area A_z uses a **stratified bootstrap percentile interval**; the empirical
+(trapezoidal) area keeps the closed-form **Hanley–McNeil** estimator as an independent
+cross-check. **`docs/roc_theory.md` is the authority** — it carries the full derivation,
+the Methods-section language, and a page-level citation table. Read it before quoting an
+interval in print.
 
-**Methods-section language:**
+The signal-detection basis is Wickens, *Elementary Signal Detection Theory* (Oxford,
+2002). A_z = Φ(a/√(1+b²)) is his Eq. 4.7 (p. 68).
 
-> A 95% confidence interval for the binormal area under the ROC curve (Az) was
-> obtained by the delta method, propagating the standard errors of the fitted z-ROC
-> intercept and slope through Az = Φ(a/√(1+b²)). For empirical (trapezoidal) areas,
-> the confidence interval used the Hanley–McNeil variance estimator based on the
-> equivalence of the area to the Mann–Whitney U statistic.
+**Why the interval is bootstrapped rather than analytic.** neuron sweeps thresholds
+across one continuous score on one sample, so its operating points are formed by
+cumulating the same observations and are **not statistically independent** (Wickens
+2002, pp. 87–88) — the rating case, not the independent-bias-condition case. Wickens
+says that dependence must be accommodated in the fitting algorithm and that it
+*increases* sampling variability (§5.3, p. 88); he offers no analytic standard error
+for a least-squares z-ROC line, routing multi-point data to maximum likelihood, which
+supplies the SEs (§3.6, p. 57). Resampling cases reproduces the dependence rather than
+modelling it, and the percentile interval is asymmetric by construction — which A_z
+requires, since its standard error varies with the parameter (§11.4, pp. 206–207).
 
-**Caveat before relying on the binormal interval in print:** on the binned fit path
-(fitexy, errors in both coordinates) the routine doesn't expose the a–b covariance, so
-that cross term is set to zero. In the calibration test the delta-method SE ran a bit
-narrow (reported SE ≈ 0.56× the empirical SD) — somewhat anti-conservative — while the
-Hanley–McNeil interval calibrated cleanly (ratio ≈ 1.09). The trapezoidal CI is the more
-trustworthy of the two as it stands; recover the covariance term, or validate the
-binormal CI further, before leaning on it in print. Both are calibration-checked by
-simulation in `tests/binormal/check_az.cpp`.
+The earlier delta-method interval assumed independent points and was ~5× too narrow;
+it has been retired. Validation: on the low-birth-weight data the bootstrap SE agrees
+with Hanley–McNeil to within ~5% (0.0497 vs 0.0522 at n = 142; 0.0844 vs 0.0870 at
+n = 47) and scales with n as it must — two estimators with different assumptions
+agreeing, where the delta method agreed with neither.
 
-**Always quote a binormal Az with the bin count that produced it.** The z-ROC line is
-fitted to *binned* points, so the delta-method SE reflects a fit through a handful of bin
-means and never sees the number of exemplars behind them. The same 142 exemplars give
-SE 0.014 at 9 bins and 0.034 at 5 bins; and n = 142 vs n = 47 gave near-identical SEs
-(0.0102 / 0.0103) where Hanley–McNeil correctly scaled (0.049 / 0.091). This makes the
-0.56× figure above a floor, not a fixed correction. The engine reports two fits — the
-best-fitting (largest fit p) and the largest-area — each labeled with its `nBins`, in
-both the text report and the GUI stats panel. See `docs/roc_theory.md`.
+The interval line reports the effective number of resamples and how many failed. A
+resample whose fit cannot be computed is currently dropped whole, and those failures
+are not random, so a large failure count means a slightly narrow interval — quote the
+counts, and see ROADMAP 3 Phase 1 in CLAUDE.md for the outstanding fix.
+
+**A_z is the primary measure, not the trapezoidal area.** The trapezoidal area is
+negatively biased — it connects operating points by straight lines where real
+isosensitivity contours are bowed — and the bias grows when points are few or bunched
+(Wickens 2002, pp. 70–71). Unless there is specific reason to doubt the Gaussian model,
+A_z is preferable (p. 72). The trapezoidal area is retained because its variance
+estimator rests on different assumptions, making agreement between the two meaningful.
+
+**Known limitation (until ROADMAP 3 Phase 2):** the z-points are grouped into
+fixed-count bins whose within-bin standard deviations serve as error bars — a device
+with no counterpart in Wickens, which measures bin width rather than sampling error.
+A_z therefore depends slightly on the bin count (0.616 at 9 bins vs 0.618 at 5 bins on
+the low-birth-weight data). Quote the bin count with the area. The fix is Wickens' own
+binomial error bar (Eq. 11.2 + 11.3, p. 202), after which binning becomes unnecessary.
 
 ## Layout
 

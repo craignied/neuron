@@ -135,9 +135,21 @@ Harvest from `session.out` and report to the user:
 - Convergence: the iteration table's last lines — error flat and max
   gradient small (logistic should reach ~1e-6; that's the converged MLE).
 - The **Test set** block (not just training): classification accuracy,
-  sensitivity/specificity, and **ROC area with its 95% CI**. Prefer the
-  trapezoidal (Hanley–McNeil) line if the binormal one printed an
-  `ITMAX too small in gcf` warning (a known, harmless legacy quirk).
+  sensitivity/specificity, and **ROC area with its 95% CI**.
+  - **Quote the trapezoidal (Hanley–McNeil) 95% CI, not the binormal one.** The
+    binormal delta-method interval is **mis-specified** — it assumes the z-ROC
+    points are independent, and neuron's are cumulated from a single sample
+    (Wickens 2002, pp. 87–88). Measured ~5× too narrow. A bootstrap replaces it in
+    ROADMAP 3 Phase 1 (CLAUDE.md); once that lands, quote the binormal CI again.
+  - This is about the **interval**, not the **area**: Wickens holds the trapezoidal
+    area negatively biased and A_z the primary measure (pp. 70–72). Report A_z as
+    the area; use the trapezoidal interval as the uncertainty.
+  - Also quote the **bin count** with any binormal A_z — it depends on the binning
+    until Phase 2.
+  - `ITMAX too small in gcf` is **not a harmless quirk** (as this file previously
+    claimed): it means a bin of a flat ROC run had zero SD, so the χ² went
+    non-finite and the binormal area failed outright. Fall back to the trapezoidal
+    area and say the binormal fit failed. Background: `docs/roc_theory.md`.
 - For logistic: notable Wald rows (smallest p-values) — translate the
   input numbers to variable names via the key file — and the condition
   number (≫1e5 suggests collinearity; did they forget `--refcat`?).
