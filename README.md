@@ -55,8 +55,11 @@ Usage: neuron [--seed N] [--gui [--no-browser]] [--version]
 menus: the binary embeds a small HTTP server (cpp-httplib, vendored in
 `third_party/`), binds 127.0.0.1 on an **OS-assigned free port** — it can
 never collide with anything else you run — prints the URL, and opens your
-browser. Pick a data file, pick a model, train, read the captured report
-next to a live ROC plot, then save the **session files**: the network and
+browser. Pick a data file, pick a model, train, read the full statistics
+beside a live ROC plot — classification and confusion counts, trapezoidal
+and binormal areas with their intervals, goodness of fit, and (for logistic
+models) the coefficient table with Wald p values and the condition number —
+then save the **session files**: the network and
 scaling factors (everything `tools/neuron2web.py` needs to deploy the
 model) plus the training/test sets, guesses, and report (everything a
 write-up needs). Each file is written into the directory you started
@@ -153,6 +156,15 @@ Hanley–McNeil interval calibrated cleanly (ratio ≈ 1.09). The trapezoidal CI
 trustworthy of the two as it stands; recover the covariance term, or validate the
 binormal CI further, before leaning on it in print. Both are calibration-checked by
 simulation in `tests/binormal/check_az.cpp`.
+
+**Always quote a binormal Az with the bin count that produced it.** The z-ROC line is
+fitted to *binned* points, so the delta-method SE reflects a fit through a handful of bin
+means and never sees the number of exemplars behind them. The same 142 exemplars give
+SE 0.014 at 9 bins and 0.034 at 5 bins; and n = 142 vs n = 47 gave near-identical SEs
+(0.0102 / 0.0103) where Hanley–McNeil correctly scaled (0.049 / 0.091). This makes the
+0.56× figure above a floor, not a fixed correction. The engine reports two fits — the
+best-fitting (largest fit p) and the largest-area — each labeled with its `nBins`, in
+both the text report and the GUI stats panel. See `docs/roc_theory.md`.
 
 ## Layout
 

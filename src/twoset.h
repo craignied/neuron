@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <stdexcept>
 #include <iomanip>
+#include <sstream>
 
 using namespace std;
 
@@ -71,6 +72,13 @@ public:
 	double getPVP(); // returns PVP
 	double getPVN(); // returns PVN
 
+	// Confusion-matrix counts at the current threshold (throw twoSetErr if
+	//    no threshold has been set) -- the numbers behind ClassTable
+	unsigned getTP(); // true positives
+	unsigned getTN(); // true negatives
+	unsigned getFP(); // false positives
+	unsigned getFN(); // false negatives
+
 	// Outputs to ostream a classification table
 	void ClassTable( ostream& );
 
@@ -103,6 +111,28 @@ public:
 	//    2005 roc application)
 	const vector< double >& getROCx() { return ROCx; }
 	const vector< double >& getROCy() { return ROCy; }
+
+	// One binormal fit at one binning -- the numbers statReport prints.
+	//    The binning matters: the delta-method SE tracks the number of bins
+	//    rather than the number of exemplars, so an Az is only meaningful
+	//    alongside the nBins that produced it.
+	struct ROCfit {
+		double az = 0; // binormal ROC area
+		double se = 0; // delta-method standard error of az
+		double chi2 = 0; // chi-squared of the z-ROC line fit
+		double p = 0; // fit p value, closer to 1 is better
+		unsigned nBins = 0; // number of bins this fit used
+	};
+
+	// Runs the best-p / best-AUC binning search that ROCarea reports, caching
+	//    both fits. ROCarea calls this; callers wanting the same two fits
+	//    without the report (the GUI stats panel) use the getters below, which
+	//    search on demand. Takes an ostream because the search warns when
+	//    maxBins exceeds the data.
+	void searchROC( ostream& );
+	ROCfit getBestPfit(); // fit with the largest fit p
+	ROCfit getBestAUCfit(); // fit with the largest ROC area
+	bool getROCsearchFailed(); // true if the search hit a statistics error
 
 	// Outputs to ostream an ROC report with statistical method and/or
 	//    trapezoidal method depending on flag set by setReportFlag() accessor
@@ -175,16 +205,26 @@ public:
 	    PKX2P, // Pearson's Chi-Square test p-value   Hui Liu added 08/15/2004
 		HLX2P;  // Hosmer-Lemeshow test p-value   Hui Liu added 08/16/2004
 
+	ROCfit bestPfit, // cached search result: fit with the largest fit p
+		bestAUCfit; // cached search result: fit with the largest ROC area
+
+	string searchErrorMsg; // message from a failed binning search
+
 	bool loadedFlag, // flag to indicate if Matrix loaded
 		thresholdFlag, // flag to indicate if threshold set
 		nBinFlag, // flag indicates if number of bins determines bin size
 		binnedFlag, // flag indicates if data was binned for statistical ROC calculation
 		statROCcalcFlag, // flag indicates if statistical ROC area calculated
+		searchCalcFlag, // flag indicates if the binning search results are current
+		searchErrorFlag, // flag indicates the binning search hit a statistics error
 		reportFlag, // flag directs how to report statistical and/or trapezoidal ROC
 		searchFlag, // flag indicates if largest p, largest ROC is searched
 		KScalcFlag, // flag indicates if Kolmogorov-Smirnov test calculated
 		PKX2calcFlag,// flag indicates if Pearson's Chi-Square test calculated   Hui Liu added 08/15/2004
 		HLX2calcFlag; // flag indicates if Hosmer-Lemeshow test calculated   Hui Liu added 08/16/2004
+
+	// Counts the nonzero, non-one data points available for binning
+	unsigned countGoodData();
 
 	// Utility function to set common initial values for constructors
 	void initialize();

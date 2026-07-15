@@ -325,6 +325,36 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   Wald/condNum/confusion counts are print-only today, setHidden is destructive.
   Phase 1a is on the session task list, not started.
 
+- **2026-07-15 (Phase 1a verified in a real browser + binormal reconciled)** — First
+  actual in-browser click-through of `gui_page.html` (Chrome extension connected; the
+  page had only ever been checked by curl + inspection). Drove the H-L low-birth-weight
+  set (189 rows → 142/47) through upload → split → logistic → train: ROC plot, full
+  stats panel, confusion tables, and the coefficient table all render; **zero page JS
+  errors**. Two findings, both about the binormal Az:
+  1. **The delta-method SE tracks the BIN COUNT, not the exemplar count.** n=142 and
+     n=47 gave near-identical SEs (0.0102 vs 0.0103) while Hanley-McNeil scaled properly
+     (0.049 vs 0.091 ≈ √(142/47)). Within one set, the 9-bin fit gave SE 0.014 and the
+     5-bin fit 0.034 — same data, 2.4× apart. This *sharpens* the known caveat in
+     `docs/roc_theory.md` (SE ≈ 0.56× empirical): the delta method propagates the z-ROC
+     line fit over a handful of binned points, so it never sees n. **Still open** —
+     the backlog's "recover the a-b covariance" item is the fix. Hanley-McNeil remains
+     the trustworthy interval and is what the page's headline "95% CI" uses.
+  2. **Panel/report mismatch — FIXED.** `ROCarea` searches nBins 3..10 and prints the
+     best-p and best-AUC fits, then restores `nBins=10`; the GUI afterwards called
+     `getStatROCarea()`, which re-binned at 10 and produced a *third* Az/SE appearing
+     nowhere in the report. Fix: the search is extracted into `TwoSet::searchROC(ostream&)`
+     caching two `TwoSet::ROCfit`s (`az,se,chi2,p,nBins`), exposed via `getBestPfit()`/
+     `getBestAUCfit()`/`getROCsearchFailed()`; `ROCarea` calls it (printed bytes
+     unchanged — goldens byte-identical), and the panel now quotes those same two fits
+     **labeled with their bin counts**. Getters search on demand only when the cache is
+     stale, so asking never changes what a later report prints; `invalidate()` clears
+     the cache and `copy()` copies it (the 2026-07-12 stale-stats bug class).
+     `countGoodData()` extracted as a shared helper. Verified: panel == report field for
+     field, incl. `SE = nan` → `n/a` on a degenerate 3-bin test fit.
+  Gates: zero-warning build, goldens byte-identical, smoke (+3 binormal assertions),
+  ctest, verify_oracle, live click-through. **Lesson: a binormal Az is meaningless
+  without the nBins that produced it — never quote one without the other.**
+
 ## ROADMAP 2 (agreed with Craig 2026-07-14) — training automation & GUI overhaul
 
 Plan-mode approved 2026-07-14. Work the phases in order; each lands independently with
@@ -371,8 +401,11 @@ as any API change. Invoke the `dataviz` skill before writing chart code (Phase 1
   try/caught → null** (binormal/K-S/H-L/sens/spec throw on degenerate sets). `stats`
   object added to train JSON (additive; `roc` kept verbatim) + new `GET /api/stats`
   (recompute w/o retraining; 409 while training). Shape: per-set `{n, confusion{tp,tn,
-  fp,fn}, acc, sens, spec, pvp, pvn, trap{area,se}, binormal{az,se,p,chi2}, ks{d,p},
-  pearsonP, hlP}` + `logistic{condNumber, coefficients[{input,beta,se,waldP}]}`.
+  fp,fn}, acc, sens, spec, pvp, pvn, trap{area,se}, binormal{bestP{az,se,p,chi2,nBins},
+  bestAUC{...}}, ks{d,p}, pearsonP, hlP}` + `logistic{condNumber,
+  coefficients[{input,beta,se,waldP}]}`. **The binormal block quotes the report's two
+  searched fits, not a fit of its own** — see the 2026-07-15 status entry for why the
+  bin count travels with each Az.
 - **Auto algorithm** (engine-side): new `src/netclone.{h,cpp}` `cloneNetwork()` — the
   RegressNet::copy_network typeid dispatch generalized (refactor RegressNet to use it;
   pure refactor, goldens hold). New `src/autoalgo.{h,cpp}` `pick(start, budgetMs,

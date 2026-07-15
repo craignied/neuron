@@ -52,6 +52,20 @@ grep -q '"ok":true' train.json || fail "train endpoint"
 grep -q '"area":' train.json || fail "no ROC area in train response"
 grep -q '"acc":' train.json || fail "no structured stats (acc) in train response"
 grep -q '"se":' train.json || fail "no ROC SE in train response"
+# Full statistics panel: the stats object with confusion counts (Phase 1a)
+grep -q '"stats":' train.json || fail "no stats object in train response"
+grep -q '"confusion":' train.json || fail "no confusion table in stats"
+grep -q '"tp":' train.json || fail "no confusion counts in stats"
+# The binormal block quotes the report's two searched fits, each with the bin
+# count that produced it -- the panel must not invent a binning of its own
+grep -q '"bestP":' train.json || fail "no best-p binormal fit in stats"
+grep -q '"bestAUC":' train.json || fail "no best-AUC binormal fit in stats"
+grep -q '"nBins":' train.json || fail "no bin count on the binormal fits"
+# /api/stats recomputes the same object without retraining
+curl -s "$URL/api/stats" > stats.json
+grep -q '"ok":true' stats.json || fail "stats endpoint"
+grep -q '"confusion":' stats.json || fail "no confusion table from /api/stats"
+grep -q '"bestP":' stats.json || fail "no binormal fits from /api/stats"
 
 # Train continues from the current weights: a second Train reports so
 curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=1&seed=42" \
@@ -103,4 +117,14 @@ grep -q '"ok":true' pair.json || fail "pre-split pair load"
 grep -q 'test exemplars' pair.json || fail "test set not loaded from the pair"
 [ -f pair_test.set ] || fail "uploaded test set not saved beside the server"
 
-echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC JSON, regress, saves)"
+# Logistic regression exposes the Wald table and condition number (Phase 1a).
+#    xor_discrete.set has a discrete outcome, so logistic applies.
+curl -s -X POST "$URL/api/model" -d "type=logistic" \
+    | grep -q '"ok":true' || fail "logistic model endpoint"
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=5000&seed=42" > logi.json
+grep -q '"ok":true' logi.json || fail "logistic train"
+grep -q '"logistic":' logi.json || fail "no logistic stats block"
+grep -q '"waldP":' logi.json || fail "no Wald p-values in logistic stats"
+grep -q '"condNumber":' logi.json || fail "no condition number in logistic stats"
+
+echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, logistic Wald/condition number, regress, saves)"

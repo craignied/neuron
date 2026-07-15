@@ -52,6 +52,12 @@ public:
 	void setAutoStepSize( const bool flag ) { automaticStepSizeFlag = flag; }
 	bool getAutoStepSize() { return automaticStepSizeFlag; }
 
+	// Condition-number diagnostics from the last reportAccuracy() (via
+	//    reportCondNum/computeCondNum); -1 until computed for this model
+	double getCondNum() const { return condNum; }
+	double getCondMaxEig() const { return condMaxEig; }
+	double getCondMinEig() const { return condMinEig; }
+
 	// Degrees of freedom of a network
 	virtual unsigned df() = 0; // pure virtual
 
@@ -117,7 +123,10 @@ protected:
 					        //    over the examplars, used in innerTrainSet() method
 		deltaError,         // deltaError constant for automatic stepsize selection
 		currGradMax,		// current absolute maximum gradient
-		gamma;              // gamma constant for automatic stepsize selection	
+		gamma,              // gamma constant for automatic stepsize selection
+		condNum,            // condition number of the B matrix (-1 until computed)
+		condMaxEig,         // maximum eigenvalue of the B matrix (-1 until computed)
+		condMinEig;         // minimum eigenvalue of the B matrix (-1 until computed)
 
 	bool weightsSetFlag,       // flag to indicate weights set
 		biasFlag,              // flag indicates if bias nodes in network
@@ -162,6 +171,11 @@ protected:
 	// Accumulate grads matrix to compute condition number, passed argument
 	//    is the exemplar number
 	void storeGrads( unsigned );
+
+	// Compute the condition number of the B matrix (runs the final training
+	//    pass and the eigenvalue calculation), storing condNum/condMaxEig/
+	//    condMinEig; reportCondNum prints those stored values
+	void computeCondNum();
 
 	// Utility to report out the condition number
 	void reportCondNum( ostream& );

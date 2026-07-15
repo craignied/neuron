@@ -214,6 +214,24 @@ print. Both intervals' calibration is checked by simulation in
 `tests/binormal/check_az.cpp` (the delta method under a generous window, the
 Hanley–McNeil under a tight one).
 
+**The delta-method SE scales with the bin count, not the sample size**
+(observed 2026-07-15). Because the z-ROC line is fitted to *binned* points, the
+delta SE reflects the uncertainty of a fit through a handful of bin means and
+never sees the number of exemplars behind them. Two consequences, both real:
+
+- Across datasets it barely moves with n. On the low-birth-weight set, n = 142
+  and n = 47 gave SEs of 0.0102 and 0.0103 — while Hanley–McNeil correctly gave
+  0.049 and 0.091, a ratio of 1.85 against the expected √(142/47) = 1.74.
+- Within one dataset it moves with the binning alone. The same 142 exemplars
+  gave SE 0.014 at 9 bins and 0.034 at 5 bins.
+
+So a binormal Az is only interpretable **alongside the nBins that produced it**,
+which is why `ROCarea` and the GUI stats panel both label every fit with its bin
+count, and why `TwoSet::getBestPfit()`/`getBestAUCfit()` return `nBins` as part
+of the `ROCfit`. Quote the bin count whenever you quote the Az. This makes the
+"0.56× narrow" figure above a floor rather than a fixed correction: how narrow
+depends on how many bins the search happened to land on.
+
 **This is tested.** `tests/binormal/check_az.cpp` draws large Gaussian samples
 with known (μ, σ), runs them through `getStatROCarea()`, and requires the
 result to match Φ((μ₁−μ₀)/√(σ₀²+σ₁²)) within sampling tolerance — including an

@@ -28,6 +28,11 @@ void TwoSet::initialize()
 	nBinFlag = true;
 	binnedFlag = false;
 	statROCcalcFlag = false;
+	searchCalcFlag = false;
+	searchErrorFlag = false;
+	searchErrorMsg.clear();
+	bestPfit = ROCfit();
+	bestAUCfit = ROCfit();
 	calcThresh = 10;
 	reportFlag = true;
 	searchFlag = true;
@@ -81,6 +86,8 @@ void TwoSet::copy( const TwoSet& rhs )
 	nBinFlag = rhs.nBinFlag;
 	binnedFlag = rhs.binnedFlag;
 	statROCcalcFlag = rhs.statROCcalcFlag;
+	searchCalcFlag = rhs.searchCalcFlag;
+	searchErrorFlag = rhs.searchErrorFlag;
 	reportFlag = rhs.reportFlag;
 	searchFlag = rhs.searchFlag;
 	KScalcFlag = rhs.KScalcFlag;
@@ -92,6 +99,9 @@ void TwoSet::copy( const TwoSet& rhs )
 	KSP = rhs.KSP;
 	PKX2P = rhs.PKX2P;
 	HLX2P = rhs.HLX2P;
+	bestPfit = rhs.bestPfit;
+	bestAUCfit = rhs.bestAUCfit;
+	searchErrorMsg = rhs.searchErrorMsg;
 	ROCx = rhs.ROCx;
 	ROCy = rhs.ROCy;
 }
@@ -275,6 +285,7 @@ double& TwoSet::test( const unsigned r )
 void TwoSet::invalidate()
 {
 	statROCcalcFlag = false;
+	searchCalcFlag = false; // the cached binning search describes the old guesses
 	KScalcFlag = false;
 	PKX2calcFlag = false;
 	HLX2calcFlag = false;
@@ -390,6 +401,41 @@ double TwoSet::getPVN()
 	}
 
 	return result;
+}
+
+// Confusion-matrix counts at the current threshold. These expose the numbers
+//    ClassTable prints; they throw (rather than print-and-return-0 like the
+//    rate getters) so a caller building JSON can turn "no threshold" into null.
+unsigned TwoSet::getTP()
+{
+	if ( !thresholdFlag )
+		throw twoSetErr( "true positives cannot be counted: no threshold set" );
+	calculate( threshold );
+	return tp;
+}
+
+unsigned TwoSet::getTN()
+{
+	if ( !thresholdFlag )
+		throw twoSetErr( "true negatives cannot be counted: no threshold set" );
+	calculate( threshold );
+	return tn;
+}
+
+unsigned TwoSet::getFP()
+{
+	if ( !thresholdFlag )
+		throw twoSetErr( "false positives cannot be counted: no threshold set" );
+	calculate( threshold );
+	return fp;
+}
+
+unsigned TwoSet::getFN()
+{
+	if ( !thresholdFlag )
+		throw twoSetErr( "false negatives cannot be counted: no threshold set" );
+	calculate( threshold );
+	return fn;
 }
 
 // Outputs to ostream a classification table
@@ -672,13 +718,10 @@ double TwoSet::getStatChi2()
 	return statChi2;
 }
 
-// Outputs to ostream an ROC report which if reportFlag is false uses either the
-//    trapezoidal method if number of data points < threshold (calcThresh)
-//    or statistical method if >= threshold, and uses both if reportFlag is true
-//    searchFlag determines if largest p, largest ROC is searched
-void TwoSet::ROCarea( ostream& outputStream )
+// Count the nonzero, non-one data points -- the ones that survive the z
+//    transform in getStatROCarea() and so are available for binning
+unsigned TwoSet::countGoodData()
 {
-	// Determine number of nonzero, non-one data points
 	vector< double > real = A.col( 1 ); // extract the "real" column
 	vector< double >::iterator pR; // to iterate through real vector
 	unsigned goodData = 0; // number of nonzero, non-one data points
@@ -690,56 +733,106 @@ void TwoSet::ROCarea( ostream& outputStream )
 		if ( ( F != 0 ) && ( H != 0 ) && ( F != 1 ) && ( H != 1 ) )
 			goodData++; // it was a nonzero, non-one data point
 	}
+	return goodData;
+}
 
-	bool statErrorFlag = false; // for statistics error
-	string errorMsg;
+// Search the binnings for the best fit p and the best ROC area, caching both.
+//    Each binning gives a different Az and a different SE, so the report and
+//    any other caller must quote the same fits or they will disagree.
+void TwoSet::searchROC( ostream& outputStream )
+{
+	unsigned goodData = countGoodData();
 
-	// Search for best AUC and p values from statistical method
-	double bestAUC = 0, bestAUCchi2 = 0, bestAUCp = 0, bestAUCse = 0,
-		bestP = 0, bestPchi2 = 0, bestPAUC = 0, bestPse = 0;
-	unsigned bestPnBins = 0, bestAUCnBins = 0;
-	if ( searchFlag )
+	searchErrorFlag = false;
+	searchErrorMsg.clear();
+	bestPfit = ROCfit();
+	bestAUCfit = ROCfit();
+
+	if ( maxBins > goodData ) // maximum number of bins cannot exceed data points
 	{
-		if ( maxBins > goodData ) // maximum number of bins cannot exceed data points
-		{
-			outputStream << "WARNING: Maximum number of bins to be searched (" << maxBins
-				<< ") exceeds data (" << goodData << ")," << endl;
-			maxBins = goodData / 3;
-			outputStream << "Setting Maximum number of bins to " << maxBins << endl;
-		}
-
-		nBinFlag = true; // if searching, number of bins must determine bin size
-
-		unsigned oldBins = nBins; // remember original number of bins
-		// Do the search
-		for ( nBins = minBins; nBins <= maxBins; nBins++ )
-		{
-			double AUC = 0;
-			try { AUC = getStatROCarea(); }
-			catch ( TwoSet::twoSetErr& e )
-			{
-				statErrorFlag = true;
-				errorMsg = e.what();
-			}
-			if ( AUC > bestAUC ) // record best ROC area
-			{
-				bestAUC = AUC;
-				bestAUCchi2 = statChi2;
-				bestAUCp = statP;
-				bestAUCse = statAzSE;
-				bestAUCnBins = nBins;
-			}
-			if ( statP > bestP ) // record best p value
-			{
-				bestPAUC = AUC;
-				bestPchi2 = statChi2;
-				bestP = statP;
-				bestPse = statAzSE;
-				bestPnBins = nBins;
-			}
-		}
-		nBins = oldBins; // return number of bins to original
+		outputStream << "WARNING: Maximum number of bins to be searched (" << maxBins
+			<< ") exceeds data (" << goodData << ")," << endl;
+		maxBins = goodData / 3;
+		outputStream << "Setting Maximum number of bins to " << maxBins << endl;
 	}
+
+	nBinFlag = true; // if searching, number of bins must determine bin size
+
+	unsigned oldBins = nBins; // remember original number of bins
+	// Do the search
+	for ( nBins = minBins; nBins <= maxBins; nBins++ )
+	{
+		double AUC = 0;
+		try { AUC = getStatROCarea(); }
+		catch ( TwoSet::twoSetErr& e )
+		{
+			searchErrorFlag = true;
+			searchErrorMsg = e.what();
+		}
+		if ( AUC > bestAUCfit.az ) // record best ROC area
+		{
+			bestAUCfit.az = AUC;
+			bestAUCfit.chi2 = statChi2;
+			bestAUCfit.p = statP;
+			bestAUCfit.se = statAzSE;
+			bestAUCfit.nBins = nBins;
+		}
+		if ( statP > bestPfit.p ) // record best p value
+		{
+			bestPfit.az = AUC;
+			bestPfit.chi2 = statChi2;
+			bestPfit.p = statP;
+			bestPfit.se = statAzSE;
+			bestPfit.nBins = nBins;
+		}
+	}
+	nBins = oldBins; // return number of bins to original
+	searchCalcFlag = true;
+}
+
+// Search on demand for callers that want the fits without the report. The
+//    search only runs when the cache is stale, so asking for these never
+//    changes what a later ROCarea() prints.
+TwoSet::ROCfit TwoSet::getBestPfit()
+{
+	if ( !searchCalcFlag )
+	{
+		ostringstream discard; // the maxBins warning belongs to the report
+		searchROC( discard );
+	}
+	return bestPfit;
+}
+
+TwoSet::ROCfit TwoSet::getBestAUCfit()
+{
+	if ( !searchCalcFlag )
+	{
+		ostringstream discard;
+		searchROC( discard );
+	}
+	return bestAUCfit;
+}
+
+bool TwoSet::getROCsearchFailed()
+{
+	if ( !searchCalcFlag )
+	{
+		ostringstream discard;
+		searchROC( discard );
+	}
+	return searchErrorFlag;
+}
+
+// Outputs to ostream an ROC report which if reportFlag is false uses either the
+//    trapezoidal method if number of data points < threshold (calcThresh)
+//    or statistical method if >= threshold, and uses both if reportFlag is true
+//    searchFlag determines if largest p, largest ROC is searched
+void TwoSet::ROCarea( ostream& outputStream )
+{
+	unsigned goodData = countGoodData();
+
+	if ( searchFlag )
+		searchROC( outputStream );
 
 	if ( !reportFlag ) // report only one
 	{
@@ -748,15 +841,15 @@ void TwoSet::ROCarea( ostream& outputStream )
 			if ( searchFlag ) // searched for best p, AUC
 			{
 				outputStream << "Searching for best p:" << endl;
-				if ( !statErrorFlag )
+				if ( !searchErrorFlag )
 				{
 					// Use utility method
-					statReport( outputStream, goodData, bestPnBins, bestPAUC, bestPchi2, bestP, bestPse );
+					statReport( outputStream, goodData, bestPfit.nBins, bestPfit.az, bestPfit.chi2, bestPfit.p, bestPfit.se );
 					outputStream << "Searching for best AUC:" << endl;
-					statReport( outputStream, goodData, bestAUCnBins, bestAUC, bestAUCchi2, bestAUCp, bestAUCse );
+					statReport( outputStream, goodData, bestAUCfit.nBins, bestAUCfit.az, bestAUCfit.chi2, bestAUCfit.p, bestAUCfit.se );
 				}
 				else
-					outputStream << errorMsg << endl;
+					outputStream << searchErrorMsg << endl;
 			}
 			else
 			{
@@ -797,15 +890,15 @@ void TwoSet::ROCarea( ostream& outputStream )
 			if ( searchFlag ) // searched for best p, AUC
 			{
 				outputStream << "Searching for best p:" << endl;
-				if ( !statErrorFlag )
+				if ( !searchErrorFlag )
 				{
 					// Use utility method
-					statReport( outputStream, goodData, bestPnBins, bestPAUC, bestPchi2, bestP, bestPse );
+					statReport( outputStream, goodData, bestPfit.nBins, bestPfit.az, bestPfit.chi2, bestPfit.p, bestPfit.se );
 					outputStream << "Searching for best AUC:" << endl;
-					statReport( outputStream, goodData, bestAUCnBins, bestAUC, bestAUCchi2, bestAUCp, bestAUCse );
+					statReport( outputStream, goodData, bestAUCfit.nBins, bestAUCfit.az, bestAUCfit.chi2, bestAUCfit.p, bestAUCfit.se );
 				}
 				else
-					outputStream << errorMsg << endl;
+					outputStream << searchErrorMsg << endl;
 			}
 			else
 			{

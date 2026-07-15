@@ -36,6 +36,11 @@ Network::Network()
 
 	// Start with canonical backprop
 	trainingType = 0;
+
+	// Condition-number diagnostics not computed yet
+	condNum = -1;
+	condMaxEig = -1;
+	condMinEig = -1;
 }
 
 // Default destructor
@@ -85,6 +90,9 @@ void Network::copy( const Network& rhs )
 	gamma = rhs.gamma;
 	maxLoops = rhs.maxLoops;
 	finalFlag = rhs.finalFlag;
+	condNum = rhs.condNum;
+	condMaxEig = rhs.condMaxEig;
+	condMinEig = rhs.condMinEig;
 }
 
 // Set the learning rate
@@ -610,9 +618,11 @@ void Network::storeGrads( unsigned n )
 	grads.replacecol( n, stackG );
 }
 
-// Utility to report out the condition number, passed argument is the output
-//    string
-void Network::reportCondNum( ostream& outputStream )
+// Compute the B-matrix eigenvalue diagnostics, storing them in condMaxEig /
+//    condMinEig / condNum. Split out of reportCondNum so the values can be read
+//    back (getCondNum et al.) after a run without recomputing; reportCondNum
+//    prints exactly these stored values.
+void Network::computeCondNum()
 {
 	// Run final iteration through training set to obtain gradients
 	//    which prevents necessity of calculating gradients at every iteration
@@ -637,7 +647,7 @@ void Network::reportCondNum( ostream& outputStream )
 
 	// Create a gsl vector to store all the eigen values
 	gsl_vector *eval = gsl_vector_alloc( dimension );
-  
+
 	// Create gsl workspace for eigen value calculations
 	gsl_eigen_symm_workspace *w = gsl_eigen_symm_alloc( dimension );
 
@@ -650,9 +660,20 @@ void Network::reportCondNum( ostream& outputStream )
 	// Free workspace
 	gsl_eigen_symm_free( w );
 
+	condMaxEig = maxabs( eigenv );
+	condMinEig = minabs( eigenv );
+	condNum = condMaxEig / condMinEig;
+}
+
+// Utility to report out the condition number, passed argument is the output
+//    string
+void Network::reportCondNum( ostream& outputStream )
+{
+	computeCondNum(); // fills condMaxEig / condMinEig / condNum
+
 	// Output results
 	// outputStream << "Eigenvalues are: " << eigenv << endl; // for debugging
-	outputStream << "B matrix maximum eigenvalue = " << maxabs( eigenv ) << endl
-		         << "         minimum eigenvalue = " << minabs( eigenv ) << endl
-		<< "Condition number = " << maxabs( eigenv ) / minabs( eigenv ) << endl;
+	outputStream << "B matrix maximum eigenvalue = " << condMaxEig << endl
+		         << "         minimum eigenvalue = " << condMinEig << endl
+		<< "Condition number = " << condNum << endl;
 }

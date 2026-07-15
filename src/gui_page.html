@@ -16,9 +16,6 @@ input[type=text] { width: 22rem; } input.num { width: 5.5rem; }
 button { padding: .35rem .9rem; cursor: pointer; }
 .status { margin-left: .8rem; font-size: .9rem; color: #777; }
 .status.ok { color: #1a7f37; } .status.err { color: #b91c1c; }
-#report { background: #101020; color: #d8f0d8; padding: 1rem; border-radius: 8px;
-          font: .78rem/1.35 ui-monospace, monospace; white-space: pre;
-          overflow-x: auto; max-height: 28rem; overflow-y: auto; display: none; }
 #rocbox { display: none; background: #fff; border: 1px solid #ddd; border-radius: 8px;
           padding: 1rem; margin-bottom: 1rem; gap: 1.5rem; align-items: flex-start;
           flex-wrap: wrap; }
@@ -29,6 +26,26 @@ button { padding: .35rem .9rem; cursor: pointer; }
 #rocstats .big { font-size: 1.15rem; font-weight: 600; }
 #rocstats .ci { color: #777; }
 #rocstats .muted { color: #777; }
+/* Full-statistics panel: dashboard-style cards under the ROC plot */
+#statsbox { display: none; margin-bottom: 1rem; }
+#statsbox h2 { font-size: 1.05rem; color: #2563eb; margin: 0 0 .5rem;
+          border-bottom: 2px solid #2563eb; padding-bottom: .3rem; }
+.scards { display: flex; gap: 1rem; flex-wrap: wrap; }
+.scard { flex: 1; min-width: 17rem; background: #fff; border: 1px solid #ddd;
+          border-radius: 8px; padding: .9rem 1.1rem; }
+.scard h3 { font-size: .95rem; margin: 0 0 .6rem; }
+.tiles { display: flex; gap: .6rem; flex-wrap: wrap; margin-bottom: .7rem; }
+.tile { background: #f4f6fb; border-radius: 6px; padding: .5rem .7rem; min-width: 4.5rem; }
+.tile .k { font-size: .7rem; color: #777; text-transform: uppercase; letter-spacing: .02em; }
+.tile .v { font-size: 1.2rem; font-weight: 600; color: #2563eb; }
+.statline { margin: .2rem 0; }
+.statline .lbl { color: #555; } .statline .na { color: #aaa; }
+table.confusion { border-collapse: collapse; margin: .4rem 0 .2rem; font-size: .82rem; }
+table.confusion th, table.confusion td { border: 1px solid #ddd; padding: .2rem .5rem;
+          text-align: right; } table.confusion th { background: #f4f6fb; font-weight: 600; }
+table.coef { border-collapse: collapse; width: 100%; font-size: .82rem; margin-top: .3rem; }
+table.coef th, table.coef td { border: 1px solid #ddd; padding: .2rem .5rem; text-align: right; }
+table.coef th { background: #f4f6fb; } table.coef td.name { text-align: left; }
 .row { margin: .45rem 0; }
 .foot { margin-top: 1.2rem; font-size: .75rem; color: #777; }
 </style>
@@ -110,7 +127,8 @@ the seed, if set) to start over from a fresh random point.</span></div>
 </div>
 <div class="row"><span class="status">Groups of input nodes make one variable:
 semicolons separate variables, commas join nodes, hyphens give ranges. The
-network must be trained first; the report appears below.</span></div>
+network must be trained first; the regression report is written to neuron.log
+beside your data.</span></div>
 </fieldset>
 
 <fieldset>
@@ -134,10 +152,11 @@ deploy the model; training/test sets and guesses document the run.</span></div>
   <canvas id="roc" width="440" height="440"></canvas>
   <div id="rocstats"></div>
 </div>
-<pre id="report"></pre>
+<div id="statsbox"><h2>Statistics</h2><div class="scards" id="scards"></div></div>
 
-<p class="foot">neuron GUI &mdash; local only (127.0.0.1). The command-line
-interface remains fully available; this page drives the same engine.</p>
+<p class="foot">neuron GUI &mdash; local only (127.0.0.1). The full run log is
+written to neuron.log beside your data and is downloadable above as the Report;
+this page shows the statistics. The command-line interface remains available.</p>
 
 <script>
 "use strict";
@@ -196,8 +215,8 @@ async function train() {
     const j = await api("/api/train", { algorithm: $("algo").value,
       maxiter: $("maxiter").value, seed: $("seed").value });
     setStatus("tstatus", j.ok, j.message);
-    if (j.output) { $("report").textContent = j.output; $("report").style.display = "block"; }
     if (j.ok && j.roc) { drawROC(j.roc); renderStats(j.roc); }
+    if (j.ok && j.stats) renderFullStats(j.stats);
   } finally { $("trainbtn").disabled = false; }
 }
 function renderStats(roc) {
@@ -214,8 +233,67 @@ function renderStats(roc) {
       + `</div>`;
   }
   html += `<div class="muted">Trapezoidal area, Hanley&ndash;McNeil CI. `
-    + `Full statistics in the report below.</div>`;
+    + `Full statistics below.</div>`;
   $("rocstats").innerHTML = html;
+}
+// The full statistics panel: one card per set (tiles + confusion + ROC detail
+// + goodness-of-fit) and, for logistic models, a coefficient/Wald table.
+function renderFullStats(st) {
+  const num = (v, d = 3) => (v === null || v === undefined) ? '<span class="na">n/a</span>'
+    : (typeof v === "number" ? v.toFixed(d) : v);
+  const pct = v => (v === null || v === undefined || v < 0) ? '<span class="na">n/a</span>'
+    : (v * 100).toFixed(1) + "%";
+  const setCard = (name, s) => {
+    if (!s) return "";
+    let h = `<div class="scard"><h3>${name}</h3><div class="tiles">`;
+    h += `<div class="tile"><div class="k">Exemplars</div><div class="v">${s.n}</div></div>`;
+    if (s.trap) h += `<div class="tile"><div class="k">ROC area</div><div class="v">${num(s.trap.area)}</div></div>`;
+    h += `<div class="tile"><div class="k">Accuracy</div><div class="v">${pct(s.acc)}</div></div></div>`;
+    // rates
+    h += `<div class="statline"><span class="lbl">Sensitivity</span> ${pct(s.sens)}`
+      + ` &middot; <span class="lbl">Specificity</span> ${pct(s.spec)}</div>`;
+    h += `<div class="statline"><span class="lbl">PV+</span> ${pct(s.pvp)}`
+      + ` &middot; <span class="lbl">PV&minus;</span> ${pct(s.pvn)}</div>`;
+    // confusion table
+    if (s.confusion) {
+      const c = s.confusion;
+      h += `<table class="confusion"><tr><th></th><th>Pred T</th><th>Pred F</th></tr>`
+        + `<tr><th>Known T</th><td>${c.tp}</td><td>${c.fn}</td></tr>`
+        + `<tr><th>Known F</th><td>${c.fp}</td><td>${c.tn}</td></tr></table>`;
+    }
+    // ROC detail
+    if (s.trap) h += `<div class="statline"><span class="lbl">Trapezoidal Az</span> `
+      + `${num(s.trap.area)} &plusmn; ${num(s.trap.se)} (SE)</div>`;
+    // Both binormal fits, named as the report names them ("best p", "best AUC").
+    // The bin count is shown because it drives the fit -- and the SE with it.
+    if (s.binormal) {
+      const bfit = (label, f) => f ? `<div class="statline">`
+        + `<span class="lbl">Binormal Az (${label})</span> `
+        + `${num(f.az)} &plusmn; ${num(f.se)} (SE), ${f.nBins} bins, `
+        + `fit p ${num(f.p)}</div>` : ``;
+      h += bfit("best p", s.binormal.bestP) + bfit("best AUC", s.binormal.bestAUC);
+    }
+    // goodness of fit
+    if (s.ks) h += `<div class="statline"><span class="lbl">Kolmogorov&ndash;Smirnov</span> `
+      + `D ${num(s.ks.d)}, p ${num(s.ks.p)}</div>`;
+    h += `<div class="statline"><span class="lbl">Pearson &chi;&sup2; p</span> ${num(s.pearsonP)}`
+      + ` &middot; <span class="lbl">Hosmer&ndash;Lemeshow p</span> ${num(s.hlP)}</div>`;
+    return h + `</div>`;
+  };
+  let cards = setCard("Training set", st.train) + setCard("Test set", st.test);
+  if (st.logistic) {
+    let h = `<div class="scard"><h3>Logistic coefficients</h3>`;
+    if (st.logistic.condNumber !== null && st.logistic.condNumber !== undefined)
+      h += `<div class="statline"><span class="lbl">Condition number</span> `
+        + `${num(st.logistic.condNumber)}</div>`;
+    h += `<table class="coef"><tr><th>Input</th><th>&beta;</th><th>SE</th><th>Wald p</th></tr>`;
+    for (const c of st.logistic.coefficients)
+      h += `<tr><td class="name">${c.input}</td><td>${num(c.beta, 4)}</td>`
+        + `<td>${num(c.se, 4)}</td><td>${num(c.waldP)}</td></tr>`;
+    cards += h + `</table></div>`;
+  }
+  $("scards").innerHTML = cards;
+  $("statsbox").style.display = cards ? "block" : "none";
 }
 async function regress() {
   $("regressbtn").disabled = true;
@@ -224,7 +302,6 @@ async function regress() {
     const j = await api("/api/regress", { structure: $("structure").value,
       direction: $("rdir").value, threshold: $("pthreshold").value });
     setStatus("rstatus", j.ok, j.message);
-    if (j.output) { $("report").textContent = j.output; $("report").style.display = "block"; }
   } finally { $("regressbtn").disabled = false; }
 }
 function drawROC(roc) {

@@ -14,8 +14,10 @@
 
 #include "stdafx.h" // For MSVC, must be first among the engine headers!
 
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -70,6 +72,19 @@ string jsonMsg( bool ok, const string& message )
 		+ ",\"message\":\"" + jsonEscape( message ) + "\"}";
 }
 
+// A double as a JSON number, or null when not finite -- NaN and infinity are
+//    not valid JSON, and degenerate sets (perfectly separated XOR, a singular
+//    covariance) do produce them (e.g. a binormal Az of NaN)
+string jnum( double v )
+{
+	if ( !std::isfinite( v ) )
+		return "null";
+	ostringstream o;
+	o.precision( 6 );
+	o << v;
+	return o.str();
+}
+
 string jsonNumbers( const vector< double >& v )
 {
 	ostringstream out;
@@ -96,11 +111,154 @@ string jsonROCSeries( TwoSet& t )
 	out.precision( 6 );
 	out << "{\"x\":" << jsonNumbers( t.getROCx() )
 		<< ",\"y\":" << jsonNumbers( t.getROCy() )
-		<< ",\"area\":" << area
-		<< ",\"se\":" << se
-		<< ",\"acc\":" << acc
-		<< ",\"sens\":" << sens
-		<< ",\"spec\":" << spec << "}";
+		<< ",\"area\":" << jnum( area )
+		<< ",\"se\":" << jnum( se )
+		<< ",\"acc\":" << jnum( acc )
+		<< ",\"sens\":" << jnum( sens )
+		<< ",\"spec\":" << jnum( spec ) << "}";
+	return out.str();
+}
+
+// One full statistics block from a TwoSet. Every metric is individually
+//    guarded: a value that can't be computed on this set (empty class, a
+//    failed binormal fit, degenerate K-S/H-L) serializes as null rather than
+//    aborting the rest of the object.
+string jsonStatsSet( TwoSet& t )
+{
+	ostringstream out;
+	out.precision( 6 );
+
+	// "name":value, or "name":null if the getter throws or is not finite
+	auto emit = [ &out ]( const char* name, function< double() > fn )
+	{
+		out << "\"" << name << "\":";
+		try { out << jnum( fn() ); }
+		catch ( ... ) { out << "null"; }
+		out << ",";
+	};
+
+	out << "{\"n\":" << t.getNumElements() << ",";
+
+	// Confusion counts share the threshold requirement, so guard them together
+	out << "\"confusion\":";
+	try
+	{
+		out << "{\"tp\":" << t.getTP() << ",\"tn\":" << t.getTN()
+			<< ",\"fp\":" << t.getFP() << ",\"fn\":" << t.getFN() << "}";
+	}
+	catch ( ... ) { out << "null"; }
+	out << ",";
+
+	emit( "acc",  [ &t ] { return t.getClassAcc(); } );
+	emit( "sens", [ &t ] { return t.getSens(); } );
+	emit( "spec", [ &t ] { return t.getSpec(); } );
+	emit( "pvp",  [ &t ] { return t.getPVP(); } );
+	emit( "pvn",  [ &t ] { return t.getPVN(); } );
+
+	// Trapezoidal area with its Hanley-McNeil SE (getTrapROCarea also fills
+	//    the curve points and the SE input)
+	out << "\"trap\":";
+	try
+	{
+		double a = t.getTrapROCarea(), se = t.getTrapSE();
+		out << "{\"area\":" << jnum( a ) << ",\"se\":" << jnum( se ) << "}";
+	}
+	catch ( ... ) { out << "null"; }
+	out << ",";
+
+	// Binormal Az at the same two binnings the report quotes: the best-fitting
+	//    (largest fit p) and the most optimistic (largest area). The binning is
+	//    part of the answer -- the delta-method SE tracks the bin count rather
+	//    than the exemplar count -- so each fit carries the nBins behind it.
+	//    Quoting these rather than a fit of our own is what keeps the panel and
+	//    the report telling the same story.
+	out << "\"binormal\":";
+	try
+	{
+		if ( t.getROCsearchFailed() )
+			out << "null";
+		else
+		{
+			auto fit = []( const TwoSet::ROCfit& f )
+			{
+				ostringstream b;
+				b.precision( 6 );
+				b << "{\"az\":" << jnum( f.az ) << ",\"se\":" << jnum( f.se )
+					<< ",\"p\":" << jnum( f.p ) << ",\"chi2\":" << jnum( f.chi2 )
+					<< ",\"nBins\":" << f.nBins << "}";
+				return b.str();
+			};
+			out << "{\"bestP\":" << fit( t.getBestPfit() )
+				<< ",\"bestAUC\":" << fit( t.getBestAUCfit() ) << "}";
+		}
+	}
+	catch ( ... ) { out << "null"; }
+	out << ",";
+
+	out << "\"ks\":";
+	try
+	{
+		double d = t.getKSD(), p = t.getKSP();
+		out << "{\"d\":" << jnum( d ) << ",\"p\":" << jnum( p ) << "}";
+	}
+	catch ( ... ) { out << "null"; }
+	out << ",";
+
+	emit( "pearsonP", [ &t ] { return t.getPearsonX2(); } );
+	// last field: no trailing comma
+	out << "\"hlP\":";
+	try { out << jnum( t.getHLX2() ); } catch ( ... ) { out << "null"; }
+	out << "}";
+
+	return out.str();
+}
+
+// The full statistics object for the current trained model: per-set blocks
+//    plus, for logistic regression, the Wald table and condition number.
+//    Returns "" when there is nothing to report (no model, or a non-discrete
+//    / multi-output dataset the classification statistics don't apply to).
+string jsonStats()
+{
+	if ( !modelPtr )
+		return "";
+	DataSet& md = modelPtr->getDataSet();
+	if ( !( md.getDiscrete() && md.getOutput() == 1 && md.trainLoaded() ) )
+		return "";
+
+	ostringstream out;
+	out.precision( 6 );
+	out << "{\"train\":" << jsonStatsSet( md.getTrainTwoSet() );
+	if ( md.testLoaded() )
+		out << ",\"test\":" << jsonStatsSet( md.getTestTwoSet() );
+
+	Logistic* lg = dynamic_cast< Logistic* >( modelPtr.get() );
+	if ( lg )
+	{
+		out << ",\"logistic\":{\"condNumber\":";
+		double cn = lg->getCondNum();
+		if ( cn < 0 ) out << "null"; else out << jnum( cn );
+
+		out << ",\"coefficients\":[";
+		const vector< double >& b = lg->getBetas();
+		const vector< double >& se = lg->getBetaSE();
+		const vector< double >& wp = lg->getWaldP();
+		unsigned nI = md.getInput();
+		for ( unsigned i = 0; i <= nI && i < b.size(); i++ )
+		{
+			if ( i ) out << ",";
+			out << "{\"input\":";
+			if ( i < nI ) out << i; else out << "\"intercept\"";
+			out << ",\"beta\":" << jnum( b[ i ] ) << ",\"se\":";
+			bool haveSE = ( i < se.size() && se[ i ] >= 0 );
+			if ( haveSE ) out << jnum( se[ i ] ); else out << "null";
+			out << ",\"waldP\":";
+			if ( haveSE && i < wp.size() ) out << jnum( wp[ i ] ); else out << "null";
+			out << "}";
+		}
+		out << "]}";
+	}
+
+	out << "}";
 	return out.str();
 }
 
@@ -410,8 +568,27 @@ string handleTrain( const httplib::Request& req )
 	lastReport = cap.text.str(); // downloadable afterwards as report.txt
 	lastTrainError = finalError; // baseline for stepwise regression
 
+	// Full statistics panel (additive; the roc object above is unchanged)
+	string stats = jsonStats();
+	string statsField = stats.empty() ? "" : ( ",\"stats\":" + stats );
+
 	return string( "{\"ok\":true,\"message\":\"" ) + jsonEscape( msg.str() )
-		+ "\",\"output\":\"" + jsonEscape( lastReport ) + "\"" + roc + "}";
+		+ "\",\"output\":\"" + jsonEscape( lastReport ) + "\"" + roc
+		+ statsField + "}";
+}
+
+// Recompute the full statistics object for the current trained model without
+//    retraining (the guesses from the last run are still in the model's DataSet)
+string handleStats()
+{
+	if ( !modelPtr )
+		return jsonMsg( false, "create and train a model first" );
+	if ( lastTrainError < 0 )
+		return jsonMsg( false, "train the model first" );
+	string stats = jsonStats();
+	if ( stats.empty() )
+		return jsonMsg( false, "no classification statistics for this model" );
+	return string( "{\"ok\":true,\"stats\":" ) + stats + "}";
 }
 
 string handleRegress( const httplib::Request& req )
@@ -595,6 +772,12 @@ int run_gui( bool openBrowser )
 	{
 		lock_guard< mutex > lock( engineMutex );
 		res.set_content( handleTrain( req ), "application/json" );
+	} );
+
+	svr.Get( "/api/stats", []( const httplib::Request&, httplib::Response& res )
+	{
+		lock_guard< mutex > lock( engineMutex );
+		res.set_content( handleStats(), "application/json" );
 	} );
 
 	svr.Post( "/api/regress", []( const httplib::Request& req, httplib::Response& res )

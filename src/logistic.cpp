@@ -41,6 +41,8 @@ void Logistic::copy( const Logistic& rhs )
 	W = rhs.W;
 	o_err = rhs.o_err;
 	G = rhs.G;
+	Bstderr = rhs.Bstderr;
+	WaldP = rhs.WaldP;
 }
 
 // Loads a DataSet object into the binary logistic model
@@ -261,9 +263,9 @@ void Logistic::reportAccuracy( ostream& outputStream )
 
 	// Calculate the variance and errors of beta weights
 	// See Hosmer & Lemeshow Applied Logistic Regression, 2nd ed., pp 36-42
-	vector< double > Bstderr( nInput + 1 ), // to hold std errors of beta weights
-		WaldP( nInput + 1 ); // to hold Wald test p-values (beta weight nonzero)
-	std::fill( Bstderr.begin(), Bstderr.end(), -1.0 ); // error value
+	// (Bstderr/WaldP are members so they can be read back after the run.)
+	Bstderr.assign( nInput + 1, -1.0 ); // std errors of beta weights (-1 = error)
+	WaldP.assign( nInput + 1, 0.0 ); // Wald test p-values (beta weight nonzero)
 
 	// XtV to hold 1st product of X'VX, as V is diagonal (all elements other than diag = 0)
 	//    setting up V and doing a Matrix dot product would waste a lot of computations

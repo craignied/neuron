@@ -57,12 +57,21 @@ public:
 	// Remove input nodes from this network
 	virtual void removeInputs( const vector< unsigned >& );
 
+	// Wald-test results filled by the last reportAccuracy() call; index nInput
+	//    is the y-intercept. getBetaSE returns -1 for any weight whose standard
+	//    error was not computable (singular covariance)
+	const vector< double >& getBetas() const { return W; }
+	const vector< double >& getBetaSE() const { return Bstderr; }
+	const vector< double >& getWaldP() const { return WaldP; }
+
 private:
 
 	vector< double > y,       // vector containing dataset outputs
 		I,                    // vector for single exemplar inputs
 		W,                    // beta weight vector
-		G;                    // gradient vector
+		G,                    // gradient vector
+		Bstderr,              // std errors of beta weights (last reportAccuracy)
+		WaldP;                // Wald-test p-values (last reportAccuracy)
 
 	double o_err; // output error term
 
