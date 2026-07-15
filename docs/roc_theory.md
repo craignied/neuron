@@ -340,6 +340,29 @@ Consequences, all measured 2026-07-15:
   See "Goodness of fit does not gate the area" below for the second, independent
   guard added at the same time.
 
+**Measured against the literature** (`tests/binormal/check_wickens.cpp`, 2026-07-15).
+Wickens' own Table 5.1 (p. 84) has a published answer, A_z = 0.784 (p. 90), so the
+binning artifact can be sized rather than argued:
+
+| bins | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
+|---|---|---|---|---|---|---|---|---|
+| A_z | .7815 | .7789 | .7785 | .7783 | .7893 | .7828 | — | — |
+| fit p | .909 | .976 | .995 | .000 | .000 | .000 | *no fit* | *no fit* |
+
+The bin count alone moves A_z by **0.011** — the size of the entire bootstrap SE
+(0.0142) — around a truth of 0.784. And the two selection criteria both choose
+badly: **best p** takes 5 bins (0.7785, among the furthest), **best AUC** takes 7
+bins (0.7893, the furthest) on a fit whose p is 0.000 — maximising the area selects
+for a poor fit by construction. The near-exact binning (8 bins, −0.0012) is one
+neither criterion picks. The engine's *operating points*, by contrast, reproduce
+Wickens' Table 5.3 exactly — the error is entirely in what the binning does to them.
+
+The fit is also **numerically fragile in this regime**: the same source compiled at
+-O0 and -O3 differs in the fourth decimal of A_z, and at 10 bins one build converges
+where the other cannot bracket a root. Bins of identical z values have SD zero, which
+`chixy` weights `BIG` = 1e30, so the objective is dominated by 1e30 terms and `brent`
+balances on the last bits.
+
 The principled error bar is Wickens' own: binomial rate variance (Eq. 11.2,
 p. 202) pushed through the delta method (Eq. 11.3, p. 202) to the z scale, giving
 

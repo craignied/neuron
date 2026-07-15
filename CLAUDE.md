@@ -502,12 +502,44 @@ Rationale, citations, and Methods language: **`docs/roc_theory.md`**. Work in or
   moot, not wasted). Note the zero-SD/NaN failure class is **already gone** (fixed at
   `Population::var()`, evening of 2026-07-15) — Phase 2 no longer has to carry it, and
   the arbitrary binning, not a crash, is what remains to justify this work.
-- **Gate on a literature acceptance test before re-blessing anything**: implement
-  Wickens' Table 5.1 (p. 84) as a ctest fixture and require the printed values —
-  zH = 0.735zF + 0.974, μ̂ₛ=1.325, σ̂ₛ=1.360, Az=0.784, criteria −0.714, −0.067, 0.423,
-  0.979, 1.590 (pp. 89–90); Ex 11.8 X²=5.93 unequal vs 35.85 equal (p. 214);
-  Ex 11.1 se(Âz)=0.042 for the single-point path (p. 204). Same self-verifying pattern
-  as the H-L low-birth-weight LL = −111.286 check.
+- **The literature acceptance test is BUILT** — `tests/binormal/check_wickens.cpp`
+  (ctest `binormal_wickens`), landed 2026-07-15 before any Phase 2 code, and it already
+  earns its keep. Wickens' Table 5.1 (p. 84; Olzak & Kramer rating data, 699 noise + 700
+  signal, six categories) fed in as (known, rating-as-score) pairs. **What it found,
+  running against the CURRENT estimator:**
+  - **The operating points are EXACTLY Wickens' Table 5.3** (f = .762 .532 .335 .152
+    .061, h = .933 .840 .746 .614 .420, all to 3 dp). The z-transform and ROC sweep are
+    provably right — the defect is entirely downstream, in the fit.
+  - **The binning is worth 0.011 of Az**: the 8 binnings span 0.7783–0.7893 around a
+    published truth of 0.784. That is the size of the whole bootstrap SE (0.0142) —
+    the arbitrary choice costs as much as the sampling noise. **This is Phase 2's target,
+    now quantified against the literature instead of asserted.**
+  - **BOTH selection criteria pick badly.** "Best p" → 5 bins → Az 0.7785 (−0.0055, one
+    of the furthest); "best AUC" → 7 bins → Az 0.7893 (+0.0053, THE furthest) **on a fit
+    whose p is 0.000** — maximising area selects for a bad fit by construction. The
+    near-exact binning (8 bins, −0.0012) is one *neither* criterion chooses. So the
+    best-p/best-AUC pair isn't merely redundant after Phase 2, it is actively harmful now.
+  - **The fit is FMA-sensitive on tied data** (new, 2026-07-15): same source at -O0 vs
+    -O3 gives Az 0.7789 vs 0.7793 at 4 bins, and at 10 bins one converges while the other
+    throws `Root must be bracketed in zbrent`. Cause: binning 1399 exemplars holding 6
+    distinct scores makes bins of identical z values → SD legitimately 0 → `chixy` weights
+    them `BIG`=1e30 → the objective is dominated by 1e30 terms and brent balances on the
+    last bits. (Returning exact 0 from `var()` was still right — NaN was worse — but it
+    routes into a pathological weighting.) **Caveat this puts on `binormal_seed42`:** it
+    is byte-stable on all 3 OSes today, but this path is more libm/FMA-exposed than
+    anything the older goldens touch. If it ever flaps on a compiler bump, this is why.
+  - Also surfaced: `zbrent` bracketing failure is a **third** distinct failure mode
+    (after gammq and "Zero std dev"). Non-fatal now — the searchROC fix skips it and the
+    other binnings still report; before 2026-07-15 it would have killed the whole report.
+  - **AZ_TOL is a RATCHET**: 0.012 today (loose enough to admit whichever binning is
+    chosen). **Phase 2 must tighten it to 0.002** — if it cannot hold that on published
+    data Wickens analysed by hand, it has not worked.
+  - **NOT covered, deliberately** (the plan over-specified this): Ex 11.8 X²=5.93/35.85
+    (p. 214) is a *multinomial* GOF over rating categories comparing two fitted models —
+    the engine computes no such statistic (its χ² is fitexy's line-fit χ², a different
+    quantity); it arrives with ML (Phase 3). Ex 11.1 se(Âz)=0.042 (p. 204) is the analytic
+    *single-point* SE (Eq 11.7, parameters = data points) — a path neuron doesn't have,
+    and whose analytic SE we deliberately removed. Both are documented in the test.
 - Az changes → **oracle needs a documented exclusion** (same pattern as the KScalc fix)
   and **`binormal_seed42` re-bless — read that diff, it is the whole record of what
   moved**. *(This line used to say just "goldens re-bless", which was a **no-op**: no

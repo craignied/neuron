@@ -31,6 +31,15 @@ add_executable(check_az
 target_include_directories(check_az PRIVATE src)
 add_test(NAME binormal_az COMMAND check_az)
 
+# Literature acceptance test: the engine's binormal ROC against Wickens' own
+# published worked example (Table 5.1, analysed by hand through chapter 5).
+# Self-verifying against the literature, like the Hosmer-Lemeshow log likelihood.
+add_executable(check_wickens
+    tests/binormal/check_wickens.cpp
+    src/twoset.cpp src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
+target_include_directories(check_wickens PRIVATE src)
+add_test(NAME binormal_wickens COMMAND check_wickens)
+
 # Unit test: engine output is capturable via util::set_screen() (the
 # GUI/server contract). No GSL needed.
 add_executable(check_capture
