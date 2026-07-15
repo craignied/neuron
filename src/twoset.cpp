@@ -48,7 +48,7 @@ void TwoSet::initialize()
 	maxBins = 10;
 	// Zero the cached statistic values so no path can ever print
 	//    uninitialized memory (2.x left these uninitialized)
-	statP = statChi2 = statAzSE = KSD = KSP = PKX2P = HLX2P = 0;
+	statP = statChi2 = KSD = KSP = PKX2P = HLX2P = 0;
 }
 
 // Copy constructor
@@ -86,7 +86,6 @@ void TwoSet::copy( const TwoSet& rhs )
 	bootB = rhs.bootB;
 	statP = rhs.statP;
 	statChi2 = rhs.statChi2;
-	statAzSE = rhs.statAzSE;
 	loadedFlag = rhs.loadedFlag;
 	thresholdFlag = rhs.thresholdFlag;
 	nBinFlag = rhs.nBinFlag;
@@ -607,7 +606,6 @@ double TwoSet::getStatROCarea()
 				rocArea = stats::Zarea( line.a() / sqrt( 1 + ( line.b() * line.b() ) ) );
 				statP = 1;
 				statChi2 = line.chi2();
-				statAzSE = azSE( line );
 				binnedFlag = false;
 			}
 			else // data is to be binned
@@ -642,7 +640,6 @@ double TwoSet::getStatROCarea()
 				rocArea = stats::Zarea( line.a() / sqrt( 1 + ( line.b() * line.b() ) ) );
 				statP = line.q();
 				statChi2 = line.chi2();
-				statAzSE = azSE( line );
 				binnedFlag = true;
 			}
 		}
@@ -651,26 +648,6 @@ double TwoSet::getStatROCarea()
 	}
 	statROCcalcFlag = true; // ROC area has now been statistically calculated
 	return rocArea;
-}
-
-// Delta-method standard error of Az = Zarea( a / sqrt(1+b^2) ), propagating
-//    the zROC fit's parameter uncertainties. Uses the a-b correlation when the
-//    fit provides it (plain fit); fitexy does not, so the covariance term is 0
-//    on the binned path.
-double TwoSet::azSE( XY& line )
-{
-	const double INV_SQRT_2PI = 0.3989422804014327; // 1/sqrt(2*pi)
-
-	double a = line.a(), b = line.b(),
-		sa = line.siga(), sb = line.sigb();
-	double s2 = 1 + b * b;
-	double u = a / sqrt( s2 );
-	double pdf = INV_SQRT_2PI * exp( -0.5 * u * u ); // standard normal density at u
-	double dA = pdf / sqrt( s2 ); // dAz/da
-	double dB = -pdf * a * b / ( s2 * sqrt( s2 ) ); // dAz/db
-	double cov = line.r() * sa * sb; // 0 when fit was fitexy
-
-	return sqrt( dA * dA * sa * sa + dB * dB * sb * sb + 2 * dA * dB * cov );
 }
 
 // Hanley-McNeil standard error of an empirical (trapezoidal) ROC area A:
@@ -700,15 +677,6 @@ double TwoSet::hmSE( double A )
 double TwoSet::getTrapSE()
 {
 	return hmSE( getTrapROCarea() );
-}
-
-// Get delta-method standard error of the statistical ROC area
-double TwoSet::getStatAzSE()
-{
-	if ( !statROCcalcFlag ) // calculate ROC area first
-		getStatROCarea();
-
-	return statAzSE;
 }
 
 // Get p value for fitted line, smaller is worse
@@ -774,30 +742,40 @@ void TwoSet::searchROC( ostream& outputStream )
 	for ( nBins = minBins; nBins <= maxBins; nBins++ )
 	{
 		double AUC = 0;
-		try { AUC = getStatROCarea(); }
-		catch ( TwoSet::twoSetErr& e )
-		{
-			searchErrorFlag = true;
-			searchErrorMsg = e.what();
-		}
-		if ( AUC > bestAUCfit.az ) // record best ROC area
+		bool usable = false;
+		try { AUC = getStatROCarea(); usable = isfinite( AUC ); }
+		catch ( TwoSet::twoSetErr& e ) { searchErrorMsg = e.what(); }
+
+		// One binning failing says nothing about the others, and the stat
+		//    members still hold the last successful binning's values -- so
+		//    take nothing from a binning that gave no area
+		if ( !usable )
+			continue;
+
+		if ( !bestAUCfit.valid || AUC > bestAUCfit.az ) // record best ROC area
 		{
 			bestAUCfit.az = AUC;
 			bestAUCfit.chi2 = statChi2;
 			bestAUCfit.p = statP;
-			bestAUCfit.se = statAzSE;
 			bestAUCfit.nBins = nBins;
+			bestAUCfit.valid = true;
 		}
-		if ( statP > bestPfit.p ) // record best p value
+		// A fit whose p could not be computed is still a fit -- it can win on
+		//    area above -- but it cannot be the best-p fit, having no p
+		if ( isfinite( statP ) && ( !bestPfit.valid || statP > bestPfit.p ) )
 		{
 			bestPfit.az = AUC;
 			bestPfit.chi2 = statChi2;
 			bestPfit.p = statP;
-			bestPfit.se = statAzSE;
 			bestPfit.nBins = nBins;
+			bestPfit.valid = true;
 		}
 	}
 	nBins = oldBins; // return number of bins to original
+
+	// The search fails only when no binning at all yielded an area. Any that
+	//    did leaves the report, and the bootstrap, with an honest answer.
+	searchErrorFlag = !bestAUCfit.valid;
 	searchCalcFlag = true;
 }
 
@@ -865,7 +843,9 @@ void TwoSet::bootstrapROC()
 		return;
 
 	vector< double > azBestP, azBestAUC, azStat;
-	unsigned failures = 0;
+	// Counted apart because a resample can yield an area but no fit p, which
+	//    is a failure for the best-p interval only
+	unsigned failures = 0, failuresP = 0;
 
 	for ( unsigned b = 0; b < bootB; b++ )
 	{
@@ -902,13 +882,21 @@ void TwoSet::bootstrapROC()
 			{                 //    of the procedure, so it is part of the spread
 				ostringstream discard; // a resample's warnings are not the user's
 				resample.searchROC( discard );
-				if ( resample.getROCsearchFailed() )
+				ROCfit rp = resample.getBestPfit(), ra = resample.getBestAUCfit();
+				if ( !ra.valid ) // no binning gave an area: nothing to contribute
 				{
 					failures++;
+					failuresP++;
 					continue;
 				}
-				azBestP.push_back( resample.getBestPfit().az );
-				azBestAUC.push_back( resample.getBestAUCfit().az );
+				// Each distribution takes the resamples it has a value for. A
+				//    resample with an area but no computable fit p informs the
+				//    best-AUC interval even though it cannot inform the best-p one
+				if ( rp.valid )
+					azBestP.push_back( rp.az );
+				else
+					failuresP++;
+				azBestAUC.push_back( ra.az );
 			}
 			else
 				azStat.push_back( resample.getStatROCarea() );
@@ -916,12 +904,13 @@ void TwoSet::bootstrapROC()
 		catch ( ... ) // a degenerate resample the fit cannot be computed on
 		{
 			failures++;
+			failuresP++;
 		}
 	}
 
 	if ( searchFlag )
 	{
-		bestPci = percentileCI( azBestP, failures );
+		bestPci = percentileCI( azBestP, failuresP );
 		bestAUCci = percentileCI( azBestAUC, failures );
 	}
 	else
@@ -1002,13 +991,16 @@ void TwoSet::ROCarea( ostream& outputStream )
 			if ( searchFlag ) // searched for best p, AUC
 			{
 				outputStream << "Searching for best p:" << endl;
-				if ( !searchErrorFlag )
-				{
+				if ( bestPfit.valid )
 					// Use utility method
 					statReport( outputStream, goodData, bestPfit.nBins, bestPfit.az, bestPfit.chi2, bestPfit.p, bestPci );
-					outputStream << "Searching for best AUC:" << endl;
+				else if ( bestAUCfit.valid ) // areas, but no fit p to choose among them
+					outputStream << "No binning gave a computable fit p value." << endl;
+				else
+					outputStream << searchErrorMsg << endl;
+				outputStream << "Searching for best AUC:" << endl;
+				if ( bestAUCfit.valid )
 					statReport( outputStream, goodData, bestAUCfit.nBins, bestAUCfit.az, bestAUCfit.chi2, bestAUCfit.p, bestAUCci );
-				}
 				else
 					outputStream << searchErrorMsg << endl;
 			}
@@ -1051,13 +1043,16 @@ void TwoSet::ROCarea( ostream& outputStream )
 			if ( searchFlag ) // searched for best p, AUC
 			{
 				outputStream << "Searching for best p:" << endl;
-				if ( !searchErrorFlag )
-				{
+				if ( bestPfit.valid )
 					// Use utility method
 					statReport( outputStream, goodData, bestPfit.nBins, bestPfit.az, bestPfit.chi2, bestPfit.p, bestPci );
-					outputStream << "Searching for best AUC:" << endl;
+				else if ( bestAUCfit.valid ) // areas, but no fit p to choose among them
+					outputStream << "No binning gave a computable fit p value." << endl;
+				else
+					outputStream << searchErrorMsg << endl;
+				outputStream << "Searching for best AUC:" << endl;
+				if ( bestAUCfit.valid )
 					statReport( outputStream, goodData, bestAUCfit.nBins, bestAUCfit.az, bestAUCfit.chi2, bestAUCfit.p, bestAUCci );
-				}
 				else
 					outputStream << searchErrorMsg << endl;
 			}
@@ -1115,9 +1110,19 @@ void TwoSet::statReport( ostream& outputStream, unsigned goodData, unsigned nBin
 	}
 	else
 		outputStream << "95% CI = not available (too few usable resamples)" << endl;
-	outputStream << "Chi-squared = " << chi2 << endl;
+	// Goodness of fit is a diagnostic and never a precondition for reporting
+	//    the area (Wickens, Elementary Signal Detection Theory, section 11.5
+	//    p. 217), so an uncomputable one is reported as such and the area above
+	//    still stands
+	if ( isfinite( chi2 ) )
+		outputStream << "Chi-squared = " << chi2 << endl;
+	else
+		outputStream << "Chi-squared = not available" << endl;
 	outputStream << resetiosflags( ios::fixed ) << setiosflags( ios::scientific );
-	outputStream << "p = " << p << " (closer to 1 is better)" << endl;
+	if ( isfinite( p ) )
+		outputStream << "p = " << p << " (closer to 1 is better)" << endl;
+	else
+		outputStream << "p = not available (fit probability did not converge)" << endl;
 	if ( binnedFlag == false ) // data was not binned
 		outputStream << "WARNING: DATA WAS NOT BINNED" << endl;
 	else

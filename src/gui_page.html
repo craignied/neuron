@@ -40,6 +40,7 @@ button { padding: .35rem .9rem; cursor: pointer; }
 .tile .v { font-size: 1.2rem; font-weight: 600; color: #2563eb; }
 .statline { margin: .2rem 0; }
 .statline .lbl { color: #555; } .statline .na { color: #aaa; }
+.statline .muted { color: #888; font-size: .85em; }
 table.confusion { border-collapse: collapse; margin: .4rem 0 .2rem; font-size: .82rem; }
 table.confusion th, table.confusion td { border: 1px solid #ddd; padding: .2rem .5rem;
           text-align: right; } table.confusion th { background: #f4f6fb; font-weight: 600; }
@@ -265,12 +266,24 @@ function renderFullStats(st) {
     if (s.trap) h += `<div class="statline"><span class="lbl">Trapezoidal Az</span> `
       + `${num(s.trap.area)} &plusmn; ${num(s.trap.se)} (SE)</div>`;
     // Both binormal fits, named as the report names them ("best p", "best AUC").
-    // The bin count is shown because it drives the fit -- and the SE with it.
+    // The bin count is shown because it drives the fit. The interval is the
+    // bootstrap's, quoted with the resamples behind it -- failures are not
+    // random, so a nonzero count means a slightly narrow interval and the
+    // reader is entitled to see it.
     if (s.binormal) {
-      const bfit = (label, f) => f ? `<div class="statline">`
-        + `<span class="lbl">Binormal Az (${label})</span> `
-        + `${num(f.az)} &plusmn; ${num(f.se)} (SE), ${f.nBins} bins, `
-        + `fit p ${num(f.p)}</div>` : ``;
+      const bfit = (label, f) => {
+        if (!f) return ``;
+        let line = `<div class="statline"><span class="lbl">Binormal Az (${label})</span> `
+          + `${num(f.az)}`;
+        if (f.ci) line += ` (95% CI ${num(f.ci.lo)}&ndash;${num(f.ci.hi)})`;
+        line += `, ${f.nBins} bins, fit p ${num(f.p)}`;
+        if (f.ci) {
+          line += ` <span class="muted">&middot; ${f.ci.resamples} resamples`;
+          if (f.ci.failures) line += `, ${f.ci.failures} failed`;
+          line += `</span>`;
+        }
+        return line + `</div>`;
+      };
       h += bfit("best p", s.binormal.bestP) + bfit("best AUC", s.binormal.bestAUC);
     }
     // goodness of fit

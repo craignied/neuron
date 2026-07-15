@@ -136,20 +136,25 @@ Harvest from `session.out` and report to the user:
   gradient small (logistic should reach ~1e-6; that's the converged MLE).
 - The **Test set** block (not just training): classification accuracy,
   sensitivity/specificity, and **ROC area with its 95% CI**.
-  - **Quote the trapezoidal (Hanley–McNeil) 95% CI, not the binormal one.** The
-    binormal delta-method interval is **mis-specified** — it assumes the z-ROC
-    points are independent, and neuron's are cumulated from a single sample
-    (Wickens 2002, pp. 87–88). Measured ~5× too narrow. A bootstrap replaces it in
-    ROADMAP 3 Phase 1 (CLAUDE.md); once that lands, quote the binormal CI again.
-  - This is about the **interval**, not the **area**: Wickens holds the trapezoidal
-    area negatively biased and A_z the primary measure (pp. 70–72). Report A_z as
-    the area; use the trapezoidal interval as the uncertainty.
+  - **Report A_z as the area and quote its bootstrap 95% CI.** Wickens holds the
+    trapezoidal area negatively biased and A_z the primary measure (pp. 70–72);
+    the trapezoidal area and its Hanley–McNeil interval are a useful independent
+    cross-check, and the two intervals should roughly agree — say so if they do.
+    (Builds before 2026-07-15 printed a delta-method interval that was
+    mis-specified and ~5× too narrow. If the CI line does not say "bootstrap
+    resamples", you are on an old binary: quote the trapezoidal interval instead.)
+  - **Quote the resample count and any failures** shown on the CI line. Failures
+    track ties rather than occurring at random, so a nonzero count means a
+    slightly narrow interval. On current builds this is normally "2000 bootstrap
+    resamples" with no failures.
   - Also quote the **bin count** with any binormal A_z — it depends on the binning
-    until Phase 2.
-  - `ITMAX too small in gcf` is **not a harmless quirk** (as this file previously
-    claimed): it means a bin of a flat ROC run had zero SD, so the χ² went
-    non-finite and the binormal area failed outright. Fall back to the trapezoidal
-    area and say the binormal fit failed. Background: `docs/roc_theory.md`.
+    until Phase 2. The report gives two fits ("best p" and "best AUC"); an A_z
+    without its bin count is meaningless.
+  - `ITMAX too small in gcf` should no longer appear (its cause was fixed
+    2026-07-15). If you see it on a current build, that is a real finding worth
+    reporting, not a quirk to shrug at. `p = not available` is benign by design:
+    goodness of fit never gates the area (Wickens §11.5, p. 217).
+  - Background for all of this: `docs/roc_theory.md`, which is the authority.
 - For logistic: notable Wald rows (smallest p-values) — translate the
   input numbers to variable names via the key file — and the condition
   number (≫1e5 suggests collinearity; did they forget `--refcat`?).

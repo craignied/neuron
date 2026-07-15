@@ -158,14 +158,17 @@ requires, since its standard error varies with the parameter (§11.4, pp. 206–
 
 The earlier delta-method interval assumed independent points and was ~5× too narrow;
 it has been retired. Validation: on the low-birth-weight data the bootstrap SE agrees
-with Hanley–McNeil to within ~5% (0.0497 vs 0.0522 at n = 142; 0.0844 vs 0.0870 at
+with Hanley–McNeil to within ~3% (0.0524 vs 0.0522 at n = 142; 0.0844 vs 0.0870 at
 n = 47) and scales with n as it must — two estimators with different assumptions
-agreeing, where the delta method agreed with neither.
+agreeing, where the delta method agreed with neither. Against simulation the mean
+reported bootstrap SE matches the empirical SD of A_z to within 1%.
 
-The interval line reports the effective number of resamples and how many failed. A
-resample whose fit cannot be computed is currently dropped whole, and those failures
-are not random, so a large failure count means a slightly narrow interval — quote the
-counts, and see ROADMAP 3 Phase 1 in CLAUDE.md for the outstanding fix.
+The interval line reports the effective number of resamples and how many failed —
+quote both. Failures track ties rather than occurring at random, so a nonzero count
+means a slightly narrow interval; on the low-birth-weight data a current build uses
+all 2000. (Until 2026-07-15 it discarded 27% of them there, because the variance of
+a bin holding a flat run of the ROC was computed by a formula that returned NaN
+instead of zero. Fixing that widened the interval to its honest width.)
 
 **A_z is the primary measure, not the trapezoidal area.** The trapezoidal area is
 negatively biased — it connects operating points by straight lines where real

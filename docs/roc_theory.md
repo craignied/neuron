@@ -286,11 +286,18 @@ perturb weight initialisation or train/test splits; `--seed N` seeds both.
 Resamples on which the fit cannot be computed are counted and reported rather
 than silently dropped. B = 2000 by default (`setBootstrapResamples`; 0 disables).
 
-**Validation.** On the low-birth-weight data the bootstrap SE agrees with the
-independent Hanley–McNeil estimate to within ~5% (train: 0.0497 vs 0.0522 at
-n = 142; test: 0.0844 vs 0.0870 at n = 47), and scales with n as it must. Two
-methods resting on different assumptions agreeing is the calibration evidence;
-the delta method agreed with neither.
+**Validation.** Two independent lines of evidence:
+
+- On the low-birth-weight data the bootstrap SE agrees with the independent
+  Hanley–McNeil estimate to within ~3% (train: 0.0524 vs 0.0522 at n = 142; test:
+  0.0844 vs 0.0870 at n = 47), and scales with n as it must. Two methods resting
+  on different assumptions agreeing is the calibration evidence; the delta method
+  agreed with neither. (Before the variance fix these read 0.0497 vs 0.0522 —
+  the residual gap on the training set *was* the discard bias.)
+- Against simulation, `tests/binormal/check_az.cpp` draws replicate samples from
+  known Gaussians and compares the mean reported bootstrap SE with the empirical
+  SD of A_z across those replicates: **ratio 1.00**. The delta method it replaced
+  needed a tolerance window of 0.4–2.5 to pass the same check.
 
 The trapezoidal area keeps its **Hanley–McNeil** closed-form interval (the
 Mann–Whitney U equivalence; Hanley & McNeil 1982). It calibrated cleanly
@@ -314,9 +321,24 @@ Consequences, all measured 2026-07-15:
 - Within one dataset it moved with the binning alone: the same 142 exemplars gave
   SE 0.014 at 9 bins and 0.034 at 5 bins.
 - Flat runs of the empirical ROC (thresholds where the hit rate does not move)
-  produce bins with **zero** SD, degenerate fitexy weights, a non-finite χ², and
-  a `gammq` failure ("a too large, ITMAX too small in gcf") — which discarded 27%
-  of bootstrap resamples until the p-value was made non-fatal.
+  give a bin whose z values are all **identical**. Their standard deviation is
+  legitimately zero, and fitexy handles a zero error bar by construction
+  (`chixy` weights such a point `BIG`). What did not handle it was
+  `Population::var()`, which computed the variance by the one-pass
+  `(Σx² − n·x̄²)/(n−1)`: for identical values those two terms agree to within
+  roundoff, so the result came out at ±1e-16 with an essentially **random sign**.
+  A negative one made `std()` return `sqrt` of a negative number — NaN — which
+  propagated into the fit and surfaced as the legacy `gammq` failure
+  ("a too large, ITMAX too small in gcf"); a positive one silently produced a
+  **fake error bar of ~3e-08**, weighting that point ~1e15 in a fit that
+  reported no error at all. This was fixed 2026-07-15 at its source (the
+  two-pass form, which returns the exact zero), not at the symptom. It had been
+  discarding **27% of bootstrap resamples** on the low-birth-weight training set
+  — non-randomly, since it tracks ties — and the discards biased the interval
+  narrow: removing them widened the 95% CI from 0.513–0.711 to 0.513–0.721 and
+  moved the bootstrap SE from 0.0497 to 0.0524, against Hanley–McNeil's 0.0522.
+  See "Goodness of fit does not gate the area" below for the second, independent
+  guard added at the same time.
 
 The principled error bar is Wickens' own: binomial rate variance (Eq. 11.2,
 p. 202) pushed through the delta method (Eq. 11.3, p. 202) to the z scale, giving
@@ -355,7 +377,23 @@ The χ² fit probability is a **diagnostic**, never a precondition for reporting
 Az. Wickens states that even had the model been strictly rejected on goodness of
 fit, it would still be appropriate to use statistics like Az to describe
 performance (§11.5, p. 217). A `gammq` failure or a poor fit therefore marks the
-p-value unavailable and leaves the area intact.
+p-value unavailable ("p = not available") and leaves the area intact.
+
+This is implemented as a guard, not as the fix for the discards described above:
+the failing `gammq` calls were a *symptom* of a NaN already in the fit, and had
+they merely been suppressed the engine would have reported a NaN area instead of
+raising. The fix is at the variance; this rule is what makes an unconvergeable
+fit probability cost the p-value alone. Two related rules follow from the same
+principle, both applying at the level of the bin search:
+
+- A binning that yields no area is skipped, not fatal. The search over 3..10 bins
+  reports whatever binnings did work; only when **none** does is there no area.
+  (Previously a single failing binning suppressed the whole report — including
+  the seven that had succeeded — and discarded the whole bootstrap resample.)
+- A fit whose p could not be computed can still win on **area**; it simply cannot
+  be the "best fit p" fit, having no p to be best at. Likewise a resample with an
+  area but no p informs the best-AUC interval and not the best-p one, so the two
+  intervals carry separate resample counts.
 
 ### Methods-section language
 
@@ -363,17 +401,18 @@ Every methodological claim below is cited to its source and is a property of the
 *method*, so it travels to any dataset. Three things do **not** travel — fix them
 before this goes near a manuscript:
 
-1. **Check ROADMAP 3 Phase 1 in CLAUDE.md first — it is PARTIAL.** The bootstrap
-   landed 2026-07-15, so a current build reports it and this text describes what
-   the code does. But one Phase 1 item is outstanding and it bears on publication:
-   a χ² convergence failure still discards the whole resample, dropping ~27% of them
-   on the low-birth-weight test set. Those discards correlate with ties rather than
-   occurring at random, so the interval is conditioned on tie-poor resamples and is
-   **biased slightly narrow**. The engine prints the effective resample count and the
-   failure count — **report them**, and if failures are more than a few percent, say
-   so or wait for the fix. A build *predating* 2026-07-15 reports the delta-method
-   interval, which is mis-specified: do not publish an A_z interval from one; use the
-   trapezoidal Hanley–McNeil interval. Describe the code you actually ran.
+1. **Check what your build reports.** ROADMAP 3 Phase 1 is complete as of
+   2026-07-15: the bootstrap interval landed, and the resample discards that
+   biased it narrow (~27% on the low-birth-weight training set) were traced to a
+   variance bug and eliminated — a current build reports 2000 of 2000 resamples
+   on that data. The engine still prints the effective resample count and the
+   failure count: **report them**, and if failures are more than a few percent,
+   say so — failures track ties rather than occurring at random, so they bias the
+   interval narrow. A build *predating* 2026-07-15 reports the delta-method
+   interval, which is mis-specified: do not publish an A_z interval from one; use
+   the trapezoidal Hanley–McNeil interval. A build from 2026-07-15 but before the
+   variance fix reports a bootstrap interval with a large failure count and is
+   narrow by roughly the amount shown above. Describe the code you actually ran.
 2. **"B = 2000 resamples"** is the default (`setBootstrapResamples`). If you
    changed it, change it here.
 3. **"the two interval methods agreed to within ~5%"** is a measurement on the
@@ -463,12 +502,36 @@ algorithm (Wickens 2002, §3.6, p. 57)."*
 | Metz ROC software, University of Chicago. | ROCFIT, LABROC4, PROPROC, CORROC, INDROC, ROCKIT, LABMRMC, DBM-MRMC — the living descendant of Swets' program summary. |
 | Wickens' supplementary programs, `twickens.bol.ucla.edu/sdt.htm` (still live; last modified 11 April 2002). | GAUSSW, DPRIMEW, and — the relevant pair — **FitRoc** (a series of independent detection conditions) and **FitRating** (a single condition with rating-scale responses). Their existence as two separate programs is the clearest statement that neuron's data type has its own fitting algorithm. neuron's case is FitRating. |
 
-### The area estimate is tested
+### What is tested, and what is not
 
-`tests/binormal/check_az.cpp` draws large Gaussian samples
-with known (μ, σ), runs them through `getStatROCarea()`, and requires the
-result to match Φ((μ₁−μ₀)/√(σ₀²+σ₁²)) within sampling tolerance — including an
-unequal-variance case. It runs in CI on every push (`ctest`).
+**The golden transcripts do not reach this code at all.** `xor_seed42` and
+`regress_seed42` have too few exemplars (`goodData < calcThresh`), so they print
+"Cannot calculate ROC statistically" and contain **zero** "By statistical method"
+lines; `verify_oracle.sh` likewise. A green golden run therefore says *nothing*
+about anything on this page — which is exactly how the delta method was replaced
+with all five invariants passing. The coverage that does exist:
+
+`tests/binormal/check_az.cpp` (ctest, runs in CI on every push):
+
+- draws large Gaussian samples with known (μ, σ), runs them through
+  `getStatROCarea()`, and requires the result to match Φ((μ₁−μ₀)/√(σ₀²+σ₁²))
+  within sampling tolerance — including an unequal-variance case;
+- asserts the variance of a set of identical values is zero rather than NaN or a
+  roundoff residue (the bug behind the resample discards, asserted at its root);
+- drives deliberately **tied** scores — the flat ROC runs that make the binning
+  degenerate — and requires every binning of the search to yield a finite area
+  and a finite fit p, and the bootstrap to discard **no** resample and stay
+  within 25% of Hanley–McNeil;
+- calibrates the bootstrap SE against the empirical SD of A_z over replicate
+  samples.
+
+`tests/gui/smoke.sh` asserts the panel's binormal block is `null` when no fit is
+possible (four exemplars) and carries both fits — each with its bin count and
+bootstrap interval — on the low-birth-weight data, which is large enough to be
+binned. Both assertions were verified to fail against the pre-fix binary.
+
+Still uncovered: no seeded golden transcript reaches the statistical path, so
+byte-level regressions in the printed ROC report are not caught.
 
 ### Provenance
 

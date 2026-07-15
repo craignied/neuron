@@ -389,7 +389,10 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   5. **The within-bin SD error bars have NO source in Wickens.** Table 5.3 (p. 90) has
      no error-bar column; Ex 5.1 fits by eye. They were invented to feed fitexy, and
      because bins are chunks of a sorted monotone sequence they measure *bin width* —
-     hence SE∝bin count, zero-SD bins on flat ROC runs, NaN χ², `gammq` throws.
+     hence SE∝bin count, and zero-SD bins on flat ROC runs. *(This entry originally
+     continued "→ degenerate fitexy weights, NaN χ², `gammq` throws". **That chain was
+     wrong** — see the evening entry above: `chixy` guards zero weights, and the NaN came
+     from `Population::var()`. The zero-SD bins are real; what they broke was not.)*
      Wickens' own binomial z error bar (Eq 11.2+11.3 p. 202: σ²_z ≈ p(1−p)/N ÷ φ²(z))
      is the fix, and it makes binning unnecessary.
   6. **fitexy (2-axis) is Wickens' own** (p. 56: y-only regression is unsatisfactory;
@@ -400,11 +403,51 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   Wickens' supplementary programs are still live at `twickens.bol.ucla.edu/sdt.htm`
   (HTTP only — WebFetch forces HTTPS and fails; use curl. Last modified 2002-04-11).
 
+- **2026-07-15 (evening) — ROADMAP 3 Phase 1 finished; legacy bugs #6 and #7 found.**
+  The plan said "make the χ² p-value non-fatal, do this first." **Measurement said the
+  plan was wrong**, and following it literally would have shipped NaN areas. Instrumenting
+  before editing is the only reason it didn't. What was actually true:
+  1. **Legacy bug #6 — `Population::var()` returned NaN for identical values.** It used
+     the one-pass `(Σx² − n·x̄²)/(n−1)`; for identical values those terms agree to within
+     roundoff and the result lands at ±1e-16 with a **random sign**. Negative → `std()`
+     = `sqrt(negative)` = NaN → poisons the zROC fit → the `gammq` throw everyone had
+     been shrugging at for ~20 years. **Positive → a fake error bar of ~3e-08**, i.e. a
+     point weighted ~1e15 in a fit that reported no error at all — so *passing* fits were
+     silently distorted too. Reached from the binning: a bin covering a flat run of the
+     empirical ROC holds identical z values. Fixed with the two-pass form (returns exact
+     zero, which `chixy` already handles via `ww==0 → BIG`). Measured: 800/4000 binnings
+     failed → **0**; 63% of resamples discarded → **0**; on real low-birth-weight data
+     `1448 resamples, 552 failed` → **2000, 0 failed**. **`gammq` was never the disease
+     — it was the immune system.** It threw on a NaN that was already there, and it was
+     the only thing preventing a NaN Az from being printed. Suppressing it, as planned,
+     would have been strictly worse than the bug.
+  2. **Legacy bug #7 — the GUI fabricated an Az of 0.** On data too small for a binormal
+     fit (`goodData < calcThresh`), `searchROC`'s loop never executes, and the panel
+     published the zero-initialized `ROCfit`: `{"az":0,...,"nBins":0}` — "perfectly
+     anti-predictive" — **while the report beside it correctly said "Cannot calculate ROC
+     statistically."** The panel/report divergence the 2026-07-15 reconciliation was
+     supposed to end, in a second place. **smoke.sh was asserting the fabrication's
+     presence** (`grep '"bestP":'` passed on the zeros). Now `null`, and smoke asserts
+     that, plus real fits on a set big enough to have them.
+  3. Also fixed: one failing binning used to set `searchErrorFlag` and thereby suppress
+     the **entire** report (including the seven binnings that worked) and discard the whole
+     bootstrap resample. `getROCsearchFailed()` now means "no binning yielded an area".
+     `ROCfit.valid` added; a NaN p can't win "best p"; best-p and best-AUC intervals carry
+     separate failure counts.
+  4. The delta method is **gone** (`azSE`, `statAzSE`, `getStatAzSE`, `ROCfit.se`) — it
+     was still being displayed in the GUI panel long after being removed from the report.
+  **Lesson, recorded because it generalizes:** the roadmap item was written from a
+  plausible causal story ("zero-SD bins → degenerate fitexy weights → non-finite χ²") that
+  was wrong in every link — there were **zero** zero-SD bins, `chixy` *guards* zero
+  weights, and the NaN came from the variance. A doc that names a mechanism is still a
+  hypothesis. Measure first; a 20-line probe settled in minutes what a session of reasoning
+  had gotten backwards.
+
 ## ROADMAP 3 (agreed with Craig 2026-07-15) — ROC inference
 
 Rationale, citations, and Methods language: **`docs/roc_theory.md`**. Work in order.
 
-### Phase 1 — land the interval (PARTIAL, committed 2026-07-15; finish this next)
+### Phase 1 — land the interval (**DONE** 2026-07-15; two commits, see status entries)
 
 **DONE (in `main`):**
 - **Bootstrap CI** replaces the delta method in `statReport`: `TwoSet::bootstrapROC()`
@@ -421,37 +464,37 @@ Rationale, citations, and Methods language: **`docs/roc_theory.md`**. Work in or
   and 0.0844/0.0870 (n=47) — two methods, different assumptions, agreeing; and it scales
   with n, which the delta SE never did. Cost ≈1 s for 2×2000 resamples on 142 rows.
 
-**REMAINING (Phase 1 is not finished):**
-1. **χ² p-value must become non-fatal** (§11.5 p. 217). Today a `gammq` failure kills the
-   whole area, which **discards 27% of resamples** on the low-birth-weight test set.
-   The discards are **not random** (they correlate with ties → zero-SD bins), so the
-   interval is conditioned on tie-poor resamples and biased narrow. Empirically the bias
-   looks small (the 1448-resample interval still matched H-M), but it is the same class
-   of flaw we just removed. **Do this first.**
-2. **GUI**: the `binormal` JSON still carries only the fit's numbers — expose the CI,
-   and show it in the stats panel.
-3. **`tests/binormal/check_az.cpp` still asserts delta-SE calibration** — vestigial now
-   that `azSE` is no longer printed. Replace with bootstrap coverage checks. (`azSE`
-   and `statAzSE` are still computed but unused by the report; decide whether to remove.)
-4. **THE GOLDENS DO NOT COVER THE BINORMAL PATH AT ALL** (found 2026-07-15). xor_seed42
-   and regress_seed42 print "Cannot calculate ROC statistically" (4 exemplars / small
-   sets, `goodData < calcThresh=10`) — **zero** "By statistical method" lines between
-   them. So goldens passing says *nothing* about ROC intervals; the safety net has a
-   hole exactly where ROADMAP 3 works. **Add a seeded golden (or ctest) that reaches the
-   statistical path before trusting any re-bless.** This is also why the bootstrap could
-   land with all five invariants green.
-- **Az does not move** in Phase 1 → `verify_oracle.sh` stays clean (already excludes
-  "95% CI"); goldens unaffected (see #4 — they never reach the path).
-- Verify: build → goldens → smoke → ctest → oracle → bank click-through.
+**ALSO DONE (second commit, 2026-07-15 evening — the four remaining items):**
+1. **The 27% resample discard is gone: 2000/2000 on low-birth-weight.** Root cause was
+   NOT the p-value — see the status entry below. `Population::var()` now uses the
+   two-pass form; the χ² p-value is non-fatal anyway (§11.5 p. 217) as a guard;
+   a failing binning no longer poisons the search, the report, or the resample.
+2. **GUI**: `binormal` JSON carries each fit's bootstrap `ci` (lo/hi/se/resamples/
+   failures); the panel shows it. The delta SE it used to display is **deleted**.
+3. **`check_az` rewritten**: delta-SE calibration replaced by bootstrap calibration
+   (ratio 1.00 vs the delta method's 0.4–2.5 window), plus the identical-values
+   variance assertion and a tied-scores regression test. `azSE`/`statAzSE`/
+   `getStatAzSE` **removed** — the delta method has no traces left in the engine.
+4. **Coverage added where the hole was**: `check_az` now drives the binormal path incl.
+   ties/degenerate binnings; `smoke.sh` asserts `binormal:null` on 4 exemplars and real
+   fits+CI on low-birth-weight. **Both were verified to FAIL against the pre-fix
+   binary** — they are not vacuous. Still open: no seeded *golden transcript* reaches
+   the statistical path, so byte-level regressions in the printed ROC report are
+   uncaught (the goldens' hole itself is unchanged).
+- **Az did not move**: oracle numerically identical, goldens byte-identical, and
+  low-birth-weight Az 0.618420/0.620688 before and after. Only the *interval* widened
+  (0.513–0.711 → 0.513–0.721), which was the point.
 
 ### Phase 2 — fix the error bars (medium; Az moves)
 - Replace within-bin SD with **σ²_z ≈ p(1−p)/N ÷ φ²(z)** (Wickens Eq 11.2+11.3 p. 202).
 - **Drop fixed-count binning** — unnecessary once error bars are analytic. Categorise by
   the **corners of the empirical ROC** (Metz/LABROC: truth-state runs are the natural
   categorisation; flat runs carry no information). This removes the 3..10 search,
-  `nBins`, the best-p/best-AUC pair, and the zero-SD/NaN class **together** — and
-  obsoletes the two-fit stats panel added 2026-07-15 (that reconciliation was correct
-  for the old design; it becomes moot, not wasted).
+  `nBins`, and the best-p/best-AUC pair **together** — and obsoletes the two-fit stats
+  panel added 2026-07-15 (that reconciliation was correct for the old design; it becomes
+  moot, not wasted). Note the zero-SD/NaN failure class is **already gone** (fixed at
+  `Population::var()`, evening of 2026-07-15) — Phase 2 no longer has to carry it, and
+  the arbitrary binning, not a crash, is what remains to justify this work.
 - **Gate on a literature acceptance test before re-blessing anything**: implement
   Wickens' Table 5.1 (p. 84) as a ctest fixture and require the printed values —
   zH = 0.735zF + 0.974, μ̂ₛ=1.325, σ̂ₛ=1.360, Az=0.784, criteria −0.714, −0.067, 0.423,

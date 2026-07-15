@@ -62,16 +62,122 @@ static bool check( double mu1, double s1, unsigned nPerClass, double tol )
 	return false;
 }
 
-// Verifies the delta-method SE of Az against simulation: the mean reported SE
-// over replicate samples should be on the scale of the empirical SD of Az.
-// (The covariance term is unavailable on the binned fitexy path, so we accept
-// a generous calibration window rather than exact agreement.)
+// The variance of a set of identical values is zero. Computed by the textbook
+// sumSquares - n*mean^2 form it is instead a roundoff residue of either sign,
+// and a negative one made std() return NaN — which reached the zROC fit as a
+// NaN error bar (a bin covering a flat run of the empirical ROC holds identical
+// z values) and destroyed the area. Asserted here because it is the root of the
+// resample discards this suite exists to keep away. See docs/roc_theory.md.
+static bool check_var_identical()
+{
+	bool ok = true;
+	// Values chosen to round either way: the first two are z-scores of common
+	// hit rates, and before the fix one gave NaN and the other a fake 3e-08 SD.
+	for ( double v : { 0.5244005127080409, -1.2815515655446004,
+		2.3263478740408408, 0.0, 1.0 } )
+	{
+		vector< double > bin( 14, v );
+		Population p( bin );
+		double var = p.var(), sd = p.std();
+
+		cout << "var of 14 identical " << v << " -> var=" << var << " std=" << sd;
+		if ( isfinite( var ) && isfinite( sd ) && var >= 0 && sd < 1e-12 )
+			cout << "  OK" << endl;
+		else
+		{
+			cout << "  FAIL (want finite, >=0, ~0)" << endl;
+			ok = false;
+		}
+	}
+	return ok;
+}
+
+// Tied scores make flat runs in the empirical ROC, which is what drives the
+// binning degenerate. Every binning of the search must still yield a finite
+// area and a finite fit p, and the bootstrap must discard no resample. Before
+// the 2026-07-15 fixes this data failed 20% of binnings and 27% of resamples.
+static bool check_ties( unsigned n0, unsigned n1, double mu1 )
+{
+	mt19937 gen( 7 );
+	normal_distribution< double > negative( 0.0, 1.0 ), positive( mu1, 1.0 );
+
+	Matrix< double > M( n0 + n1, 2 );
+	unsigned r = 0;
+	// Round the scores hard: ties are what a saturating model actually produces
+	for ( unsigned i = 0; i < n0; i++, r++ )
+	{
+		M( r, 0 ) = 0;
+		M( r, 1 ) = round( negative( gen ) * 20 ) / 20;
+	}
+	for ( unsigned i = 0; i < n1; i++, r++ )
+	{
+		M( r, 0 ) = 1;
+		M( r, 1 ) = round( positive( gen ) * 20 ) / 20;
+	}
+
+	bool ok = true;
+
+	// Every binning the search will visit must produce something usable
+	TwoSet perBin( M );
+	unsigned bad = 0;
+	for ( unsigned nb = 3; nb <= 10; nb++ )
+	{
+		perBin.setNbins( nb );
+		perBin.setNbinsSetsSize( true );
+		perBin.invalidate();
+		try
+		{
+			double az = perBin.getStatROCarea();
+			if ( !isfinite( az ) || !isfinite( perBin.getStatP() ) )
+				bad++;
+		}
+		catch ( ... ) { bad++; }
+	}
+	cout << "tied scores, binnings 3..10 unusable: " << bad << "/8";
+	if ( bad == 0 )
+		cout << "  OK" << endl;
+	else
+	{
+		cout << "  FAIL (want 0)" << endl;
+		ok = false;
+	}
+
+	// The bootstrap must keep every resample, and agree with Hanley-McNeil
+	TwoSet assay( M );
+	assay.setROCSearchFlag( true );
+	assay.setBootstrapResamples( 400 ); // enough to be a real check, quick in CI
+	TwoSet::CI ci = assay.getBestAUCci();
+	double hm = assay.getTrapSE();
+
+	cout << "tied scores, bootstrap: resamples=" << ci.resamples
+		<< " failed=" << ci.failures << " SE=" << ci.se
+		<< "  (Hanley-McNeil SE=" << hm << ")";
+	// Discards here are not random — they track ties — so they bias the
+	// interval narrow. Demand none, and demand the SE stay near the
+	// independent estimator rather than merely being finite.
+	if ( ci.valid && ci.failures == 0 && ci.lo < ci.hi
+		&& fabs( ci.se - hm ) / hm < 0.25 )
+		cout << "  OK" << endl;
+	else
+	{
+		cout << "  FAIL (want 0 failures, SE within 25% of H-M)" << endl;
+		ok = false;
+	}
+
+	return ok;
+}
+
+// Verifies the bootstrap SE against simulation: the mean reported bootstrap SE
+// over replicate samples should match the empirical SD of Az across those same
+// replicates. This is the calibration check that matters now that the interval
+// is resampled rather than propagated analytically (the delta-method SE this
+// once asserted is retired — it tracked the bin count, not the sample size).
 static bool check_se( double mu1, double s1, unsigned nPerClass, unsigned reps )
 {
 	mt19937 gen( 6789 );
 	normal_distribution< double > negative( 0.0, 1.0 ), positive( mu1, s1 );
 
-	double sumAz = 0, sumAz2 = 0, sumSE = 0,
+	double sumAz = 0, sumAz2 = 0, sumBoot = 0,
 		sumT = 0, sumT2 = 0, sumHM = 0;
 	for ( unsigned r = 0; r < reps; r++ )
 	{
@@ -84,10 +190,14 @@ static bool check_se( double mu1, double s1, unsigned nPerClass, unsigned reps )
 			M( 2 * i + 1, 1 ) = positive( gen );
 		}
 		TwoSet assay( M );
+		// Calibrate the plain fit against itself: no bin search, so the
+		// interval in getStatCi() is the one around getStatROCarea() below
+		assay.setROCSearchFlag( false );
+		assay.setBootstrapResamples( 200 ); // reps x B — keep CI honest but quick
 		double az = assay.getStatROCarea();
 		sumAz += az;
 		sumAz2 += az * az;
-		sumSE += assay.getStatAzSE();
+		sumBoot += assay.getStatCi().se;
 		double t = assay.getTrapROCarea();
 		sumT += t;
 		sumT2 += t * t;
@@ -95,25 +205,25 @@ static bool check_se( double mu1, double s1, unsigned nPerClass, unsigned reps )
 	}
 	double meanAz = sumAz / reps;
 	double empSD = sqrt( sumAz2 / reps - meanAz * meanAz );
-	double ratio = ( sumSE / reps ) / empSD;
+	double ratio = ( sumBoot / reps ) / empSD;
 
 	double meanT = sumT / reps;
 	double empSDT = sqrt( sumT2 / reps - meanT * meanT );
 	double ratioHM = ( sumHM / reps ) / empSDT;
 
-	cout << "SE calibration (delta): empirical SD(Az)=" << empSD
-		<< "  mean reported SE=" << sumSE / reps << "  ratio=" << ratio << endl;
+	cout << "SE calibration (bootstrap): empirical SD(Az)=" << empSD
+		<< "  mean reported SE=" << sumBoot / reps << "  ratio=" << ratio << endl;
 	cout << "SE calibration (Hanley-McNeil): empirical SD(trap)=" << empSDT
 		<< "  mean reported SE=" << sumHM / reps << "  ratio=" << ratioHM;
 
-	// Delta method drops the a-b covariance on the binned path — generous
-	// window; Hanley-McNeil should be well calibrated — tight window.
-	if ( ratio > 0.4 && ratio < 2.5 && ratioHM > 0.7 && ratioHM < 1.4 )
+	// Both should now be well calibrated; the window allows for the modest
+	// number of replicates the empirical SD is itself estimated from.
+	if ( ratio > 0.7 && ratio < 1.4 && ratioHM > 0.7 && ratioHM < 1.4 )
 	{
 		cout << "  OK" << endl;
 		return true;
 	}
-	cout << "  FAIL (delta want 0.4-2.5, H-M want 0.7-1.4)" << endl;
+	cout << "  FAIL (want 0.7-1.4 for both)" << endl;
 	return false;
 }
 
@@ -127,8 +237,12 @@ int main()
 	ok &= check( 2.0, 1.5, 2000, 0.02 );
 	// Weak separation
 	ok &= check( 0.5, 1.0, 2000, 0.02 );
-	// Delta-method SE roughly matches sampling variability
-	ok &= check_se( 1.0, 1.0, 300, 80 );
+	// A set of identical values has zero variance, not a NaN
+	ok &= check_var_identical();
+	// Tied scores must not cost binnings or bootstrap resamples
+	ok &= check_ties( 100, 42, 0.7 );
+	// Bootstrap SE matches sampling variability
+	ok &= check_se( 1.0, 1.0, 200, 40 );
 
 	if ( ok )
 	{

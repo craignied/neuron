@@ -56,16 +56,18 @@ grep -q '"se":' train.json || fail "no ROC SE in train response"
 grep -q '"stats":' train.json || fail "no stats object in train response"
 grep -q '"confusion":' train.json || fail "no confusion table in stats"
 grep -q '"tp":' train.json || fail "no confusion counts in stats"
-# The binormal block quotes the report's two searched fits, each with the bin
-# count that produced it -- the panel must not invent a binning of its own
-grep -q '"bestP":' train.json || fail "no best-p binormal fit in stats"
-grep -q '"bestAUC":' train.json || fail "no best-AUC binormal fit in stats"
-grep -q '"nBins":' train.json || fail "no bin count on the binormal fits"
+# Four exemplars cannot support a binormal fit -- the report says so ("Cannot
+#    calculate ROC statistically"), so the panel must say so too, with null.
+#    It used to publish the search's zero-initialized fit here instead: an Az of
+#    0, meaning perfectly anti-predictive, presented as a real result while the
+#    report alongside it declined to give one.
+grep -q '"binormal":null' train.json || fail "binormal must be null when no fit is possible"
+grep -q '"bestP":' train.json && fail "fabricated a binormal fit on 4 exemplars"
 # /api/stats recomputes the same object without retraining
 curl -s "$URL/api/stats" > stats.json
 grep -q '"ok":true' stats.json || fail "stats endpoint"
 grep -q '"confusion":' stats.json || fail "no confusion table from /api/stats"
-grep -q '"bestP":' stats.json || fail "no binormal fits from /api/stats"
+grep -q '"binormal":null' stats.json || fail "binormal must be null from /api/stats too"
 
 # Train continues from the current weights: a second Train reports so
 curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=1&seed=42" \
@@ -127,4 +129,37 @@ grep -q '"logistic":' logi.json || fail "no logistic stats block"
 grep -q '"waldP":' logi.json || fail "no Wald p-values in logistic stats"
 grep -q '"condNumber":' logi.json || fail "no condition number in logistic stats"
 
-echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, logistic Wald/condition number, regress, saves)"
+# The binormal path proper. Everything above is too small to reach it (4
+#    exemplars), so nothing above says anything about the ROC statistics --
+#    this is the case that does. The Hosmer-Lemeshow low-birth-weight set is
+#    committed in the repo and is large enough to be binned, so the panel must
+#    carry both searched fits, each labelled with the bin count that produced
+#    it (an Az is meaningless without it), plus the bootstrap interval.
+cp ../../../docs/datasets/low-birth-weight/lowbwt2-2train.txt .
+curl -s -X POST "$URL/api/load" -d "mode=raw&path=lowbwt2-2train.txt&fraction=0.25" \
+    | grep -q '"ok":true' || fail "load low-birth-weight raw"
+curl -s -X POST "$URL/api/model" -d "type=logistic" \
+    | grep -q '"ok":true' || fail "logistic model on low-birth-weight"
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=2000&seed=42" > lbw.json
+grep -q '"ok":true' lbw.json || fail "low-birth-weight train"
+grep -q '"bestP":' lbw.json || fail "no best-p binormal fit where one is possible"
+grep -q '"bestAUC":' lbw.json || fail "no best-AUC binormal fit where one is possible"
+grep -q '"nBins":' lbw.json || fail "no bin count on the binormal fits"
+# A fit must not report the zero-initialized bin count it never searched with
+grep -q '"nBins":0' lbw.json && fail "binormal fit reported with no binning"
+# Each binormal Az carries the bootstrap interval, with the resamples behind it
+grep -q '"ci":{"lo":' lbw.json || fail "no bootstrap CI on the binormal fits"
+grep -q '"resamples":' lbw.json || fail "no resample count on the binormal CI"
+# The retired delta-method SE must not reappear as a bare fit SE
+python3 - <<'PY' || fail "binormal fit still carries a non-bootstrap se"
+import json, sys
+d = json.load(open("lbw.json"))
+for setname, s in (d.get("stats") or {}).items():
+    b = (s or {}).get("binormal")
+    if not b: continue
+    for which, f in b.items():
+        if f and "se" in f:
+            sys.exit(1)
+PY
+
+echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, binormal fits + null when impossible, logistic Wald/condition number, regress, saves)"

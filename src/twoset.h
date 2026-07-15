@@ -103,7 +103,6 @@ public:
 	double getStatROCarea(); // returns statistical ROC area
 	double getStatP(); // returns p-value for fitted line, smaller is worse
 	double getStatChi2(); // returns chi-squared value for fitted line
-	double getStatAzSE(); // returns delta-method standard error of Az
 	double getTrapSE(); // returns Hanley-McNeil SE of the trapezoidal area
 
 	// ROC curve points captured by the last getTrapROCarea() call, for
@@ -112,16 +111,20 @@ public:
 	const vector< double >& getROCx() { return ROCx; }
 	const vector< double >& getROCy() { return ROCy; }
 
-	// One binormal fit at one binning -- the numbers statReport prints.
-	//    The binning matters: the delta-method SE tracks the number of bins
-	//    rather than the number of exemplars, so an Az is only meaningful
+	// One binormal fit at one binning -- the numbers statReport prints. The
+	//    binning matters: it changes the area, so an Az is only meaningful
 	//    alongside the nBins that produced it.
+	// A binormal fit of the zROC line. No standard error lives here: the
+	//    interval for an az comes from bootstrapROC() (see the CI struct),
+	//    the delta method that once supplied one having been retired as
+	//    mis-specified -- it assumed the operating points were independent
+	//    when they are cumulated from one sample. See docs/roc_theory.md.
 	struct ROCfit {
 		double az = 0; // binormal ROC area
-		double se = 0; // delta-method standard error of az
-		double chi2 = 0; // chi-squared of the z-ROC line fit
-		double p = 0; // fit p value, closer to 1 is better
+		double chi2 = 0; // chi-squared of the z-ROC line fit; NaN if not computable
+		double p = 0; // fit p value, closer to 1 is better; NaN if not computable
 		unsigned nBins = 0; // number of bins this fit used
+		bool valid = false; // false when the search found no such fit
 	};
 
 	// A bootstrap percentile confidence interval for an ROC area
@@ -141,7 +144,7 @@ public:
 	void searchROC( ostream& );
 	ROCfit getBestPfit(); // fit with the largest fit p
 	ROCfit getBestAUCfit(); // fit with the largest ROC area
-	bool getROCsearchFailed(); // true if the search hit a statistics error
+	bool getROCsearchFailed(); // true only if NO binning yielded an area
 
 	// Bootstrap confidence intervals for the binormal areas. Resamples the
 	//    exemplars with replacement (stratified: the class sizes are held at
@@ -224,7 +227,6 @@ public:
 	double threshold, // threshold value
 		statP, // p-value for fitted line for statistical ROC calculation
 		statChi2, // chi-squared value for fitted line for statistical ROC calculation
-		statAzSE, // delta-method standard error of the statistical ROC area (Az)
 		KSD, // Kolmogorov-Smirnov test D value
 		KSP, // Kolmogorov-Smirnov test p-value
 	    PKX2P, // Pearson's Chi-Square test p-value   Hui Liu added 08/15/2004
@@ -273,7 +275,6 @@ public:
 	void statReport( ostream&, unsigned, unsigned, double, double, double, const CI& );
 
 	// Delta-method standard error of Az from a fitted zROC line
-	double azSE( XY& );
 
 	// Hanley-McNeil standard error of an empirical (trapezoidal) ROC area
 	double hmSE( double );

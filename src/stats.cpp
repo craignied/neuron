@@ -13,6 +13,8 @@ using namespace std;
 
 #include <math.h>
 
+#include <limits>
+
 #include "stats.h"
 
 #define ITMAX 100
@@ -48,6 +50,23 @@ double stats::gammln( double xx )
 	return -tmp + log( 2.5066282746310005 * ser / x );
 }
 
+
+// Chi-squared probability of a fit with ndata points and 2 fitted parameters,
+//    or NaN when it cannot be computed. The fit probability is a diagnostic
+//    and never a precondition for reporting the fit or an area derived from
+//    it: Wickens, Elementary Signal Detection Theory, section 11.5 p. 217,
+//    holds that even a model rejected on goodness of fit may still be used to
+//    describe performance. gammq does not converge on a non-finite chi-squared
+//    (and has no meaning with two or fewer points), so failing here must cost
+//    the p value alone.
+static double fitProbability( double chi2, unsigned ndata )
+{
+	if ( ndata <= 2 || !isfinite( chi2 ) || chi2 < 0 )
+		return numeric_limits< double >::quiet_NaN();
+
+	try { return stats::gammq( 0.5 * ( ndata - 2 ), 0.5 * chi2 ); }
+	catch ( stats::statsErr& ) { return numeric_limits< double >::quiet_NaN(); }
+}
 
 // Incomplete gamma function by continued fraction representation
 //    Modification of Numerical Recipes in C p.219
@@ -595,8 +614,27 @@ double Population::var()
 		squaresFlag = true; // sum of squares now calculated
 	}
 
-	// Calculate and return variance, note correction
-	_var = ( sumSquares - ( _n * _mean * _mean ) ) / ( _n - 1 );
+	// Calculate and return variance, note correction. Summing the squared
+	//    deviations from the mean directly is the two-pass form; the textbook
+	//    one-pass ( sumSquares - n * mean^2 ) / ( n - 1 ) differences two
+	//    nearly equal quantities when the values are nearly equal, losing the
+	//    difference to roundoff. It came out with either sign where the true
+	//    variance is zero: negative made std() return sqrt of a negative
+	//    number -- NaN, which then poisoned everything downstream -- and
+	//    positive gave a fake standard deviation around 3e-08. (The zROC
+	//    binning reaches exactly this: a bin covering a flat run of the
+	//    empirical ROC holds identical z values, so its standard deviation is
+	//    legitimately zero. See twoset.cpp.) This form returns that zero
+	//    exactly, which fitexy's chixy() already handles. sumSquares stays
+	//    calculated above because kurtosis() relies on var() to do it.
+	double devSquares = 0;
+	for ( vector< double >::iterator p = x.begin(); p != x.end(); p++ )
+	{
+		double dev = *p - _mean;
+		devSquares += dev * dev;
+	}
+
+	_var = devSquares / ( _n - 1 );
 
 	varFlag = true; // variance now calculated
 
@@ -842,8 +880,7 @@ void XY::fit()
 		{
 			for ( i = 0; i < ndata; i++ )
 				_chi2 += sqr( ( y[ i ] - _a - _b * x[ i ] ) / sig[ i ] );
-			try { _q = stats::gammq( 0.5 * ( ndata - 2 ), 0.5 * _chi2 ); }
-			catch ( stats::statsErr& e ) { throw XYErr( e.what() ); }
+			_q = fitProbability( _chi2, ndata );
 		}
 		_r = ( -sx / ( ss * st2 ) ) / ( _siga * _sigb );
 	}
@@ -897,8 +934,29 @@ XY::XY( vector< double >& __x, vector< double >& __y, vector< double >& sigx,
 	sig = ww;
 	ndata = ndat;
 	mwt = true;
-	try { fit(); }
-	catch ( XY::XYErr& e ) { throw XYErr( e.what() ); }
+
+	// The weighted fit here only seeds the minimization below with a starting
+	//    slope, but being weighted it divides by each error bar, so a zero one
+	//    either trips its own guard or makes the seed NaN. (Zero error bars
+	//    reach here from the zROC binning: a bin covering a flat run of the
+	//    empirical ROC holds identical z values, so its standard deviation is
+	//    legitimately zero. See twoset.cpp.) chixy() below tolerates a zero
+	//    error bar by construction -- it weights such a point BIG -- so the
+	//    objective is well defined and only the seed is lost. Reseed unweighted:
+	//    a starting angle for the same minimization of the same objective
+	//    cannot change where a fit that already had a usable seed converges,
+	//    which is why this is a fallback and not the default.
+	bool seeded;
+	try { fit(); seeded = isfinite( _b ); }
+	catch ( XY::XYErr& ) { seeded = false; } // a zero error bar; seed unusable
+
+	if ( !seeded )
+	{
+		mwt = false; // seed from the unweighted fit instead
+		try { fit(); }
+		catch ( XY::XYErr& e ) { throw XYErr( e.what() ); }
+		mwt = true;
+	}
 	b = _b;
 
 	offs = ang[ 1 ] = 0.0;
@@ -925,8 +983,7 @@ XY::XY( vector< double >& __x, vector< double >& __y, vector< double >& sigx,
 		chi2 = chixy( b );
 		a = aa;
 
-		try { q = stats::gammq( 0.5 * ( nn - 2 ), chi2 * 0.5 ); }
-		catch ( stats::statsErr& e ) { throw XYErr( e.what() ); }
+		q = fitProbability( chi2, nn );
 
 		for ( r2 = 0.0 ,j = 0; j < nn; j++ )
 			r2 += ww[ j ];
