@@ -25,8 +25,13 @@ cp ../xor_net.txt .
 ../"$NEW"    < ../xor_verify.in > verify_30.txt
 # Excluded lines: version banner/farewell; Kolmogorov-Smirnov (known oracle
 # bug, see README); "95% CI" (3.0 enhancement — the oracle never reported
-# confidence intervals on ROC areas).
-strip() { grep -v -e 'Welcome to' -e 'Thank you for using' -e 'Kolmogorov-Smirnov' -e '95% CI' "$1"; }
+# confidence intervals on ROC areas); the oracle's two-line "Maximum number of
+# bins to be searched ... exceeds data" warning (3.0 removed the binning
+# entirely in favour of Wickens' binomial error bars — there is no bin count to
+# search over, so the warning has nothing left to warn about; see
+# docs/roc_theory.md). The exclusion is the whole warning, both its lines.
+strip() { grep -v -e 'Welcome to' -e 'Thank you for using' -e 'Kolmogorov-Smirnov' \
+    -e '95% CI' -e 'Maximum number of bins' -e 'Setting Maximum number of bins' "$1"; }
 fail=0
 diff <(strip verify_oracle.txt) <(strip verify_30.txt) || fail=1
 grep -q 'Kolmogorov-Smirnov goodness of fit D = 1, p = 0.0970269' verify_30.txt \

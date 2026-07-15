@@ -166,49 +166,28 @@ string jsonStatsSet( TwoSet& t )
 	catch ( ... ) { out << "null"; }
 	out << ",";
 
-	// Binormal Az at the same two binnings the report quotes: the best-fitting
-	//    (largest fit p) and the most optimistic (largest area). The binning is
-	//    part of the answer -- the delta-method SE tracks the bin count rather
-	//    than the exemplar count -- so each fit carries the nBins behind it.
-	//    Quoting these rather than a fit of our own is what keeps the panel and
-	//    the report telling the same story.
+	// The binormal Az the report quotes, with its bootstrap interval. There is
+	//    deliberately no SE from the fit itself: the delta method that used to
+	//    supply one assumed independent operating points and ran ~5x narrow.
+	//    Quoting the engine's fit rather than one of our own is what keeps the
+	//    panel and the report telling the same story.
 	out << "\"binormal\":";
 	try
 	{
-		if ( t.getROCsearchFailed() )
-			out << "null"; // no binning yielded an area: say so, do not invent one
+		TwoSet::ROCfit f = t.getROCfit();
+		if ( !f.valid )
+			out << "null"; // no fit was possible: say so, do not invent one
 		else
 		{
-			// Each fit carries its own bootstrap interval. There is deliberately
-			//    no SE from the fit itself: the delta method that used to supply
-			//    one assumed independent operating points and ran ~5x narrow.
-			auto fit = []( const TwoSet::ROCfit& f, const TwoSet::CI& c )
-			{
-				ostringstream b;
-				b.precision( 6 );
-				b << "{\"az\":" << jnum( f.az )
-					<< ",\"p\":" << jnum( f.p ) << ",\"chi2\":" << jnum( f.chi2 )
-					<< ",\"nBins\":" << f.nBins << ",\"ci\":";
-				if ( c.valid )
-					b << "{\"lo\":" << jnum( c.lo ) << ",\"hi\":" << jnum( c.hi )
-						<< ",\"se\":" << jnum( c.se )
-						<< ",\"resamples\":" << c.resamples
-						<< ",\"failures\":" << c.failures << "}";
-				else
-					b << "null";
-				b << "}";
-				return b.str();
-			};
-			// A fit the search never found is null, not a zero-filled one
-			TwoSet::ROCfit bp = t.getBestPfit(), ba = t.getBestAUCfit();
-			out << "{\"bestP\":";
-			if ( bp.valid )
-				out << fit( bp, t.getBestPci() );
-			else
-				out << "null";
-			out << ",\"bestAUC\":";
-			if ( ba.valid )
-				out << fit( ba, t.getBestAUCci() );
+			out << "{\"az\":" << jnum( f.az )
+				<< ",\"p\":" << jnum( f.p ) << ",\"chi2\":" << jnum( f.chi2 )
+				<< ",\"points\":" << f.points << ",\"ci\":";
+			TwoSet::CI c = t.getStatCi();
+			if ( c.valid )
+				out << "{\"lo\":" << jnum( c.lo ) << ",\"hi\":" << jnum( c.hi )
+					<< ",\"se\":" << jnum( c.se )
+					<< ",\"resamples\":" << c.resamples
+					<< ",\"failures\":" << c.failures << "}";
 			else
 				out << "null";
 			out << "}";

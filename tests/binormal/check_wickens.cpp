@@ -142,63 +142,27 @@ int main()
 	TwoSet points( m );
 	ok &= check_operating_points( points );
 
-	// Sweeping the bin count is now a NULL TEST, and that is the point: the
-	//    estimator no longer bins, so every one of these must come back with the
-	//    same Az. Before Phase 2 they spanned 0.011 -- and the fit was so
-	//    ill-conditioned in this tied regime (bins of identical z values have SD
-	//    zero, which chixy weights BIG=1e30, leaving brent balancing on the last
-	//    bits) that -O0 and -O3 disagreed in the fourth decimal and disagreed about
-	//    whether 10 bins converged at all. Asserted below, not just printed.
-	cout << "\nAz by bin count -- must not vary (Wickens: " << WICKENS_AZ << "):" << endl;
-	double firstAz = 0;
-	bool binningInert = true;
-	TwoSet sweep( m );
-	for ( unsigned nb = 3; nb <= 10; nb++ )
-	{
-		sweep.setNbins( nb );
-		sweep.setNbinsSetsSize( true );
-		sweep.invalidate();
-		try
-		{
-			double az = sweep.getStatROCarea();
-			if ( nb == 3 )
-				firstAz = az;
-			else if ( fabs( az - firstAz ) > 1e-9 )
-				binningInert = false;
-			cout << "  " << setw( 2 ) << nb << " bins  Az=" << az
-				<< "  diff=" << showpos << az - WICKENS_AZ << noshowpos
-				<< "  fit p=" << sweep.getStatP() << endl;
-		}
-		catch ( exception& e )
-		{
-			cout << "  " << setw( 2 ) << nb << " bins  no fit (" << e.what() << ")" << endl;
-			binningInert = false; // it used to throw here; it must not now
-		}
-	}
-	cout << "  bin count does not move Az" << ( binningInert ? "  OK" : "  FAIL" ) << endl;
-	ok &= binningInert;
-
-	// The reported fits must land near Wickens' published area
+	// The reported fit must land on Wickens' published area
 	TwoSet assay( m );
-	assay.setROCSearchFlag( true );
 	assay.setBootstrapResamples( 400 );
-	TwoSet::ROCfit bp = assay.getBestPfit(), ba = assay.getBestAUCfit();
+	TwoSet::ROCfit f = assay.getROCfit();
 
-	cout << "\nreported fits vs Wickens " << WICKENS_AZ << " (tolerance " << AZ_TOL << "):" << endl;
-	for ( int which = 0; which < 2; which++ )
+	cout << "\nreported fit vs Wickens " << WICKENS_AZ << " (tolerance " << AZ_TOL << "):" << endl;
+	bool good = f.valid && nearly( f.az, WICKENS_AZ, AZ_TOL );
+	cout << "  Az=" << f.az << " from " << f.points << " operating points"
+		<< "  diff=" << showpos << f.az - WICKENS_AZ << noshowpos
+		<< "  fit p=" << f.p << ( good ? "  OK" : "  FAIL" ) << endl;
+	ok &= good;
+	// Wickens reads five criteria off these data (p. 90); so must we
+	if ( f.points != 5 )
 	{
-		const TwoSet::ROCfit& f = which ? ba : bp;
-		const char* name = which ? "best AUC" : "best p  ";
-		bool good = f.valid && nearly( f.az, WICKENS_AZ, AZ_TOL );
-		cout << "  " << name << ": Az=" << f.az << " (" << f.nBins << " bins)"
-			<< "  diff=" << showpos << f.az - WICKENS_AZ << noshowpos
-			<< ( good ? "  OK" : "  FAIL" ) << endl;
-		ok &= good;
+		cout << "  FAIL: fitted " << f.points << " points, Wickens has 5" << endl;
+		ok = false;
 	}
 
 	// The bootstrap interval must cover the published value. This is a coverage
 	//    check against a real number from the literature, not against ourselves.
-	TwoSet::CI ci = assay.getBestAUCci();
+	TwoSet::CI ci = assay.getStatCi();
 	bool covers = ci.valid && ci.lo <= WICKENS_AZ && WICKENS_AZ <= ci.hi;
 	cout << "  95% CI " << ci.lo << " - " << ci.hi << " (" << ci.resamples
 		<< " resamples, " << ci.failures << " failed) covers " << WICKENS_AZ

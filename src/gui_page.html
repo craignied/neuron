@@ -265,26 +265,22 @@ function renderFullStats(st) {
     // ROC detail
     if (s.trap) h += `<div class="statline"><span class="lbl">Trapezoidal Az</span> `
       + `${num(s.trap.area)} &plusmn; ${num(s.trap.se)} (SE)</div>`;
-    // Both binormal fits, named as the report names them ("best p", "best AUC").
-    // The bin count is shown because it drives the fit. The interval is the
-    // bootstrap's, quoted with the resamples behind it -- failures are not
-    // random, so a nonzero count means a slightly narrow interval and the
-    // reader is entitled to see it.
+    // The binormal Az with its bootstrap interval, quoted from the engine's own
+    // fit so the panel and the report agree. The operating-point count is shown
+    // because it qualifies the claim -- an Az from 5 points and one from 500 are
+    // not the same thing -- and the resamples because failures are not random, so
+    // a nonzero count means a slightly narrow interval and the reader should see it.
     if (s.binormal) {
-      const bfit = (label, f) => {
-        if (!f) return ``;
-        let line = `<div class="statline"><span class="lbl">Binormal Az (${label})</span> `
-          + `${num(f.az)}`;
-        if (f.ci) line += ` (95% CI ${num(f.ci.lo)}&ndash;${num(f.ci.hi)})`;
-        line += `, ${f.nBins} bins, fit p ${num(f.p)}`;
-        if (f.ci) {
-          line += ` <span class="muted">&middot; ${f.ci.resamples} resamples`;
-          if (f.ci.failures) line += `, ${f.ci.failures} failed`;
-          line += `</span>`;
-        }
-        return line + `</div>`;
-      };
-      h += bfit("best p", s.binormal.bestP) + bfit("best AUC", s.binormal.bestAUC);
+      const f = s.binormal;
+      let line = `<div class="statline"><span class="lbl">Binormal Az</span> ${num(f.az)}`;
+      if (f.ci) line += ` (95% CI ${num(f.ci.lo)}&ndash;${num(f.ci.hi)})`;
+      line += `, ${f.points} operating points, fit p ${num(f.p)}`;
+      if (f.ci) {
+        line += ` <span class="muted">&middot; ${f.ci.resamples} resamples`;
+        if (f.ci.failures) line += `, ${f.ci.failures} failed`;
+        line += `</span>`;
+      }
+      h += line + `</div>`;
     }
     // goodness of fit
     if (s.ks) h += `<div class="statline"><span class="lbl">Kolmogorov&ndash;Smirnov</span> `

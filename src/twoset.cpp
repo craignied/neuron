@@ -22,30 +22,17 @@ TwoSet::TwoSet( const Matrix< double >& D )
 void TwoSet::initialize()
 {
 	thresholdFlag = false;
-	nBins = 10;
-	binSize = 10;
-	binThresh = 100;
-	nBinFlag = true;
-	binnedFlag = false;
 	statROCcalcFlag = false;
-	searchCalcFlag = false;
-	searchErrorFlag = false;
-	searchErrorMsg.clear();
-	bestPfit = ROCfit();
-	bestAUCfit = ROCfit();
+	statFitCalcFlag = false;
+	statFit = ROCfit();
 	bootCalcFlag = false;
 	bootB = 2000; // resamples for the ROC confidence intervals
-	bestPci = CI();
-	bestAUCci = CI();
 	statCi = CI();
 	calcThresh = 10;
 	reportFlag = true;
-	searchFlag = true;
 	KScalcFlag = false;
 	PKX2calcFlag = false;  // Hui Liu added 09/09/2004
 	HLX2calcFlag = false;  //  Hui Liu added 09/09/2004
-	minBins = 3;
-	maxBins = 10;
 	// Zero the cached statistic values so no path can ever print
 	//    uninitialized memory (2.x left these uninitialized)
 	statP = statChi2 = KSD = KSP = PKX2P = HLX2P = 0;
@@ -77,27 +64,18 @@ void TwoSet::copy( const TwoSet& rhs )
 	fp = rhs.fp;
 	fn = rhs.fn;
 	threshold = rhs.threshold;
-	nBins = rhs.nBins;
-	binSize = rhs.binSize;
-	binThresh = rhs.binThresh;
 	calcThresh = rhs.calcThresh;
 	nThresholds = rhs.nThresholds;
-	minBins = rhs.minBins;
-	maxBins = rhs.maxBins;
 	bootB = rhs.bootB;
 	statP = rhs.statP;
 	statChi2 = rhs.statChi2;
 	statPoints = rhs.statPoints;
 	loadedFlag = rhs.loadedFlag;
 	thresholdFlag = rhs.thresholdFlag;
-	nBinFlag = rhs.nBinFlag;
-	binnedFlag = rhs.binnedFlag;
 	statROCcalcFlag = rhs.statROCcalcFlag;
-	searchCalcFlag = rhs.searchCalcFlag;
-	searchErrorFlag = rhs.searchErrorFlag;
+	statFitCalcFlag = rhs.statFitCalcFlag;
 	bootCalcFlag = rhs.bootCalcFlag;
 	reportFlag = rhs.reportFlag;
-	searchFlag = rhs.searchFlag;
 	KScalcFlag = rhs.KScalcFlag;
 	PKX2calcFlag = rhs.PKX2calcFlag;  // Hui Liu added 09/09/2004
 	HLX2calcFlag = rhs.HLX2calcFlag;   // Hui Liu added 09/09/2004
@@ -107,12 +85,8 @@ void TwoSet::copy( const TwoSet& rhs )
 	KSP = rhs.KSP;
 	PKX2P = rhs.PKX2P;
 	HLX2P = rhs.HLX2P;
-	bestPfit = rhs.bestPfit;
-	bestAUCfit = rhs.bestAUCfit;
-	bestPci = rhs.bestPci;
-	bestAUCci = rhs.bestAUCci;
+	statFit = rhs.statFit;
 	statCi = rhs.statCi;
-	searchErrorMsg = rhs.searchErrorMsg;
 	ROCx = rhs.ROCx;
 	ROCy = rhs.ROCy;
 }
@@ -296,7 +270,7 @@ double& TwoSet::test( const unsigned r )
 void TwoSet::invalidate()
 {
 	statROCcalcFlag = false;
-	searchCalcFlag = false; // the cached binning search describes the old guesses
+	statFitCalcFlag = false; // the cached fit describes the old guesses
 	bootCalcFlag = false; // and so do the cached bootstrap intervals
 	KScalcFlag = false;
 	PKX2calcFlag = false;
@@ -635,8 +609,7 @@ double TwoSet::getStatROCarea()
 			rocArea = stats::Zarea( line.a() / sqrt( 1 + ( line.b() * line.b() ) ) );
 			statP = line.q();
 			statChi2 = line.chi2();
-			binnedFlag = false;
-		}
+				}
 		catch ( stats::statsErr& e ) { throw twoSetErr( e.what() ); }
 		catch ( XY::XYErr& e ) { throw twoSetErr( e.what() ); }
 	}
@@ -682,6 +655,43 @@ double TwoSet::getStatP()
 	return statP;
 }
 
+// Distinct operating points the last zROC line was fitted to
+unsigned TwoSet::getStatPoints()
+{
+	if ( !statROCcalcFlag ) // calculate ROC area first
+		getStatROCarea();
+
+	return statPoints;
+}
+
+// The fit the report quotes. Returns valid = false rather than throwing when the
+//    data cannot support a fit -- a caller that cannot have an answer must be
+//    able to say so, not invent one. (The GUI panel once published this struct's
+//    zero-initialised state as a real Az of 0 while the report beside it
+//    correctly declined to give one; hence the flag.)
+TwoSet::ROCfit TwoSet::getROCfit()
+{
+	if ( statFitCalcFlag )
+		return statFit;
+
+	statFit = ROCfit();
+	try
+	{
+		double az = getStatROCarea();
+		if ( isfinite( az ) )
+		{
+			statFit.az = az;
+			statFit.chi2 = statChi2;
+			statFit.p = statP;
+			statFit.points = statPoints;
+			statFit.valid = true;
+		}
+	}
+	catch ( TwoSet::twoSetErr& ) {} // no fit; valid stays false
+	statFitCalcFlag = true;
+	return statFit;
+}
+
 // Get chi-squared value for fitted line
 double TwoSet::getStatChi2()
 {
@@ -707,70 +717,6 @@ unsigned TwoSet::countGoodData()
 			goodData++; // it was a nonzero, non-one data point
 	}
 	return goodData;
-}
-
-// Search the binnings for the best fit p and the best ROC area, caching both.
-//    Each binning gives a different Az and a different SE, so the report and
-//    any other caller must quote the same fits or they will disagree.
-void TwoSet::searchROC( ostream& outputStream )
-{
-	unsigned goodData = countGoodData();
-
-	searchErrorFlag = false;
-	searchErrorMsg.clear();
-	bestPfit = ROCfit();
-	bestAUCfit = ROCfit();
-
-	if ( maxBins > goodData ) // maximum number of bins cannot exceed data points
-	{
-		outputStream << "WARNING: Maximum number of bins to be searched (" << maxBins
-			<< ") exceeds data (" << goodData << ")," << endl;
-		maxBins = goodData / 3;
-		outputStream << "Setting Maximum number of bins to " << maxBins << endl;
-	}
-
-	nBinFlag = true; // if searching, number of bins must determine bin size
-
-	unsigned oldBins = nBins; // remember original number of bins
-	// Do the search
-	for ( nBins = minBins; nBins <= maxBins; nBins++ )
-	{
-		double AUC = 0;
-		bool usable = false;
-		try { AUC = getStatROCarea(); usable = isfinite( AUC ); }
-		catch ( TwoSet::twoSetErr& e ) { searchErrorMsg = e.what(); }
-
-		// One binning failing says nothing about the others, and the stat
-		//    members still hold the last successful binning's values -- so
-		//    take nothing from a binning that gave no area
-		if ( !usable )
-			continue;
-
-		if ( !bestAUCfit.valid || AUC > bestAUCfit.az ) // record best ROC area
-		{
-			bestAUCfit.az = AUC;
-			bestAUCfit.chi2 = statChi2;
-			bestAUCfit.p = statP;
-			bestAUCfit.nBins = nBins;
-			bestAUCfit.valid = true;
-		}
-		// A fit whose p could not be computed is still a fit -- it can win on
-		//    area above -- but it cannot be the best-p fit, having no p
-		if ( isfinite( statP ) && ( !bestPfit.valid || statP > bestPfit.p ) )
-		{
-			bestPfit.az = AUC;
-			bestPfit.chi2 = statChi2;
-			bestPfit.p = statP;
-			bestPfit.nBins = nBins;
-			bestPfit.valid = true;
-		}
-	}
-	nBins = oldBins; // return number of bins to original
-
-	// The search fails only when no binning at all yielded an area. Any that
-	//    did leaves the report, and the bootstrap, with an honest answer.
-	searchErrorFlag = !bestAUCfit.valid;
-	searchCalcFlag = true;
 }
 
 // Percentile interval (and spread) of a set of resampled ROC areas
@@ -815,8 +761,6 @@ void TwoSet::bootstrapROC()
 	if ( bootCalcFlag ) // intervals already current
 		return;
 
-	bestPci = CI();
-	bestAUCci = CI();
 	statCi = CI();
 	bootCalcFlag = true; // even a refusal below is a current answer
 
@@ -836,10 +780,8 @@ void TwoSet::bootstrapROC()
 	if ( known0.empty() || known1.empty() ) // single-class data has no ROC
 		return;
 
-	vector< double > azBestP, azBestAUC, azStat;
-	// Counted apart because a resample can yield an area but no fit p, which
-	//    is a failure for the best-p interval only
-	unsigned failures = 0, failuresP = 0;
+	vector< double > azStat;
+	unsigned failures = 0;
 
 	for ( unsigned b = 0; b < bootB; b++ )
 	{
@@ -863,98 +805,24 @@ void TwoSet::bootstrapROC()
 		{
 			TwoSet resample( M );
 			// The resample must be scored exactly as this set is scored
-			resample.setBinSize( binSize );
-			resample.setNbins( nBins );
-			resample.setNbinsSetsSize( nBinFlag );
-			resample.NbinThreshold( binThresh );
 			resample.setROCthresh( calcThresh );
-			resample.setMinROCSearchBins( minBins );
-			resample.setMaxROCSearchBins( maxBins );
 			resample.setBootstrapResamples( 0 ); // no bootstrap within a bootstrap
 
-			if ( searchFlag ) // re-run the search: choosing the binning is part
-			{                 //    of the procedure, so it is part of the spread
-				ostringstream discard; // a resample's warnings are not the user's
-				resample.searchROC( discard );
-				ROCfit rp = resample.getBestPfit(), ra = resample.getBestAUCfit();
-				if ( !ra.valid ) // no binning gave an area: nothing to contribute
-				{
-					failures++;
-					failuresP++;
-					continue;
-				}
-				// Each distribution takes the resamples it has a value for. A
-				//    resample with an area but no computable fit p informs the
-				//    best-AUC interval even though it cannot inform the best-p one
-				if ( rp.valid )
-					azBestP.push_back( rp.az );
-				else
-					failuresP++;
-				azBestAUC.push_back( ra.az );
+			double az = resample.getStatROCarea();
+			if ( !isfinite( az ) )
+			{
+				failures++;
+				continue;
 			}
-			else
-				azStat.push_back( resample.getStatROCarea() );
+			azStat.push_back( az );
 		}
 		catch ( ... ) // a degenerate resample the fit cannot be computed on
 		{
 			failures++;
-			failuresP++;
 		}
 	}
 
-	if ( searchFlag )
-	{
-		bestPci = percentileCI( azBestP, failuresP );
-		bestAUCci = percentileCI( azBestAUC, failures );
-	}
-	else
-		statCi = percentileCI( azStat, failures );
-}
-
-// Search on demand for callers that want the fits without the report. The
-//    search only runs when the cache is stale, so asking for these never
-//    changes what a later ROCarea() prints.
-TwoSet::ROCfit TwoSet::getBestPfit()
-{
-	if ( !searchCalcFlag )
-	{
-		ostringstream discard; // the maxBins warning belongs to the report
-		searchROC( discard );
-	}
-	return bestPfit;
-}
-
-TwoSet::ROCfit TwoSet::getBestAUCfit()
-{
-	if ( !searchCalcFlag )
-	{
-		ostringstream discard;
-		searchROC( discard );
-	}
-	return bestAUCfit;
-}
-
-bool TwoSet::getROCsearchFailed()
-{
-	if ( !searchCalcFlag )
-	{
-		ostringstream discard;
-		searchROC( discard );
-	}
-	return searchErrorFlag;
-}
-
-// Bootstrap on demand, same contract as the fit getters above
-TwoSet::CI TwoSet::getBestPci()
-{
-	bootstrapROC();
-	return bestPci;
-}
-
-TwoSet::CI TwoSet::getBestAUCci()
-{
-	bootstrapROC();
-	return bestAUCci;
+	statCi = percentileCI( azStat, failures );
 }
 
 TwoSet::CI TwoSet::getStatCi()
@@ -966,15 +834,11 @@ TwoSet::CI TwoSet::getStatCi()
 // Outputs to ostream an ROC report which if reportFlag is false uses either the
 //    trapezoidal method if number of data points < threshold (calcThresh)
 //    or statistical method if >= threshold, and uses both if reportFlag is true
-//    searchFlag determines if largest p, largest ROC is searched
 void TwoSet::ROCarea( ostream& outputStream )
 {
 	unsigned goodData = countGoodData();
 
-	if ( searchFlag )
-		searchROC( outputStream );
-
-	// The intervals the report is about to print
+	// The interval the report is about to print
 	if ( goodData >= calcThresh )
 		bootstrapROC();
 
@@ -982,34 +846,14 @@ void TwoSet::ROCarea( ostream& outputStream )
 	{
 		if ( goodData >= calcThresh ) // enough data points for statistical calculation
 		{
-			if ( searchFlag ) // searched for best p, AUC
+			try  // calculate ROC AUC to get chi2, p values
 			{
-				outputStream << "Searching for best p:" << endl;
-				if ( bestPfit.valid )
-					// Use utility method
-					statReport( outputStream, goodData, bestPfit.nBins, bestPfit.az, bestPfit.chi2, bestPfit.p, bestPci );
-				else if ( bestAUCfit.valid ) // areas, but no fit p to choose among them
-					outputStream << "No binning gave a computable fit p value." << endl;
-				else
-					outputStream << searchErrorMsg << endl;
-				outputStream << "Searching for best AUC:" << endl;
-				if ( bestAUCfit.valid )
-					statReport( outputStream, goodData, bestAUCfit.nBins, bestAUCfit.az, bestAUCfit.chi2, bestAUCfit.p, bestAUCci );
-				else
-					outputStream << searchErrorMsg << endl;
+				double AUC = getStatROCarea();
+				statReport( outputStream, goodData, AUC, statChi2, statP, statCi );
 			}
-			else
+			catch ( TwoSet::twoSetErr& e )
 			{
-				double AUC = 0;
-				try  // calculate ROC AUC to get chi2, p values
-				{
-					AUC = getStatROCarea();
-					statReport( outputStream, goodData, nBins, AUC, statChi2, statP, statCi ); // use utility method
-				}
-				catch ( TwoSet::twoSetErr& e )
-				{
-					outputStream << e.what() << endl;
-				}
+				outputStream << e.what() << endl;
 			}
 		}
 		else // use trapezoidal method
@@ -1034,34 +878,14 @@ void TwoSet::ROCarea( ostream& outputStream )
 		if ( goodData >= calcThresh ) // enough data points for statistical calculation
 		{
 			outputStream << "By statistical method, ";
-			if ( searchFlag ) // searched for best p, AUC
+			try  // calculate ROC AUC to get chi2, p values
 			{
-				outputStream << "Searching for best p:" << endl;
-				if ( bestPfit.valid )
-					// Use utility method
-					statReport( outputStream, goodData, bestPfit.nBins, bestPfit.az, bestPfit.chi2, bestPfit.p, bestPci );
-				else if ( bestAUCfit.valid ) // areas, but no fit p to choose among them
-					outputStream << "No binning gave a computable fit p value." << endl;
-				else
-					outputStream << searchErrorMsg << endl;
-				outputStream << "Searching for best AUC:" << endl;
-				if ( bestAUCfit.valid )
-					statReport( outputStream, goodData, bestAUCfit.nBins, bestAUCfit.az, bestAUCfit.chi2, bestAUCfit.p, bestAUCci );
-				else
-					outputStream << searchErrorMsg << endl;
+				double AUC = getStatROCarea();
+				statReport( outputStream, goodData, AUC, statChi2, statP, statCi );
 			}
-			else
+			catch ( TwoSet::twoSetErr& e )
 			{
-				double AUC = 0;
-				try  // calculate ROC AUC to get chi2, p values
-				{
-					AUC = getStatROCarea();
-					statReport( outputStream, goodData, nBins, AUC, statChi2, statP, statCi ); // use utility method
-				}
-				catch ( TwoSet::twoSetErr& e )
-				{
-					outputStream << e.what() << endl;
-				}
+				outputStream << e.what() << endl;
 			}
 		}
 		else // not enough data points for statistical calculation
@@ -1085,7 +909,7 @@ void TwoSet::ROCarea( ostream& outputStream )
 }
 
 // Utility method for ROCarea, outputs statistical report
-void TwoSet::statReport( ostream& outputStream, unsigned goodData, unsigned nBins, double AUC,
+void TwoSet::statReport( ostream& outputStream, unsigned goodData, double AUC,
 	double chi2, double p, const CI& ci )
 {
 	outputStream << resetiosflags( ios::scientific ) << setiosflags( ios::fixed | ios::showpoint )

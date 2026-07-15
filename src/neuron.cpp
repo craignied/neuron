@@ -589,7 +589,7 @@ void specify_ROC( DataSet* dataPtr )
 	cout << endl << "WARNING: DO NOT CHANGE THESE UNLESS YOU KNOW WHAT YOU'RE DOING" << endl;
 
 	unsigned choice = 0, // initial non-quit choice
-		quitChoice = 7, // final menu (quit) choice
+		quitChoice = 4, // final menu (quit) choice
 		n; // for unsigned replies
 
 	bool yesFlag; // for yes/no questions
@@ -644,46 +644,6 @@ void specify_ROC( DataSet* dataPtr )
 			COUT15 << dataPtr->getTestTwoSet().getROCthresh() << endl;
 		else
 			COUT15 << "not loaded" << endl;
-		// Choose if search for best p, AUC
-		cout << "( 4 ) Search for best statistical p & AUC:       ";
-		if ( dataPtr->trainLoaded() )
-		{
-			if ( dataPtr->getTrainTwoSet().getROCSearchFlag() )
-				COUT12 << "yes";
-			else
-				COUT12 << "no";
-		}
-		else
-			COUT12 << "not loaded";
-		if ( dataPtr->testLoaded() )
-		{
-			if ( dataPtr->getTestTwoSet().getROCSearchFlag() )
-				COUT15 << "yes" << endl;
-			else
-				COUT15 << "no" << endl;
-		}
-		else
-			COUT15 << "not loaded" << endl;
-		// Choose minimum number of data points for statistical calculation
-		cout << "( 5 ) Minimum number of bins to search:          ";
-		if ( dataPtr->trainLoaded() )
-			COUT12 << dataPtr->getTrainTwoSet().getMinROCSearchBins();
-		else
-			COUT12 << "not loaded";
-		if ( dataPtr->testLoaded() )
-			COUT15 << dataPtr->getTestTwoSet().getMinROCSearchBins() << endl;
-		else
-			COUT15 << "not loaded" << endl;
-		// Choose minimum number of data points for statistical calculation
-		cout << "( 6 ) Maximum number of bins to search:          ";
-		if ( dataPtr->trainLoaded() )
-			COUT12 << dataPtr->getTrainTwoSet().getMaxROCSearchBins();
-		else
-			COUT12 << "not loaded";
-		if ( dataPtr->testLoaded() )
-			COUT15 << dataPtr->getTestTwoSet().getMaxROCSearchBins() << endl;
-		else
-			COUT15 << "not loaded" << endl;
 		// Quit choice
 		cout << "( " << quitChoice << " ) Return to main menu" << endl;
 
@@ -734,30 +694,6 @@ void specify_ROC( DataSet* dataPtr )
 						dataPtr->getTrainTwoSet().setROCthresh( n );
 					if ( ( tSet == 2 ) || ( tSet == 3 ) )
 						dataPtr->getTestTwoSet().setROCthresh( n );
-				}
-				else if ( choice == 4 ) // specify if search for best p, AUC
-				{
-					yesFlag = util::askYesNo( "Search for best p and AUC (yes/no)? " );
-					if ( ( tSet == 1 ) || ( tSet == 3 ) )
-						dataPtr->getTrainTwoSet().setROCSearchFlag( yesFlag );
-					if ( ( tSet == 2 ) || ( tSet == 3 ) )
-						dataPtr->getTestTwoSet().setROCSearchFlag( yesFlag );
-				}
-				else if ( choice == 5 ) // specify minimum number of bins to search
-				{
-					n = util::askI( "What is the minimum number of bins to search? ", 3 );
-					if ( ( tSet == 1 ) || ( tSet == 3 ) )
-						dataPtr->getTrainTwoSet().setMinROCSearchBins( n );
-					if ( ( tSet == 2 ) || ( tSet == 3 ) )
-						dataPtr->getTestTwoSet().setMinROCSearchBins( n );
-				}
-				else if ( choice == 6 ) // specify maximum number of bins to search
-				{
-					n = util::askI( "What is the maximum number of bins to search? ", 3 );
-					if ( ( tSet == 1 ) || ( tSet == 3 ) )
-						dataPtr->getTrainTwoSet().setMaxROCSearchBins( n );
-					if ( ( tSet == 2 ) || ( tSet == 3 ) )
-						dataPtr->getTestTwoSet().setMaxROCSearchBins( n );
 				}
 			} // end of do choice
 		} // end of if ( choice != quitChoice )

@@ -244,14 +244,7 @@ Classification table for training set:
 Known T:           2            42
 Known F:           0            98
 ----------------------------------
-By statistical method, Searching for best p:
-ROC area = 0.620527
-95% CI = 0.515316 - 0.720378 (SE = 0.050920, 2000 bootstrap resamples)
-Chi-squared = 15.092772
-p = 1.000000e+00 (closer to 1 is better)
-Operating points fitted = 127
-Searching for best AUC:
-ROC area = 0.620527
+By statistical method, ROC area = 0.620527
 95% CI = 0.515316 - 0.720378 (SE = 0.050920, 2000 bootstrap resamples)
 Chi-squared = 15.092772
 p = 1.000000e+00 (closer to 1 is better)
@@ -277,14 +270,7 @@ Classification table for test set:
 Known T:           0            15
 Known F:           0            32
 ----------------------------------
-By statistical method, Searching for best p:
-ROC area = 0.669981
-95% CI = 0.486106 - 0.814210 (SE = 0.085369, 2000 bootstrap resamples)
-Chi-squared = 3.741584
-p = 1.000000e+00 (closer to 1 is better)
-Operating points fitted = 37
-Searching for best AUC:
-ROC area = 0.669981
+By statistical method, ROC area = 0.669981
 95% CI = 0.486106 - 0.814210 (SE = 0.085369, 2000 bootstrap resamples)
 Chi-squared = 3.741584
 p = 1.000000e+00 (closer to 1 is better)

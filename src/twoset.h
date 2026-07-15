@@ -89,20 +89,12 @@ public:
 	double getTrapROCarea(); // returns ROC by trapezoidal area
 
 	// Accessors for statistical ROC calculation
-	void setNbins( const unsigned n ) { nBins = n; } // set number of bins
-	unsigned getNbins() { return nBins; } // return number of bins
-	void setBinSize( const unsigned n ) { binSize = n; } // set bin size
-	unsigned getBinSize() { return binSize; } // return bin size
-	// Number of data points under which data will not be binned
-	void NbinThreshold( const unsigned n ) { binThresh = n; }
-	unsigned getNBinThreshold() { return binThresh; }
-	bool getBinned() { return binnedFlag; } // returns if data was binned
-	// Accessors to determine if number of bins sets bin size (and vice versa)
-	void setNbinsSetsSize( bool flag ) { nBinFlag = flag; }
-	bool getNbinsSetsSize() { return nBinFlag; }
 	double getStatROCarea(); // returns statistical ROC area
 	double getStatP(); // returns p-value for fitted line, smaller is worse
 	double getStatChi2(); // returns chi-squared value for fitted line
+	// Distinct operating points the zROC line was fitted to. Worth quoting with
+	//    an area: an Az from five points and one from five hundred differ.
+	unsigned getStatPoints(); 
 	double getTrapSE(); // returns Hanley-McNeil SE of the trapezoidal area
 
 	// ROC curve points captured by the last getTrapROCarea() call, for
@@ -111,20 +103,18 @@ public:
 	const vector< double >& getROCx() { return ROCx; }
 	const vector< double >& getROCy() { return ROCy; }
 
-	// One binormal fit at one binning -- the numbers statReport prints. The
-	//    binning matters: it changes the area, so an Az is only meaningful
-	//    alongside the nBins that produced it.
-	// A binormal fit of the zROC line. No standard error lives here: the
-	//    interval for an az comes from bootstrapROC() (see the CI struct),
-	//    the delta method that once supplied one having been retired as
-	//    mis-specified -- it assumed the operating points were independent
-	//    when they are cumulated from one sample. See docs/roc_theory.md.
+	// The binormal fit of the zROC line -- the numbers statReport prints. No
+	//    standard error lives here: the interval for an az comes from
+	//    bootstrapROC() (see the CI struct), the delta method that once supplied
+	//    one having been retired as mis-specified -- it assumed the operating
+	//    points were independent when they are cumulated from one sample. See
+	//    docs/roc_theory.md.
 	struct ROCfit {
 		double az = 0; // binormal ROC area
 		double chi2 = 0; // chi-squared of the z-ROC line fit; NaN if not computable
 		double p = 0; // fit p value, closer to 1 is better; NaN if not computable
-		unsigned nBins = 0; // number of bins this fit used
-		bool valid = false; // false when the search found no such fit
+		unsigned points = 0; // distinct operating points fitted
+		bool valid = false; // false when no fit could be computed at all
 	};
 
 	// A bootstrap percentile confidence interval for an ROC area
@@ -136,27 +126,18 @@ public:
 		bool valid = false; // false when too few resamples succeeded
 	};
 
-	// Runs the best-p / best-AUC binning search that ROCarea reports, caching
-	//    both fits. ROCarea calls this; callers wanting the same two fits
-	//    without the report (the GUI stats panel) use the getters below, which
-	//    search on demand. Takes an ostream because the search warns when
-	//    maxBins exceeds the data.
-	void searchROC( ostream& );
-	ROCfit getBestPfit(); // fit with the largest fit p
-	ROCfit getBestAUCfit(); // fit with the largest ROC area
-	bool getROCsearchFailed(); // true only if NO binning yielded an area
+	// The fit the report quotes, for callers that want it without the report
+	//    (the GUI stats panel). Returns valid = false rather than throwing when
+	//    the data cannot support a fit, so a caller never has to invent one.
+	ROCfit getROCfit();
 
-	// Bootstrap confidence intervals for the binormal areas. Resamples the
+	// Bootstrap confidence interval for the binormal area. Resamples the
 	//    exemplars with replacement (stratified: the class sizes are held at
 	//    their observed values) and re-runs the WHOLE Wickens procedure on each
-	//    resample -- including the bin search -- so the interval carries the
-	//    variability of choosing the binning, not just of fitting at a fixed
-	//    one. Percentile method. Draws come from util::i_resample(), an
+	//    resample. Percentile method. Draws come from util::i_resample(), an
 	//    independent stream, so computing an interval never perturbs training.
 	void bootstrapROC();
-	CI getBestPci(); // interval for the best-p area
-	CI getBestAUCci(); // interval for the best-AUC area
-	CI getStatCi(); // interval for the fixed-binning area (when not searching)
+	CI getStatCi(); // interval for the binormal area
 	// Number of resamples; 0 disables the bootstrap and its CI lines
 	void setBootstrapResamples( const unsigned n ) { bootB = n; }
 	unsigned getBootstrapResamples() { return bootB; }
@@ -164,14 +145,6 @@ public:
 	// Outputs to ostream an ROC report with statistical method and/or
 	//    trapezoidal method depending on flag set by setReportFlag() accessor
 	void ROCarea( ostream& );
-	// Accessors which specify if largest p, largest ROC is searched
-	void setROCSearchFlag( const bool flag ) { searchFlag = flag; }
-	bool getROCSearchFlag() { return searchFlag; }
-	// Access minimum & maximum number of search bins
-	void setMinROCSearchBins( const unsigned n ) { assert ( n > 2 ); minBins = n; }
-	unsigned getMinROCSearchBins() { return minBins; }
-	void setMaxROCSearchBins( const unsigned n ) { assert ( n > 2 ); maxBins = n; }
-	unsigned getMaxROCSearchBins() { return maxBins; }
 	// Access threshold under which statistics will not be used
 	void setROCthresh( const unsigned n ) { calcThresh = n; }
 	unsigned getROCthresh() { return calcThresh; }
@@ -214,12 +187,7 @@ public:
 		fn, // false negatives
 		nThresholds, // number of thresholds for trapezoidal method
 		statPoints, // distinct operating points the last zROC line was fitted to
-		nBins, // number of bins for statistical ROC
-		binSize, // bin size for statistical ROC
-		binThresh, // number of data points under which data will not be binned
 		calcThresh, // number of data points under which statistics will not be used
-		minBins, // minimum number of search bins
-		maxBins, // maximum number of search bins
 		bootB; // number of bootstrap resamples for the ROC confidence intervals
 
 	vector< double > ROCx, // ROC curve x (1 - specificity) for plotting
@@ -233,25 +201,16 @@ public:
 	    PKX2P, // Pearson's Chi-Square test p-value   Hui Liu added 08/15/2004
 		HLX2P;  // Hosmer-Lemeshow test p-value   Hui Liu added 08/16/2004
 
-	ROCfit bestPfit, // cached search result: fit with the largest fit p
-		bestAUCfit; // cached search result: fit with the largest ROC area
+	ROCfit statFit; // cached fit, so the panel and the report agree
 
-	CI bestPci, // cached bootstrap interval for the best-p area
-		bestAUCci, // cached bootstrap interval for the best-AUC area
-		statCi; // cached bootstrap interval for the fixed-binning area
-
-	string searchErrorMsg; // message from a failed binning search
+	CI statCi; // cached bootstrap interval for the binormal area
 
 	bool loadedFlag, // flag to indicate if Matrix loaded
 		thresholdFlag, // flag to indicate if threshold set
-		nBinFlag, // flag indicates if number of bins determines bin size
-		binnedFlag, // flag indicates if data was binned for statistical ROC calculation
 		statROCcalcFlag, // flag indicates if statistical ROC area calculated
-		searchCalcFlag, // flag indicates if the binning search results are current
-		searchErrorFlag, // flag indicates the binning search hit a statistics error
+		statFitCalcFlag, // flag indicates if the cached fit is current
 		bootCalcFlag, // flag indicates if the bootstrap intervals are current
 		reportFlag, // flag directs how to report statistical and/or trapezoidal ROC
-		searchFlag, // flag indicates if largest p, largest ROC is searched
 		KScalcFlag, // flag indicates if Kolmogorov-Smirnov test calculated
 		PKX2calcFlag,// flag indicates if Pearson's Chi-Square test calculated   Hui Liu added 08/15/2004
 		HLX2calcFlag; // flag indicates if Hosmer-Lemeshow test calculated   Hui Liu added 08/16/2004
@@ -273,7 +232,7 @@ public:
 	void copy( const TwoSet& rhs );
 
 	// Utility method for ROCarea, outputs statistical report
-	void statReport( ostream&, unsigned, unsigned, double, double, double, const CI& );
+	void statReport( ostream&, unsigned, double, double, double, const CI& );
 
 	// Delta-method standard error of Az from a fitted zROC line
 

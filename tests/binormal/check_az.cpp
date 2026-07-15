@@ -117,36 +117,23 @@ static bool check_ties( unsigned n0, unsigned n1, double mu1 )
 
 	bool ok = true;
 
-	// Every binning the search will visit must produce something usable
-	TwoSet perBin( M );
-	unsigned bad = 0;
-	for ( unsigned nb = 3; nb <= 10; nb++ )
-	{
-		perBin.setNbins( nb );
-		perBin.setNbinsSetsSize( true );
-		perBin.invalidate();
-		try
-		{
-			double az = perBin.getStatROCarea();
-			if ( !isfinite( az ) || !isfinite( perBin.getStatP() ) )
-				bad++;
-		}
-		catch ( ... ) { bad++; }
-	}
-	cout << "tied scores, binnings 3..10 unusable: " << bad << "/8";
-	if ( bad == 0 )
+	// The fit itself must survive the ties
+	TwoSet fit( M );
+	TwoSet::ROCfit f = fit.getROCfit();
+	cout << "tied scores, fit: Az=" << f.az << " from " << f.points
+		<< " points, fit p=" << f.p;
+	if ( f.valid && isfinite( f.az ) && isfinite( f.p ) )
 		cout << "  OK" << endl;
 	else
 	{
-		cout << "  FAIL (want 0)" << endl;
+		cout << "  FAIL (want a finite area and fit p)" << endl;
 		ok = false;
 	}
 
 	// The bootstrap must keep every resample, and agree with Hanley-McNeil
 	TwoSet assay( M );
-	assay.setROCSearchFlag( true );
 	assay.setBootstrapResamples( 400 ); // enough to be a real check, quick in CI
-	TwoSet::CI ci = assay.getBestAUCci();
+	TwoSet::CI ci = assay.getStatCi();
 	double hm = assay.getTrapSE();
 
 	cout << "tied scores, bootstrap: resamples=" << ci.resamples
@@ -190,9 +177,6 @@ static bool check_se( double mu1, double s1, unsigned nPerClass, unsigned reps )
 			M( 2 * i + 1, 1 ) = positive( gen );
 		}
 		TwoSet assay( M );
-		// Calibrate the plain fit against itself: no bin search, so the
-		// interval in getStatCi() is the one around getStatROCarea() below
-		assay.setROCSearchFlag( false );
 		assay.setBootstrapResamples( 200 ); // reps x B — keep CI honest but quick
 		double az = assay.getStatROCarea();
 		sumAz += az;

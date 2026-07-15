@@ -208,8 +208,6 @@ Classification table for training set:
 Known T:           2             0
 Known F:           0             2
 ----------------------------------
-WARNING: Maximum number of bins to be searched (10) exceeds data (0),
-Setting Maximum number of bins to 0
 Cannot calculate ROC statistically, not enough data points (10)
 By trapezoidal method, ROC area = 1.000000
 95% CI = 1.000000 - 1.000000 (SE = 0.000000, Hanley-McNeil)

@@ -492,7 +492,7 @@ Rationale, citations, and Methods language: **`docs/roc_theory.md`**. Work in or
   low-birth-weight Az 0.618420/0.620688 before and after. Only the *interval* widened
   (0.513–0.711 → 0.513–0.721), which was the point.
 
-### Phase 2 — fix the error bars (**estimator DONE** 2026-07-15; cleanup remains)
+### Phase 2 — fix the error bars (**DONE** 2026-07-15)
 - **DONE — Replaced within-bin SD with σ²_z ≈ p(1−p)/N ÷ φ²(z)** (Wickens Eq 11.2+11.3
   p. 202), and stopped binning: `getStatROCarea()` now sweeps **distinct** thresholds
   (a tied score repeated per exemplar is the same operating point) and fits those points
@@ -520,13 +520,28 @@ Rationale, citations, and Methods language: **`docs/roc_theory.md`**. Work in or
   bars, so χ² ≪ df and p rounds to 1.000 (lbw train: χ²=15.1, df=125). Wickens says the
   dependence invalidates it (p. 212). It *is* meaningful in the rating regime: Wickens'
   Table 5.1 gives χ²=1.93 on 3 df, p=0.587. The area never depends on it (§11.5 p. 217).
-- **REMAINING (cleanup commit):** the binning machinery is now dead weight — `searchROC`
-  runs 8 identical fits (and the bootstrap does that *per resample*), the report prints
-  the same fit twice under "Searching for best p:"/"Searching for best AUC:", and the GUI
-  panel shows two identical rows. Remove: the 3..10 search, `nBins`/`binSize`/`binThresh`/
-  `nBinFlag`/`getBinned`, the best-p/best-AUC pair (→ one `ROCfit`/one `CI`), the CLI
-  submenu's min/max-search-bins options, `bin()` if unused elsewhere. Touches the menus →
-  goldens re-bless again (that diff should be report *shape* only, no numbers moving).
+- **DONE — the dead machinery is gone** (cleanup commit). Removed: `searchROC` and the
+  3..10 search (it was running 8 identical fits, and the bootstrap did that *per
+  resample*), the best-p/best-AUC pair → **one `ROCfit` / one `CI`**, `nBins`/`binSize`/
+  `binThresh`/`nBinFlag`/`binnedFlag`/`minBins`/`maxBins` and all their accessors,
+  `searchFlag`, `searchErrorMsg`. New `getROCfit()` returns `valid=false` instead of
+  throwing, so a caller that cannot have an answer says so rather than inventing one
+  (that is legacy bug #7's class, closed structurally). GUI JSON: `binormal` is now one
+  object (`az`/`p`/`chi2`/`points`/`ci`), not a `bestP`/`bestAUC` pair. **CLI submenu 13
+  loses options 4/5/6** (search, min bins, max bins) — quit moves 7 → 4. ROADMAP 2 froze
+  the menus, but "frozen" meant no *new* features; a control that silently does nothing
+  is worse than a removed one.
+- **Golden diff was report shape only, no numbers moving** — exactly as predicted.
+  binormal_seed42: the duplicated "Searching for best p:"/"Searching for best AUC:"
+  blocks collapse to one `By statistical method, ROC area = ...`; Az/CI/χ²/points
+  byte-identical. xor + regress each lost 2 lines: the `WARNING: Maximum number of bins
+  to be searched (10) exceeds data (0)` pair, a warning from a search that no longer
+  exists.
+- **The oracle DID need an exclusion after all — but not for the predicted reason.** The
+  plan said "Az changes → oracle needs a documented exclusion". Az never reaches the
+  oracle (0 statistical-method lines). It needs one because the *oracle* still prints
+  that two-line maxBins warning and 3.0 no longer does. Right conclusion, wrong reason —
+  documented in `verify_oracle.sh` alongside the KScalc and 95%-CI exclusions.
 - **Drop fixed-count binning** — unnecessary once error bars are analytic. Categorise by
   the **corners of the empirical ROC** (Metz/LABROC: truth-state runs are the natural
   categorisation; flat runs carry no information). This removes the 3..10 search,
