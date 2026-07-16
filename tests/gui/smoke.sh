@@ -139,6 +139,9 @@ grep -q '"autoAlgo":{"selected":' auto.json || fail "no autoAlgo selection block
 [ $(grep -o '"algorithm":' auto.json | wc -l) -ge 3 ] || fail "want 3 probes in autoAlgo"
 grep -q 'Auto algorithm selection' auto.json || fail "no probe summary in the report"
 grep -q 'Selected: ' auto.json || fail "no decision line in the report"
+# The user-visible message must name the winner (the page shows the message,
+#    not the report)
+grep -q '"message":"auto selected ' auto.json || fail "winner not named in the message"
 
 # The binormal path proper. Everything above is too small to reach it (4
 #    exemplars), so nothing above says anything about the ROC statistics --

@@ -639,9 +639,11 @@ string handleRandomize( const httplib::Request& req )
 //    is the async worker, with job.running gating every other handler out.
 //    autoJson (may be empty) is the auto-selection block to embed in the
 //    result; preamble (may be empty) is report text captured before this
-//    call -- the probe decision summary -- prepended to the report.
+//    call -- the probe decision summary -- prepended to the report; autoNote
+//    (may be empty) names the selection in the user-visible message, because
+//    the page shows the message, not the report.
 string runTrainingAndBuildResult( bool continued, const string& autoJson,
-	const string& preamble )
+	const string& preamble, const string& autoNote )
 {
 	Capture cap;
 	double finalError;
@@ -675,7 +677,7 @@ string runTrainingAndBuildResult( bool continued, const string& autoJson,
 
 	ostringstream msg;
 	msg.precision( 6 );
-	msg << ( continued ? "continued training; final error "
+	msg << autoNote << ( continued ? "continued training; final error "
 		: "trained; final error " ) << finalError;
 	if ( stopReason == "cancelled" )
 		msg << " (stopped by request)";
@@ -724,7 +726,7 @@ string jsonAutoAlgo( const autoalgo::Result& r )
 string runTrainJob( bool continued, bool autoSelect, unsigned maxIter,
 	bool observed )
 {
-	string autoJson, preamble;
+	string autoJson, preamble, autoNote;
 
 	if ( autoSelect )
 	{
@@ -737,6 +739,8 @@ string runTrainJob( bool continued, bool autoSelect, unsigned maxIter,
 		preamble = probeCap.text.str();
 
 		autoJson = jsonAutoAlgo( r );
+		if ( r.selected ) // name the winner where the user actually looks
+			autoNote = "auto selected " + r.selectedName + "; ";
 
 		if ( r.winner ) // adopt the winning clone, probe progress kept
 		{
@@ -747,7 +751,8 @@ string runTrainJob( bool continued, bool autoSelect, unsigned maxIter,
 	}
 
 	if ( !observed )
-		return runTrainingAndBuildResult( continued, autoJson, preamble );
+		return runTrainingAndBuildResult( continued, autoJson, preamble,
+			autoNote );
 
 	// Observed (async) run: wire the realtime-chart observer to the model
 	//    that will actually train -- after any adoption above
@@ -756,7 +761,8 @@ string runTrainJob( bool continued, bool autoSelect, unsigned maxIter,
 	DataSet& md = modelPtr->getDataSet();
 	GuiObserver observer( net, md.testLoaded() ? md.getNumTest() : 0 );
 	iter->setObserver( &observer );
-	string result = runTrainingAndBuildResult( continued, autoJson, preamble );
+	string result = runTrainingAndBuildResult( continued, autoJson, preamble,
+		autoNote );
 	iter->setObserver( nullptr );
 	return result;
 }

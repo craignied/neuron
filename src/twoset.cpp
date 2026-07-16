@@ -1018,6 +1018,14 @@ void TwoSet::KScalc()
 
 		for ( unsigned row = 0; row < A.rows(); row++ )
 		{
+			// A NaN guess (a diverged network) compares false against
+			//    everything, so the merge loop below would advance NEITHER
+			//    index -- an infinite loop, found 2026-07-16 when the first
+			//    diverged training probe reached this epilogue. There is no
+			//    honest K-S over undefined guesses; refuse instead.
+			if ( isnan( A( row, 1 ) ) )
+				throw twoSetErr( "guesses contain NaN (a diverged model?)" );
+
 			if ( A( row, 0 ) == 0 )
 				zeros.push_back( A( row, 1 ) );
 			else

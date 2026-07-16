@@ -12,6 +12,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <random>
 
 #include "twoset.h"
@@ -172,10 +173,45 @@ static bool check_small()
 	return false;
 }
 
+// NaN guesses (a diverged network) reach every statistic through the
+// training epilogue. K-S's Numerical Recipes merge advances an index only
+// when one side is <= the other -- with NaN, BOTH comparisons are false and
+// the loop hangs forever (found 2026-07-16 by a diverged training probe;
+// this test hangs against the unguarded code). The honest answer is a
+// refusal. H-L must refuse via its fit p too, and Pearson reports NaN.
+static bool check_nan_guesses()
+{
+	Matrix< double > M( 24, 2 );
+	for ( unsigned i = 0; i < 24; i++ )
+	{
+		M( i, 0 ) = ( i % 2 ) ? 1 : 0;
+		M( i, 1 ) = 0.1 + 0.03 * i;
+	}
+	M( 5, 1 ) = numeric_limits< double >::quiet_NaN();
+	TwoSet t( M );
+
+	bool ksRefused = false;
+	try { t.getKSD(); }
+	catch ( TwoSet::twoSetErr& ) { ksRefused = true; }
+
+	double px2 = t.getPearsonX2();
+
+	cout << "NaN guesses: K-S " << ( ksRefused ? "refused" : "returned" )
+		<< ", Pearson X2 = " << px2;
+	if ( ksRefused && isnan( px2 ) )
+	{
+		cout << "  OK" << endl;
+		return true;
+	}
+	cout << "  FAIL (want a K-S refusal and a NaN Pearson X2)" << endl;
+	return false;
+}
+
 int main()
 {
 	bool ok = true;
 
+	ok &= check_nan_guesses();
 	ok &= check( 9999 );  // just under the old fixed array size
 	ok &= check( 12000 ); // past it: segfaulted before the 2026-07-16 fix
 	ok &= check_textbook();

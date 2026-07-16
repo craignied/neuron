@@ -726,6 +726,20 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   Gates: zero-warning build, goldens byte-identical, 5/5 ctest, smoke (incl.
   auto blocking + async), verify_oracle identical. **Next: ROADMAP 2 Phase 3**
   (plateau auto-stop).
+  **Post-landing (same night):** Craig asked whether the selection is REPORTED —
+  it was in the report and the JSON, but the page shows only the message, so the
+  message now opens with "auto selected <name>; " (smoke asserts it). And the probes'
+  chaos monkey kept paying: a **second NaN infinite loop**, nondeterministic this time
+  (wall-clock probe boundaries → different divergence trajectories → hung 1 run in ~2,
+  then not for 25). Sampled at `KScalc()`: the NR merge advances an index only on a
+  `<=` comparison, and NaN fails BOTH directions — neither index moves. K-S now refuses
+  honestly on NaN guesses ("guesses contain NaN (a diverged model?)" → the existing
+  "Could not calculate" catch); `check_hl` gained the case, **verified to hang against
+  the unguarded code**; the hang-hunt script then ran 25 clean attempts. Lesson worth
+  keeping: the engine's statistics were written for guesses a converged model produces;
+  the probes deliberately manufacture diverged ones, so every statistic they reach is
+  getting its first NaN audit — two infinite loops so far (operatingPoints, KScalc),
+  found by sampling actual hangs, not by reading for them.
 
 ## ROADMAP 3 (agreed with Craig 2026-07-15) — ROC inference
 
