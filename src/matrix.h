@@ -160,6 +160,12 @@ public:
 	Matrix< T >& excludecols( Matrix< T >&, const vector< unsigned >& ) const;
 	Matrix< T > excludecols( const vector< unsigned >& ) const; // returns new Matrix
 
+	// Methods which gather the rows indicated by the passed vector, IN THAT
+	//    ORDER. Unlike includecols, positions may repeat and arrive unsorted:
+	//    drawing a bootstrap resample with replacement is one gather
+	Matrix< T >& includerows( Matrix< T >&, const vector< unsigned >& ) const;
+	Matrix< T > includerows( const vector< unsigned >& ) const; // returns new Matrix
+
 	// Simple math unary assignment operators (element by element)
 	Matrix< T >& operator+= ( const Matrix< T >& ); // +=
 	Matrix< T >& operator-= ( const Matrix< T >& ); // -=
@@ -1871,10 +1877,14 @@ Matrix< T >& Matrix< T >::includecols( Matrix< T >& M, const vector< unsigned >&
 	// Sort incoming positions vector, necessary for coming application of unique
 	sort( posC.begin(), posC.end() );
 
+	// The output has ONE column per included position. (This assert read
+	//    ncols_ - pos.size() -- excludecols' dimension -- since 2.x; the
+	//    method had no callers, so the wrong contract never fired. Fixed
+	//    2026-07-16 when includerows was added beside it.)
 	assert ( *( max_element( pos.begin(), pos.end() ) ) < ncols_ // bounds check
 		&& posC.end() == unique( posC.begin(), posC.end() ) // unique check
 		&& M.nrows_ == nrows_ // dimension checks
-		&& M.ncols_ == ( ncols_ - pos.size() ) );
+		&& M.ncols_ == pos.size() );
 
 	vector< bool > vbool( ncols_ ); // indicates if column should be included
 	std::fill( vbool.begin(), vbool.end(), false ); // initialize to all false
@@ -1905,11 +1915,55 @@ Matrix< T >& Matrix< T >::includecols( Matrix< T >& M, const vector< unsigned >&
 template < class T >
 Matrix< T > Matrix< T >::includecols( const vector< unsigned >& pos ) const
 {
-	// Construct receiving Matrix
-	Matrix< T > result( nrows_, ( ncols_ - pos.size() ) );
+	// Construct receiving Matrix: one column per included position (sized
+	//    ncols_ - pos.size() until 2026-07-16 -- see the note in the
+	//    two-argument form)
+	Matrix< T > result( nrows_, ( unsigned ) pos.size() );
 
 	// Use previously coded includecols method
 	this->includecols( result, pos );
+
+	return result; // for use in Matrix math
+}
+
+// Method which gathers the rows indicated by the passed vector, in that
+//    order, into the passed Matrix. Positions may repeat and arrive in any
+//    order (unlike includecols): a bootstrap resample drawn with replacement
+//    is exactly this gather. Row indices are checked unconditionally (a
+//    BoundsViolation throw, like operator() -- not an assert), because a bad
+//    gather index in a release build would otherwise read out of bounds.
+template < class T >
+Matrix< T >& Matrix< T >::includerows( Matrix< T >& M, const vector< unsigned >& pos ) const
+{
+	assert ( M.nrows_ == pos.size() // dimension checks
+		&& M.ncols_ == ncols_ );
+
+	T *pMData = M.data_; // pointer to the incoming Matrix data array
+
+	for ( unsigned i = 0; i < pos.size(); i++ ) // cycle through positions
+	{
+		if ( pos[ i ] >= nrows_ ) // bounds check the gathered row
+			throw BoundsViolation();
+
+		// Copy the indicated row into the incoming Matrix
+		const T *pData = data_ + pos[ i ] * ncols_;
+		for ( unsigned c = 0; c < ncols_; c++, ++pData, ++pMData )
+			*pMData = *pData;
+	}
+
+	return M; // for use in Matrix math
+}
+
+// Method which gathers the rows indicated by the passed vector, in that
+//    order, returning a new Matrix
+template < class T >
+Matrix< T > Matrix< T >::includerows( const vector< unsigned >& pos ) const
+{
+	// Construct receiving Matrix: one row per gathered position
+	Matrix< T > result( ( unsigned ) pos.size(), ncols_ );
+
+	// Use previously coded includerows method
+	this->includerows( result, pos );
 
 	return result; // for use in Matrix math
 }

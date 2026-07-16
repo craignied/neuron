@@ -40,6 +40,13 @@ add_executable(check_wickens
 target_include_directories(check_wickens PRIVATE src)
 add_test(NAME binormal_wickens COMMAND check_wickens)
 
+# Unit test: the Matrix row-gather primitive (includerows -- repeats and
+# arbitrary order allowed, bounds throw) and includecols' output dimension.
+add_executable(check_matrix
+    tests/matrix/check_matrix.cpp src/matrix.cpp src/utility.cpp)
+target_include_directories(check_matrix PRIVATE src)
+add_test(NAME matrix_gather COMMAND check_matrix)
+
 # Regression test: Hosmer-Lemeshow on datasets past 10,000 rows (fixed-size
 # stack arrays segfaulted there until 2026-07-16). No GSL needed.
 add_executable(check_hl

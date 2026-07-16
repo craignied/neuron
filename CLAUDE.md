@@ -120,6 +120,24 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
    ("goldens re-bless", "the oracle needs an exclusion", "Metz corners are needed") were
    likewise hollow, all written from *"the invariants cover this"*.
 
+4. **Engine code lives in the class layer.** The computational core was built on
+   `Matrix` / `vector_ops` / `Population` so that (a) the code reads like the matrix
+   notation in the paper it came from — you can go from the page to the code and back —
+   and (b) every element access is bounds-checked (`Matrix::operator()` throws
+   `BoundsViolation` even in release builds, where asserts vanish). New engine or
+   statistics code uses those classes; when the layer lacks a primitive, **extend the
+   layer** (as `includerows` was added 2026-07-16 for the bootstrap resample) rather
+   than dropping to raw arrays or hand-rolled recounts. Scalar code is sometimes
+   genuinely the right tool (order statistics, Numerical Recipes routines) — say so in
+   a comment where you do it. *Why this is a rule:* legacy bug #8 was `HLX2calc`
+   copying data OUT of the bounds-checked Matrix into raw `double[10000]` C arrays —
+   the layer would have thrown; the raw arrays scribbled the stack for twenty years.
+   The same day, the ROC threshold sweep's hand-rolled per-threshold recount (O(n²),
+   multiplied by 2000 bootstrap resamples) turned out to be the entire bootstrap scale
+   cliff; reformulated as one sort plus cumulation — which is also how Wickens' own
+   Table 5.2 is built — the 12,000-row report went from minutes to seconds,
+   byte-identical. Leaving the layer cost correctness once and performance twice.
+
 ## Housekeeping
 
 - **GitHub:** https://github.com/craignied/neuron (HTTPS remote per the locker's
@@ -581,6 +599,46 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
      the full ROC/stats panels, zero page JS errors. All gates: zero-warning build,
      goldens byte-identical, 4/4 ctest, smoke, verify_oracle identical.
   Next in ROADMAP 2: Phase 2 (auto algorithm selection).
+
+- **2026-07-16 (late day) — back into the class layer; the bootstrap scale cliff is
+  GONE.** Craig asked whether new engine code was using his Matrix/vector_ops/Population
+  layer as designed (matrix notation ↔ the page, bounds safety) or layering scalar code
+  on top. Honest audit: storage/moments yes, algorithms no — and the inherited scalar
+  idiom was exactly where the morning's performance problem lived. What landed:
+  1. **The ROC sweep is now sort-once + cumulate** (`TwoSet::operatingPoints()`, shared
+     by `getStatROCarea` and `countGoodData`): every operating point is a cumulative
+     count over the score-sorted exemplars — which is literally how Wickens builds his
+     Table 5.2 — replacing the per-threshold O(n) recount that made each curve O(n²)
+     and the bootstrap 2000× that. **Equivalence proven at the bit level**: identical
+     F/H arithmetic (same integer divisions), goldens byte-identical including
+     `binormal_seed42`, check_wickens still 0.7839, bank transcript diff-clean.
+     **Measured**: bank logistic session 33.2 s → 14.0 s (report ~20 s → ~2 s); the
+     12,000-row synthetic session that spent minutes in the bootstrap this morning
+     (and then segfaulted at H-L) now runs end-to-end in **5.1 s**. The morning entry's
+     open question about exposing/scaling bootstrap B is largely **mooted** — the cost
+     was never inherent to B=2000, it was the sweep.
+  2. **`Matrix::includerows`** — the row-gather primitive (repeats allowed, any order,
+     unconditional `BoundsViolation` throw like `operator()` since release builds strip
+     asserts). A bootstrap resample is now one expression, `A.includerows( pick )`, with
+     the same RNG consumption order (goldens prove it). New ctest `matrix_gather`,
+     **proven non-vacuous by sabotage** (gather ignoring positions → test fails).
+     Found en passant: **`includecols` had carried `excludecols`' dimension contract
+     since 2.x** (asserted/allocated ncols−pos.size() columns while copying pos.size())
+     — dormant, zero callers, fixed and pinned by the new test rather than numbered as
+     a live bug.
+  3. **Standing rule 4 added** (engine code lives in the class layer; extend the layer
+     when it lacks a primitive; stated reason required where scalar code is right).
+     AGENTS.md + walkthrough cost notes re-measured and updated in the same commit.
+  4. **HLX2calc layer-lift (Craig's item 3) assessed and DEFERRED.** Measured in
+     isolation: the selection sort costs 17 ms at bank size, 0.6 s at 34k rows, 3.8 s
+     at 100k — now the engine's last quadratic hot spot, but sub-second at every
+     dataset the repo has ever seen. Memory safety is already fixed; a cosmetic lift
+     would risk tie-order changes against the oracle-pinned p-value for no statistical
+     gain; and the function's real defects are statistical (χ² accumulates across the
+     NG=10..4 loop without reset, recomputes the last group inside the group loop,
+     reports the LARGEST p over group counts) — polishing it before Craig rules on the
+     statistic means doing the work twice. **Recommendation: fold the lift into an
+     "H-L statistic review" roadmap item, where outputs are expected to change anyway.**
 
 ## ROADMAP 3 (agreed with Craig 2026-07-15) — ROC inference
 

@@ -215,8 +215,24 @@ public:
 		PKX2calcFlag,// flag indicates if Pearson's Chi-Square test calculated   Hui Liu added 08/15/2004
 		HLX2calcFlag; // flag indicates if Hosmer-Lemeshow test calculated   Hui Liu added 08/16/2004
 
-	// Counts the nonzero, non-one data points -- the operating points that
-	//    survive the z transform, which gates the statistical ROC report
+	// One point of the empirical ROC: the false-alarm and hit rates at a
+	//    distinct score threshold, and how many exemplars hold that score
+	struct OperatingPoint {
+		double F; // false-alarm rate (1 - specificity) at this threshold
+		double H; // hit rate (sensitivity) at this threshold
+		unsigned count; // exemplars holding exactly this score
+	};
+
+	// The empirical ROC in ONE pass: sort the exemplars by descending score
+	//    once, then every operating point is a cumulative count (Wickens
+	//    builds his Table 5.2 exactly this way). Replaces the per-threshold
+	//    full recount, which cost O(n^2) and made the bootstrap's 2000
+	//    re-runs a scale cliff. n0/n1 receive the class sizes (the binomial
+	//    denominators for the error bars).
+	vector< OperatingPoint > operatingPoints( unsigned& n0, unsigned& n1 );
+
+	// Counts the exemplars whose operating points survive the z transform
+	//    (F and H both interior), which gates the statistical ROC report
 	unsigned countGoodData();
 
 	// Utility function to set common initial values for constructors

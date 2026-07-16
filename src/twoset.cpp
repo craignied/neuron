@@ -560,6 +560,54 @@ static double zErrorBar( double p, unsigned N )
 	return sqrt( p * ( 1 - p ) / N ) / density;
 }
 
+// The empirical ROC in one pass. Sorting the exemplars by descending score
+//    once makes every operating point a cumulative count -- at threshold T,
+//    tp is simply the number of positives already passed -- which is exactly
+//    how Wickens builds his Table 5.2 (cumulative frequencies). The
+//    per-threshold full recount this replaces cost O(n) per distinct score,
+//    O(n^2) per curve, and the bootstrap re-runs the curve 2000 times.
+//    One point per DISTINCT threshold: a tied score repeated across
+//    exemplars is the same operating point, so the whole tie group is
+//    cumulated before its point is emitted.
+vector< TwoSet::OperatingPoint > TwoSet::operatingPoints( unsigned& n0, unsigned& n1 )
+{
+	vector< double > known = A.col( 0 ), score = A.col( 1 );
+
+	n0 = n1 = 0; // class sizes: the binomial denominators
+	for ( unsigned row = 0; row < n; row++ )
+		if ( known[ row ] == 0 ) n0++; else n1++;
+
+	// Sort positions by descending score -- the direction the thresholds walk
+	vector< unsigned > order( n );
+	for ( unsigned i = 0; i < n; i++ )
+		order[ i ] = i;
+	sort( order.begin(), order.end(),
+		[ &score ]( unsigned a, unsigned b ) { return score[ a ] > score[ b ]; } );
+
+	vector< OperatingPoint > points;
+	unsigned tp = 0, fp = 0, i = 0;
+	while ( i < n )
+	{
+		// The threshold "score >= T" takes the whole tie group at once
+		unsigned j = i;
+		while ( j < n && score[ order[ j ] ] == score[ order[ i ] ] )
+		{
+			if ( known[ order[ j ] ] == 0 ) fp++; else tp++;
+			j++;
+		}
+
+		OperatingPoint p;
+		p.F = static_cast< double >( fp ) / n0; // false-alarm rate
+		p.H = static_cast< double >( tp ) / n1; // hit rate
+		p.count = j - i;
+		points.push_back( p );
+
+		i = j; // next distinct score
+	}
+
+	return points;
+}
+
 double TwoSet::getStatROCarea()
  {
 	double rocArea = 0;
@@ -570,35 +618,19 @@ double TwoSet::getStatROCarea()
 	{
 		try
 		{
-			unsigned n0 = 0, n1 = 0; // class sizes: the binomial denominators
-			for ( unsigned row = 0; row < A.rows(); row++ )
-				if ( A( row, 0 ) == 0 ) n0++; else n1++;
+			unsigned n0, n1;
+			vector< OperatingPoint > points = operatingPoints( n0, n1 );
 
-			vector< double > zH, zF, sH, sF, real = A.col( 1 );
-			vector< double >::iterator pR;
-			sort( real.begin(), real.end() );
-			reverse( real.begin(), real.end() );
-
-			double previous = 0; bool havePrevious = false;
-			for ( pR = real.begin(); pR != real.end(); pR++ )
-			{
-				// One point per DISTINCT threshold. Repeating a tied score's point
-				//    once per exemplar does not add information -- it is the same
-				//    operating point -- it just replicates it in the fit.
-				if ( havePrevious && *pR == previous ) continue;
-				previous = *pR; havePrevious = true;
-
-				calculate( *pR );
-				double F = static_cast< double >( fp ) / ( tn + fp );
-				double H = static_cast< double >( tp ) / ( tp + fn );
-				if ( ( F != 0 ) && ( H != 0 ) && ( F != 1 ) && ( H != 1 ) )
+			vector< double > zH, zF, sH, sF;
+			for ( vector< OperatingPoint >::iterator p = points.begin();
+				p != points.end(); p++ )
+				if ( ( p->F != 0 ) && ( p->H != 0 ) && ( p->F != 1 ) && ( p->H != 1 ) )
 				{
-					zF.push_back( stats::invZarea( F ) );
-					zH.push_back( stats::invZarea( H ) );
-					sF.push_back( zErrorBar( F, n0 ) );
-					sH.push_back( zErrorBar( H, n1 ) );
+					zF.push_back( stats::invZarea( p->F ) );
+					zH.push_back( stats::invZarea( p->H ) );
+					sF.push_back( zErrorBar( p->F, n0 ) );
+					sH.push_back( zErrorBar( p->H, n1 ) );
 				}
-			}
 
 			if ( zF.size() < 3 )
 				throw twoSetErr( "Too few distinct operating points to fit a zROC line" );
@@ -701,21 +733,20 @@ double TwoSet::getStatChi2()
 	return statChi2;
 }
 
-// Count the nonzero, non-one data points -- the ones that survive the z
-//    transform in getStatROCarea(); the count gates the statistical report
+// Count the exemplars whose operating points survive the z transform (F and
+//    H both interior); the count gates the statistical report. Each exemplar
+//    counts individually -- a tie group contributes its whole size -- which
+//    preserves the legacy per-row count exactly, now via the one-pass sweep.
 unsigned TwoSet::countGoodData()
 {
-	vector< double > real = A.col( 1 ); // extract the "real" column
-	vector< double >::iterator pR; // to iterate through real vector
-	unsigned goodData = 0; // number of nonzero, non-one data points
-	for ( pR = real.begin(); pR != real.end(); pR++ )
-	{
-		calculate( *pR ); // get tp, fp, tn, fn from vector of "reals"
-		double F = static_cast< double >( fp ) / ( tn + fp ); // "false alarm rate", 1 - specificity
-		double H = static_cast< double >( tp ) / ( tp + fn ); // "hit rate", sensitivity
-		if ( ( F != 0 ) && ( H != 0 ) && ( F != 1 ) && ( H != 1 ) )
-			goodData++; // it was a nonzero, non-one data point
-	}
+	unsigned n0, n1, goodData = 0;
+	vector< OperatingPoint > points = operatingPoints( n0, n1 );
+
+	for ( vector< OperatingPoint >::iterator p = points.begin();
+		p != points.end(); p++ )
+		if ( ( p->F != 0 ) && ( p->H != 0 ) && ( p->F != 1 ) && ( p->H != 1 ) )
+			goodData += p->count;
+
 	return goodData;
 }
 
@@ -783,27 +814,21 @@ void TwoSet::bootstrapROC()
 	vector< double > azStat;
 	unsigned failures = 0;
 
+	vector< unsigned > pick( n ); // reused row-gather positions, one resample each
+
 	for ( unsigned b = 0; b < bootB; b++ )
 	{
-		// Draw with replacement inside each class
-		Matrix< double > M( n, 2 );
+		// Draw with replacement inside each class; the resample is then one
+		//    row gather (Matrix::includerows exists for exactly this)
 		unsigned row = 0;
 		for ( unsigned i = 0; i < known0.size(); i++, row++ )
-		{
-			unsigned pick = known0[ util::i_resample( ( unsigned ) known0.size() ) ];
-			M( row, 0 ) = A( pick, 0 );
-			M( row, 1 ) = A( pick, 1 );
-		}
+			pick[ row ] = known0[ util::i_resample( ( unsigned ) known0.size() ) ];
 		for ( unsigned i = 0; i < known1.size(); i++, row++ )
-		{
-			unsigned pick = known1[ util::i_resample( ( unsigned ) known1.size() ) ];
-			M( row, 0 ) = A( pick, 0 );
-			M( row, 1 ) = A( pick, 1 );
-		}
+			pick[ row ] = known1[ util::i_resample( ( unsigned ) known1.size() ) ];
 
 		try
 		{
-			TwoSet resample( M );
+			TwoSet resample( A.includerows( pick ) );
 			// The resample must be scored exactly as this set is scored
 			resample.setROCthresh( calcThresh );
 			resample.setBootstrapResamples( 0 ); // no bootstrap within a bootstrap

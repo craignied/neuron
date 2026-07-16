@@ -143,8 +143,8 @@ datasets, but on 3,391 rows you should set the budget yourself. And prefer
 canonical gradient descent here: it converges in seconds, while Shanno's and
 conjugate-gradient line searches can grind for a very long time on this data.
 The run (training takes 12 seconds on an M2 Ultra; the statistical report
-that follows adds about 20 more, most of it the two ROC bootstraps — 2,000
-resamples per set):
+that follows — including two 2,000-resample ROC bootstraps — adds about 2
+more):
 
 ```
 Training algorithm is canonical backpropagation
