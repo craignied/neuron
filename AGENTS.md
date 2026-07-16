@@ -23,10 +23,14 @@ Ground rules:
   directory of the first dataset file the session loads (falling back to
   the current directory if none is ever loaded) — so the run's artifacts
   end up next to the user's data, where they expect them.
-- Costs: grooming is instant; the trainings below take seconds. If a
-  training runs for more than ~2 minutes, something is wrong — kill it and
-  re-check the recipe (usually a missing iteration cap or missing
-  `--refcat`).
+- Costs: grooming is instant; the trainings below take seconds. If the
+  *iteration table* is still printing after ~2 minutes, something is wrong —
+  kill it and re-check the recipe (usually a missing iteration cap or
+  missing `--refcat`). But the statistical report AFTER training includes a
+  2,000-resample ROC bootstrap per set whose cost grows roughly with the
+  square of the row count: ~20 s total on the 3,391-row bank walkthrough,
+  minutes at 10,000+ rows. A silent pause after "Total iterations" on a
+  large dataset is the bootstrap working, not a hang — don't kill it.
 
 ## 0. Build the engine (once)
 

@@ -446,17 +446,11 @@ This is implemented as a guard, not as the fix for the discards described above:
 the failing `gammq` calls were a *symptom* of a NaN already in the fit, and had
 they merely been suppressed the engine would have reported a NaN area instead of
 raising. The fix is at the variance; this rule is what makes an unconvergeable
-fit probability cost the p-value alone. Two related rules follow from the same
-principle, both applying at the level of the bin search:
-
-- A binning that yields no area is skipped, not fatal. The search over 3..10 bins
-  reports whatever binnings did work; only when **none** does is there no area.
-  (Previously a single failing binning suppressed the whole report — including
-  the seven that had succeeded — and discarded the whole bootstrap resample.)
-- A fit whose p could not be computed can still win on **area**; it simply cannot
-  be the "best fit p" fit, having no p to be best at. Likewise a resample with an
-  area but no p informs the best-AUC interval and not the best-p one, so the two
-  intervals carry separate resample counts.
+fit probability cost the p-value alone — the report prints "p = not available"
+and the area stands. (While the bin search existed, the same principle applied
+at its level too: a failing binning was skipped rather than suppressing the
+whole report and its bootstrap resample. The search is gone — see "The binning
+artifact" — so only the fit-level rule survives.)
 
 ### Methods-section language
 
@@ -547,9 +541,12 @@ algorithm (Wickens 2002, §3.6, p. 57)."*
   F ≈ 0.9999 — far outside any observed operating point, so it does not affect
   A_z on data like this. It matters when b is far from 1 or the data are sparse
   or lopsided. PROPROC is the remedy, and it needs ML (see the roadmap's Phase 3).
-- Until Phase 2 lands, the **binning is arbitrary** and A_z depends on it
-  (0.616 at 9 bins vs 0.618 at 5 bins on the low-birth-weight data — small, but
-  real). Quote the bin count with the area, or use the trapezoidal area.
+- **Quote the operating-point count with the area** (the report's "Operating
+  points fitted" line): an A_z from five points and one from five hundred are
+  different claims. (Before 2026-07-15 the equivalent advice was to quote the
+  bin count, because the binning was arbitrary and moved A_z — worth 0.011 on
+  Wickens' own data. The binning is gone; the point count is what remains to
+  disclose.)
 - The bootstrap resamples exemplars, so it captures sampling variability of the
   cases. It does not capture model-selection variability from choices made
   outside the resampled procedure.
@@ -562,7 +559,7 @@ algorithm (Wickens 2002, §3.6, p. 57)."*
 | Dorfman, D. D., & Alf, E. (1968a, 1968b) | The standard ML algorithm for fitting the SDT model to several conditions, as cited by Wickens' reference notes, p. 58. (Commonly cited elsewhere as Dorfman & Alf 1969, *J. Math. Psych.* 6:487–496; Wickens gives 1968a/1968b.) |
 | Hanley, J. A., & McNeil, B. J. (1982). *Radiology* 143:29–36. | Closed-form variance of the empirical (trapezoidal) area via the Mann–Whitney U equivalence; `TwoSet::hmSE`. |
 | Efron, B., & Tibshirani, R. J. (1993). *An Introduction to the Bootstrap*. | Bootstrap percentile intervals. |
-| Metz, C. E., Herman, B. A., & Shen, J. H. (1998). *Statistics in Medicine* 17:1033–1053. | LABROC4/LABROC5; truth-state runs in rank-ordered data as the natural categorisation of continuous data, retaining the ROC's corners without loss of information relevant to ROC estimation. The basis of the Phase 2 categorisation. |
+| Metz, C. E., Herman, B. A., & Shen, J. H. (1998). *Statistics in Medicine* 17:1033–1053. | LABROC4/LABROC5; truth-state runs in rank-ordered data as the natural categorisation of continuous data, retaining the ROC's corners without loss of information relevant to ROC estimation. Considered for Phase 2 and found unnecessary — its purpose is to categorise for a maximum-likelihood fit, and the least-squares line over distinct operating points needs no categories. Returns with ML (Phase 3), or not at all. |
 | Metz, C. E., & Pan, X. (1999). | The "proper" binormal model; degeneracy (fits of unphysical shape crossing the chance line) and its remedy. |
 | Pesce, L. L., & Metz, C. E. (2007). | Reliable, computationally efficient ML estimation of proper binormal ROC curves. |
 | Hsieh, F., & Turnbull, B. W. (1996). *Annals of Statistics* 24:25–40. | Generalized least squares for grouped data; minimum-distance estimator that avoids grouping entirely. |
@@ -576,11 +573,10 @@ algorithm (Wickens 2002, §3.6, p. 57)."*
 
 **`binormal_seed42` is the golden that covers this page.** It runs the
 Hosmer–Lemeshow low-birth-weight data (189 rows, split 142/47) through a seeded
-logistic fit and freezes the whole printed ROC report byte-for-byte: both
-searched fits with their bin counts, the χ² and fit p, the bootstrap intervals,
-the Hanley–McNeil interval, and both the binned (train) and unbinned (test)
-paths. Its resolution is the report's own 6 decimals: a 0.01% change in A_z is
-caught, 1e-7 is not.
+logistic fit and freezes the whole printed ROC report byte-for-byte: the A_z
+with its operating-point count, the χ² and fit p, the bootstrap interval, and
+the Hanley–McNeil interval, on both the training and test sets. Its resolution
+is the report's own 6 decimals: a 0.01% change in A_z is caught, 1e-7 is not.
 
 It exists because the other two goldens **do not reach this code at all**:
 `xor_seed42` and `regress_seed42` have too few exemplars (`goodData <
@@ -599,21 +595,24 @@ The rest of the coverage:
   within sampling tolerance — including an unequal-variance case;
 - asserts the variance of a set of identical values is zero rather than NaN or a
   roundoff residue (the bug behind the resample discards, asserted at its root);
-- drives deliberately **tied** scores — the flat ROC runs that make the binning
-  degenerate — and requires every binning of the search to yield a finite area
-  and a finite fit p, and the bootstrap to discard **no** resample and stay
-  within 25% of Hanley–McNeil;
+- drives deliberately **tied** scores — the flat ROC runs that used to make the
+  binning degenerate — and requires the fit to yield a finite area and a finite
+  fit p, and the bootstrap to discard **no** resample and stay within 25% of
+  Hanley–McNeil;
 - calibrates the bootstrap SE against the empirical SD of A_z over replicate
   samples.
 
 `tests/gui/smoke.sh` asserts the panel's binormal block is `null` when no fit is
-possible (four exemplars) and carries both fits — each with its bin count and
-bootstrap interval — on the low-birth-weight data, which is large enough to be
-binned. Both assertions were verified to fail against the pre-fix binary.
+possible (four exemplars) and carries the fit — with its operating-point count
+and bootstrap interval — on the low-birth-weight data, which is large enough to
+reach the statistical path. Both assertions were verified to fail against the
+pre-fix binary.
 
-**When Phase 2 moves A_z, `binormal_seed42` is the record of what moved.** Re-bless
-it only after the literature acceptance test (Wickens Table 5.1) passes, and read
-the diff: it is the only place the change becomes visible line by line.
+**When Phase 2 moved A_z (2026-07-15), `binormal_seed42` was the record of what
+moved** — its re-bless diff (commit `c219b17`) is where the change is visible
+line by line, and it was re-blessed only after the literature acceptance test
+(Wickens Table 5.1) passed. The same discipline applies to any future change
+that moves the area: literature test first, then read the golden's diff.
 
 ### Provenance
 
@@ -622,4 +621,5 @@ The implementation entered the neUROn2++ lineage via the standalone Windows
 of assay data, and was merged into the engine before the 2.6 era. The engine's
 copy is the maintained one (it carries the 2.6.x and 3.0 fixes); the roc app
 additionally collected the ROC curve coordinates for plotting (`ROCx`/`ROCy`),
-which is planned for porting when the 3.0 GUI needs to draw curves.
+ported into the engine 2026-07-13 (`getTrapROCarea()` fills them; the GUI's
+ROC plot draws them).

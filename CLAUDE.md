@@ -498,6 +498,46 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   `setHidden` is destructive — that were verified by exploration on 2026-07-14 and are
   probably sound. Rule 3 applies anyway: measure the specific claim before building on it.
 
+- **2026-07-16 (morning) — post-ROC audit: docs destaled, legacy bug #8 found and
+  fixed.** Craig asked for a documentation-consistency pass and a bug pass over
+  yesterday's work before starting ROADMAP 2 Phase 1b. Results:
+  1. **Legacy bug #8 — `TwoSet::HLX2calc()` segfaulted on any dataset over 10,000
+     rows.** It copied the guesses into fixed `double[10000]` stack arrays with no
+     bounds check (since 2004). Proven by measurement, not inspection: a synthetic
+     12,000-row logistic session crashed with `EXC_BAD_ACCESS` in `HLX2calc` (lldb
+     backtrace on the store into `aHL`); under 10,000 rows it worked. The walkthrough's
+     bank data never tripped it (3,391 training rows — under the line). Fixed by sizing
+     the arrays to the data (`vector<double>`), byte-identical below the line. New
+     ctest `hosmer_lemeshow_large` (`tests/twoset/check_hl.cpp`), **verified to
+     segfault against the pre-fix code** per standing rule 2. (Noted while in there,
+     NOT changed because the oracle pins the behavior: HLX2calc's χ² accumulates
+     across the NG=10..4 group-count loop without resetting, recomputes the last group
+     inside the group loop, and takes the LARGEST p over group counts — statistically
+     odd, but legacy-frozen; and its selection sort is O(n²). Craig should rule on
+     whether the H-L statistic itself deserves a ROADMAP item.)
+  2. **The bootstrap has a scale cliff, and B is not user-settable.** Measured: the
+     post-training report costs ~20 s on the 3,391-row bank set (two 2,000-resample
+     bootstraps), minutes by 12,000 rows — cost grows ~quadratically (per-resample
+     sweep is O(distinct·n)). `setBootstrapResamples` exists in the engine but no CLI
+     menu or GUI parameter reaches it. Not changed (any default change moves goldens);
+     AGENTS.md now warns agents that the post-training pause is the bootstrap, not a
+     hang. **Open question for Craig:** expose B (menu 13 / GUI field), scale it with
+     n, or leave it.
+  3. **Docs destaled** (everything the ROADMAP 3 cleanup overtook): `roc_theory.md`
+     (GOF-gating section no longer describes the removed bin search; "until Phase 2
+     lands" disclosure bullet; "what is tested" section; Metz reference row; ROCx/ROCy
+     provenance), bank `WALKTHROUGH.md` **re-run for real** (§4/§5 transcripts now show
+     the bootstrap CI and the statistical fit that the old `ITMAX too small in gcf`
+     failure used to suppress — the fixed estimator now succeeds on the SimpleProp run
+     where 2026-07-13's binned fit failed; Az values: logistic test 0.873922, SimpleProp
+     test 0.871037), §6 rewritten around the single fit + bootstrap, ROADMAP 2's stats
+     JSON shape corrected to the shipped single-`binormal` object, stale comments in
+     twoset.{h,cpp}/check_az.cpp. AGENTS.md cost guidance updated (see 2).
+  4. Gates all green after the fix: zero-warning build, goldens byte-identical, 4/4
+     ctest (incl. the new one), smoke, verify_oracle numerically identical.
+  Phase 1b remains the next thread and its plan claims remain unverified — measure
+  `train()`/`screenPtr`/`setHidden` before building, per rule 3.
+
 ## ROADMAP 3 (agreed with Craig 2026-07-15) — ROC inference
 
 Rationale, citations, and Methods language: **`docs/roc_theory.md`**. Work in order.
@@ -733,11 +773,13 @@ as any API change. Invoke the `dataviz` skill before writing chart code (Phase 1
   try/caught → null** (binormal/K-S/H-L/sens/spec throw on degenerate sets). `stats`
   object added to train JSON (additive; `roc` kept verbatim) + new `GET /api/stats`
   (recompute w/o retraining; 409 while training). Shape: per-set `{n, confusion{tp,tn,
-  fp,fn}, acc, sens, spec, pvp, pvn, trap{area,se}, binormal{bestP{az,se,p,chi2,nBins},
-  bestAUC{...}}, ks{d,p}, pearsonP, hlP}` + `logistic{condNumber,
-  coefficients[{input,beta,se,waldP}]}`. **The binormal block quotes the report's two
-  searched fits, not a fit of its own** — see the 2026-07-15 status entry for why the
-  bin count travels with each Az.
+  fp,fn}, acc, sens, spec, pvp, pvn, trap{area,se}, binormal{az,p,chi2,points,ci{lo,hi,
+  se,resamples,failures}}|null, ks{d,p}, pearsonP, hlP}` + `logistic{condNumber,
+  coefficients[{input,beta,se,waldP}]}`. *(This paragraph originally specified a
+  `bestP`/`bestAUC` fit pair with bin counts; ROADMAP 3 Phase 2 removed the bin search
+  before 1b started, so the shipped Phase 1a shape is the single fit above.)* **The
+  binormal block quotes the report's own fit (`getROCfit()`), never one of its own,
+  and is `null` when no fit is possible** — legacy bug #7's class, closed structurally.
 - **Auto algorithm** (engine-side): new `src/netclone.{h,cpp}` `cloneNetwork()` — the
   RegressNet::copy_network typeid dispatch generalized (refactor RegressNet to use it;
   pure refactor, goldens hold). New `src/autoalgo.{h,cpp}` `pick(start, budgetMs,

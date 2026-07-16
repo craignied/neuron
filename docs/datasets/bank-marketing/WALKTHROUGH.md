@@ -142,7 +142,9 @@ stop when the maximum absolute gradient falls below 1e-6 — sensible for tiny
 datasets, but on 3,391 rows you should set the budget yourself. And prefer
 canonical gradient descent here: it converges in seconds, while Shanno's and
 conjugate-gradient line searches can grind for a very long time on this data.
-The run (12 seconds on an M2 Ultra):
+The run (training takes 12 seconds on an M2 Ultra; the statistical report
+that follows adds about 20 more, most of it the two ROC bootstraps — 2,000
+resamples per set):
 
 ```
 Training algorithm is canonical backpropagation
@@ -173,16 +175,22 @@ Classification accuracy: 90.2%
 Sensitivity: 35.4%
 Specificity: 97.3%
 ...
-By statistical method, Searching for best p:
-ROC area = 0.873784
-95% CI = 0.844717 - 0.902851 (SE = 0.014830, delta method)
-...
+By statistical method, ROC area = 0.873922
+95% CI = 0.844467 - 0.901292 (SE = 0.014801, 2000 bootstrap resamples)
+Chi-squared = 258.501854
+p = 1.000000e+00 (closer to 1 is better)
+Operating points fitted = 920
 By trapezoidal method, ROC area = 0.874627
 95% CI = 0.835128 - 0.914125 (SE = 0.020152, Hanley-McNeil)
 ```
 
 Both ROC methods agree (0.874) and their confidence intervals overlap almost
-exactly — a healthy sign. Note the sensitivity: at the default 0.5 cutoff the
+exactly — a healthy sign (and meaningful, because the two intervals rest on
+different assumptions: the binormal CI is a stratified bootstrap, the
+trapezoidal one is the closed-form Hanley–McNeil estimator). Don't over-read
+the `p = 1.000000` fit line: on a continuous score it is an artifact of the
+operating points being cumulated from one sample, not a perfect fit — see
+`docs/roc_theory.md`. Note the sensitivity: at the default 0.5 cutoff the
 model catches only 35% of subscribers, because only 11.5% of clients
 subscribe; the ROC area is the threshold-free measure of how well the model
 *ranks* them.
@@ -228,28 +236,33 @@ Total iterations = 2001
 That took 0000:00:04
 
 Training set:  Classification accuracy: 91.1%
+By statistical method, ROC area = 0.923369
+95% CI = 0.909801 - 0.934962 (SE = 0.006530, 2000 bootstrap resamples)
 By trapezoidal method, ROC area = 0.923744
 95% CI = 0.905337 - 0.942151 (SE = 0.009391, Hanley-McNeil)
 
 Test set:      Classification accuracy: 89.4%
+By statistical method, ROC area = 0.871037
+95% CI = 0.838943 - 0.899129 (SE = 0.015410, 2000 bootstrap resamples)
 By trapezoidal method, ROC area = 0.870908
 95% CI = 0.830941 - 0.910874 (SE = 0.020391, Hanley-McNeil)
 ```
 
 Two things worth noticing:
 
-- **Train vs test**: 0.924 vs 0.871. The network fits the training data
+- **Train vs test**: 0.923 vs 0.871. The network fits the training data
   better than logistic regression did (0.908) but generalizes the same —
   the classic mild-overfit signature, caught because we held out a test set.
-  The network's test CI (0.831–0.911) and logistic's (0.835–0.914) overlap
+  The network's test CI (0.839–0.899) and logistic's (0.844–0.901) overlap
   almost completely: on this data the extra flexibility buys nothing, which
   is itself a publishable observation.
-- On this run the binormal search prints `a too large, ITMAX too small in
-  gcf` instead of a statistical ROC area — the incomplete-gamma routine
-  behind the binned chi-square failed to converge for these guesses (a
-  message that has been part of neuron since the 2002 tutorial). The
-  trapezoidal area with its Hanley–McNeil CI is always printed and is the
-  number to use then.
+- Builds before 2026-07-15 printed `a too large, ITMAX too small in gcf`
+  here instead of a statistical ROC area — a failure of the old binned fit
+  that had been part of neuron since the 2002 tutorial. Its cause is fixed;
+  a current build prints the full statistical report above. If you ever see
+  that message on a current build, report it as a bug rather than shrugging
+  — the trapezoidal area with its Hanley–McNeil CI is still always printed
+  and is the fallback number in the meantime.
 
 **Don't skip the iteration cap.** Trained instead with conjugate gradients
 and no cap, this exact configuration ran for 80 minutes: 40,000 iterations
@@ -265,17 +278,20 @@ Every model prints, for the training set and the test set:
   values at the 0.5 cutoff.
 - **Statistical (binormal) ROC area** — the Wickens signal-detection-theory
   method: fit a line to the ROC curve in z-space, then
-  Az = Φ(a/√(1+b²)) (Wickens 2002, Eq. 4.7, p. 68). Reported twice (best-p and
-  best-AUC bin searches), each with its bin count.
+  Az = Φ(a/√(1+b²)) (Wickens 2002, Eq. 4.7, p. 68), fitted directly to the
+  distinct operating points ("Operating points fitted" — quote that count with
+  the area). Its **95% CI is a stratified bootstrap** (the resample count and
+  any failures are printed on the CI line — quote those too).
 - **Trapezoidal ROC area** — the empirical area, with a **95% CI by
-  Hanley–McNeil**.
-- **On the intervals, read `docs/roc_theory.md` before quoting one.** The binormal
-  **delta-method CI is mis-specified** (it assumes the z-ROC points are independent;
-  they are cumulated from one sample and are not — Wickens pp. 87–88) and measured
-  ~5× too narrow. It is being replaced by a bootstrap (ROADMAP 3, CLAUDE.md). Until
-  that lands, **report the trapezoidal Hanley–McNeil interval** — but note that this
-  is a statement about the *interval*, not the *area*: Wickens holds the trapezoidal
-  area to be negatively biased and A_z to be the primary measure (pp. 70–72).
+  Hanley–McNeil**. A_z is the primary measure (Wickens holds the trapezoidal
+  area negatively biased, pp. 70–72); the trapezoidal interval rests on
+  different assumptions, so agreement between the two is worth reporting.
+- **On what the intervals mean — and what the fit p does not — read
+  `docs/roc_theory.md` before quoting anything in print.** (Builds before
+  2026-07-15 printed a delta-method CI here that was mis-specified and ~5×
+  too narrow, plus a second "best AUC" fit from an arbitrary binning; if your
+  output looks like that, you are on an old binary — use the trapezoidal
+  Hanley–McNeil interval and rebuild.)
 - **Goodness-of-fit** — Kolmogorov–Smirnov, Pearson chi-square, and
   Hosmer–Lemeshow.
 - For logistic regression: **Wald tests** on every coefficient and the
