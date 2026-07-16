@@ -279,3 +279,10 @@ and, with history logging on, is appended to `neuron.log`.
 
 Maintainers: keep this file in sync when tools or menus change — it is the
 operating manual for AI assistants, and its recipes are promised to work.
+
+**If you are changing the engine rather than using it**, read the standing rules
+at the top of `CLAUDE.md` first. The short version, learned expensively: a green
+test suite is not evidence until you know it executes what you changed — run a
+new test against the old binary and watch it fail before you trust it — and a
+doc that names a mechanism (including one in this repo) is a hypothesis, not a
+finding. Measure it.

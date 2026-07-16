@@ -90,6 +90,36 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   `manifest.tex` references multi-MB `.bmp` scans that were deliberately NOT copied;
   a rebuild would need `\includegraphics` switched to the PDF figures.
 
+## Standing rules
+
+1. **Whenever tools, menus, or recipes change, update `AGENTS.md` in the same commit** —
+   its recipes are promised to work.
+
+2. **A test must be proven to fail.** Before you believe a test guards anything, run it
+   against the code it is supposed to catch — `git stash push -- src/`, rebuild, confirm
+   it fails, `git stash pop`. A test that has never failed is a hypothesis, not a guard.
+   *Why this is a rule and not advice:* on 2026-07-15 the entire ROC confidence interval
+   was replaced — delta method out, bootstrap in — with **all five invariants green**,
+   because none of them executed the code. `xor_seed42` and `regress_seed42` have four
+   exemplars and print "Cannot calculate ROC statistically"; the oracle likewise. Zero
+   "By statistical method" lines between them. The same day, `smoke.sh` was found to be
+   *asserting a fabricated Az of 0* — the test was pinning the bug in place. Both were
+   caught only by running the new tests against the old binary, and each caught something
+   real. `tests/golden/run_golden.sh` now asserts its own coverage (see the list at its
+   foot) so that this particular hole cannot silently reopen; nothing equivalent guards
+   the other suites, so the practice is the guard.
+
+3. **A doc that names a mechanism is a hypothesis, not a finding — measure before acting
+   on it, including docs written here.** Also 2026-07-15: this file's own ROADMAP said
+   "make the χ² p-value non-fatal, do this first", from a causal story ("zero-SD bins →
+   degenerate fitexy weights → non-finite χ²") that was wrong in **every link** — there
+   were zero zero-SD bins, `chixy` guards zero weights, and the NaN came from
+   `Population::var()`. Doing what the plan said would have shipped silent NaN areas;
+   `gammq` was not the disease, it was the immune system. A 20-line probe settled in
+   minutes what a session of reasoning had inverted. Three further plan steps
+   ("goldens re-bless", "the oracle needs an exclusion", "Metz corners are needed") were
+   likewise hollow, all written from *"the invariants cover this"*.
+
 ## Housekeeping
 
 - **GitHub:** https://github.com/craignied/neuron (HTTPS remote per the locker's
