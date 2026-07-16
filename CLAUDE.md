@@ -473,6 +473,31 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   hypothesis. Measure first; a 20-line probe settled in minutes what a session of reasoning
   had gotten backwards.
 
+- **2026-07-15 (close of day) — ROADMAP 3 is DONE bar the backlog; the ROC work is
+  finished.** Phases 1 and 2 both landed today (see the entries above and the roadmap).
+  Where it ends up: every ROC number the engine prints traces to a page in Wickens, the
+  binormal Az is validated against his own published worked example to **±0.0001**
+  (`check_wickens`, Table 5.1 → 0.7839 vs his 0.784), the interval is a stratified
+  bootstrap calibrated two independent ways (Hanley-McNeil to ~3%, simulation to ~1%),
+  and the arbitrary binning that used to move Az by 0.011 is gone along with the whole
+  search/best-p/best-AUC apparatus. **Seven legacy bugs** found and fixed across the
+  reanimation, two of them today (#6 `Population::var()` NaN, #7 the GUI's fabricated
+  Az of 0). What remains is Phase 3 (Dorfman-Alf ML) — genuinely backlog, with its
+  rationale rewritten after Craig asked whether it was now dead; the surviving reasons
+  (degeneracy/PROPROC, efficiency, a meaningful GOF, the publication standard) were
+  never written down until he asked.
+  **The methodological residue, which outlives the ROC work:** three plan steps and one
+  causal chain in this file proved hollow today, all written from *"the invariants cover
+  this"*, and a rewritten confidence interval once landed with all five invariants green
+  and none of them executing the code. That is now **rules + a mechanism**, not a story
+  (see "Standing rules" at the top, and the coverage list at the foot of
+  `run_golden.sh`) — because the stories written here decayed within hours, which is
+  precisely the evidence for not trusting stories. **Next thread: ROADMAP 2 Phase 1b**
+  (async training + realtime error graph; starts with `screenPtr` → `thread_local`). Its
+  plan makes concrete claims — `train()` has no hook, `screenPtr` is a process-global,
+  `setHidden` is destructive — that were verified by exploration on 2026-07-14 and are
+  probably sound. Rule 3 applies anyway: measure the specific claim before building on it.
+
 ## ROADMAP 3 (agreed with Craig 2026-07-15) — ROC inference
 
 Rationale, citations, and Methods language: **`docs/roc_theory.md`**. Work in order.

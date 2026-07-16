@@ -147,12 +147,12 @@ Harvest from `session.out` and report to the user:
     track ties rather than occurring at random, so a nonzero count means a
     slightly narrow interval. On current builds this is normally "2000 bootstrap
     resamples" with no failures.
-  - The report gives two fits ("best p" and "best AUC"). Since 2026-07-15 they are
-    **the same number** — the binning they searched over is gone, so the search has
-    nothing left to choose between; the duplication is vestigial and is being removed.
-    Quote the area once. (Older advice to quote a bin count with every A_z is obsolete:
-    there are no bins. The report now gives "Operating points fitted", which is worth
-    quoting — an A_z from five points and one from five hundred are different claims.)
+  - **Quote "Operating points fitted" with the area** — an A_z from five points and one
+    from five hundred are different claims. (Advice to quote a *bin count* is obsolete:
+    since 2026-07-15 there is no binning, and the "best p"/"best AUC" pair the report
+    used to print is gone with it. There is one A_z. A build that still prints two, or
+    prints "Bin size = ... Number bins = ...", predates the fix and its A_z depends on
+    an arbitrary bin count — worth ~0.011 on Wickens' own data.)
   - `ITMAX too small in gcf` should no longer appear (its cause was fixed
     2026-07-15). If you see it on a current build, that is a real finding worth
     reporting, not a quirk to shrug at. `p = not available` is benign by design:

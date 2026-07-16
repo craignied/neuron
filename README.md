@@ -132,9 +132,17 @@ output change, regenerate with `./tests/golden/run_golden.sh --bless`.
 The suite has three cases: `xor_seed42` (SimpleProp training and statistics),
 `regress_seed42` (plus stepwise regression), and `binormal_seed42`, which runs the
 low-birth-weight data through a seeded logistic fit to cover the **statistical ROC
-report** — the binormal areas, the bin search, and the bootstrap intervals. The first
-two are too small to reach that path at all, so before the third existed the entire ROC
-report was invisible to the goldens.
+report** — the binormal area, its bootstrap interval, and the goodness-of-fit tests. The
+first two are too small to reach that path at all, so before the third existed the entire
+ROC report was invisible to the goldens.
+
+**The suite also asserts its own coverage.** A green run means nothing if the transcripts
+never execute what you changed, so `run_golden.sh` carries a list of paths that some
+transcript must reach — the binormal report, the bootstrap interval, the zROC fit, K–S,
+Hosmer–Lemeshow, stepwise. Delete or retarget a case and the suite fails and names what
+it stopped covering, rather than going quietly green. That check exists because the ROC
+confidence interval was once replaced entirely with every test passing and none of them
+running the code.
 
 A second, local-only check (`tests/oracle/`) cross-verifies the engine against the
 original neUROn2++ binary; see its README.
