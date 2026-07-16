@@ -40,6 +40,14 @@ add_executable(check_wickens
 target_include_directories(check_wickens PRIVATE src)
 add_test(NAME binormal_wickens COMMAND check_wickens)
 
+# Regression test: Hosmer-Lemeshow on datasets past 10,000 rows (fixed-size
+# stack arrays segfaulted there until 2026-07-16). No GSL needed.
+add_executable(check_hl
+    tests/twoset/check_hl.cpp
+    src/twoset.cpp src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
+target_include_directories(check_hl PRIVATE src)
+add_test(NAME hosmer_lemeshow_large COMMAND check_hl)
+
 # Unit test: engine output is capturable via util::set_screen() (the
 # GUI/server contract). No GSL needed.
 add_executable(check_capture

@@ -92,10 +92,11 @@ static bool check_var_identical()
 	return ok;
 }
 
-// Tied scores make flat runs in the empirical ROC, which is what drives the
-// binning degenerate. Every binning of the search must still yield a finite
-// area and a finite fit p, and the bootstrap must discard no resample. Before
-// the 2026-07-15 fixes this data failed 20% of binnings and 27% of resamples.
+// Tied scores make flat runs in the empirical ROC — the regime that used to
+// drive the (since-removed) binning degenerate. The fit must still yield a
+// finite area and a finite fit p, and the bootstrap must discard no resample.
+// Before the 2026-07-15 fixes this data failed 20% of binnings and 27% of
+// resamples.
 static bool check_ties( unsigned n0, unsigned n1, double mu1 )
 {
 	mt19937 gen( 7 );

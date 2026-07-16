@@ -702,7 +702,7 @@ double TwoSet::getStatChi2()
 }
 
 // Count the nonzero, non-one data points -- the ones that survive the z
-//    transform in getStatROCarea() and so are available for binning
+//    transform in getStatROCarea(); the count gates the statistical report
 unsigned TwoSet::countGoodData()
 {
 	vector< double > real = A.col( 1 ); // extract the "real" column
@@ -1090,8 +1090,12 @@ void TwoSet::HLX2calc()
 	double tmpHLX2P = 0.0;
 	double tempSwap = 0.0;
 
-    double aHL[ 10000 ];
-	double bHL[ 10000 ];
+	// Sized to the data: these were double[10000] stack arrays from 2004 to
+	//    2026, so any dataset past 10,000 rows wrote beyond them -- a segfault
+	//    once the writes reached the stack guard page (legacy bug #8, found
+	//    2026-07-16 at 12,000 rows). tests/twoset/check_hl.cpp guards this.
+	vector< double > aHL( n );
+	vector< double > bHL( n );
 
     for ( unsigned iM2V = 0; iM2V < n; iM2V++ )
 	{

@@ -215,7 +215,8 @@ public:
 		PKX2calcFlag,// flag indicates if Pearson's Chi-Square test calculated   Hui Liu added 08/15/2004
 		HLX2calcFlag; // flag indicates if Hosmer-Lemeshow test calculated   Hui Liu added 08/16/2004
 
-	// Counts the nonzero, non-one data points available for binning
+	// Counts the nonzero, non-one data points -- the operating points that
+	//    survive the z transform, which gates the statistical ROC report
 	unsigned countGoodData();
 
 	// Utility function to set common initial values for constructors
@@ -233,8 +234,6 @@ public:
 
 	// Utility method for ROCarea, outputs statistical report
 	void statReport( ostream&, unsigned, double, double, double, const CI& );
-
-	// Delta-method standard error of Az from a fitted zROC line
 
 	// Hanley-McNeil standard error of an empirical (trapezoidal) ROC area
 	double hmSE( double );
