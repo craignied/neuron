@@ -214,7 +214,7 @@ By trapezoidal method, ROC area = 1.000000
 Number thresholds = 4
 Kolmogorov-Smirnov goodness of fit D = 1, p = 0.0970269
 Pearson's Chi-Square goodness of fit p = 0.997129
-Hosmer-Lemeshow goodness of fit p = Could not calculate Hosmer-Lemeshow goodness of fit: a too large, ITMAX too small in gcf
+Hosmer-Lemeshow goodness of fit p = Could not calculate Hosmer-Lemeshow goodness of fit: fewer exemplars than Hosmer-Lemeshow groups (10)
 
 Would you like to save this model (yes/no)? 
 ( 1 ) Randomize weights

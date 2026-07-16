@@ -640,6 +640,45 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
      statistic means doing the work twice. **Recommendation: fold the lift into an
      "H-L statistic review" roadmap item, where outputs are expected to change anyway.**
 
+- **2026-07-16 (evening) — legacy bug #9: the Hosmer-Lemeshow test was not the
+  Hosmer-Lemeshow test.** Craig flagged the χ² accumulation and largest-p selection;
+  forensics (a Python reimplementation validated against the engine's printed output to
+  five decimals on three datasets — `scratchpad hl_forensics.py`, results recorded here)
+  found FIVE compounding defects in the 2004 implementation: a tail-complement
+  pseudo-group term added at every group; the χ² never reset across a group-count scan
+  from 10 down to 4; observed- instead of expected-based variance denominators (with
+  divide-by-0.5 fallbacks); the most favorable p over the seven scans reported; and
+  df = NG−2 applied to a sum with ~2× that many terms. **Measured: it rejected a TRUE
+  model 54-56% of the time at α = 0.05** (median p 0.035, 2000 sims, n = 500 — confirmed
+  independently at 55.75% by the C++ test against the old code), and on the repo's own
+  bank walkthrough it **flipped a conclusion**: test-set H-L p = 0.0014 where the true
+  statistic gives 0.18 (no evidence of misfit). It hid on well-fitted training data
+  because MLE residuals sum to zero, which kills the junk tail terms — benign exactly
+  where the reference checks live. **Fix: the textbook Ĉ** (H&L 2nd ed. §5.2.2), g = 10
+  deciles of risk FIXED by Craig's decision (the canonical choice, the one every
+  published reference value uses; scanning group counts for a favorable p was part of
+  the disease), E-based denominators, χ²(8), stable_sort so tie order is deterministic
+  cross-platform, honest refusal when n < g. In the class layer per rule 4 — which also
+  removed the O(n²) selection sort en passant (getHLX2 at 100k rows: 3.8 s → 11 ms;
+  nothing in the report is quadratic any more, and yesterday's deferred "H-L layer
+  lift" item is mooted). Verified: `check_hl` gained a hand-computed Ĉ case (closed-form
+  p = 0.98101184) and a true-model calibration guard (reject < 20%; new code 9.5%,
+  theory ~11% for known-true probabilities) — **both watched fail against the old
+  code**; engine H-L on the H&L reference fit now matches the independent Python
+  textbook value (0.997925 vs 0.9979); goldens re-blessed (the diff is ONLY the seven
+  H-L lines — lbw train 0.6392→0.7468, test 0.4209→0.7332, and the small-set refusals,
+  where the old code was already failing via the gcf throw); oracle H-L line excluded
+  with 3.0's refusal asserted (the KScalc pattern).
+  **Pearson forensics (same session, decision PENDING):** `PKX2calc` is unsalvageable as
+  a p-value — denominator g(1−g/n) ≈ g instead of g(1−g), so the statistic's expectation
+  under a TRUE model is ≈ n − Σĝ (measured: lbw 127.9 vs predicted 130.0), referred to a
+  hardcoded χ²(2) → **p → 0 as n grows regardless of fit** (true-model median p: 0.14 at
+  n=10, 8e-5 at n=50, 1e-44 at n=500). Deeper: even computed correctly, individual-level
+  Pearson X² has no valid χ² reference with continuous covariates (cells of size 1, df
+  needs the model's parameter count, which TwoSet doesn't know) — the problem the H-L
+  test was invented to solve. Options put to Craig: drop the line; print the correct X²
+  with n and no p; or a normal approximation with caveats.
+
 ## ROADMAP 3 (agreed with Craig 2026-07-15) — ROC inference
 
 Rationale, citations, and Methods language: **`docs/roc_theory.md`**. Work in order.

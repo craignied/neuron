@@ -28,10 +28,9 @@ Ground rules:
   kill it and re-check the recipe (usually a missing iteration cap or
   missing `--refcat`). The statistical report AFTER training (including its
   2,000-resample ROC bootstrap per set) adds a few seconds — ~2 s on the
-  3,391-row bank walkthrough, ~3 s at 12,000 rows. Only around 100,000 rows
-  does the report grow to ~10 s (the Hosmer–Lemeshow sort is the remaining
-  quadratic piece). A short pause after "Total iterations" is the report
-  working, not a hang.
+  3,391-row bank walkthrough, ~3 s at 12,000 rows — and scales gently
+  (nothing in the report is quadratic any more). A short pause after
+  "Total iterations" is the report working, not a hang.
 
 ## 0. Build the engine (once)
 

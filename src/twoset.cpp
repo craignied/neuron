@@ -1098,138 +1098,92 @@ double TwoSet::getHLX2()   // returns p-value
 	return HLX2P;
 }
 
-// Utility method to calculate Hosmer-Lemeshow statistic
-// Referring to the book "Applied Logistic Regression"
-// Hui Liu modified 09/25/2004
-// Craig Niederberger modified 3/12/2009 to throw exceptions
+// The Hosmer-Lemeshow goodness-of-fit statistic, as defined in Hosmer &
+//    Lemeshow, Applied Logistic Regression, 2nd ed., section 5.2.2: sort the
+//    exemplars by fitted probability, cut them into g equal-count groups
+//    ("deciles of risk"), and refer
+//
+//        C-hat = sum_k ( O_k - E_k )^2 / ( n_k * pibar_k * ( 1 - pibar_k ) )
+//
+//    to chi-squared on g - 2 degrees of freedom, where E_k is the sum of the
+//    fitted probabilities in group k, O_k the observed events, and
+//    pibar_k = E_k / n_k.
+//
+//    g is FIXED at 10 -- H&L's canonical choice, the one their published
+//    reference values and every standard implementation use. It is fixed on
+//    purpose: the 2004 implementation this replaces scanned group counts
+//    10 down to 4 and reported the most favorable p, which is a selection
+//    over analyses, and that was the least of its problems (legacy bug #9,
+//    2026-07-16: it also added a tail-complement pseudo-group term at every
+//    group, never reset the chi-squared across the group-count scan, and
+//    used observed- instead of expected-based variance denominators --
+//    measured against a reimplementation validated on the engine's own
+//    output, it rejected a TRUE model 54% of the time at alpha = 0.05).
 void TwoSet::HLX2calc()
 {
-	// Test data is divided into NG (from 10 to 3) groups.
-	// Individual group has an unfixed number of test samples.
+	const unsigned g = 10; // deciles of risk -- fixed, see above
 
-	unsigned NumGrp[ 10 ];
-
-
-	double ChiSquarSumHL = 0.0;
-	double tmpSumHL = 0.0;
-	double tmpHLX2P = 0.0;
-	double tempSwap = 0.0;
-
-	// Sized to the data: these were double[10000] stack arrays from 2004 to
-	//    2026, so any dataset past 10,000 rows wrote beyond them -- a segfault
-	//    once the writes reached the stack guard page (legacy bug #8, found
-	//    2026-07-16 at 12,000 rows). tests/twoset/check_hl.cpp guards this.
-	vector< double > aHL( n );
-	vector< double > bHL( n );
-
-    for ( unsigned iM2V = 0; iM2V < n; iM2V++ )
+	if ( !loadedFlag ) // a Matrix must have been loaded
 	{
-         aHL[ iM2V ] = A( iM2V, 1 );
-		 bHL[ iM2V ] = A( iM2V, 0 );
-    }
+		util::screen() << "I'm sorry, but a TwoSet Matrix has not yet been defined." << endl;
+		return;
+	}
 
-    // Sorting the expected values and observed values from the smallest to largest
-    for ( unsigned iSort = 0; iSort < ( n - 1 ); iSort++ )
-    {
-        unsigned minIndex = iSort;
+	if ( n < g ) // cannot form g nonempty groups
+		throw twoSetErr( "fewer exemplars than Hosmer-Lemeshow groups (10)" );
 
-        // Find the index of the minimum element
-        for ( unsigned jSort = iSort + 1; jSort < n; jSort++ )
-        {
-            if ( aHL[ jSort ] < aHL[ minIndex ] )
-            {
-                minIndex = jSort;
-            }
-        }
+	vector< double > known = A.col( 0 ), guess = A.col( 1 );
 
-        // Swap if i-th element not already smallest
-        if ( minIndex > iSort )
-        {
-            tempSwap = aHL[ iSort ];
-			aHL[ iSort ] = aHL[ minIndex ];
-			aHL[ minIndex ] = tempSwap;
+	// Sort positions by ascending fitted probability. stable_sort so tied
+	//    probabilities keep their row order and the group boundaries are
+	//    deterministic across platforms.
+	vector< unsigned > order( n );
+	for ( unsigned i = 0; i < n; i++ )
+		order[ i ] = i;
+	stable_sort( order.begin(), order.end(),
+		[ &guess ]( unsigned a, unsigned b ) { return guess[ a ] < guess[ b ]; } );
 
-			tempSwap = bHL[ iSort ];
-			bHL[ iSort ] = bHL[ minIndex ];
-			bHL[ minIndex ] = tempSwap;
-        }
+	double Chat = 0; // the statistic
+	bool contradicted = false; // a certain prediction observed to be wrong
 
-    }
+	unsigned start = 0, size = n / g;
+	for ( unsigned k = 0; k < g; k++ )
+	{
+		// Equal-count groups; the last takes the remainder
+		unsigned end = ( k == g - 1 ) ? n : start + size, nk = end - start;
+
+		double E = 0, O = 0;
+		for ( unsigned i = start; i < end; i++ )
+		{
+			E += guess[ order[ i ] ]; // expected events: sum of fitted probabilities
+			O += known[ order[ i ] ]; // observed events
+		}
+		start = end;
+
+		double pibar = E / nk;
+		double denominator = nk * pibar * ( 1 - pibar );
+
+		// A zero-variance group means every fitted probability in it is
+		//    exactly 0 or exactly 1 (a saturated model). If its outcomes
+		//    match, the group contributes nothing; if they don't, the model
+		//    made a certain prediction that was observed to be false, and no
+		//    finite chi-squared expresses that.
+		if ( denominator <= 0 )
+		{
+			if ( O == E )
+				continue;
+			contradicted = true;
+			break;
+		}
+
+		Chat += ( O - E ) * ( O - E ) / denominator;
+	}
 
 	try
 	{
-		for ( unsigned NG = 10; NG > 3; NG-- )
-		{
-			int tmpNumSum = 0;
-
-			for ( unsigned iGroup = 0; iGroup < NG-1; iGroup++ )
-			{
-				double ExpectVal = 0.0;
-				double ObserVal = 0.0;
-
-				NumGrp[ iGroup ] = int( n / NG + 0.5); // NG groups for data set
-
-				// Calculate the first (NG-1) groups
-				for ( unsigned jGroup = 0; jGroup < NumGrp[ iGroup ]; jGroup++ )
-				{
-					ExpectVal += aHL[ jGroup+tmpNumSum ];
-					ObserVal += bHL[ jGroup+tmpNumSum ];
-				}
-
-				tmpNumSum += NumGrp[ iGroup ];
-
-				// Most division_by_zero happening is due to Observal equals to 0.
-				double ObserValAvg = ObserVal / NumGrp[ iGroup ];
-
-				tmpSumHL = ObserVal * ( 1.0 - ObserVal / NumGrp[ iGroup ] );
-
-				if ( tmpSumHL != 0 )
-					ChiSquarSumHL += ( ( ExpectVal-ObserVal ) * ( ExpectVal-ObserVal ) ) / tmpSumHL;
-				else
-				{
-					if ( ObserValAvg > 0.5 )
-						ChiSquarSumHL += ( ( ExpectVal-ObserVal ) * ( ExpectVal-ObserVal ) ) / ObserValAvg;
-					else
-						ChiSquarSumHL += ( ( ExpectVal-ObserVal ) * ( ExpectVal-ObserVal ) ) / ( 0.5 );
-				}
-
-				// Calculate the (NG-1)th group
-				NumGrp[ NG - 1 ] = n - tmpNumSum;
-				double ExpectValNG = 0.0;
-				double ObserValNG = 0.0;
-				for ( unsigned jGroupNG = 0; jGroupNG < NumGrp[ NG - 1 ]; jGroupNG++ )
-				{
-					ExpectValNG += aHL[ jGroupNG + tmpNumSum ];
-					ObserValNG += bHL[ jGroupNG + tmpNumSum];
-				}
-
-				// Most division_by_zero happening is due to ObservalNG equals to 0.
-				double ObserValNGAvg = ObserValNG / NumGrp[ NG - 1 ];
-
-				tmpSumHL = ObserValNG * ( 1.0 - ObserValNG / NumGrp[ NG - 1 ] );
-
-				if ( tmpSumHL != 0.0 )
-					ChiSquarSumHL += ( ( ExpectValNG - ObserValNG ) * ( ExpectValNG - ObserValNG ) )
-						/ tmpSumHL;
-				else
-				{
-					if ( ObserValNGAvg > 0.5 )
-						ChiSquarSumHL += ( ( ExpectValNG - ObserValNG ) * ( ExpectValNG - ObserValNG ) ) / ObserValNGAvg;
-					else
-						ChiSquarSumHL += ( ExpectValNG - ObserValNG ) * ( ExpectValNG - ObserValNG ) / ( 0.5 );
-				}
-
-				// The degree of freedom for Hosmer-Lemeshow is (NG-2)
-				HLX2P = stats::pX2( NG-2, ChiSquarSumHL );
-			}
-
-			if ( HLX2P > tmpHLX2P ) // chose the largest values from different group number case
-				tmpHLX2P = HLX2P;
-		}
+		HLX2P = contradicted ? 0 : stats::pX2( g - 2, Chat );
 	}
 	catch ( stats::statsErr& e ) { throw twoSetErr( e.what() ); }
-	catch ( XY::XYErr& e ) { throw twoSetErr( e.what() ); }
 
 	HLX2calcFlag = true; // Hosmer-Lemeshow test statistics have been calculated
-	HLX2P = tmpHLX2P;
 }

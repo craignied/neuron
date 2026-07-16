@@ -293,7 +293,11 @@ Every model prints, for the training set and the test set:
   output looks like that, you are on an old binary — use the trapezoidal
   Hanley–McNeil interval and rebuild.)
 - **Goodness-of-fit** — Kolmogorov–Smirnov, Pearson chi-square, and
-  Hosmer–Lemeshow.
+  Hosmer–Lemeshow. The Hosmer–Lemeshow line is the canonical calibration
+  test for a logistic model (Ĉ over g = 10 deciles of risk against χ² on
+  8 df, exactly as in *Applied Logistic Regression* §5.2.2; builds before
+  2026-07-16 printed a defective variant that rejected true models about
+  half the time — see CLAUDE.md, legacy bug #9).
 - For logistic regression: **Wald tests** on every coefficient and the
   **condition number** of the information matrix (large values warn of
   collinearity — try re-grooming without `--refcat` to see it blow up).

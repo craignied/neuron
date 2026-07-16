@@ -30,12 +30,20 @@ cp ../xor_net.txt .
 # entirely in favour of Wickens' binomial error bars — there is no bin count to
 # search over, so the warning has nothing left to warn about; see
 # docs/roc_theory.md). The exclusion is the whole warning, both its lines.
+# Hosmer-Lemeshow (legacy bug #9, fixed in 3.0 2026-07-16): the oracle's
+# H-L accumulated junk terms across a group-count scan and reported the most
+# favorable p — on these 4 exemplars its own gammq happens to throw. 3.0
+# computes the textbook C-hat (g=10 deciles of risk) and refuses honestly
+# when there are fewer exemplars than groups; that refusal is asserted below.
 strip() { grep -v -e 'Welcome to' -e 'Thank you for using' -e 'Kolmogorov-Smirnov' \
-    -e '95% CI' -e 'Maximum number of bins' -e 'Setting Maximum number of bins' "$1"; }
+    -e '95% CI' -e 'Maximum number of bins' -e 'Setting Maximum number of bins' \
+    -e 'Hosmer-Lemeshow' "$1"; }
 fail=0
 diff <(strip verify_oracle.txt) <(strip verify_30.txt) || fail=1
 grep -q 'Kolmogorov-Smirnov goodness of fit D = 1, p = 0.0970269' verify_30.txt \
     || { echo "FAIL: 3.0 K-S line differs from known-correct value" >&2; fail=1; }
+grep -q 'fewer exemplars than Hosmer-Lemeshow groups (10)' verify_30.txt \
+    || { echo "FAIL: 3.0 H-L should refuse on 4 exemplars (known-correct behavior)" >&2; fail=1; }
 if [ $fail -eq 0 ]; then
     echo "OK: oracle and 3.0 outputs identical (K-S checked against known-correct value)"
 else

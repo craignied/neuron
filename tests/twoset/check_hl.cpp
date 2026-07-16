@@ -52,16 +52,113 @@ static bool check( unsigned nRows )
 	return false;
 }
 
+// A hand-computable case pinning the textbook C-hat (H&L 2nd ed. section
+// 5.2.2). Twenty rows, all fitted probabilities 0.5, so the ten groups are
+// consecutive row pairs (stable sort keeps row order on ties). Nine groups
+// observe exactly their expectation (outcomes 1,0 -> O = E = 1: zero terms);
+// the last observes 0,0 against E = 1:
+//     term = (O-E)^2 / (n_k pibar (1-pibar)) = 1 / (2 * .5 * .5) = 2
+// so C-hat = 2 on g-2 = 8 df, and for even df the survival function is
+// closed-form: p = e^{-1} (1 + 1 + 1/2 + 1/6) = 0.98101184.
+// The 2004 algorithm this replaced (legacy bug #9) gives a different number
+// -- verified by compiling this test against it and watching it fail.
+static bool check_textbook()
+{
+	Matrix< double > M( 20, 2 );
+	for ( unsigned i = 0; i < 20; i++ )
+	{
+		M( i, 0 ) = ( i < 18 ) ? ( i % 2 == 0 ? 1 : 0 ) : 0;
+		M( i, 1 ) = 0.5;
+	}
+	TwoSet t( M );
+	double p = t.getHLX2();
+
+	cout << "hand-computed C-hat=2, df=8: p = " << p;
+	if ( fabs( p - 0.98101184 ) < 1e-6 )
+	{
+		cout << "  OK" << endl;
+		return true;
+	}
+	cout << "  FAIL (want 0.98101184)" << endl;
+	return false;
+}
+
+// Calibration: on data where the fitted probabilities ARE the truth, a
+// goodness-of-fit test must not cry misfit. With known-true probabilities
+// the statistic runs a little hot against chi-squared(g-2) (that df assumes
+// estimated parameters), so theory puts the rejection rate near 11%, not 5%
+// -- the guard allows 20%. The 2004 algorithm rejected a true model 54% of
+// the time; this assertion fails against it.
+static bool check_calibration()
+{
+	mt19937 gen( 20260716 );
+	normal_distribution< double > x( 0.0, 1.0 );
+	uniform_real_distribution< double > u( 0.0, 1.0 );
+
+	const unsigned sims = 400, nRows = 200;
+	unsigned rejected = 0;
+	for ( unsigned s = 0; s < sims; s++ )
+	{
+		Matrix< double > M( nRows, 2 );
+		for ( unsigned i = 0; i < nRows; i++ )
+		{
+			double prob = 1.0 / ( 1.0 + exp( -( 0.5 + 1.2 * x( gen ) ) ) );
+			M( i, 0 ) = ( u( gen ) < prob ) ? 1 : 0;
+			M( i, 1 ) = prob;
+		}
+		TwoSet t( M );
+		if ( t.getHLX2() < 0.05 )
+			rejected++;
+	}
+	double rate = ( double ) rejected / sims;
+
+	cout << "calibration, model true: rejected " << rate * 100 << "% at alpha=0.05";
+	if ( rate < 0.20 )
+	{
+		cout << "  OK" << endl;
+		return true;
+	}
+	cout << "  FAIL (want < 20%)" << endl;
+	return false;
+}
+
+// Fewer exemplars than groups: the honest answer is a refusal, not a number
+static bool check_small()
+{
+	Matrix< double > M( 4, 2 );
+	for ( unsigned i = 0; i < 4; i++ )
+	{
+		M( i, 0 ) = ( i < 2 ) ? 1 : 0;
+		M( i, 1 ) = ( i < 2 ) ? 0.9 : 0.1;
+	}
+	TwoSet t( M );
+	bool threw = false;
+	try { t.getHLX2(); }
+	catch ( TwoSet::twoSetErr& ) { threw = true; }
+
+	cout << "4 exemplars: " << ( threw ? "refused" : "returned a number" );
+	if ( threw )
+	{
+		cout << "  OK" << endl;
+		return true;
+	}
+	cout << "  FAIL (want a refusal)" << endl;
+	return false;
+}
+
 int main()
 {
 	bool ok = true;
 
 	ok &= check( 9999 );  // just under the old fixed array size
-	ok &= check( 12000 ); // past it: segfaulted before the fix
+	ok &= check( 12000 ); // past it: segfaulted before the 2026-07-16 fix
+	ok &= check_textbook();
+	ok &= check_calibration();
+	ok &= check_small();
 
 	if ( ok )
 	{
-		cout << "check_hl: Hosmer-Lemeshow survives large datasets" << endl;
+		cout << "check_hl: Hosmer-Lemeshow matches the textbook and survives large datasets" << endl;
 		return 0;
 	}
 	cerr << "check_hl: FAILED" << endl;
