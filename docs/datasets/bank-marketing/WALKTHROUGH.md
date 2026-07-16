@@ -292,12 +292,20 @@ Every model prints, for the training set and the test set:
   too narrow, plus a second "best AUC" fit from an arbitrary binning; if your
   output looks like that, you are on an old binary — use the trapezoidal
   Hanley–McNeil interval and rebuild.)
-- **Goodness-of-fit** — Kolmogorov–Smirnov, Pearson chi-square, and
-  Hosmer–Lemeshow. The Hosmer–Lemeshow line is the canonical calibration
-  test for a logistic model (Ĉ over g = 10 deciles of risk against χ² on
-  8 df, exactly as in *Applied Logistic Regression* §5.2.2; builds before
-  2026-07-16 printed a defective variant that rejected true models about
-  half the time — see CLAUDE.md, legacy bug #9).
+- **Goodness-of-fit** — Kolmogorov–Smirnov, Pearson, and Hosmer–Lemeshow.
+  The **Hosmer–Lemeshow line is the calibration test to quote**: Ĉ over
+  g = 10 deciles of risk against χ² on 8 df, exactly as in Hosmer &
+  Lemeshow, *Applied Logistic Regression*, 2nd ed. (Wiley, 2000), §5.2.2 —
+  the canonical g every published reference value uses. The **Pearson line
+  is a statistic, deliberately without a p-value**: with continuous inputs
+  every covariate pattern is a single exemplar, and the individual-level X²
+  then has no valid χ² reference — the very problem the Hosmer–Lemeshow
+  grouping was invented to solve. Read it as a scale check instead: under a
+  well-fitted model E[X²] ≈ n, so X² far above n suggests overdispersion or
+  misfit. (Builds before 2026-07-16 printed a defective Hosmer–Lemeshow
+  variant that rejected true models about half the time, and a Pearson "p"
+  that shrank with sample size regardless of fit — see CLAUDE.md, legacy
+  bug #9. Do not quote either from an old binary.)
 - For logistic regression: **Wald tests** on every coefficient and the
   **condition number** of the information matrix (large values warn of
   collinearity — try re-grooming without `--refcat` to see it blow up).

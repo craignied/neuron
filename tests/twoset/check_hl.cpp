@@ -122,6 +122,32 @@ static bool check_calibration()
 	return false;
 }
 
+// The Pearson value is a hand-computable STATISTIC (never a p -- none exists
+// at the individual level; see TwoSet::PKX2calc). Twenty rows, all fitted
+// probabilities 0.5: every squared Pearson residual is 0.25/0.25 = 1, so
+// X2 = 20 exactly. The 2004 implementation returned a "p" from a hardcoded
+// chi-squared(2) instead -- 0.0059 on this data -- so this fails against it.
+static bool check_pearson()
+{
+	Matrix< double > M( 20, 2 );
+	for ( unsigned i = 0; i < 20; i++ )
+	{
+		M( i, 0 ) = ( i % 2 == 0 ) ? 1 : 0;
+		M( i, 1 ) = 0.5;
+	}
+	TwoSet t( M );
+	double x2 = t.getPearsonX2();
+
+	cout << "Pearson X2 on 20 unit residuals = " << x2;
+	if ( fabs( x2 - 20.0 ) < 1e-9 )
+	{
+		cout << "  OK" << endl;
+		return true;
+	}
+	cout << "  FAIL (want exactly 20)" << endl;
+	return false;
+}
+
 // Fewer exemplars than groups: the honest answer is a refusal, not a number
 static bool check_small()
 {
@@ -154,6 +180,7 @@ int main()
 	ok &= check( 12000 ); // past it: segfaulted before the 2026-07-16 fix
 	ok &= check_textbook();
 	ok &= check_calibration();
+	ok &= check_pearson();
 	ok &= check_small();
 
 	if ( ok )

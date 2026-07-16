@@ -35,15 +35,24 @@ cp ../xor_net.txt .
 # favorable p — on these 4 exemplars its own gammq happens to throw. 3.0
 # computes the textbook C-hat (g=10 deciles of risk) and refuses honestly
 # when there are fewer exemplars than groups; that refusal is asserted below.
+# Pearson (same audit): the oracle printed a "p" from a hardcoded
+# chi-squared(2) over a statistic that scales with n — noise. 3.0 prints the
+# correct individual-level X2 with NO p (none validly exists at cells of
+# size 1); on this near-perfectly-fitted XOR the residuals are tiny, so the
+# known-correct X2 is near zero — asserted below. (3.0's Pearson line ends
+# "see Hosmer-Lemeshow", so that exclusion catches it; the Pearson exclusion
+# below is for the oracle's own line.)
 strip() { grep -v -e 'Welcome to' -e 'Thank you for using' -e 'Kolmogorov-Smirnov' \
     -e '95% CI' -e 'Maximum number of bins' -e 'Setting Maximum number of bins' \
-    -e 'Hosmer-Lemeshow' "$1"; }
+    -e 'Hosmer-Lemeshow' -e 'Pearson' "$1"; }
 fail=0
 diff <(strip verify_oracle.txt) <(strip verify_30.txt) || fail=1
 grep -q 'Kolmogorov-Smirnov goodness of fit D = 1, p = 0.0970269' verify_30.txt \
     || { echo "FAIL: 3.0 K-S line differs from known-correct value" >&2; fail=1; }
 grep -q 'fewer exemplars than Hosmer-Lemeshow groups (10)' verify_30.txt \
     || { echo "FAIL: 3.0 H-L should refuse on 4 exemplars (known-correct behavior)" >&2; fail=1; }
+grep -q 'Pearson X2 = 0.0103491 (n = 4; no valid p at the individual level' verify_30.txt \
+    || { echo "FAIL: 3.0 Pearson line differs from known-correct statistic" >&2; fail=1; }
 if [ $fail -eq 0 ]; then
     echo "OK: oracle and 3.0 outputs identical (K-S checked against known-correct value)"
 else

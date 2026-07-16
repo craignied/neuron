@@ -253,7 +253,7 @@ By trapezoidal method, ROC area = 0.623609
 95% CI = 0.521339 - 0.725878 (SE = 0.052178, Hanley-McNeil)
 Number thresholds = 100
 Kolmogorov-Smirnov goodness of fit D = 0.204082, p = 0.139907
-Pearson's Chi-Square goodness of fit p = 3.08593e-22
+Pearson X2 = 142.643 (n = 142; no valid p at the individual level - see Hosmer-Lemeshow)
 Hosmer-Lemeshow goodness of fit p = 0.746803
 
 Test set:
@@ -279,7 +279,7 @@ By trapezoidal method, ROC area = 0.689583
 95% CI = 0.519083 - 0.860084 (SE = 0.086990, Hanley-McNeil)
 Number thresholds = 47
 Kolmogorov-Smirnov goodness of fit D = 0.310417, p = 0.229615
-Pearson's Chi-Square goodness of fit p = 1.24926e-07
+Pearson X2 = 45.4687 (n = 47; no valid p at the individual level - see Hosmer-Lemeshow)
 Hosmer-Lemeshow goodness of fit p = 0.733198
 
    Input:       Beta weight:     Std Err:    Wald p(W!=0):

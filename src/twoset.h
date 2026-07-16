@@ -158,8 +158,17 @@ public:
 	double getKSD(); // returns D
 	double getKSP(); // returns p-value
 
-	// Hui Liu added 08/15/2004 Accessors for Pearson's Chi-Square test
-	double getPearsonX2();  //;
+	// The individual-level Pearson chi-square STATISTIC, sum of squared
+	//    Pearson residuals (y - g)^2 / (g(1-g)). Deliberately not a p-value:
+	//    with continuous covariates the covariate patterns are the exemplars
+	//    themselves (cells of size 1), and X2 then has no valid chi-squared
+	//    reference -- the problem the Hosmer-Lemeshow test exists to solve
+	//    (Hosmer & Lemeshow, Applied Logistic Regression, 2nd ed., ch. 5).
+	//    Under a well-fitted model E[X2] is about n; X2 far above n suggests
+	//    overdispersion. The 2004 implementation printed a "p" from a
+	//    hardcoded chi-squared(2) whose statistic scaled with n -- noise on
+	//    any nontrivial dataset (see CLAUDE.md 2026-07-16, with legacy bug #9).
+	double getPearsonX2();
 
 	// Hui Liu added 08/16/2004 Accessors for Hosmer-Lemeshow test
 	double getHLX2();  //;
@@ -198,7 +207,7 @@ public:
 		statChi2, // chi-squared value for fitted line for statistical ROC calculation
 		KSD, // Kolmogorov-Smirnov test D value
 		KSP, // Kolmogorov-Smirnov test p-value
-	    PKX2P, // Pearson's Chi-Square test p-value   Hui Liu added 08/15/2004
+	    PKX2, // Pearson chi-square STATISTIC (no valid p exists; see getPearsonX2)
 		HLX2P;  // Hosmer-Lemeshow test p-value   Hui Liu added 08/16/2004
 
 	ROCfit statFit; // cached fit, so the panel and the report agree

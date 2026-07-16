@@ -669,15 +669,27 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   H-L lines — lbw train 0.6392→0.7468, test 0.4209→0.7332, and the small-set refusals,
   where the old code was already failing via the gcf throw); oracle H-L line excluded
   with 3.0's refusal asserted (the KScalc pattern).
-  **Pearson forensics (same session, decision PENDING):** `PKX2calc` is unsalvageable as
-  a p-value — denominator g(1−g/n) ≈ g instead of g(1−g), so the statistic's expectation
-  under a TRUE model is ≈ n − Σĝ (measured: lbw 127.9 vs predicted 130.0), referred to a
+  **Pearson forensics (same session):** `PKX2calc` was unsalvageable as a p-value —
+  denominator g(1−g/n) ≈ g instead of g(1−g), so the statistic's expectation under a
+  TRUE model was ≈ n − Σĝ (measured: lbw 127.9 vs predicted 130.0), referred to a
   hardcoded χ²(2) → **p → 0 as n grows regardless of fit** (true-model median p: 0.14 at
   n=10, 8e-5 at n=50, 1e-44 at n=500). Deeper: even computed correctly, individual-level
   Pearson X² has no valid χ² reference with continuous covariates (cells of size 1, df
   needs the model's parameter count, which TwoSet doesn't know) — the problem the H-L
-  test was invented to solve. Options put to Craig: drop the line; print the correct X²
-  with n and no p; or a normal approximation with caveats.
+  test was invented to solve. **Craig's decision: print the correct X² with n and NO p**
+  ("Pearson X2 = ... (n = ...; no valid p at the individual level - see
+  Hosmer-Lemeshow)"), the explanation kept in the docs (walkthrough §6 reading guide +
+  the PKX2calc/getPearsonX2 comments carry the full H&L citation and the E[X²] ≈ n
+  reading rule). Landed 2026-07-16 evening: correct squared-Pearson-residual sum,
+  saturated-model guard (a contradicted certain prediction → X² = inf), GUI JSON
+  `pearsonP` → `pearsonX2` with the page labeling it as a statistic. `check_hl` gained a
+  hand-exact case (20 unit residuals → X² = 20 exactly — cannot pass against the old
+  getter, which returned a p ∈ [0,1]). Goldens re-blessed (Pearson lines only), and the
+  diff **corroborates the implementation on real data**: lbw train X² = 142.6 on
+  n = 142, test 45.5 on n = 47 — the E[X²] ≈ n signature of a well-fitted model — and
+  the XOR null-model case gives X² = 4 on n = 4 exactly. Oracle: Pearson excluded, 3.0's
+  line pinned (X² = 0.0103 on the near-perfectly-fitted XOR net — near-zero residuals,
+  the known-correct answer).
 
 ## ROADMAP 3 (agreed with Craig 2026-07-15) — ROC inference
 

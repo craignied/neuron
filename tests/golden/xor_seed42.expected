@@ -213,7 +213,7 @@ By trapezoidal method, ROC area = 1.000000
 95% CI = 1.000000 - 1.000000 (SE = 0.000000, Hanley-McNeil)
 Number thresholds = 4
 Kolmogorov-Smirnov goodness of fit D = 1, p = 0.0970269
-Pearson's Chi-Square goodness of fit p = 0.997129
+Pearson X2 = 0.0110271 (n = 4; no valid p at the individual level - see Hosmer-Lemeshow)
 Hosmer-Lemeshow goodness of fit p = Could not calculate Hosmer-Lemeshow goodness of fit: fewer exemplars than Hosmer-Lemeshow groups (10)
 
 Would you like to save this model (yes/no)? 

@@ -306,7 +306,10 @@ string jsonStatsSet( TwoSet& t )
 	catch ( ... ) { out << "null"; }
 	out << ",";
 
-	emit( "pearsonP", [ &t ] { return t.getPearsonX2(); } );
+	// The Pearson value is the STATISTIC, not a p (no valid p exists at the
+	//    individual level -- see TwoSet::PKX2calc); n travels beside it in
+	//    this object, and X2 >> n is the overdispersion signal
+	emit( "pearsonX2", [ &t ] { return t.getPearsonX2(); } );
 	// last field: no trailing comma
 	out << "\"hlP\":";
 	try { out << jnum( t.getHLX2() ); } catch ( ... ) { out << "null"; }

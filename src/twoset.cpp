@@ -3,6 +3,8 @@
 
 #include "stdafx.h" // For MSVC++ MUST BE FIRST!
 
+#include <limits>
+
 #include "twoset.h"
 
 // Default constructor
@@ -35,7 +37,7 @@ void TwoSet::initialize()
 	HLX2calcFlag = false;  //  Hui Liu added 09/09/2004
 	// Zero the cached statistic values so no path can ever print
 	//    uninitialized memory (2.x left these uninitialized)
-	statP = statChi2 = KSD = KSP = PKX2P = HLX2P = 0;
+	statP = statChi2 = KSD = KSP = PKX2 = HLX2P = 0;
 	statPoints = 0;
 }
 
@@ -83,7 +85,7 @@ void TwoSet::copy( const TwoSet& rhs )
 	//    flags but not the values, so copies claimed statistics they never held
 	KSD = rhs.KSD;
 	KSP = rhs.KSP;
-	PKX2P = rhs.PKX2P;
+	PKX2 = rhs.PKX2;
 	HLX2P = rhs.HLX2P;
 	statFit = rhs.statFit;
 	statCi = rhs.statCi;
@@ -1042,51 +1044,65 @@ void TwoSet::KScalc()
 	catch ( XY::XYErr& e ) { throw twoSetErr( e.what() ); }
 }
 
-// Accessors for Pearson's Chi-Square test Hui Liu added 08/15/2004
-double TwoSet::getPearsonX2()  // returns p-value
+// Returns the individual-level Pearson chi-square STATISTIC (see twoset.h
+//    on why there is deliberately no p-value with it)
+double TwoSet::getPearsonX2()
 {
 	if ( !PKX2calcFlag )
 		PKX2calc();
 
-		return PKX2P;
+	return PKX2;
 }
 
-// Utility method to calculate Pearson's Chi-Square statistic Hui Liu modified 09/25/2004
-// Craig Niederberger modified 3/12/2009 to throw exceptions
+// The individual-level Pearson chi-square statistic: the sum of squared
+//    Pearson residuals over the exemplars,
+//
+//        X2 = sum_i ( y_i - g_i )^2 / ( g_i ( 1 - g_i ) )
+//
+//    where g_i is the fitted probability. Under a well-fitted model each
+//    term has expectation 1, so E[X2] is about n; X2 far above n suggests
+//    overdispersion or misfit. NO p-value is computed, on purpose: with
+//    continuous covariates the covariate patterns are the exemplars
+//    themselves (every cell has size 1), and X2 then has no valid
+//    chi-squared reference -- its degrees of freedom would also need the
+//    model's parameter count, which a TwoSet cannot know. This is exactly
+//    the problem the Hosmer-Lemeshow grouping solves (Hosmer, D.W., &
+//    Lemeshow, S., Applied Logistic Regression, 2nd ed., Wiley, 2000,
+//    ch. 5); refer goodness-of-fit questions to that line. The 2004
+//    implementation this replaces printed a "p" from a hardcoded
+//    chi-squared(2) whose statistic grew with n -- measured: p -> 0 on any
+//    nontrivial dataset even when the model was TRUE (CLAUDE.md 2026-07-16,
+//    found with legacy bug #9).
 void TwoSet::PKX2calc()
 {
 	if ( !loadedFlag ) // a Matrix must have been loaded
-		util::screen() << "I'm sorry, but a TwoSet Matrix has not yet been defined." << endl;
-
-	else try
 	{
-		double PKX2= 0.0;
-		double tmpSumPX= 0.0;
+		util::screen() << "I'm sorry, but a TwoSet Matrix has not yet been defined." << endl;
+		return;
+	}
 
-		for ( unsigned iAi1 = 0; iAi1 < n; iAi1++ )
+	vector< double > known = A.col( 0 ), guess = A.col( 1 );
+
+	PKX2 = 0;
+	for ( unsigned i = 0; i < n; i++ )
+	{
+		double variance = guess[ i ] * ( 1 - guess[ i ] );
+
+		// A fitted probability of exactly 0 or 1 (a saturated model) has no
+		//    variance: a correct certain prediction contributes nothing, and
+		//    a contradicted one no finite statistic can express
+		if ( variance <= 0 )
 		{
-			tmpSumPX += A(iAi1, 1);
+			if ( known[ i ] == guess[ i ] )
+				continue;
+			PKX2 = numeric_limits< double >::infinity();
+			break;
 		}
 
-		tmpSumPX= tmpSumPX/n;  // Most division_by_zero case happenning is due to A(i,1)=0. So we average A(i,1).
-
-		for ( unsigned i = 0; i < n; i++ )
-		{
-			if ( ( A ( i, 1 ) * ( 1 - A( i, 1 ) / n ) ) == 0 )
-				if ( tmpSumPX > 0.5 )
-					PKX2 += ( ( A( i, 0 ) - A( i, 1 ) ) * ( A( i, 0 ) - A( i, 1 ) ) ) / ( tmpSumPX );
-				else
-					PKX2 += ( A ( i, 0 ) - A( i, 1 ) ) * ( A( i, 0 ) - A( i, 1 ) ) / ( 0.5 );
-			else
-				PKX2 += ( ( A( i, 0 ) - A( i, 1 ) ) * ( A( i, 0 ) - A( i, 1 ) ) ) / (A( i, 1 ) * ( 1 - A( i, 1 ) / n ) );
-		 }
-
-
-		PKX2P = stats::pX2(2, PKX2 ); // The default degree of freedom for Pearson's Chi-Sqaure is 2
-		PKX2calcFlag = true; // Pearson's Chi-Square test statistics have been calculated
+		PKX2 += ( known[ i ] - guess[ i ] ) * ( known[ i ] - guess[ i ] ) / variance;
 	}
-	catch ( stats::statsErr& e ) { throw twoSetErr( e.what() ); }
-	catch ( XY::XYErr& e ) { throw twoSetErr( e.what() ); }
+
+	PKX2calcFlag = true; // the Pearson statistic has been calculated
 }
 
 // Accessors for Hosmer-Lemeshow statistic Hui Liu added 08/16/2004
@@ -1098,10 +1114,12 @@ double TwoSet::getHLX2()   // returns p-value
 	return HLX2P;
 }
 
-// The Hosmer-Lemeshow goodness-of-fit statistic, as defined in Hosmer &
-//    Lemeshow, Applied Logistic Regression, 2nd ed., section 5.2.2: sort the
-//    exemplars by fitted probability, cut them into g equal-count groups
-//    ("deciles of risk"), and refer
+// The Hosmer-Lemeshow goodness-of-fit statistic, as defined in Hosmer, D.W.,
+//    & Lemeshow, S., Applied Logistic Regression, 2nd ed., Wiley, 2000,
+//    section 5.2.2 (the same book, model, and data as
+//    docs/datasets/low-birth-weight, whose committed fit self-verifies the
+//    engine): sort the exemplars by fitted probability, cut them into g
+//    equal-count groups ("deciles of risk"), and refer
 //
 //        C-hat = sum_k ( O_k - E_k )^2 / ( n_k * pibar_k * ( 1 - pibar_k ) )
 //

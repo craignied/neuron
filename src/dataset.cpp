@@ -1006,8 +1006,12 @@ void DataSet::metricsReport( ostream& outputStream )
 				outputStream << "Could not calculate Kolmogorov-Smirnov goodness of fit: " << e.what() << endl;
 			}	
 
-			// Output training set Pearson's Chi-Square test results Hui Liu added 08/15/2004			
-			outputStream << "Pearson's Chi-Square goodness of fit p = " << TrainTwoSet.getPearsonX2() << endl;
+			// The Pearson statistic carries no p on purpose: no valid
+			//    chi-squared reference exists at the individual level (see
+			//    TwoSet::PKX2calc); under a good fit X2 is about n
+			outputStream << "Pearson X2 = " << TrainTwoSet.getPearsonX2()
+				<< " (n = " << TrainTwoSet.getNumElements()
+				<< "; no valid p at the individual level - see Hosmer-Lemeshow)" << endl;
 		
 			// Output training set Hosmer-Lemeshow test results Hui Liu added 08/16/2004
 			// Craig Niederberger modified 3/12/2009 to catch exceptions
@@ -1091,8 +1095,10 @@ void DataSet::metricsReport( ostream& outputStream )
 				outputStream << "Could not calculate Kolmogorov-Smirnov goodness of fit: " << e.what() << endl;
 			}
 			
-		    // Output test set Pearson's Chi-Square test results     Hui Liu added 08/15/2004
-			outputStream << "Pearson's Chi-Square goodness of fit p = " << TestTwoSet.getPearsonX2() << endl;
+			// See the training-set Pearson note above: a statistic, never a p
+			outputStream << "Pearson X2 = " << TestTwoSet.getPearsonX2()
+				<< " (n = " << TestTwoSet.getNumElements()
+				<< "; no valid p at the individual level - see Hosmer-Lemeshow)" << endl;
 		
 			// Output test set Hosmer-Lemeshow test results Hui Liu added 08/16/2004
 			// Craig Niederberger modified 3/12/2009 to catch exceptions

@@ -421,7 +421,10 @@ function renderFullStats(st) {
     // goodness of fit
     if (s.ks) h += `<div class="statline"><span class="lbl">Kolmogorov&ndash;Smirnov</span> `
       + `D ${num(s.ks.d)}, p ${num(s.ks.p)}</div>`;
-    h += `<div class="statline"><span class="lbl">Pearson &chi;&sup2; p</span> ${num(s.pearsonP)}`
+    // Pearson is shown as a statistic, never a p: none exists at the
+    // individual level (X&sup2; near n = fine; far above n = overdispersion)
+    h += `<div class="statline"><span class="lbl">Pearson &chi;&sup2;</span> ${num(s.pearsonX2, 1)}`
+      + ` <span class="muted">(no individual-level p &mdash; see H&ndash;L)</span>`
       + ` &middot; <span class="lbl">Hosmer&ndash;Lemeshow p</span> ${num(s.hlP)}</div>`;
     return h + `</div>`;
   };
