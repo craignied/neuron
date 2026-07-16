@@ -259,7 +259,15 @@ including a `stopReason` of max_iterations / grad_max / cancelled / …);
 `POST /api/train/stop` cancels. While a run is live every other
 engine-touching endpoint returns **HTTP 409** with `"busy":true` — retry
 after the run. Without `async=1`, `POST /api/train` blocks exactly as
-before. `POST /api/load` also accepts `discrete=0` for a continuous
+before. `algorithm` accepts `1`–`3` or **`auto`** (since 2026-07-16): auto
+probes all three optimizers on clones of the same starting weights for
+750 ms each (batch/epoch forced for CGD and Shanno, as they require),
+adopts the lowest-error probe — its progress kept — and continues training
+it to `maxiter`. The result JSON gains
+`autoAlgo{selected, selectedName, probes[{algorithm, name, error,
+iterations, stopReason}]}` and the report opens with the decision summary;
+a probe whose `stopReason` is `grad_max` **converged inside its budget**,
+which usually settles the choice outright. `POST /api/load` also accepts `discrete=0` for a continuous
 (regression) outcome — with `mode=raw` that requires `fraction=0` (the
 stratified split needs classes), so pre-split regression data loads via
 `mode=train` plus `testfile`/`testpath`.

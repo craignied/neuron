@@ -26,6 +26,7 @@
 #include <thread>
 
 #include "gui.h"
+#include "autoalgo.h"
 #include "dataset.h"
 #include "logistic.h"
 #include "simpleprop.h"
@@ -636,7 +637,11 @@ string handleRandomize( const httplib::Request& req )
 //    JSON (captured report, ROC curves, stats, stop reason). The caller must
 //    own the engine: either it holds engineMutex (blocking /api/train) or it
 //    is the async worker, with job.running gating every other handler out.
-string runTrainingAndBuildResult( bool continued )
+//    autoJson (may be empty) is the auto-selection block to embed in the
+//    result; preamble (may be empty) is report text captured before this
+//    call -- the probe decision summary -- prepended to the report.
+string runTrainingAndBuildResult( bool continued, const string& autoJson,
+	const string& preamble )
 {
 	Capture cap;
 	double finalError;
@@ -648,7 +653,7 @@ string runTrainingAndBuildResult( bool continued )
 	{
 		return string( "{\"ok\":false,\"message\":\"training failed: " )
 			+ jsonEscape( e.what() ) + "\",\"output\":\""
-			+ jsonEscape( cap.text.str() ) + "\"}";
+			+ jsonEscape( preamble + cap.text.str() ) + "\"}";
 	}
 
 	// ROC curves come from the model's own DataSet copy — that's where
@@ -675,30 +680,103 @@ string runTrainingAndBuildResult( bool continued )
 	if ( stopReason == "cancelled" )
 		msg << " (stopped by request)";
 
-	lastReport = cap.text.str(); // downloadable afterwards as report.txt
+	lastReport = preamble + cap.text.str(); // downloadable as report.txt
 	lastTrainError = finalError; // baseline for stepwise regression
 
 	// Full statistics panel (additive; the roc object above is unchanged)
 	string stats = jsonStats();
 	string statsField = stats.empty() ? "" : ( ",\"stats\":" + stats );
+	string autoField = autoJson.empty() ? "" : ( ",\"autoAlgo\":" + autoJson );
 
 	return string( "{\"ok\":true,\"message\":\"" ) + jsonEscape( msg.str() )
 		+ "\",\"stopReason\":\"" + stopReason
 		+ "\",\"output\":\"" + jsonEscape( lastReport ) + "\"" + roc
-		+ statsField + "}";
+		+ statsField + autoField + "}";
+}
+
+// The auto-selection result as JSON (the report carries the same story as
+//    the printed decision summary; this is the structured form)
+string jsonAutoAlgo( const autoalgo::Result& r )
+{
+	ostringstream out;
+	out.precision( 6 );
+	out << "{\"selected\":" << r.selected << ",\"selectedName\":\""
+		<< jsonEscape( r.selectedName ) << "\",\"cancelled\":"
+		<< ( r.cancelled ? "true" : "false" ) << ",\"probes\":[";
+	for ( unsigned i = 0; i < r.probes.size(); i++ )
+	{
+		const autoalgo::Probe& p = r.probes[ i ];
+		out << ( i ? "," : "" ) << "{\"algorithm\":" << p.algorithm
+			<< ",\"name\":\"" << jsonEscape( p.name )
+			<< "\",\"error\":" << ( p.usable ? jnum( p.error ) : "null" )
+			<< ",\"iterations\":" << p.iterations
+			<< ",\"stopReason\":\"" << stopReasonName( p.stop ) << "\"}";
+	}
+	out << "]}";
+	return out.str();
+}
+
+// The whole training job: optional auto algorithm selection (probe all
+//    three from identical weights, adopt the winner -- which REPLACES
+//    modelPtr, so every pointer is re-derived after it), then the real
+//    training run, observed for the GUI's realtime chart when asked. The
+//    caller must own the engine (see runTrainingAndBuildResult).
+string runTrainJob( bool continued, bool autoSelect, unsigned maxIter,
+	bool observed )
+{
+	string autoJson, preamble;
+
+	if ( autoSelect )
+	{
+		Network* net = dynamic_cast< Network* >( modelPtr.get() );
+
+		// The probe summary is captured separately so it can lead the report
+		Capture probeCap;
+		autoalgo::Result r = autoalgo::pick( *net, 750,
+			observed ? &job.cancel : nullptr );
+		preamble = probeCap.text.str();
+
+		autoJson = jsonAutoAlgo( r );
+
+		if ( r.winner ) // adopt the winning clone, probe progress kept
+		{
+			modelPtr = std::move( r.winner );
+			dynamic_cast< Iterative* >( modelPtr.get() )
+				->setMaxIterations( maxIter );
+		}
+	}
+
+	if ( !observed )
+		return runTrainingAndBuildResult( continued, autoJson, preamble );
+
+	// Observed (async) run: wire the realtime-chart observer to the model
+	//    that will actually train -- after any adoption above
+	Network* net = dynamic_cast< Network* >( modelPtr.get() );
+	Iterative* iter = dynamic_cast< Iterative* >( modelPtr.get() );
+	DataSet& md = modelPtr->getDataSet();
+	GuiObserver observer( net, md.testLoaded() ? md.getNumTest() : 0 );
+	iter->setObserver( &observer );
+	string result = runTrainingAndBuildResult( continued, autoJson, preamble );
+	iter->setObserver( nullptr );
+	return result;
 }
 
 string handleTrain( const httplib::Request& req )
 {
-	unsigned algorithm = ( unsigned ) atol( param( req, "algorithm" ).c_str() ),
-		maxIter = ( unsigned ) atol( param( req, "maxiter" ).c_str() );
-	string seed = param( req, "seed" );
+	string algoStr = param( req, "algorithm" ), seed = param( req, "seed" );
+	unsigned maxIter = ( unsigned ) atol( param( req, "maxiter" ).c_str() );
 	bool async = ( param( req, "async" ) == "1" );
+
+	// algorithm=auto probes all three optimizers from identical weights and
+	//    adopts the winner (autoalgo.h) before the real run
+	bool autoSelect = ( algoStr == "auto" );
+	unsigned algorithm = autoSelect ? 1
+		: ( unsigned ) atol( algoStr.c_str() );
 
 	if ( !modelPtr )
 		return jsonMsg( false, "create a model first" );
 	if ( algorithm < 1 || algorithm > 3 )
-		return jsonMsg( false, "algorithm must be 1, 2 or 3" );
+		return jsonMsg( false, "algorithm must be 1, 2, 3 or auto" );
 	if ( maxIter < 1 )
 		return jsonMsg( false, "max iterations must be at least 1" );
 	if ( !seed.empty() )
@@ -717,10 +795,11 @@ string handleTrain( const httplib::Request& req )
 	if ( !net->getWeightsSet() )
 		net->randomize();
 	iter->setMaxIterations( maxIter );
-	net->setTrainingType( algorithm - 1 );
+	if ( !autoSelect ) // auto: each probe sets its own; the winner's sticks
+		net->setTrainingType( algorithm - 1 );
 
 	if ( !async ) // the original blocking contract, unchanged
-		return runTrainingAndBuildResult( continued );
+		return runTrainJob( continued, autoSelect, maxIter, false );
 
 	// Async: hand the engine to a worker thread and return at once. The
 	//    caller holds engineMutex here; job.running (set before the worker
@@ -740,17 +819,13 @@ string handleTrain( const httplib::Request& req )
 	job.cancel = false;
 	job.running = true;
 
-	DataSet& md = modelPtr->getDataSet();
-	unsigned nTest = md.testLoaded() ? md.getNumTest() : 0;
-
-	job.worker = thread( [ continued, net, iter, nTest ]
+	// The worker re-derives every engine pointer itself: auto selection may
+	//    REPLACE modelPtr with the winning clone, so nothing dereferencable
+	//    is captured here. Its screen starts at cout (thread_local); the
+	//    Captures inside runTrainJob redirect it for the run.
+	job.worker = thread( [ continued, autoSelect, maxIter ]
 	{
-		// This thread's screen starts at cout (thread_local); the Capture
-		//    inside runTrainingAndBuildResult redirects it for the run
-		GuiObserver observer( net, nTest );
-		iter->setObserver( &observer );
-		string result = runTrainingAndBuildResult( continued );
-		iter->setObserver( nullptr );
+		string result = runTrainJob( continued, autoSelect, maxIter, true );
 
 		{
 			lock_guard< mutex > lock( job.progressMutex );
@@ -759,7 +834,8 @@ string handleTrain( const httplib::Request& req )
 		job.running = false;
 	} );
 
-	return jsonMsg( true, "training started" );
+	return jsonMsg( true, autoSelect
+		? "probing algorithms, then training" : "training started" );
 }
 
 // Progress of the async run: the decimated error series while it runs, plus

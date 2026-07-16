@@ -10,6 +10,7 @@
 #include <string>
 #include <typeinfo>
 
+#include "netclone.h"   // cloneNetwork, the generalized network copy
 #include "simpleprop.h" // SimpleProp class
 #include "bareprop.h"   // BareProp class
 #include "backprop.h"   // BackProp class
@@ -133,24 +134,16 @@ void RegressNet::print_regression_table( const ptable& p_values )
 	report( out ); // use previously coded report() method
 }
 
-// Makes a copy of the incoming Network (add here if you add a new Network object)
+// Makes a copy of the incoming Network via cloneNetwork(), the generalized
+//    typeid dispatch that once lived here (netclone.h -- add new Network
+//    types THERE; auto algorithm selection clones through the same path)
 bool RegressNet::copy_network()
 {
 	bool success = true;
 
-	if ( typeid( *netPtr ) == typeid( BareProp ) ) // it's a BareProp network
-		// Create new BareProp object with copy ctor & set pointer to the copy
-		netCopyPtr = make_unique< BareProp >( *dynamic_cast< BareProp* >( netPtr ) );
-	else if ( typeid( *netPtr ) == typeid( SimpleProp ) ) // it's a SimpleProp network
-		// Create new SimpleProp object with copy ctor & set pointer to the copy
-		netCopyPtr = make_unique< SimpleProp >( *dynamic_cast< SimpleProp* >( netPtr ) );
-	else if ( typeid( *netPtr ) == typeid( BackProp ) ) // it's a BackProp network
-		// Create new BackProp object with copy ctor & set pointer to the copy
-		netCopyPtr = make_unique< BackProp >( *dynamic_cast< BackProp* >( netPtr ) );
-	else if ( typeid( *netPtr ) == typeid( Logistic ) ) // it's a Binary logistic network
-		// Create new Logistic object with copy ctor & set pointer to the copy
-		netCopyPtr = make_unique< Logistic >( *dynamic_cast< Logistic* >( netPtr ) );
-	else // no identifiable Network type was found
+	netCopyPtr = cloneNetwork( *netPtr );
+
+	if ( !netCopyPtr ) // no identifiable Network type was found
 	{
 		errorOut << errorString << "couldn't copy Network, unknown type";
 		throw RegressNetErr( errorOut.str().c_str() );

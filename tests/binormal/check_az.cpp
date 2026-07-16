@@ -15,6 +15,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <random>
 
 #include "twoset.h"
@@ -212,6 +213,44 @@ static bool check_se( double mu1, double s1, unsigned nPerClass, unsigned reps )
 	return false;
 }
 
+// A diverged network produces NaN guesses. The sweep must survive them:
+// NaN != NaN, so a naive tie-group cumulation never consumes a NaN element
+// -- the first diverged training probe found that as an INFINITE loop
+// (2026-07-16; this test hangs against that code). The old per-threshold
+// recount never counted a NaN row as predicted positive at any finite
+// threshold, so the fix excludes NaN scores from the sweep while keeping
+// every row in the class denominators.
+static bool check_nan_guesses()
+{
+	mt19937 gen( 99 );
+	normal_distribution< double > negative( 0.0, 1.0 ), positive( 1.5, 1.0 );
+
+	Matrix< double > M( 60, 2 );
+	for ( unsigned i = 0; i < 60; i++ )
+	{
+		M( i, 0 ) = ( i % 2 ) ? 1 : 0;
+		M( i, 1 ) = ( i % 2 ) ? positive( gen ) : negative( gen );
+	}
+	// Poison a few guesses in both classes, the way divergence actually does
+	M( 10, 1 ) = numeric_limits< double >::quiet_NaN();
+	M( 11, 1 ) = numeric_limits< double >::quiet_NaN();
+	M( 12, 1 ) = numeric_limits< double >::infinity();
+
+	TwoSet t( M );
+	t.setBootstrapResamples( 50 ); // exercise the resample path over NaNs too
+	TwoSet::ROCfit f = t.getROCfit();
+
+	cout << "NaN guesses: fit " << ( f.valid ? "valid" : "invalid" )
+		<< ", Az = " << f.az << " from " << f.points << " points";
+	if ( f.valid && isfinite( f.az ) && f.az > 0.5 && f.points < 60 )
+	{
+		cout << "  OK" << endl;
+		return true;
+	}
+	cout << "  FAIL (want a finite fit over the finite scores)" << endl;
+	return false;
+}
+
 int main()
 {
 	bool ok = true;
@@ -226,6 +265,8 @@ int main()
 	ok &= check_var_identical();
 	// Tied scores must not cost binnings or bootstrap resamples
 	ok &= check_ties( 100, 42, 0.7 );
+	// NaN guesses (a diverged network) must not hang or poison the sweep
+	ok &= check_nan_guesses();
 	// Bootstrap SE matches sampling variability
 	ok &= check_se( 1.0, 1.0, 200, 40 );
 

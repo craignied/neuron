@@ -691,6 +691,42 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   line pinned (X² = 0.0103 on the near-perfectly-fitted XOR net — near-zero residuals,
   the known-correct answer).
 
+- **2026-07-16 (night) — ROADMAP 2 Phase 2 DONE: `algorithm=auto`. Its first diverged
+  probe found a bug I had shipped 24 hours earlier.** What landed:
+  1. **`src/netclone.{h,cpp}`** — RegressNet's typeid clone dispatch generalized to
+     `cloneNetwork()`; RegressNet refactored onto it (pure refactor, regress golden
+     byte-identical).
+  2. **`src/autoalgo.{h,cpp}` `pick()`** — three clones from identical weights, 750 ms
+     wall-clock each via a `BudgetObserver` (Iterative::copy nulls observers, so clones
+     never drive the GUI's), batch/epoch forced for CGD/Shanno, probes leave no trace
+     (setLastop/setHistory off, **bootstrap disabled on probe clones' TwoSets** — else
+     each probe's discarded report would cost more than its budget), probe reports
+     discarded, one decision summary + per-probe stopReason printed to the caller's
+     screen. Winner = lowest finite error, strict comparison keeps the simpler
+     algorithm on ties; a diverged probe is a result, not a failure; the winning CLONE
+     is adopted (probe progress kept) and trains on to the user's maxiter.
+  3. **GUI**: `algorithm=auto` on `/api/train` (blocking and async), `autoAlgo` JSON
+     block, page dropdown option. The async worker was restructured to re-derive every
+     engine pointer inside the job — adoption REPLACES modelPtr, so the 1b-era lambda
+     captures would have dangled; smoke covers async+auto specifically for this.
+  4. **The regression the probes caught: yesterday's `operatingPoints()` looped forever
+     on NaN guesses.** A diverged Shanno probe (error 1e63 → NaN guesses) hung its own
+     epilogue: NaN != NaN, so the tie-group cumulation never consumed a NaN element —
+     `i` never advanced, push_back forever (lldb sample: ROCarea → operatingPoints →
+     memmove). The wall-clock budget couldn't save it (the hang is inside one call).
+     Fix faithful to the old recount's semantics: non-finite scores never enter the
+     sweep (a NaN guess compares false at every finite threshold) but stay in the class
+     denominators. `check_az` gained a NaN-guesses case **verified to hang against
+     yesterday's committed code** (12 s timeout kill) and pass now; HLX2calc's
+     stable_sort comparator got the same NaN guard (NaNs last — comparing NaN in
+     std::sort is UB, and a NaN group poisons E so the fit p honestly fails).
+     Observed working after the fix: on lbw, canonical CONVERGES inside its 750 ms
+     probe (grad_max, error at the MLE) while CGD/Shanno diverge to 1e5/1e63 — the
+     selection picks canonical, exactly the bank-walkthrough lesson, automated.
+  Gates: zero-warning build, goldens byte-identical, 5/5 ctest, smoke (incl.
+  auto blocking + async), verify_oracle identical. **Next: ROADMAP 2 Phase 3**
+  (plateau auto-stop).
+
 ## ROADMAP 3 (agreed with Craig 2026-07-15) — ROC inference
 
 Rationale, citations, and Methods language: **`docs/roc_theory.md`**. Work in order.
@@ -977,8 +1013,11 @@ as any API change. Invoke the `dataviz` skill before writing chart code (Phase 1
   (sampleTestError), gui.cpp (TrainJob, 409, async=1, status/stop), gui_page.html.
   Smoke: existing lines unchanged + async poll-to-done, 409 busy, stop →
   `"cancelled"`; capture ctest two-thread assertion (verified to fail pre-fix).
-- **2 — auto algorithm**. New netclone + autoalgo; regressnet refactor. Smoke:
-  `algorithm=auto` → `autoAlgo` w/ 3 probes + `Selected` in report; goldens hold.
+- **2 — auto algorithm** (**DONE** 2026-07-16, see status entry). New netclone +
+  autoalgo; regressnet refactor (goldens held). Smoke: `algorithm=auto` → `autoAlgo`
+  w/ 3 probes + `Selected` in report, blocking AND async (adoption replaces modelPtr
+  mid-job — the worker re-derives its pointers). Probes carry per-probe stopReason;
+  bootstrap disabled on probe clones; diverged probes are results, not failures.
 - **3 — plateau auto-stop**. New plateau.h + tests/plateau ctest (4 synthetic traces:
   improving decay no-trigger, decay-then-flat trigger, flat sawtooth w/ window ≥2p
   trigger, sawtooth+slow-decay no-trigger). Smoke `autostop=1` → `stopReason`. Also

@@ -129,6 +129,17 @@ grep -q '"logistic":' logi.json || fail "no logistic stats block"
 grep -q '"waldP":' logi.json || fail "no Wald p-values in logistic stats"
 grep -q '"condNumber":' logi.json || fail "no condition number in logistic stats"
 
+# Auto algorithm selection (ROADMAP 2 Phase 2): probe all three optimizers
+#    from identical weights, adopt the winner, continue training to maxiter.
+#    The result carries the structured selection and the report carries the
+#    human-readable decision summary.
+curl -s -X POST "$URL/api/train" -d "algorithm=auto&maxiter=2000&seed=42" > auto.json
+grep -q '"ok":true' auto.json || fail "algorithm=auto train"
+grep -q '"autoAlgo":{"selected":' auto.json || fail "no autoAlgo selection block"
+[ $(grep -o '"algorithm":' auto.json | wc -l) -ge 3 ] || fail "want 3 probes in autoAlgo"
+grep -q 'Auto algorithm selection' auto.json || fail "no probe summary in the report"
+grep -q 'Selected: ' auto.json || fail "no decision line in the report"
+
 # The binormal path proper. Everything above is too small to reach it (4
 #    exemplars), so nothing above says anything about the ROC statistics --
 #    this is the case that does. The Hosmer-Lemeshow low-birth-weight set is
@@ -233,4 +244,16 @@ grep -q '"running":false' status2.json || fail "async run never completed"
 grep -q '"stopReason":"' status2.json || fail "no stopReason on the async result"
 grep -q '"stats":' status2.json || fail "async result missing the stats object"
 
-echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, binormal fits + null when impossible, logistic Wald/condition number, regress, saves, async train/status/stop + 409 busy + cancel)"
+# Async + auto together: the adoption REPLACES the model mid-job, so the
+#    worker must re-derive its pointers -- this is the path that would break
+curl -s -X POST "$URL/api/train" -d "algorithm=auto&maxiter=200&seed=42&async=1" \
+    | grep -q '"ok":true' || fail "async auto train did not start"
+for i in $(seq 1 240); do
+    curl -s "$URL/api/train/status" > status3.json
+    grep -q '"running":false' status3.json && break
+    sleep 0.5
+done
+grep -q '"running":false' status3.json || fail "async auto run never completed"
+grep -q '"autoAlgo":{"selected":' status3.json || fail "async result missing autoAlgo"
+
+echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, binormal fits + null when impossible, logistic Wald/condition number, regress, saves, async train/status/stop + 409 busy + cancel, algorithm=auto blocking + async)"

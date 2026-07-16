@@ -575,24 +575,35 @@ vector< TwoSet::OperatingPoint > TwoSet::operatingPoints( unsigned& n0, unsigned
 {
 	vector< double > known = A.col( 0 ), score = A.col( 1 );
 
-	n0 = n1 = 0; // class sizes: the binomial denominators
+	n0 = n1 = 0; // class sizes: the binomial denominators, over ALL rows
 	for ( unsigned row = 0; row < n; row++ )
 		if ( known[ row ] == 0 ) n0++; else n1++;
 
-	// Sort positions by descending score -- the direction the thresholds walk
-	vector< unsigned > order( n );
+	// Only finite scores enter the sweep. A NaN guess (a diverged network)
+	//    compares false against every threshold, so the old per-threshold
+	//    recount never counted such a row as predicted positive at ANY finite
+	//    threshold -- excluding the row from the cumulation, but NOT from the
+	//    class denominators above, reproduces that exactly. (It is also what
+	//    keeps this loop finite: NaN != NaN, so a NaN "tie group" would never
+	//    consume its own element -- the first diverged training probe found
+	//    that as an infinite loop, 2026-07-16.)
+	vector< unsigned > order;
+	order.reserve( n );
 	for ( unsigned i = 0; i < n; i++ )
-		order[ i ] = i;
+		if ( isfinite( score[ i ] ) )
+			order.push_back( i );
+
+	// Sort positions by descending score -- the direction the thresholds walk
 	sort( order.begin(), order.end(),
 		[ &score ]( unsigned a, unsigned b ) { return score[ a ] > score[ b ]; } );
 
 	vector< OperatingPoint > points;
-	unsigned tp = 0, fp = 0, i = 0;
-	while ( i < n )
+	unsigned nOrdered = ( unsigned ) order.size(), tp = 0, fp = 0, i = 0;
+	while ( i < nOrdered )
 	{
 		// The threshold "score >= T" takes the whole tie group at once
 		unsigned j = i;
-		while ( j < n && score[ order[ j ] ] == score[ order[ i ] ] )
+		while ( j < nOrdered && score[ order[ j ] ] == score[ order[ i ] ] )
 		{
 			if ( known[ order[ j ] ] == 0 ) fp++; else tp++;
 			j++;
@@ -1159,7 +1170,16 @@ void TwoSet::HLX2calc()
 	for ( unsigned i = 0; i < n; i++ )
 		order[ i ] = i;
 	stable_sort( order.begin(), order.end(),
-		[ &guess ]( unsigned a, unsigned b ) { return guess[ a ] < guess[ b ]; } );
+		[ &guess ]( unsigned a, unsigned b )
+		{
+			// NaN guesses (a diverged network) sort last -- comparing NaN
+			//    inside std::stable_sort would break its strict weak
+			//    ordering. They then poison E in the top group, and the fit
+			//    probability honestly fails rather than printing a number.
+			if ( isnan( guess[ a ] ) ) return false;
+			if ( isnan( guess[ b ] ) ) return true;
+			return guess[ a ] < guess[ b ];
+		} );
 
 	double Chat = 0; // the statistic
 	bool contradicted = false; // a certain prediction observed to be wrong
