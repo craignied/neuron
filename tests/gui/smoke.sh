@@ -161,4 +161,76 @@ for setname, s in (d.get("stats") or {}).items():
         sys.exit(1)
 PY
 
-echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, binormal fits + null when impossible, logistic Wald/condition number, regress, saves)"
+# --- Async training (ROADMAP 2 Phase 1b) -----------------------------------
+# A slow, continuous-outcome regression set: iterations are heavy enough that
+#    a 50M-iteration budget cannot finish during the test, and a non-discrete
+#    outcome keeps the cancelled run's epilogue cheap (no classification
+#    statistics, no ROC bootstrap).
+PY=python3; command -v python3 >/dev/null || PY=python
+$PY - <<'PY'
+import random
+random.seed(3)
+def rows(n):
+    for i in range(n):
+        a, b, c = (random.uniform(-0.9, 0.9) for _ in range(3))
+        y = 0.5 + 0.3 * a - 0.2 * b + 0.1 * c + random.gauss(0, 0.1)
+        y = min(max(y, 0.05), 0.95)
+        yield "%.6f %.6f %.6f %.6f\n" % (a, b, c, y)
+with open("slow_train.set", "w", newline="\n") as f:
+    f.writelines(rows(3750))
+with open("slow_test.set", "w", newline="\n") as f:
+    f.writelines(rows(1250))
+PY
+curl -s -X POST "$URL/api/load" \
+    -d "mode=train&path=slow_train.set&testpath=slow_test.set&discrete=0" \
+    | grep -q '"ok":true' || fail "load slow regression pair (discrete=0)"
+curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=8" \
+    | grep -q '"ok":true' || fail "model on slow set"
+
+# async=1 returns immediately with the run still going
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=50000000&seed=42&async=1" \
+    | grep -q '"ok":true' || fail "async train did not start"
+curl -s "$URL/api/train/status" | grep -q '"running":true' \
+    || fail "status should say running right after an async start"
+
+# While it runs, every engine-touching endpoint refuses with 409 + busy:true
+busy=$(curl -s -w '\n%{http_code}' -X POST "$URL/api/load" -d "mode=train&path=xor_discrete.set")
+echo "$busy" | grep -q '"busy":true' || fail "no busy flag while training"
+echo "$busy" | tail -1 | grep -q '409' || fail "busy refusal should be HTTP 409"
+
+# The observer publishes a decimated error series while training
+sleep 1
+curl -s "$URL/api/train/status" > status.json
+grep -q '"iter":\[[0-9]' status.json || fail "no error series while training"
+grep -q '"train":\[' status.json || fail "no training-error series"
+
+# Stop: the run finishes normally (report and all) with stopReason cancelled
+curl -s -X POST "$URL/api/train/stop" | grep -q '"ok":true' || fail "stop endpoint"
+for i in $(seq 1 120); do
+    curl -s "$URL/api/train/status" > status.json
+    grep -q '"running":false' status.json && break
+    sleep 0.5
+done
+grep -q '"running":false' status.json || fail "run never stopped after cancel"
+grep -q '"stopReason":"cancelled"' status.json || fail "cancelled run should say so"
+grep -q '"ok":true' status.json || fail "cancelled run should still be a completed run"
+# Stop with nothing running refuses cleanly
+curl -s -X POST "$URL/api/train/stop" | grep -q '"ok":false' \
+    || fail "stop should refuse when nothing is running"
+
+# An async run left to finish carries the same full result as blocking mode
+curl -s -X POST "$URL/api/load" -d "mode=train&path=xor_discrete.set" \
+    | grep -q '"ok":true' || fail "engine not reusable after a cancelled run"
+curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=3" > /dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=100000&seed=42&async=1" \
+    | grep -q '"ok":true' || fail "second async train did not start"
+for i in $(seq 1 240); do
+    curl -s "$URL/api/train/status" > status2.json
+    grep -q '"running":false' status2.json && break
+    sleep 0.5
+done
+grep -q '"running":false' status2.json || fail "async run never completed"
+grep -q '"stopReason":"' status2.json || fail "no stopReason on the async result"
+grep -q '"stats":' status2.json || fail "async result missing the stats object"
+
+echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, binormal fits + null when impossible, logistic Wald/condition number, regress, saves, async train/status/stop + 409 busy + cancel)"

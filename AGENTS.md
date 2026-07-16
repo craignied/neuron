@@ -247,6 +247,23 @@ experiment keeps everything together. After training, the "Session files"
 buttons save/download the network + scaling factors (deployment trio
 minus the spec) and the train/test sets, guesses, and report.
 
+**Training is asynchronous in the GUI** (since 2026-07-16): the page shows a
+realtime error-vs-iteration chart while a run is live, the Train button
+becomes Stop, and stopping is graceful — the engine finishes the iteration
+and produces its full report, so a stopped run is a completed run. For
+scripts and agents driving the HTTP API with curl, the same machinery is:
+`POST /api/train` with `async=1` returns immediately; poll
+`GET /api/train/status` (running flag, decimated iter/train/test error
+series, and — once finished — the same result JSON a blocking train returns,
+including a `stopReason` of max_iterations / grad_max / cancelled / …);
+`POST /api/train/stop` cancels. While a run is live every other
+engine-touching endpoint returns **HTTP 409** with `"busy":true` — retry
+after the run. Without `async=1`, `POST /api/train` blocks exactly as
+before. `POST /api/load` also accepts `discrete=0` for a continuous
+(regression) outcome — with `mode=raw` that requires `fraction=0` (the
+stratified split needs classes), so pre-split regression data loads via
+`mode=train` plus `testfile`/`testpath`.
+
 The GUI also runs **stepwise regression** on a trained network (the
 "Stepwise regression" panel): give it the input-variable structure — the
 same grouping string `mkdataset.py --inputs` writes and `psa_defs.txt`

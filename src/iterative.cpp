@@ -14,7 +14,7 @@ Iterative::Iterative() : maxIterations ( 1000000 ), printCount ( 1000 ),
 	window ( 1000 ), minStopFlag ( false ), windowStopFlag ( false ),
 	changeStopFlag ( false ), gradMaxFlag ( true ), logPrintFlag ( true ),
 	boundsErrorFlag ( false ), minError ( 1e-30 ), delta ( 1e-16 ),
-	gradMaxLimit ( 1e-6 ) { }
+	gradMaxLimit ( 1e-6 ), observerPtr ( nullptr ), stopReason ( STOP_NONE ) { }
 
 // Default destructor
 Iterative::~Iterative() { }
@@ -51,6 +51,10 @@ void Iterative::copy( const Iterative& rhs )
 	minError = rhs.minError;
 	delta = rhs.delta;
 	gradMaxLimit = rhs.gradMaxLimit;
+	stopReason = rhs.stopReason;
+	// Deliberately NOT copied: a clone (RegressNet's working copies, the
+	//    coming autoalgo probes) must never drive its original's observer
+	observerPtr = nullptr;
 }
 
 // Sets the maximum number of iterations through training set
@@ -109,6 +113,10 @@ double Iterative::train()
 		gradMaxValue = 1e10; // maximum absolute gradient value (initialized to huge)
 
 	boundsErrorFlag = false; // new training resets bounds error flag
+
+	// If the loop below runs out, that IS the stop reason; every earlier
+	//    exit overwrites this at its break
+	stopReason = STOP_MAX_ITERATIONS;
 
 	deque< double > errorsWindow; // window of error values, use deque for speed
 
@@ -244,9 +252,10 @@ double Iterative::train()
 
 				fileStream << screenStream.str(); // stream line into file stream
 				util::screen() << screenStream.str(); // then print to screen
-				
+
+				stopReason = STOP_MIN_ERROR;
 				break;
-			}	
+			}
 
 		// Exit if change in error less than specified delta value
 		if ( changeStopFlag )
@@ -261,7 +270,8 @@ double Iterative::train()
 
 				fileStream << screenStream.str(); // stream line into file stream
 				util::screen() << screenStream.str(); // then print to screen
-				
+
+				stopReason = STOP_CHANGE;
 				break;
 			}
 			else
@@ -285,7 +295,8 @@ double Iterative::train()
 
 					fileStream << screenStream.str(); // stream line into file stream
 					util::screen() << screenStream.str(); // then print to screen
-										
+
+					stopReason = STOP_WINDOW;
 					break;
 				}
 				else // set error did not increase, so advance window
@@ -310,9 +321,28 @@ double Iterative::train()
 
 				fileStream << screenStream.str(); // stream line into file stream
 				util::screen() << screenStream.str(); // then print to screen
-				
+
+				stopReason = STOP_GRADMAX;
 				break;
-			} 
+			}
+		}
+
+		// Give the observer its look at the finished iteration -- at the
+		//    BOTTOM, after every stop check above, so a run with no observer
+		//    is bit-identical to one before the hook existed
+		if ( observerPtr && !observerPtr->onIteration( iteration, setError ) )
+		{
+			screenStream.str( "" ); // reset screen stream
+
+			// Prepare line for printing to screen (only observer-driven runs
+			//    can ever print this, so transcripts without one are unchanged)
+			screenStream << "Training was stopped by request." << endl;
+
+			fileStream << screenStream.str(); // stream line into file stream
+			util::screen() << screenStream.str(); // then print to screen
+
+			stopReason = STOP_OBSERVER;
+			break;
 		}
 	}
 

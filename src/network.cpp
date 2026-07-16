@@ -284,6 +284,34 @@ void Network::reportAccuracy( ostream& outputStream )
 	}
 }
 
+// Mean error over every stride-th test exemplar (the GUI's mid-training
+//    test-error sample). Mirrors reportAccuracy's 1-output test loop but
+//    deliberately does NOT write the TwoSet guesses: a sample taken mid-run
+//    must never invalidate cached statistics or masquerade as a final pass.
+double Network::sampleTestError( unsigned stride )
+{
+	if ( !theData.testLoaded() || theData.getOutput() != 1 )
+		return -1; // nothing to sample
+
+	if ( stride < 1 )
+		stride = 1;
+
+	unsigned nInput = theData.getInput(), count = 0;
+	double setError = 0;
+
+	for ( unsigned r = 0; r < Test.rows(); r += stride )
+	{
+		forward( Test, r ); // forward propagate the test exemplar
+
+		// Same error the final report uses, averaged over the sample
+		errorFunction E( theData.getTestMatrix()( r, nInput ), o, x, errorType );
+		setError += E.value();
+		count++;
+	}
+
+	return count ? setError / count : -1;
+}
+
 // Outputs classification accuracies to ostream for Iterative table
 //    Iterative.cpp has already checked that outputs are discrete
 void Network::classAccuracy( ostream& outputStream )

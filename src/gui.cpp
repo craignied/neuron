@@ -14,6 +14,8 @@
 
 #include "stdafx.h" // For MSVC, must be first among the engine headers!
 
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
@@ -21,6 +23,7 @@
 #include <memory>
 #include <mutex>
 #include <sstream>
+#include <thread>
 
 #include "gui.h"
 #include "dataset.h"
@@ -47,6 +50,104 @@ string lastReport;
 // The last training run's final error, the baseline for stepwise regression
 //    (RegressNet's Wilks GLRT); -1 until a model has been trained
 double lastTrainError = -1;
+
+// --- The async training job (ROADMAP 2 Phase 1b) --------------------------
+//
+// One job at a time. While it runs, job.running gates every handler that
+// would touch the engine (HTTP 409, no queueing); only /api/train/status and
+// /api/train/stop go through. The worker thread owns the engine for the
+// duration and does NOT hold engineMutex while training -- the gate is what
+// keeps everyone else out. The worker captures engine output through its own
+// thread_local screen (see utility.cpp).
+struct TrainJob
+{
+	thread worker;
+	atomic< bool > running{ false }; // toggled under engineMutex
+	atomic< bool > cancel{ false };  // the Stop button; observer returns false
+
+	// Everything below is guarded by progressMutex. The error-vs-iteration
+	//    series is decimated: capped at MAX_POINTS, halving (and doubling the
+	//    keep-every-nth stride) when full, so a million-iteration run still
+	//    ships a bounded, evenly thinned curve.
+	mutex progressMutex;
+	vector< unsigned > iters;
+	vector< double > trainErr, testErr; // testErr < 0 = not sampled
+	unsigned keepEvery = 1, sampleCounter = 0;
+	string result; // the finished run's response JSON, "" while running
+};
+TrainJob job;
+
+const unsigned JOB_MAX_POINTS = 2000;
+
+// The worker-side observer: samples the error curve on a wall-clock schedule
+//    (>= 250 ms apart, so observing costs nothing measurable) and carries the
+//    Stop request into the training loop. Test error is sampled over at most
+//    ~1000 exemplars per look (sampleTestError's stride).
+struct GuiObserver : Iterative::Observer
+{
+	Network* net;
+	unsigned testStride;
+	chrono::steady_clock::time_point lastSample;
+	bool sampledYet = false;
+
+	GuiObserver( Network* n, unsigned nTest )
+		: net( n ),
+		testStride( nTest > 1000 ? nTest / 1000 : 1 ),
+		lastSample( chrono::steady_clock::now() ) {}
+
+	bool onIteration( unsigned iteration, double setError ) override
+	{
+		auto now = chrono::steady_clock::now();
+		if ( !sampledYet || now - lastSample >= chrono::milliseconds( 250 ) )
+		{
+			sampledYet = true;
+			lastSample = now;
+
+			// Sampled OUTSIDE progressMutex: only the worker touches the engine
+			double testError = net ? net->sampleTestError( testStride ) : -1;
+
+			lock_guard< mutex > lock( job.progressMutex );
+			if ( ++job.sampleCounter % job.keepEvery == 0 )
+			{
+				job.iters.push_back( iteration );
+				job.trainErr.push_back( setError );
+				job.testErr.push_back( testError );
+				if ( job.iters.size() >= JOB_MAX_POINTS )
+				{
+					// Halve the series, double the stride for future samples
+					for ( unsigned i = 0, j = 0; j < job.iters.size(); i++, j += 2 )
+					{
+						job.iters[ i ] = job.iters[ j ];
+						job.trainErr[ i ] = job.trainErr[ j ];
+						job.testErr[ i ] = job.testErr[ j ];
+					}
+					job.iters.resize( job.iters.size() / 2 );
+					job.trainErr.resize( job.trainErr.size() / 2 );
+					job.testErr.resize( job.testErr.size() / 2 );
+					job.keepEvery *= 2;
+				}
+			}
+		}
+		return !job.cancel.load();
+	}
+};
+
+// The engine's stop reason as a JSON-friendly name. STOP_OBSERVER reads as
+//    "cancelled" here because the GUI's observer only ever stops on the Stop
+//    button; a future auto-stop gets its own reason (STOP_PLATEAU, ROADMAP 2).
+const char* stopReasonName( Iterative::StopReason r )
+{
+	switch ( r )
+	{
+	case Iterative::STOP_MAX_ITERATIONS: return "max_iterations";
+	case Iterative::STOP_MIN_ERROR: return "min_error";
+	case Iterative::STOP_CHANGE: return "min_change";
+	case Iterative::STOP_WINDOW: return "error_window";
+	case Iterative::STOP_GRADMAX: return "grad_max";
+	case Iterative::STOP_OBSERVER: return "cancelled";
+	default: return "none";
+	}
+}
 
 // --- JSON helpers (responses only; requests arrive form-encoded) ---------
 
@@ -348,6 +449,11 @@ string handleLoad( const httplib::Request& req )
 	if ( nO < 1 )
 		nO = 1;
 
+	// discrete=0 declares a continuous outcome (regression): the engine then
+	//    trains with LMS error and skips the classification statistics. The
+	//    default matches the engine's own (discrete), which the page assumes.
+	bool discrete = ( param( req, "discrete" ) != "0" );
+
 	string path = resolveFile( req, "file", "path", savedTrain, err );
 	if ( !err.empty() )
 		return jsonMsg( false, err );
@@ -376,6 +482,8 @@ string handleLoad( const httplib::Request& req )
 	auto ds = make_unique< DataSet >();
 	ds->setInput( nI );
 	ds->setOutput( nO );
+	if ( !discrete )
+		ds->setDiscrete( false );
 
 	Capture cap;
 	bool ok = false;
@@ -384,7 +492,22 @@ string handleLoad( const httplib::Request& req )
 	{
 		ds->loadRaw( path );
 		if ( ds->rawLoaded() )
-			ok = ds->randomizeD( fraction );
+		{
+			// The stratified split needs a discrete outcome to stratify on; a
+			//    continuous outcome converts whole (the engine's raw2train) --
+			//    pre-split regression data loads through mode=train + testfile
+			if ( !discrete )
+			{
+				if ( fraction > 0 )
+					return jsonMsg( false, "a continuous outcome cannot be "
+						"stratified into a train/test split; load with "
+						"fraction=0, or pre-split the data and use mode=train "
+						"with a testfile" );
+				ok = ds->raw2train();
+			}
+			else
+				ok = ds->randomizeD( fraction );
+		}
 	}
 	else // the file already is a training set
 	{
@@ -506,36 +629,12 @@ string handleRandomize( const httplib::Request& req )
 		: "weights randomized from the seed \xe2\x80\x94 the next Train starts fresh" );
 }
 
-string handleTrain( const httplib::Request& req )
+// Run modelPtr->train() on the CALLING thread and build the full response
+//    JSON (captured report, ROC curves, stats, stop reason). The caller must
+//    own the engine: either it holds engineMutex (blocking /api/train) or it
+//    is the async worker, with job.running gating every other handler out.
+string runTrainingAndBuildResult( bool continued )
 {
-	unsigned algorithm = ( unsigned ) atol( param( req, "algorithm" ).c_str() ),
-		maxIter = ( unsigned ) atol( param( req, "maxiter" ).c_str() );
-	string seed = param( req, "seed" );
-
-	if ( !modelPtr )
-		return jsonMsg( false, "create a model first" );
-	if ( algorithm < 1 || algorithm > 3 )
-		return jsonMsg( false, "algorithm must be 1, 2 or 3" );
-	if ( maxIter < 1 )
-		return jsonMsg( false, "max iterations must be at least 1" );
-	if ( !seed.empty() )
-		util::set_seed( ( unsigned ) atol( seed.c_str() ) );
-
-	Network* net = dynamic_cast< Network* >( modelPtr.get() );
-	Iterative* iter = dynamic_cast< Iterative* >( modelPtr.get() );
-
-	// Training does NOT re-randomize: a second Train continues from the
-	//    current weights (pick up where it left off). Only a model that has
-	//    never had weights set gets randomized here, so the first Train after
-	//    "Create model" just works; use /api/randomize to start over.
-	//    "continued" (for the message) means previously *trained*, not merely
-	//    randomized -- lastTrainError is -1 after model creation or randomize.
-	bool continued = ( lastTrainError >= 0 );
-	if ( !net->getWeightsSet() )
-		net->randomize();
-	iter->setMaxIterations( maxIter );
-	net->setTrainingType( algorithm - 1 );
-
 	Capture cap;
 	double finalError;
 	try
@@ -561,10 +660,17 @@ string handleTrain( const httplib::Request& req )
 		roc += "}";
 	}
 
+	// Why the run ended -- "cancelled" is a completed run too (the engine
+	//    falls through to its normal epilogue on an observer stop)
+	Iterative* iter = dynamic_cast< Iterative* >( modelPtr.get() );
+	string stopReason = iter ? stopReasonName( iter->getStopReason() ) : "none";
+
 	ostringstream msg;
 	msg.precision( 6 );
 	msg << ( continued ? "continued training; final error "
 		: "trained; final error " ) << finalError;
+	if ( stopReason == "cancelled" )
+		msg << " (stopped by request)";
 
 	lastReport = cap.text.str(); // downloadable afterwards as report.txt
 	lastTrainError = finalError; // baseline for stepwise regression
@@ -574,8 +680,116 @@ string handleTrain( const httplib::Request& req )
 	string statsField = stats.empty() ? "" : ( ",\"stats\":" + stats );
 
 	return string( "{\"ok\":true,\"message\":\"" ) + jsonEscape( msg.str() )
+		+ "\",\"stopReason\":\"" + stopReason
 		+ "\",\"output\":\"" + jsonEscape( lastReport ) + "\"" + roc
 		+ statsField + "}";
+}
+
+string handleTrain( const httplib::Request& req )
+{
+	unsigned algorithm = ( unsigned ) atol( param( req, "algorithm" ).c_str() ),
+		maxIter = ( unsigned ) atol( param( req, "maxiter" ).c_str() );
+	string seed = param( req, "seed" );
+	bool async = ( param( req, "async" ) == "1" );
+
+	if ( !modelPtr )
+		return jsonMsg( false, "create a model first" );
+	if ( algorithm < 1 || algorithm > 3 )
+		return jsonMsg( false, "algorithm must be 1, 2 or 3" );
+	if ( maxIter < 1 )
+		return jsonMsg( false, "max iterations must be at least 1" );
+	if ( !seed.empty() )
+		util::set_seed( ( unsigned ) atol( seed.c_str() ) );
+
+	Network* net = dynamic_cast< Network* >( modelPtr.get() );
+	Iterative* iter = dynamic_cast< Iterative* >( modelPtr.get() );
+
+	// Training does NOT re-randomize: a second Train continues from the
+	//    current weights (pick up where it left off). Only a model that has
+	//    never had weights set gets randomized here, so the first Train after
+	//    "Create model" just works; use /api/randomize to start over.
+	//    "continued" (for the message) means previously *trained*, not merely
+	//    randomized -- lastTrainError is -1 after model creation or randomize.
+	bool continued = ( lastTrainError >= 0 );
+	if ( !net->getWeightsSet() )
+		net->randomize();
+	iter->setMaxIterations( maxIter );
+	net->setTrainingType( algorithm - 1 );
+
+	if ( !async ) // the original blocking contract, unchanged
+		return runTrainingAndBuildResult( continued );
+
+	// Async: hand the engine to a worker thread and return at once. The
+	//    caller holds engineMutex here; job.running (set before the worker
+	//    exists) is what keeps every other handler out from now on.
+	if ( job.worker.joinable() )
+		job.worker.join(); // reap the previous, finished run's thread
+
+	{
+		lock_guard< mutex > lock( job.progressMutex );
+		job.iters.clear();
+		job.trainErr.clear();
+		job.testErr.clear();
+		job.keepEvery = 1;
+		job.sampleCounter = 0;
+		job.result.clear();
+	}
+	job.cancel = false;
+	job.running = true;
+
+	DataSet& md = modelPtr->getDataSet();
+	unsigned nTest = md.testLoaded() ? md.getNumTest() : 0;
+
+	job.worker = thread( [ continued, net, iter, nTest ]
+	{
+		// This thread's screen starts at cout (thread_local); the Capture
+		//    inside runTrainingAndBuildResult redirects it for the run
+		GuiObserver observer( net, nTest );
+		iter->setObserver( &observer );
+		string result = runTrainingAndBuildResult( continued );
+		iter->setObserver( nullptr );
+
+		{
+			lock_guard< mutex > lock( job.progressMutex );
+			job.result = result; // publish BEFORE running goes false
+		}
+		job.running = false;
+	} );
+
+	return jsonMsg( true, "training started" );
+}
+
+// Progress of the async run: the decimated error series while it runs, plus
+//    the finished run's full result (same shape as blocking /api/train) once
+//    it completes. The page polls this.
+string handleTrainStatus()
+{
+	lock_guard< mutex > lock( job.progressMutex );
+
+	ostringstream out;
+	out.precision( 6 );
+	out << "{\"ok\":true,\"running\":" << ( job.running ? "true" : "false" )
+		<< ",\"series\":{\"iter\":[";
+	for ( unsigned i = 0; i < job.iters.size(); i++ )
+		out << ( i ? "," : "" ) << job.iters[ i ];
+	out << "],\"train\":[";
+	for ( unsigned i = 0; i < job.trainErr.size(); i++ )
+		out << ( i ? "," : "" ) << jnum( job.trainErr[ i ] );
+	out << "],\"test\":[";
+	for ( unsigned i = 0; i < job.testErr.size(); i++ ) // < 0 = not sampled
+		out << ( i ? "," : "" )
+			<< ( job.testErr[ i ] < 0 ? "null" : jnum( job.testErr[ i ] ) );
+	out << "]},\"result\":" << ( job.result.empty() ? "null" : job.result )
+		<< "}";
+	return out.str();
+}
+
+string handleTrainStop()
+{
+	if ( !job.running )
+		return jsonMsg( false, "no training in progress" );
+	job.cancel = true;
+	return jsonMsg( true, "stopping at the end of this iteration" );
 }
 
 // Recompute the full statistics object for the current trained model without
@@ -724,6 +938,20 @@ bool saveArtifact( const string& what, string& name, string& err )
 	return ok;
 }
 
+// While an async run owns the engine, every other engine-touching request is
+//    refused outright with 409 -- no queueing. Returns true if it refused.
+//    (Callers hold engineMutex; job.running was set under it too.)
+bool busyGate( httplib::Response& res )
+{
+	if ( !job.running )
+		return false;
+	res.status = 409;
+	res.set_content(
+		"{\"ok\":false,\"message\":\"training in progress\",\"busy\":true}",
+		"application/json" );
+	return true;
+}
+
 void openInBrowser( const string& url )
 {
 #if defined( _WIN32 )
@@ -754,36 +982,54 @@ int run_gui( bool openBrowser )
 	svr.Post( "/api/load", []( const httplib::Request& req, httplib::Response& res )
 	{
 		lock_guard< mutex > lock( engineMutex );
+		if ( busyGate( res ) ) return;
 		res.set_content( handleLoad( req ), "application/json" );
 	} );
 
 	svr.Post( "/api/model", []( const httplib::Request& req, httplib::Response& res )
 	{
 		lock_guard< mutex > lock( engineMutex );
+		if ( busyGate( res ) ) return;
 		res.set_content( handleModel( req ), "application/json" );
 	} );
 
 	svr.Post( "/api/randomize", []( const httplib::Request& req, httplib::Response& res )
 	{
 		lock_guard< mutex > lock( engineMutex );
+		if ( busyGate( res ) ) return;
 		res.set_content( handleRandomize( req ), "application/json" );
 	} );
 
 	svr.Post( "/api/train", []( const httplib::Request& req, httplib::Response& res )
 	{
 		lock_guard< mutex > lock( engineMutex );
+		if ( busyGate( res ) ) return;
 		res.set_content( handleTrain( req ), "application/json" );
+	} );
+
+	// Status and stop are the two doors that stay open while a run owns the
+	//    engine; neither touches it (progress buffer and atomics only)
+	svr.Get( "/api/train/status", []( const httplib::Request&, httplib::Response& res )
+	{
+		res.set_content( handleTrainStatus(), "application/json" );
+	} );
+
+	svr.Post( "/api/train/stop", []( const httplib::Request&, httplib::Response& res )
+	{
+		res.set_content( handleTrainStop(), "application/json" );
 	} );
 
 	svr.Get( "/api/stats", []( const httplib::Request&, httplib::Response& res )
 	{
 		lock_guard< mutex > lock( engineMutex );
+		if ( busyGate( res ) ) return;
 		res.set_content( handleStats(), "application/json" );
 	} );
 
 	svr.Post( "/api/regress", []( const httplib::Request& req, httplib::Response& res )
 	{
 		lock_guard< mutex > lock( engineMutex );
+		if ( busyGate( res ) ) return;
 		res.set_content( handleRegress( req ), "application/json" );
 	} );
 
@@ -792,6 +1038,7 @@ int run_gui( bool openBrowser )
 	svr.Get( "/api/save/:what", []( const httplib::Request& req, httplib::Response& res )
 	{
 		lock_guard< mutex > lock( engineMutex );
+		if ( busyGate( res ) ) return;
 		string what = req.path_params.at( "what" );
 
 		if ( what == "report" ) // the last training run's captured output
@@ -841,6 +1088,13 @@ int run_gui( bool openBrowser )
 		openInBrowser( url );
 
 	svr.listen_after_bind();
+
+	// If the server ever exits normally, don't destroy a joinable worker
+	if ( job.worker.joinable() )
+	{
+		job.cancel = true;
+		job.worker.join();
+	}
 
 	return 0;
 }

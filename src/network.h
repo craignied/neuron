@@ -58,6 +58,13 @@ public:
 	double getCondMaxEig() const { return condMaxEig; }
 	double getCondMinEig() const { return condMinEig; }
 
+	// Mean error over every stride-th test exemplar -- the cheap mid-training
+	//    test-error sample for the GUI's realtime graph (mirrors the 1-output
+	//    test loop of reportAccuracy, minus the TwoSet writes: sampling must
+	//    never invalidate cached statistics). Returns -1 when there is no
+	//    1-output test set to sample. stride 1 is the full test error.
+	double sampleTestError( unsigned stride );
+
 	// Degrees of freedom of a network
 	virtual unsigned df() = 0; // pure virtual
 

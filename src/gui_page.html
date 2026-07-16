@@ -19,6 +19,18 @@ button { padding: .35rem .9rem; cursor: pointer; }
 #rocbox { display: none; background: #fff; border: 1px solid #ddd; border-radius: 8px;
           padding: 1rem; margin-bottom: 1rem; gap: 1.5rem; align-items: flex-start;
           flex-wrap: wrap; }
+/* Realtime error-vs-iteration chart (async training) */
+#errbox { display: none; background: #fff; border: 1px solid #ddd; border-radius: 8px;
+          padding: 1rem; margin-bottom: 1rem; }
+#errbox h3 { font-size: .95rem; margin: 0 0 .1rem; }
+#errbox .legend { font-size: .8rem; color: #52514e; margin-bottom: .4rem; }
+#errbox .sw { display: inline-block; width: .7em; height: .7em; border-radius: 2px;
+          margin: 0 .3em 0 1em; vertical-align: baseline; }
+#errbox .sw:first-child { margin-left: 0; }
+#errwrap { position: relative; }
+#errtip { display: none; position: absolute; pointer-events: none; background: #fff;
+          border: 1px solid #ddd; border-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,.12);
+          font-size: .75rem; padding: .25rem .5rem; color: #52514e; white-space: nowrap; }
 #rocstats { flex: 1; min-width: 15rem; font-size: .9rem; }
 #rocstats h3 { font-size: .95rem; margin: .2rem 0 .6rem; }
 #rocstats .sblk { margin-bottom: 1rem; }
@@ -149,6 +161,14 @@ browser. Network + scaling factors are what tools/neuron2web.py needs to
 deploy the model; training/test sets and guesses document the run.</span></div>
 </fieldset>
 
+<div id="errbox">
+  <h3>Training error</h3>
+  <div class="legend"><span class="sw" style="background:#2a78d6"></span>training set
+    <span class="sw" style="background:#008300"></span>test set (sampled)
+    <span id="errnote"></span></div>
+  <div id="errwrap"><canvas id="errc" width="880" height="240"></canvas>
+    <div id="errtip"></div></div>
+</div>
 <div id="rocbox">
   <canvas id="roc" width="440" height="440"></canvas>
   <div id="rocstats"></div>
@@ -209,17 +229,133 @@ async function randomizeWeights() {
     setStatus("tstatus", j.ok, j.message);
   } finally { $("randbtn").disabled = false; }
 }
+// Training runs async: Train becomes Stop while the run is live, and a 400 ms
+// status poll feeds the realtime error chart. A stopped run is a completed
+// run — the engine falls through to its normal report — so Stop still ends
+// with the ROC plot and the statistics panel.
+let training = false;
+const fmtE = v => (v === null || v === undefined) ? "n/a" : Number(v).toExponential(2);
 async function train() {
-  $("trainbtn").disabled = true;
-  setStatus("tstatus", true, "training…");
-  try {
-    const j = await api("/api/train", { algorithm: $("algo").value,
-      maxiter: $("maxiter").value, seed: $("seed").value });
+  if (training) { // the button reads "Stop"
+    const j = await api("/api/train/stop", {});
     setStatus("tstatus", j.ok, j.message);
-    if (j.ok && j.roc) { drawROC(j.roc); renderStats(j.roc); }
-    if (j.ok && j.stats) renderFullStats(j.stats);
-  } finally { $("trainbtn").disabled = false; }
+    return;
+  }
+  const j = await api("/api/train", { algorithm: $("algo").value,
+    maxiter: $("maxiter").value, seed: $("seed").value, async: 1 });
+  if (!j.ok) { setStatus("tstatus", false, j.message); return; }
+  training = true;
+  $("trainbtn").textContent = "Stop";
+  $("errbox").style.display = "block";
+  $("errnote").textContent = "";
+  errSeries = null;
+  lastIterSeen = -1; stalePolls = 0;
+  setStatus("tstatus", true, "training…");
+  pollTraining();
 }
+// When the iteration counter stops moving but the run is still "running",
+// the engine is in its post-training report (the ROC bootstrap dominates,
+// and its cost grows with the dataset) — say so instead of looking hung.
+let lastIterSeen = -1, stalePolls = 0;
+async function pollTraining() {
+  let j;
+  try {
+    j = await (await fetch("/api/train/status")).json();
+  } catch (e) { setTimeout(pollTraining, 1000); return; }
+  if (j.series && j.series.iter.length) {
+    errSeries = j.series;
+    drawErr(j.series);
+    const n = j.series.iter.length - 1;
+    if (j.series.iter[n] === lastIterSeen) stalePolls++;
+    else { lastIterSeen = j.series.iter[n]; stalePolls = 0; }
+    if (j.running)
+      setStatus("tstatus", true, stalePolls > 4
+        ? "computing the statistical report… (ROC bootstrap — longer on large datasets)"
+        : "training… iteration "
+          + j.series.iter[n].toLocaleString() + ", error " + fmtE(j.series.train[n]));
+  }
+  if (j.running) { setTimeout(pollTraining, 400); return; }
+  training = false;
+  $("trainbtn").textContent = "Train";
+  const res = j.result;
+  if (!res) return; // nothing ever ran
+  setStatus("tstatus", res.ok, res.message);
+  if (res.ok && res.roc) { drawROC(res.roc); renderStats(res.roc); }
+  if (res.ok && res.stats) renderFullStats(res.stats);
+}
+// The realtime chart: error (log scale) against iteration, training set plus
+// the wall-clock-sampled test error. Recessive decade gridlines; the series
+// carry the same colors they wear on the ROC plot (color follows the entity).
+let errSeries = null;
+function drawErr(s) {
+  const c = $("errc"), g = c.getContext("2d");
+  const L = 56, T = 10, R = 12, B = 30;
+  const W = c.width - L - R, H = c.height - T - B;
+  g.clearRect(0, 0, c.width, c.height);
+
+  const vals = [];
+  for (const a of [s.train, s.test])
+    for (const v of a) if (v !== null && v > 0) vals.push(Math.log10(v));
+  if (!vals.length) return;
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if (hi - lo < 0.1) { lo -= 0.05; hi += 0.05; } // flat line: pad the domain
+  const it0 = s.iter[0], itN = s.iter[s.iter.length - 1];
+  const X = i => L + (itN > it0 ? (s.iter[i] - it0) / (itN - it0) : 0.5) * W;
+  const Y = v => T + (1 - (Math.log10(v) - lo) / (hi - lo)) * H;
+
+  // Frame and decade gridlines (recessive), y labels in muted ink
+  g.strokeStyle = "#e1e0d9"; g.lineWidth = 1;
+  g.strokeRect(L, T, W, H);
+  g.fillStyle = "#898781"; g.font = "11px system-ui"; g.textAlign = "right";
+  for (let e = Math.ceil(lo); e <= Math.floor(hi); e++) {
+    const y = T + (1 - (e - lo) / (hi - lo)) * H;
+    g.beginPath(); g.moveTo(L, y); g.lineTo(L + W, y); g.stroke();
+    g.fillText("1e" + e, L - 6, y + 4);
+  }
+  if (Math.floor(hi) < Math.ceil(lo)) { // less than one decade: label the ends
+    g.fillText(Math.pow(10, hi).toExponential(1), L - 6, T + 8);
+    g.fillText(Math.pow(10, lo).toExponential(1), L - 6, T + H);
+  }
+  // x ticks: first, middle, last iteration
+  g.textAlign = "center";
+  for (const i of [0, Math.floor((s.iter.length - 1) / 2), s.iter.length - 1])
+    g.fillText(s.iter[i].toLocaleString(), X(i), T + H + 16);
+  g.fillText("iteration", L + W / 2, T + H + 28);
+  g.textAlign = "left";
+
+  // The two series: 2px lines, nulls (unsampled test) break the path
+  for (const [arr, color] of [[s.train, "#2a78d6"], [s.test, "#008300"]]) {
+    g.strokeStyle = color; g.lineWidth = 2; g.beginPath();
+    let pen = false;
+    for (let i = 0; i < arr.length; i++) {
+      if (arr[i] === null || arr[i] <= 0) { pen = false; continue; }
+      if (pen) g.lineTo(X(i), Y(arr[i]));
+      else { g.moveTo(X(i), Y(arr[i])); pen = true; }
+    }
+    g.stroke();
+  }
+  g.lineWidth = 1;
+}
+// Hover: nearest sample under the cursor, values in the tooltip
+$("errc").addEventListener("mousemove", ev => {
+  const tip = $("errtip");
+  if (!errSeries || !errSeries.iter.length) { tip.style.display = "none"; return; }
+  const s = errSeries, rect = $("errc").getBoundingClientRect();
+  const px = (ev.clientX - rect.left) * ($("errc").width / rect.width);
+  const L = 56, W = $("errc").width - L - 12;
+  const it0 = s.iter[0], itN = s.iter[s.iter.length - 1];
+  const target = it0 + Math.min(1, Math.max(0, (px - L) / W)) * (itN - it0);
+  let best = 0;
+  for (let i = 1; i < s.iter.length; i++)
+    if (Math.abs(s.iter[i] - target) < Math.abs(s.iter[best] - target)) best = i;
+  tip.textContent = "iteration " + s.iter[best].toLocaleString()
+    + " · train " + fmtE(s.train[best])
+    + (s.test[best] !== null ? " · test " + fmtE(s.test[best]) : "");
+  tip.style.display = "block";
+  tip.style.left = Math.min(ev.clientX - rect.left + 14, rect.width - 180) + "px";
+  tip.style.top = (ev.clientY - rect.top - 30) + "px";
+});
+$("errc").addEventListener("mouseleave", () => { $("errtip").style.display = "none"; });
 function renderStats(roc) {
   const pct = v => (v < 0 ? "n/a" : (v * 100).toFixed(1) + "%");
   let html = "<h3>Results at a glance</h3>";
@@ -331,7 +467,7 @@ function drawROC(roc) {
   }
   let ly = 30;
   for (const [name, series, color] of
-       [["train", roc.train, "#2563eb"], ["test", roc.test, "#dc2626"]]) {
+       [["train", roc.train, "#2a78d6"], ["test", roc.test, "#008300"]]) {
     if (!series || !series.x.length) continue;
     g.strokeStyle = color; g.lineWidth = 1.8; g.beginPath();
     g.moveTo(X(1), Y(1)); // curve counts backwards from (1,1)

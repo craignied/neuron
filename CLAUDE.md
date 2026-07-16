@@ -538,6 +538,50 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   Phase 1b remains the next thread and its plan claims remain unverified — measure
   `train()`/`screenPtr`/`setHidden` before building, per rule 3.
 
+- **2026-07-16 (afternoon) — ROADMAP 2 Phase 1b DONE: async training + realtime error
+  graph.** The plan's claims were measured first, per rule 3: `train()` had no hook
+  (four break sites, all print-then-break — verified by reading iterative.cpp:99),
+  `screenPtr` was a process-global (utility.cpp:376, not the plan's :355 — drifted but
+  true), `setHidden` deferred to Phase 4. What landed, in prove-fail order:
+  1. **`screenPtr` → `thread_local`.** The two-thread assertions were added to
+     tests/capture FIRST and **watched fail against the global** ("redirection in other
+     threads left the main thread's screen alone"), then the one-word fix made them
+     pass. Rule now in the code comment: any new engine thread must set its own screen
+     redirection first — it starts at cout, not at the spawner's stream.
+  2. **`Iterative::Observer` + `StopReason`.** onIteration(iteration, setError) called
+     at the BOTTOM of the train loop after every existing stop check; false = stop,
+     falling through to the normal epilogue (a cancelled run is a completed run).
+     `copy()` nulls the observer (clones must not drive their original's GUI buffers).
+     StopReason set at every loop exit; printed output unchanged — goldens
+     byte-identical throughout. New "Training was stopped by request." line prints
+     only on observer-driven runs.
+  3. **`Network::sampleTestError(stride)`** — mirrors reportAccuracy's 1-output test
+     loop but deliberately never writes the TwoSet guesses (a mid-run sample must not
+     invalidate cached statistics).
+  4. **gui.cpp `TrainJob`**: worker thread owns the engine, `job.running` gates every
+     other engine-touching endpoint with **HTTP 409 + `"busy":true`** (no queueing);
+     `POST /api/train` blocking by default, `async=1` returns at once;
+     `GET /api/train/status` (decimated series: ≥250 ms wall-clock samples, cap 2000
+     points, halve+double-stride); `POST /api/train/stop`. `stopReason` string on every
+     train result (blocking too — additive). **En passant: `/api/load` gained
+     `discrete=0`** (continuous outcomes) because the async smoke needed a regression
+     set and the GUI turned out unable to load one at all; raw+continuous requires
+     fraction=0 (stratification needs classes), pre-split pairs load via mode=train.
+  5. **Page**: realtime log-y error-vs-iteration canvas (train + sampled test, dataviz
+     skill palette — slots 1/2 validated, ROC plot repainted to match so color follows
+     the entity), Train↔Stop toggle, 400 ms poll, crosshair tooltip, and an honest
+     "computing the statistical report… (ROC bootstrap)" status when iterations stop
+     advancing but the run is in its epilogue — on bank-size data that phase is ~25 s
+     of otherwise-suspicious silence.
+  6. **Verified**: smoke extended (async start → running:true, 409 busy mid-run,
+     stop → `stopReason:"cancelled"` with full stats, second async run to natural
+     completion) and green on the new binary; **live click-through in Chrome on the
+     bank data** — chart streams during a 20k-iteration logistic run, Stop cancels
+     within one iteration (series froze at 23,150), the cancelled run still delivered
+     the full ROC/stats panels, zero page JS errors. All gates: zero-warning build,
+     goldens byte-identical, 4/4 ctest, smoke, verify_oracle identical.
+  Next in ROADMAP 2: Phase 2 (auto algorithm selection).
+
 ## ROADMAP 3 (agreed with Craig 2026-07-15) — ROC inference
 
 Rationale, citations, and Methods language: **`docs/roc_theory.md`**. Work in order.
@@ -819,10 +863,11 @@ as any API change. Invoke the `dataviz` skill before writing chart code (Phase 1
 - **1a — stats getters + full stats panel** (training still blocking). Files: twoset,
   logistic, network, gui.cpp, gui_page.html. Smoke asserts `stats`/`confusion`/`waldP`/
   `condNumber`; `/api/stats` round-trip; goldens byte-identical through print refactors.
-- **1b — async training + realtime graph**. Files: utility.cpp (thread_local),
-  iterative (Observer/StopReason), network (sampleTestError), gui.cpp (TrainJob, 409,
-  async=1, status/stop), gui_page.html. Smoke: existing lines unchanged + async
-  poll-to-done, 409 busy, stop → `"cancelled"`; capture ctest two-thread assertion.
+- **1b — async training + realtime graph** (**DONE** 2026-07-16, see status entry).
+  Files: utility.cpp (thread_local), iterative (Observer/StopReason), network
+  (sampleTestError), gui.cpp (TrainJob, 409, async=1, status/stop), gui_page.html.
+  Smoke: existing lines unchanged + async poll-to-done, 409 busy, stop →
+  `"cancelled"`; capture ctest two-thread assertion (verified to fail pre-fix).
 - **2 — auto algorithm**. New netclone + autoalgo; regressnet refactor. Smoke:
   `algorithm=auto` → `autoAlgo` w/ 3 probes + `Selected` in report; goldens hold.
 - **3 — plateau auto-stop**. New plateau.h + tests/plateau ctest (4 synthetic traces:

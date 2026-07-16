@@ -7,6 +7,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <thread>
 
 #include "dataset.h"
 #include "twoset.h"
@@ -78,6 +79,55 @@ int main()
 	// --- Restoration ------------------------------------------------------
 	expect( &util::screen() == static_cast< ostream* >( &cout ),
 		"set_screen( cout ) restores the default stream" );
+
+	// --- Per-thread redirection (the async-training contract) -------------
+	// Each engine thread must own its screen: a GUI request thread and the
+	// training worker redirect independently, so one thread's capture can
+	// never swallow another's output. screenPtr is thread_local; before
+	// 2026-07-16 it was a process-global and this test failed.
+	ostringstream capA, capB;
+
+	thread ta( [ & ]
+	{
+		util::set_screen( capA );
+		util::screen() << "thread A speaking" << endl;
+	} );
+	ta.join();
+
+	thread tb( [ & ]
+	{
+		util::set_screen( capB );
+		util::screen() << "thread B speaking" << endl;
+	} );
+	tb.join();
+
+	expect( capA.str().find( "thread A speaking" ) != string::npos
+		&& capA.str().find( "thread B" ) == string::npos,
+		"thread A captured only its own output" );
+	expect( capB.str().find( "thread B speaking" ) != string::npos
+		&& capB.str().find( "thread A" ) == string::npos,
+		"thread B captured only its own output" );
+
+	// A worker's redirection must not leak into this (main) thread
+	expect( &util::screen() == static_cast< ostream* >( &cout ),
+		"redirection in other threads left the main thread's screen alone" );
+
+	// And redirecting the main thread must not touch a live worker's screen
+	ostringstream mainCap, workerCap;
+	string workerSaw;
+	util::set_screen( mainCap );
+	thread tw( [ & ]
+	{
+		util::set_screen( workerCap );
+		util::screen() << "worker line" << endl;
+		workerSaw = workerCap.str();
+	} );
+	tw.join();
+	util::set_screen( cout );
+
+	expect( workerSaw.find( "worker line" ) != string::npos
+		&& mainCap.str().empty(),
+		"concurrent main-thread capture did not swallow the worker's output" );
 
 	return failures == 0 ? 0 : 1;
 }

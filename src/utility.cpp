@@ -372,8 +372,13 @@ string util::run_path( const string& filename )
 	return runDir + filename;
 }
 
-// Engine-core output stream, redirectable for GUI/server capture
-static ostream* screenPtr = &cout;
+// Engine-core output stream, redirectable for GUI/server capture.
+//    thread_local: every engine thread owns its redirection (each GUI request
+//    thread and the async-training worker capture independently; the CLI,
+//    single-threaded, never notices). Rule: any new engine thread must set
+//    its own screen redirection first -- it starts at cout, not at whatever
+//    the spawning thread had. tests/capture asserts this contract.
+static thread_local ostream* screenPtr = &cout;
 
 ostream& util::screen()
 {

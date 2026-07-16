@@ -17,6 +17,30 @@ using namespace std;
 
 class Iterative : public Model {
 public:
+	// Observer of a training run. onIteration() is called at the BOTTOM of
+	//    every training iteration, after all the existing stop checks, so a
+	//    run with no observer is bit-identical to one that never had the
+	//    hook (the goldens' guarantee). Return false to stop training: the
+	//    run falls through to the normal epilogue (report, logs, final
+	//    error), so a stopped run is a completed run.
+	class Observer {
+	public:
+		virtual ~Observer() {}
+		virtual bool onIteration( unsigned iteration, double setError ) = 0;
+	};
+
+	// Why the last train() ended. Set at every exit from the training loop;
+	//    printed output is unchanged (each reason's message predates this).
+	enum StopReason {
+		STOP_NONE, // train() has not run
+		STOP_MAX_ITERATIONS, // the iteration budget ran out
+		STOP_MIN_ERROR, // error fell below the minimum
+		STOP_CHANGE, // change in error over 1 iteration fell below delta
+		STOP_WINDOW, // error increased over the window
+		STOP_GRADMAX, // maximum absolute gradient fell below the limit
+		STOP_OBSERVER // the observer said stop (GUI cancel)
+	};
+
 	Iterative(); // default constructor
 	virtual ~Iterative(); // destructor
 
@@ -54,6 +78,12 @@ public:
 	bool getWindowStop() { return windowStopFlag; } // returns flag indicating if will be used
 	void setWindow( const unsigned ); // sets window width
 	unsigned getWindow() { return window; } // returns window width
+
+	// The observer is NOT owned and NOT copied: a clone (RegressNet's working
+	//    copies) must never drive its original's GUI buffers, so copy() nulls it
+	void setObserver( Observer* obs ) { observerPtr = obs; }
+	Observer* getObserver() { return observerPtr; }
+	StopReason getStopReason() { return stopReason; }
 
 	// Specifies the type of print counter, and if applicable, its value
 	void setLogPrint( const bool flag ) { logPrintFlag = flag; } // sets if log printing used
@@ -97,6 +127,9 @@ protected:
 	double minError, // minimum error value
 		delta, // change in error value
 		gradMaxLimit; // limit of maximum gradient
+
+	Observer* observerPtr; // non-owning; see setObserver
+	StopReason stopReason; // why the last train() ended
 
 	// Copy utility
 	void copy( const Iterative& rhs );
