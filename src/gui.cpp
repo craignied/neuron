@@ -22,6 +22,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <ctime>
 #include <sstream>
 #include <thread>
 
@@ -443,10 +444,45 @@ static string resolveFile( const httplib::Request& req, const string& fileField,
 	return param( req, pathField );
 }
 
+// --- Per-action audit log --------------------------------------------------
+//    Every GUI user action is appended, with a timestamp and the exact
+//    parameter values it carried, to neuron_actions.log in the workspace
+//    (beside the data, like neuron.log). This is the audit trail Craig asked
+//    for (2026-07-19): "every user action needs to be logged". It complements
+//    neuron.log, which records the engine's operations and the fully
+//    self-describing training-run header (algorithm, eta, weight decay, and
+//    every stopping condition). Its own mutex, so writes never interleave even
+//    from the un-serialized /api/train/stop.
+static mutex auditMutex;
+
+void logActionLine( const string& line )
+{
+	lock_guard< mutex > lk( auditMutex );
+	string path = util::run_path( "neuron_actions.log" );
+	ofstream f( path.c_str(), ios::out | ios::app );
+	if ( !f.is_open() ) return;
+	time_t now = time( nullptr );
+	char stamp[ 32 ];
+	strftime( stamp, sizeof stamp, "%Y-%m-%dT%H:%M:%S", localtime( &now ) );
+	f << stamp << " " << line << endl;
+}
+
+void logAction( const httplib::Request& req, const string& action )
+{
+	string line = action;
+	for ( const auto& p : req.params )
+		if ( p.second.size() <= 256 ) // skip an oversized value, keep the key
+			line += " " + p.first + "=" + p.second;
+	for ( const auto& fp : req.files ) // uploads: the filename, never the content
+		line += " " + fp.first + "=@" + fp.second.filename;
+	logActionLine( line );
+}
+
 // --- Handlers --------------------------------------------------------------
 
 string handleLoad( const httplib::Request& req )
 {
+	logAction( req, "load" );
 	string mode = param( req, "mode" ), savedTrain, savedTest, err;
 	unsigned nI = ( unsigned ) atol( param( req, "inputs" ).c_str() ),
 		nO = ( unsigned ) atol( param( req, "outputs" ).c_str() );
@@ -596,6 +632,7 @@ static vector< unsigned > parseLayers( const string& spec )
 
 string handleModel( const httplib::Request& req )
 {
+	logAction( req, "model" );
 	string type = param( req, "type" );
 	string mode = param( req, "mode" ); // "load" = load a saved network from a file
 
@@ -716,6 +753,7 @@ string handleModel( const httplib::Request& req )
 //    built from the analysis's own TwoSets (same helpers as training).
 string handleDFA( const httplib::Request& req )
 {
+	logAction( req, "dfa" );
 	string type = param( req, "type" );
 	if ( type != "linear" && type != "quadratic" )
 		return jsonMsg( false, "DFA type must be linear or quadratic" );
@@ -775,6 +813,7 @@ string handleDFA( const httplib::Request& req )
 
 string handleRandomize( const httplib::Request& req )
 {
+	logAction( req, "randomize" );
 	string seed = param( req, "seed" );
 
 	if ( !modelPtr )
@@ -929,6 +968,7 @@ string runTrainJob( bool continued, bool autoSelect, unsigned maxIter,
 
 string handleTrain( const httplib::Request& req )
 {
+	logAction( req, "train" );
 	string algoStr = param( req, "algorithm" ), seed = param( req, "seed" );
 	unsigned maxIter = ( unsigned ) atol( param( req, "maxiter" ).c_str() );
 	bool async = ( param( req, "async" ) == "1" );
@@ -1146,6 +1186,7 @@ string handleTrainStatus()
 
 string handleTrainStop()
 {
+	logActionLine( "stop" );
 	if ( !job.running )
 		return jsonMsg( false, "no training in progress" );
 	job.cancel = true;
@@ -1168,6 +1209,7 @@ string handleStats()
 
 string handleRegress( const httplib::Request& req )
 {
+	logAction( req, "regress" );
 	string structure = param( req, "structure" ),
 		direction = param( req, "direction" );
 	double threshold = atof( param( req, "threshold" ).c_str() );
@@ -1407,6 +1449,7 @@ int run_gui( bool openBrowser )
 		lock_guard< mutex > lock( engineMutex );
 		if ( busyGate( res ) ) return;
 		string what = req.path_params.at( "what" );
+		logActionLine( "save " + what );
 
 		if ( what == "report" ) // the last training run's captured output
 		{

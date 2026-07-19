@@ -15,5 +15,6 @@ tests/golden/runs/
 tests/tools/runs/
 # Engine log files, written next to whatever dataset a session loads
 neuron.log
+neuron_actions.log
 model.txt
 tests/gui/runs/

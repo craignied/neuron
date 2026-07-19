@@ -350,4 +350,15 @@ done
 grep -q '"running":false' status3.json || fail "async auto run never completed"
 grep -q '"autoAlgo":{"selected":' status3.json || fail "async result missing autoAlgo"
 
+# --- Per-action audit log (every user action logged, 2026-07-19) -----------
+# Every GUI action lands in neuron_actions.log beside the data, timestamped,
+# with the exact parameter values it carried. The session above drove load,
+# model, train (with params), dfa, and saves -- all must be there.
+[ -f neuron_actions.log ] || fail "no per-action audit log was written"
+grep -qE '^[0-9-]+T[0-9:]+ load '  neuron_actions.log || fail "load not audited"
+grep -qE '^[0-9-]+T[0-9:]+ model ' neuron_actions.log || fail "model not audited"
+grep -qE '^[0-9-]+T[0-9:]+ train ' neuron_actions.log || fail "train not audited"
+grep -q 'algorithm=' neuron_actions.log || fail "train parameters not recorded in the audit log"
+grep -qE '^[0-9-]+T[0-9:]+ dfa '   neuron_actions.log || fail "dfa not audited"
+
 echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, binormal fits + null when impossible, logistic Wald/condition number, regress, saves, plateau auto-stop + control + validation, train-panel parity controls (learning rate/weight decay/batch-epoch/stopping conditions/print counter) + behavioral proof + validation, model-panel parity (bias->BareProp/multi-layer->BackProp/error function/load-network), DFA (linear/quadratic + report/stats), async train/status/stop + 409 busy + cancel, algorithm=auto blocking + async)"
