@@ -804,6 +804,48 @@ string handleTrain( const httplib::Request& req )
 			return jsonMsg( false, "autostop_window must be at least 2" );
 	}
 
+	// --- Additional training controls (GUI/CLI parity, 2026-07-19) --------
+	//    Each is applied (below, once net/iter exist) ONLY when its field is
+	//    present in the request, so a call that omits it keeps the model's
+	//    current setting -- both the existing smoke train and "continue with
+	//    new parameters" rely on that. Validate here; setter asserts vanish in
+	//    release builds. A present-but-empty stopping-condition field disables
+	//    that condition; a present value enables and sets it.
+	bool haveEta = req.has_param( "eta" ) && !param( req, "eta" ).empty();
+	double etaVal = haveEta ? atof( param( req, "eta" ).c_str() ) : 0;
+	if ( haveEta && !( etaVal > 0 && etaVal <= 1 ) )
+		return jsonMsg( false, "learning rate must be greater than 0 and at most 1" );
+
+	bool wdOn = req.has_param( "weight_decay" ) && param( req, "weight_decay" ) == "1";
+	double decayVal = 0;
+	if ( wdOn )
+	{
+		string d = param( req, "decay" );
+		if ( d.empty() )
+			return jsonMsg( false, "weight decay is on but no lambda was given" );
+		decayVal = atof( d.c_str() );
+		if ( !( decayVal >= 0 && decayVal <= 1 ) )
+			return jsonMsg( false, "weight decay lambda must be between 0 and 1" );
+	}
+
+	if ( req.has_param( "minerr" ) && !param( req, "minerr" ).empty()
+		&& !( atof( param( req, "minerr" ).c_str() ) > 0
+			&& atof( param( req, "minerr" ).c_str() ) < 1 ) )
+		return jsonMsg( false, "lower error limit must be between 0 and 1" );
+	if ( req.has_param( "change" ) && !param( req, "change" ).empty()
+		&& !( atof( param( req, "change" ).c_str() ) > 0
+			&& atof( param( req, "change" ).c_str() ) < 1 ) )
+		return jsonMsg( false, "change-in-error limit must be between 0 and 1" );
+	if ( req.has_param( "errwindow" ) && !param( req, "errwindow" ).empty()
+		&& atol( param( req, "errwindow" ).c_str() ) <= 1 )
+		return jsonMsg( false, "error window must be greater than 1" );
+	if ( req.has_param( "gradmax" ) && !param( req, "gradmax" ).empty()
+		&& atof( param( req, "gradmax" ).c_str() ) <= 0 )
+		return jsonMsg( false, "maximum absolute gradient limit must be positive" );
+	if ( req.has_param( "printcount" ) && !param( req, "printcount" ).empty()
+		&& atol( param( req, "printcount" ).c_str() ) < 1 )
+		return jsonMsg( false, "print count must be at least 1" );
+
 	if ( !seed.empty() )
 		util::set_seed( ( unsigned ) atol( seed.c_str() ) );
 
@@ -821,6 +863,60 @@ string handleTrain( const httplib::Request& req )
 		net->randomize();
 	iter->setMaxIterations( maxIter );
 	iter->setAutoStop( autoStop, autoStopTol, autoStopWin );
+
+	// Apply the parity controls validated above -- present-only, so anything
+	//    the request omits keeps the model's current value (persists across
+	//    Train calls, which is how "stop, then continue with new parameters"
+	//    works). These settings are carried into the autoalgo probe clones and
+	//    the adopted winner by Network::copy / Iterative::copy.
+	if ( req.has_param( "batch_epoch" ) )
+		net->setBatchEpoch( param( req, "batch_epoch" ) == "1" );
+	if ( req.has_param( "autostep" ) )
+	{
+		bool a = ( param( req, "autostep" ) == "1" );
+		net->setAutoStepSize( a );
+		if ( a ) net->setBatchEpoch( true ); // auto step size requires batch/epoch
+	}
+	if ( haveEta && !( req.has_param( "autostep" ) && param( req, "autostep" ) == "1" ) )
+		net->setEta( etaVal ); // manual rate only when not on automatic
+	if ( req.has_param( "weight_decay" ) )
+	{
+		net->setWeightDecay( wdOn );
+		net->setDecay( wdOn ? decayVal : 0 );
+	}
+	if ( req.has_param( "logprint" ) )
+	{
+		bool lg = ( param( req, "logprint" ) == "1" );
+		iter->setLogPrint( lg );
+		if ( !lg && req.has_param( "printcount" ) && !param( req, "printcount" ).empty() )
+			iter->setPrintCount( ( unsigned ) atol( param( req, "printcount" ).c_str() ) );
+	}
+	// Stopping conditions: present+value enables & sets, present+empty disables.
+	if ( req.has_param( "minerr" ) )
+	{
+		string s = param( req, "minerr" );
+		if ( s.empty() ) iter->setMinStop( false );
+		else { iter->setMinStop( true ); iter->setMinError( atof( s.c_str() ) ); }
+	}
+	if ( req.has_param( "change" ) )
+	{
+		string s = param( req, "change" );
+		if ( s.empty() ) iter->setChangeStop( false );
+		else { iter->setChangeStop( true ); iter->setChange( atof( s.c_str() ) ); }
+	}
+	if ( req.has_param( "errwindow" ) )
+	{
+		string s = param( req, "errwindow" );
+		if ( s.empty() ) iter->setWindowStop( false );
+		else { iter->setWindowStop( true ); iter->setWindow( ( unsigned ) atol( s.c_str() ) ); }
+	}
+	if ( req.has_param( "gradmax" ) )
+	{
+		string s = param( req, "gradmax" );
+		if ( s.empty() ) iter->setGradStop( false );
+		else { iter->setGradStop( true ); iter->setGradMaxLimit( atof( s.c_str() ) ); }
+	}
+
 	if ( !autoSelect ) // auto: each probe sets its own; the winner's sticks
 		net->setTrainingType( algorithm - 1 );
 

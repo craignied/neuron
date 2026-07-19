@@ -114,15 +114,53 @@ table.coef th { background: #f4f6fb; } table.coef td.name { text-align: left; }
   <label>Max iterations <input class="num" type="number" id="maxiter" value="2000"
     min="1"></label>
   <label>Seed <input class="num" type="number" id="seed" placeholder="clock"></label>
-  <label title="Stop automatically when the training error stops improving (moving-average window 100, relative tolerance 1e-4)"><input
-    type="checkbox" id="autostop"> Auto-stop on plateau</label>
   <button id="randbtn" onclick="randomizeWeights()">Randomize weights</button>
   <button id="trainbtn" onclick="train()">Train</button>
   <span class="status" id="tstatus"></span>
 </div>
+<div class="row">
+  <label title="Automatic learning-rate selection (forces batch/epoch on)"><input
+    type="checkbox" id="autostep"> Automatic learning rate</label>
+  <label>Learning rate <input class="num" type="number" id="eta" step="any"
+    min="0" max="1" placeholder="model default"></label>
+  <label title="Batch/epoch (off-line) training"><input type="checkbox"
+    id="batch_epoch" checked> Batch/epoch</label>
+  <label title="L2 weight decay"><input type="checkbox" id="weight_decay">
+    Weight decay</label>
+  <label>&lambda; <input class="num" type="number" id="decay" step="any" min="0"
+    max="1" placeholder="lambda"></label>
+</div>
+<div class="row">
+  <span class="status">Stopping conditions &mdash; blank = off:</span>
+  <label>Min error <input class="num" type="number" id="minerr" step="any"
+    placeholder="off"></label>
+  <label>Change limit <input class="num" type="number" id="change" step="any"
+    placeholder="off"></label>
+  <label>Error window <input class="num" type="number" id="errwindow"
+    placeholder="off"></label>
+  <label title="Stop when the maximum absolute gradient drops below this">Max
+    gradient <input class="num" type="number" id="gradmax" step="any"
+    value="1e-6"></label>
+</div>
+<div class="row">
+  <label title="Stop automatically when the training error stops improving"><input
+    type="checkbox" id="autostop"> Auto-stop on plateau</label>
+  <label>tol <input class="num" type="number" id="autostop_tol" step="any"
+    value="1e-4"></label>
+  <label>window <input class="num" type="number" id="autostop_window" value="100"
+    min="2"></label>
+  <label>Print counter <select id="logprint">
+    <option value="1">logarithmic</option>
+    <option value="0">linear</option>
+  </select></label>
+  <label>every <input class="num" type="number" id="printcount" value="1000"
+    min="1"></label>
+</div>
 <div class="row"><span class="status">Train picks up from the current weights,
-so clicking it again continues for more iterations. Randomize weights (with
-the seed, if set) to start over from a fresh random point.</span></div>
+so clicking it again continues for more iterations &mdash; change any parameter
+above and Train again to continue from those weights with the new settings.
+Randomize weights (with the seed, if set) to start over from a fresh random
+point.</span></div>
 </fieldset>
 
 <fieldset>
@@ -246,7 +284,26 @@ async function train() {
   }
   const p = { algorithm: $("algo").value, maxiter: $("maxiter").value,
     seed: $("seed").value, async: 1 };
-  if ($("autostop").checked) p.autostop = 1; // engine defaults for tol/window
+  // Learning rate / regularization
+  p.autostep = $("autostep").checked ? 1 : 0;
+  if (!$("autostep").checked && $("eta").value !== "") p.eta = $("eta").value;
+  p.batch_epoch = $("batch_epoch").checked ? 1 : 0;
+  p.weight_decay = $("weight_decay").checked ? 1 : 0;
+  if ($("weight_decay").checked) p.decay = $("decay").value;
+  // Stopping conditions (blank field = disable that condition)
+  p.minerr = $("minerr").value;
+  p.change = $("change").value;
+  p.errwindow = $("errwindow").value;
+  p.gradmax = $("gradmax").value;
+  // Plateau auto-stop
+  if ($("autostop").checked) {
+    p.autostop = 1;
+    p.autostop_tol = $("autostop_tol").value;
+    p.autostop_window = $("autostop_window").value;
+  }
+  // Print counter
+  p.logprint = $("logprint").value;
+  if ($("logprint").value === "0") p.printcount = $("printcount").value;
   const j = await api("/api/train", p);
   if (!j.ok) { setStatus("tstatus", false, j.message); return; }
   training = true;

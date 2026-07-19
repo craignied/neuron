@@ -50,16 +50,16 @@ Status: ✅ present · 🔲 planned (parity gap being closed 2026-07-19) · — 
 | CLI menu option | GUI control | API | Status |
 |---|---|---|---|
 | 1 Randomize weights | Randomize weights button | `POST /api/randomize` | ✅ |
-| 2 Learning rate (auto / manual η) | Auto-step toggle + η field | `POST /api/train` `eta=`,`autostep=` | 🔲 |
+| 2 Learning rate (auto / manual η) | Auto-step toggle + η field | `POST /api/train` `eta=`,`autostep=` | ✅ |
 | 3 Stopping: max iterations | Max iterations field | `POST /api/train` `maxiter=` | ✅ |
-| 3 Stopping: lower error limit | Min-error field | `POST /api/train` `minerr=` | 🔲 |
-| 3 Stopping: change-in-error limit | Change field | `POST /api/train` `change=` | 🔲 |
-| 3 Stopping: error-window increase | Window field | `POST /api/train` `errwindow=` | 🔲 |
-| 3 Stopping: max absolute gradient | Grad-max field | `POST /api/train` `gradmax=` | 🔲 |
-| (new) Plateau auto-stop tol / window | Auto-stop checkbox + tol/window fields | `POST /api/train` `autostop`,`autostop_tol`,`autostop_window` | 🔲 (checkbox ✅, fields planned) |
-| 4 Batch/epoch on/off | Batch/epoch toggle | `POST /api/train` `batch_epoch=` | 🔲 |
-| 5 Weight decay (on/off + λ) | Weight-decay toggle + λ field | `POST /api/train` `weight_decay=`,`decay=` | 🔲 |
-| 6 Print counter (log / linear) | Print-counter select + count | `POST /api/train` `logprint=`,`printcount=` | 🔲 |
+| 3 Stopping: lower error limit | Min-error field | `POST /api/train` `minerr=` | ✅ |
+| 3 Stopping: change-in-error limit | Change field | `POST /api/train` `change=` | ✅ |
+| 3 Stopping: error-window increase | Window field | `POST /api/train` `errwindow=` | ✅ |
+| 3 Stopping: max absolute gradient | Grad-max field | `POST /api/train` `gradmax=` | ✅ |
+| (new) Plateau auto-stop tol / window | Auto-stop checkbox + tol/window fields | `POST /api/train` `autostop`,`autostop_tol`,`autostop_window` | ✅ |
+| 4 Batch/epoch on/off | Batch/epoch toggle | `POST /api/train` `batch_epoch=` | ✅ |
+| 5 Weight decay (on/off + λ) | Weight-decay toggle + λ field | `POST /api/train` `weight_decay=`,`decay=` | ✅ |
+| 6 Print counter (log / linear) | Print-counter select + count | `POST /api/train` `logprint=`,`printcount=` | ✅ |
 | (train-time) Algorithm (GD/CGD/Shanno/auto) | Algorithm select | `POST /api/train` `algorithm=` | ✅ |
 | 7 Train model | Train button | `POST /api/train` | ✅ |
 | 8 Save network | § Session files → Network | `GET /api/save/network` | ✅ |

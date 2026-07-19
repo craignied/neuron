@@ -201,6 +201,35 @@ curl -s -X POST "$URL/api/train" \
     -d "algorithm=1&maxiter=100&seed=42&autostop=1&autostop_window=1" \
     | grep -q '"ok":false' || fail "autostop_window < 2 should be rejected"
 
+# --- Train-panel parity controls (GUI/CLI parity, 2026-07-19) --------------
+# Learning rate, weight decay, batch/epoch, the stopping conditions, and the
+# print counter are now settable through /api/train, matching the CLI model +
+# stopping-conditions menus. Behavioral proof: a change-in-error limit of 0.5
+# stops almost immediately (min_change), and the run header must announce the
+# condition -- both prove the param reached the engine, not just parsed.
+curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=2000&seed=42&change=0.5" > tp.json
+grep -q '"ok":true' tp.json || fail "train with change limit"
+grep -q '"stopReason":"min_change"' tp.json || fail "change limit did not take effect"
+grep -q 'change in error over 1 iteration becomes less than 0.5' tp.json \
+    || fail "run header did not record the change-limit condition"
+# Learning rate + weight decay + batch/epoch accepted together
+curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
+curl -s -X POST "$URL/api/train" \
+    -d "algorithm=1&maxiter=200&seed=42&eta=0.5&weight_decay=1&decay=0.001&batch_epoch=1" \
+    | grep -q '"ok":true' || fail "train with eta / weight-decay / batch-epoch"
+# Out-of-range values are rejected cleanly (asserts vanish in release builds)
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=10&eta=5" \
+    | grep -q '"ok":false' || fail "learning rate > 1 should be rejected"
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=10&weight_decay=1&decay=9" \
+    | grep -q '"ok":false' || fail "weight decay lambda > 1 should be rejected"
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=10&errwindow=1" \
+    | grep -q '"ok":false' || fail "error window <= 1 should be rejected"
+# A bare train (no parity fields) is unaffected -- the model keeps its defaults
+curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=2000&seed=42" \
+    | grep -q '"stopReason":"grad_max"' || fail "a bare train must keep default stopping"
+
 # --- Async training (ROADMAP 2 Phase 1b) -----------------------------------
 # A slow, continuous-outcome regression set: iterations are heavy enough that
 #    a 50M-iteration budget cannot finish during the test, and a non-discrete
@@ -285,4 +314,4 @@ done
 grep -q '"running":false' status3.json || fail "async auto run never completed"
 grep -q '"autoAlgo":{"selected":' status3.json || fail "async result missing autoAlgo"
 
-echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, binormal fits + null when impossible, logistic Wald/condition number, regress, saves, plateau auto-stop + control + validation, async train/status/stop + 409 busy + cancel, algorithm=auto blocking + async)"
+echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, binormal fits + null when impossible, logistic Wald/condition number, regress, saves, plateau auto-stop + control + validation, train-panel parity controls (learning rate/weight decay/batch-epoch/stopping conditions/print counter) + behavioral proof + validation, async train/status/stop + 409 busy + cancel, algorithm=auto blocking + async)"
