@@ -71,11 +71,13 @@ static bool nearly( double got, double want, double tol )
 }
 
 // The empirical operating points must be Wickens' -- this is the z-transform and
-// the ROC sweep, checked independently of any line fitting.
+// the ROC sweep, checked independently of any line fitting. Listed in ascending
+// false-alarm rate, the direction getTrapROCarea now walks the curve (origin ->
+// (1,1)); Wickens' Table 5.3 tabulates the same points top-down.
 static bool check_operating_points( TwoSet& t )
 {
-	static const double F[ 5 ] = { 0.762, 0.532, 0.335, 0.152, 0.061 };
-	static const double H[ 5 ] = { 0.933, 0.840, 0.746, 0.614, 0.420 };
+	static const double F[ 5 ] = { 0.061, 0.152, 0.335, 0.532, 0.762 };
+	static const double H[ 5 ] = { 0.420, 0.614, 0.746, 0.840, 0.933 };
 
 	t.getTrapROCarea(); // fills the curve points
 	const vector< double >& x = t.getROCx();

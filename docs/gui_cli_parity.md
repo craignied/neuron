@@ -42,7 +42,6 @@ must be closed (turned ✅) in the same change.
 | 12 Threshold for discrete output | Threshold field | `POST /api/load` `threshold=` | ✅ |
 | 12 Input variate lower/upper limits | Scaling-bounds inputs fields | `POST /api/load` `in_lower=`,`in_upper=` | ✅ |
 | 12 Output variate lower/upper limits (continuous) | Scaling-bounds outputs fields | `POST /api/load` `out_lower=`,`out_upper=` | ✅ |
-| 13 Trapezoidal ROC thresholds | ROC trapezoid-thresholds field | `POST /api/load` `trap_thresholds=` | ✅ |
 | 13 Statistical/trapezoidal both-or-either | ROC report select | `POST /api/load` `roc_report=both|either` | ✅ |
 | 13 Minimum data for statistical ROC | ROC statistical-min field | `POST /api/load` `roc_min=` | ✅ |
 
@@ -52,6 +51,14 @@ three entry forms map to two params: `fraction` covers the decimal and
 numerator/denominator forms (the CLI's own `randomize(n,d)` delegates to
 `randomizeD`), and `test_n` is the whole-number form (`randomize(n)` exactly —
 `randomizeD` truncates `ratio·N`, so a fraction cannot promise an exact count).
+
+Menu 13's former "trapezoidal thresholds" option was **removed from both
+interfaces** (2026-07-19), so parity holds: the trapezoidal ROC area is now the
+exact non-parametric AUC integrated over every operating point (the same
+`operatingPoints()` sweep the statistical method and bootstrap use), so there is
+no threshold count to configure. The CLI submenu renumbered accordingly (1
+statistical/trapezoidal, 2 minimum data, 3 return); the GUI dropped the
+`trap_thresholds` field and param.
 
 ## Model submenu
 

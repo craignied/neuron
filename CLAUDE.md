@@ -937,6 +937,36 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   comparison sat at ln 2. "Watched it fail" means watched it fail *for the measured
   reason*, not merely that the script printed FAIL somewhere.
 
+- **2026-07-19 (later) — the trapezoidal ROC area is now the exact non-parametric
+  AUC; the last fixed-count threshold sweep is gone.** Found while starting ROADMAP 2
+  Phase 4 (an OBD test tripped `assert(nThresholds > 0)`): the 2026-07-16 "back into
+  the class layer" refactor converted `getStatROCarea`, `countGoodData`, and the
+  bootstrap to the one sort-and-cumulate `operatingPoints()`, but **left
+  `getTrapROCarea` on the old arbitrary-threshold grid** — the sole remaining
+  consumer of `nThresholds`, an O(nThresholds·n) recount whose value depended on the
+  count. Craig's call: finish the refactor. `getTrapROCarea` now integrates
+  trapezoids over the very same operating points, so it is the exact empirical AUC
+  (the Mann-Whitney U the Hanley-McNeil SE beside it already assumes) with no
+  parameter to set. **Verified as the exact rank statistic**, not merely different:
+  the re-blessed lbw areas are exact `U/(n0·n1)` values (test 0.678125 = 325.5/480,
+  train 0.621173 = 2678.5/4312 — half-steps from ties), they track the binormal Az
+  beside them within ~0.008, and the degenerate 4-exemplar case gives the correct
+  0.5 chance level where the old grid gave 0.000000 (a min==max artifact). The whole
+  `nThresholds` surface was stripped: the member/setter/getter, the "Number
+  thresholds" report line, the CLI dataset-menu-13 trapezoidal-thresholds option (the
+  submenu renumbered 1/2/3, frozen-menu precedent = ROADMAP 3's removal of submenu-13
+  options 4/5/6), the GUI `trap_thresholds` field and `/api/load` param, and the
+  now-dead default-setting calls in neuron.cpp/gui.cpp/dataset.cpp. `check_wickens`
+  reads the plot points (`ROCx/ROCy`), which now run ascending F (origin → (1,1), the
+  natural curve direction) instead of descending — same Wickens Table 5.3 values,
+  arrays reordered. Gates: goldens re-blessed (the diff is ONLY the removed
+  "Number thresholds" lines + the corrected trapezoid areas — read and confirmed),
+  oracle green with a documented "Number thresholds" exclusion (the area itself is
+  unchanged at 1.0 on the perfectly separated XOR net), 6/6 ctest, smoke green,
+  parity matrix + AGENTS.md updated (rules 5 and 1). Was the trapezoidal area ever
+  wrong before? Only approximate — 100 thresholds was close on real data (~0.002 off)
+  but the grid was an arbitrary choice the exact AUC removes. **Next: resume OBD.**
+
 ## ROADMAP 3 (agreed with Craig 2026-07-15) — ROC inference
 
 Rationale, citations, and Methods language: **`docs/roc_theory.md`**. Work in order.

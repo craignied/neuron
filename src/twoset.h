@@ -82,10 +82,8 @@ public:
 	// Outputs to ostream a classification table
 	void ClassTable( ostream& );
 
-	// ROC area calculation by trapezoidal method
-	// Accessors for number of thresholds to calculate trapezoidal method
-	void setTrapThresholds( const unsigned n ) { nThresholds = n; }
-	unsigned getTrapThresholds() { return nThresholds; }
+	// The empirical (trapezoidal) ROC area -- the exact non-parametric AUC
+	//    integrated over operatingPoints(); no threshold count to configure
 	double getTrapROCarea(); // returns ROC by trapezoidal area
 
 	// Accessors for statistical ROC calculation
@@ -194,7 +192,6 @@ public:
 		tn, // true negatives
 		fp, // false positives
 		fn, // false negatives
-		nThresholds, // number of thresholds for trapezoidal method
 		statPoints, // distinct operating points the last zROC line was fitted to
 		calcThresh, // number of data points under which statistics will not be used
 		bootB; // number of bootstrap resamples for the ROC confidence intervals

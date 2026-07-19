@@ -67,7 +67,6 @@ void TwoSet::copy( const TwoSet& rhs )
 	fn = rhs.fn;
 	threshold = rhs.threshold;
 	calcThresh = rhs.calcThresh;
-	nThresholds = rhs.nThresholds;
 	bootB = rhs.bootB;
 	statP = rhs.statP;
 	statChi2 = rhs.statChi2;
@@ -115,7 +114,6 @@ void TwoSet::setMatrix( const Matrix< double >& inMatrix )
 		A = inMatrix; // set data Matrix to incoming Matrix
 		loadedFlag = true; // and the Matrix loaded flag
 		n = A.rows(); // and set the number of outcomes
-		nThresholds = n; // default number of thresholds for ROC area
 		thresholdFlag = false; // reset the threshold
 		statROCcalcFlag = false; // ROC has not yet been calculated for new dataset
 		KScalcFlag = false; // KS test has not yet been calculated for new dataset
@@ -449,10 +447,17 @@ void TwoSet::ClassTable( ostream& outputStream )
 }
 
 // Calculates and returns the ROC area by trapezoidal method
+// The empirical (trapezoidal) ROC area, integrated over the SAME operating
+//    points getStatROCarea and the bootstrap use (operatingPoints(): one
+//    sort-and-cumulate over the distinct scores). This is the exact
+//    non-parametric AUC -- the Mann-Whitney U statistic, and the quantity whose
+//    standard error hmSE() reports -- with no arbitrary threshold count. It
+//    superseded a fixed-count grid sweep (nThresholds evenly-spaced thresholds,
+//    each a full O(n) recount) that only APPROXIMATED this area and made the
+//    value depend on the count; that count is gone. The curve (F on x, H on y)
+//    runs (0,0) -> ... -> (1,1) as the cumulation grows, the plot direction.
 double TwoSet::getTrapROCarea()
 {
-	assert ( nThresholds > 0 ); // must be at least 1
-
 	double rocArea = 0; // initialize the ROC area
 
 	if ( !loadedFlag ) // a Matrix must have been loaded
@@ -464,36 +469,22 @@ double TwoSet::getTrapROCarea()
 		ROCx.clear();
 		ROCy.clear();
 
-		vector< double > test = A.col( 1 ); // extract the test column
+		unsigned n0, n1;
+		vector< OperatingPoint > points = operatingPoints( n0, n1 );
 
-		// Find maximum and minimum of test column
-		double minimum = *min_element( test.begin(), test.end() ),
-			maximum = *max_element( test.begin(), test.end() );
-
-		// Calculate first and incremental value for cycling through thresholds
-		double increment = ( maximum - minimum ) / nThresholds;
-		double ROCthreshold = minimum + increment;
-
-		// Initial x & y values of ROC curve -- remember it counts backwards!
-		double x, y, xOld = 1, yOld = 1;
-
-		// Calculate the ROC area by trapezoids
-		for ( unsigned i = 1; i <= nThresholds; i++ )
+		// Trapezoids from the origin up through each operating point in
+		//    increasing (F, H). The origin is the first plotted vertex.
+		double fOld = 0, hOld = 0;
+		ROCx.push_back( 0 );
+		ROCy.push_back( 0 );
+		for ( vector< OperatingPoint >::iterator p = points.begin();
+			p != points.end(); p++ )
 		{
-			calculate( ROCthreshold ); // get tp, fp, tn, fn
-			x = static_cast< double >( fp ) / ( tn + fp ); // 1 - specificity
-			y = static_cast< double >( tp ) / ( tp + fn ); // sensitivity
-			if ( x != xOld ) // if new x
-			{
-				rocArea += 0.5 * ( yOld + y ) * ( xOld - x ); // calculate area
-				xOld = x; // reset x & y values
-				yOld = y;
-
-				// For plotting ROC curve
-				ROCx.push_back( x );
-				ROCy.push_back( y );
-			}
-			ROCthreshold += increment; // Next threshold
+			rocArea += 0.5 * ( hOld + p->H ) * ( p->F - fOld );
+			fOld = p->F;
+			hOld = p->H;
+			ROCx.push_back( p->F ); // 1 - specificity
+			ROCy.push_back( p->H ); // sensitivity
 		}
 	}
 
@@ -907,7 +898,6 @@ void TwoSet::ROCarea( ostream& outputStream )
 				<< " (SE = " << se << ", Hanley-McNeil)" << endl;
 		}
 			outputStream << "WARNING: TRAPEZOIDAL METHOD USED" << endl;
-			outputStream << "Number thresholds = " << nThresholds << endl;
 			outputStream << resetiosflags( ios::fixed | ios::showpoint );
 		}
 	}
@@ -941,7 +931,6 @@ void TwoSet::ROCarea( ostream& outputStream )
 			outputStream << "95% CI = " << lo << " - " << hi
 				<< " (SE = " << se << ", Hanley-McNeil)" << endl;
 		}
-		outputStream << "Number thresholds = " << nThresholds << endl;
 		outputStream << resetiosflags( ios::fixed | ios::showpoint );
 	}
 }

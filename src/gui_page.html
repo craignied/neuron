@@ -109,8 +109,6 @@ table.coef th { background: #f4f6fb; } table.coef td.name { text-align: left; }
 </div>
 <div class="row">
   <span class="status">ROC reporting &mdash; blank = automatic:</span>
-  <label title="Thresholds for the trapezoidal ROC area">trapezoid thresholds
-    <input class="num" type="number" id="trap_thresholds" placeholder="auto"></label>
   <label title="Report both the statistical and trapezoidal areas, or whichever applies">report
     <select id="roc_report"><option value="">default</option>
     <option value="both">both</option><option value="either">either</option></select></label>
@@ -329,7 +327,7 @@ async function loadData() {
   fd.append("history", $("ds_history").checked ? 1 : 0);
   // Optional characteristics / ROC settings: sent only when filled in
   for (const id of ["test_n", "threshold", "in_lower", "in_upper", "out_lower",
-                    "out_upper", "trap_thresholds", "roc_report", "roc_min"])
+                    "out_upper", "roc_report", "roc_min"])
     if ($(id).value !== "") fd.append(id, $(id).value);
   const r = await fetch("/api/load", { method: "POST", body: fd });
   const j = await r.json();

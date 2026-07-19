@@ -318,11 +318,8 @@ bool DataSet::setTrainTwoSet()
 		// Remember the "test" column is filled with garbage!
 		TwoSetMatrix.replacecol( 0, TrainSetData.col( TrainSetData.cols() - 1 ) );
 
-		// Load data Matrix into training set TwoSet object, record and reenter
-		//    old number thresholds, as setMatrix will set to number of exemplars
-		unsigned n = TrainTwoSet.getTrapThresholds();
+		// Load data Matrix into training set TwoSet object
 		TrainTwoSet.setMatrix( TwoSetMatrix );
-		TrainTwoSet.setTrapThresholds( n );
 
 		TrainTwoSet.setThreshold( threshold ); // set the threshold
 
@@ -480,11 +477,8 @@ bool DataSet::setTestTwoSet()
 		// Remember the "test" column is filled with garbage!
 		TwoSetMatrix.replacecol( 0, TestSetData.col( TestSetData.cols() - 1 ) );
 
-		// Load data Matrix into test set TwoSet object, record and reenter
-		//    old number thresholds, as setMatrix will set to number of exemplars
-		unsigned n = TestTwoSet.getTrapThresholds();
+		// Load data Matrix into test set TwoSet object
 		TestTwoSet.setMatrix( TwoSetMatrix );
-		TestTwoSet.setTrapThresholds( n );
 
 		TestTwoSet.setThreshold( threshold ); // set the threshold
 

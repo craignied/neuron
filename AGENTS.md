@@ -312,7 +312,9 @@ BackProp with accuracy-only reports, exactly the CLI's behavior), `test_n=`
 (an exact test-set count instead of a fraction), `threshold=`,
 `in_lower=`/`in_upper=`, `out_lower=`/`out_upper=` (continuous outcomes only),
 `history=0` (dataset-operations logging off), and the ROC reporting settings
-`trap_thresholds=`, `roc_report=both|either`, `roc_min=`. Every GUI/API user
+`roc_report=both|either`, `roc_min=`. (There is no `trap_thresholds` any more:
+the trapezoidal ROC area is now the exact non-parametric AUC over every
+operating point, so there is no threshold count to set.) Every GUI/API user
 action is also appended — timestamped, with its exact parameter values — to
 **`neuron_actions.log`** in the run directory beside the data.
 

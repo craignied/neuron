@@ -330,29 +330,20 @@ curl -s "$URL/api/save/dfa_test_guesses" | grep -q '"ok":false' \
     || fail "dfa test guesses should refuse without a test set"
 
 # --- Dataset characteristics + ROC reporting (CLI dataset menus 11/12/13) ---
-# The load-time params: invalid values are rejected before anything loads;
-# trap_thresholds is proven behaviorally (5 thresholds -> exactly 5 ROC curve
-# points in the train JSON, not the auto-tuned count).
+# The load-time params: invalid values are rejected before anything loads. (The
+# trapezoidal ROC area is now the exact AUC over every operating point, so there
+# is no trap_thresholds count to set -- that former param and its test are gone.)
 curl -s -X POST "$URL/api/load" -d "mode=train&path=lowbwt2-2train.txt&out_lower=0.2" \
     | grep -q '"ok":false' || fail "output bounds on a discrete outcome must be rejected"
 curl -s -X POST "$URL/api/load" -d "mode=train&path=lowbwt2-2train.txt&threshold=1.5" \
     | grep -q '"ok":false' || fail "threshold outside (0,1) must be rejected"
-curl -s -X POST "$URL/api/load" -d "mode=train&path=lowbwt2-2train.txt&trap_thresholds=1" \
-    | grep -q '"ok":false' || fail "trap_thresholds < 2 must be rejected"
 curl -s -X POST "$URL/api/load" -d "mode=train&path=lowbwt2-2train.txt&roc_report=maybe" \
     | grep -q '"ok":false' || fail "roc_report must be both or either"
 curl -s -X POST "$URL/api/load" -d "mode=train&path=lowbwt2-2train.txt&in_lower=1&in_upper=-1" \
     | grep -q '"ok":false' || fail "inverted input bounds must be rejected"
 curl -s -X POST "$URL/api/load" \
-    -d "mode=train&path=lowbwt2-2train.txt&threshold=0.4&in_lower=-0.8&in_upper=0.8&history=1&trap_thresholds=5" \
+    -d "mode=train&path=lowbwt2-2train.txt&threshold=0.4&in_lower=-0.8&in_upper=0.8&history=1&roc_report=both" \
     | grep -q '"ok":true' || fail "valid characteristics + ROC settings must load"
-curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
-curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=500&seed=42" > tp5.json
-$PY - <<'PY' || fail "trap_thresholds=5 did not reach the ROC sweep"
-import json
-d = json.load(open("tp5.json"))
-assert len(d["roc"]["train"]["x"]) == 5, len(d["roc"]["train"]["x"])
-PY
 
 # The whole-number split form: test_n places EXACTLY n exemplars in the test
 # set (randomizeD truncates ratio*N, so a fraction cannot promise this)
@@ -491,4 +482,4 @@ grep -qE '^[0-9-]+T[0-9:]+ train ' neuron_actions.log || fail "train not audited
 grep -q 'algorithm=' neuron_actions.log || fail "train parameters not recorded in the audit log"
 grep -qE '^[0-9-]+T[0-9:]+ dfa '   neuron_actions.log || fail "dfa not audited"
 
-echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, binormal fits + null when impossible, logistic Wald/condition number, regress, saves, plateau auto-stop + control + validation, train-panel parity controls (learning rate/weight decay/batch-epoch/stopping conditions/print counter) + behavioral proof + validation, model-panel parity (bias->BareProp/multi-layer->BackProp/error function/load-network), no-bias BackProp save/load round trip, multipart log toggles, logistic batch/epoch guard, DFA (linear/quadratic + report/stats + guesses saves), dataset characteristics + ROC reporting load params + trap_thresholds behavioral proof, test_n exact split, multi-output load/BackProp/train/DFA + logistic refusal, async train/status/stop + 409 busy + cancel, algorithm=auto blocking + async, per-action audit log)"
+echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, binormal fits + null when impossible, logistic Wald/condition number, regress, saves, plateau auto-stop + control + validation, train-panel parity controls (learning rate/weight decay/batch-epoch/stopping conditions/print counter) + behavioral proof + validation, model-panel parity (bias->BareProp/multi-layer->BackProp/error function/load-network), no-bias BackProp save/load round trip, multipart log toggles, logistic batch/epoch guard, DFA (linear/quadratic + report/stats + guesses saves), dataset characteristics + ROC reporting load params, test_n exact split, multi-output load/BackProp/train/DFA + logistic refusal, async train/status/stop + 409 busy + cancel, algorithm=auto blocking + async, per-action audit log)"

@@ -268,13 +268,6 @@ unique_ptr< DataSet > specify_data() // returns a dataset if correctly specified
 				cin >> reply;
 				dataPtr->saveScales( reply ); // save the scaling factors
 			}
-
-			// If number of examples > 1, output is discrete, and only 1 output,
-			//    change number of ROC thresholds to an appropriate value
-			if ( dataPtr->trainLoaded() && dataPtr->getNumTrain() > 1
-				&& dataPtr->getDiscrete() && dataPtr->getOutput() == 1 )
-				dataPtr->getTrainTwoSet().setTrapThresholds(
-					( dataPtr->getNumTrain() > 100 ? 100 : dataPtr->getNumTrain() ) );
 		}
 		else if ( choice == 5 ) // randomize a raw dataset into training & test sets
 		{
@@ -290,13 +283,6 @@ unique_ptr< DataSet > specify_data() // returns a dataset if correctly specified
 
 			// Load the file into the dataset
 			dataPtr->loadTrain( reply );
-
-			// If number of examples > 1, output is discrete, and only 1 output,
-			//    change number of ROC thresholds to an appropriate value
-			if ( dataPtr->trainLoaded() && dataPtr->getNumTrain() > 1
-				&& dataPtr->getDiscrete() && dataPtr->getOutput() == 1 )
-				dataPtr->getTrainTwoSet().setTrapThresholds(
-					( dataPtr->getNumTrain() > 100 ? 100 : dataPtr->getNumTrain() ) );
 		}
 
 		else if ( choice == 7 ) // save the training set
@@ -334,13 +320,6 @@ unique_ptr< DataSet > specify_data() // returns a dataset if correctly specified
 
 			// Load the file into the dataset
 			dataPtr->loadTest( reply );
-
-			// If number of examples > 1, output is discrete, and only 1 output,
-			//    change number of ROC thresholds to an appropriate value
-			if ( dataPtr->testLoaded() && dataPtr->getNumTest() > 1
-				&& dataPtr->getDiscrete() && dataPtr->getOutput() == 1 )
-				dataPtr->getTestTwoSet().setTrapThresholds(
-					( dataPtr->getNumTest() > 100 ? 100 : dataPtr->getNumTest() ) );
 		}
 
 		else if ( choice == 10 ) // save the test set
@@ -441,17 +420,6 @@ bool randomize_raw( DataSet* dataPtr )
 		// If successful, query to save training & test sets
 		if ( success )
 		{
-			// For ROC, number of examples must be > 1, the output must be discrete,
-			//    change number of ROC thresholds to an appropriate value
-			if ( dataPtr->getNumTest() > 1 && dataPtr->getDiscrete()
-				&& dataPtr->getOutput() == 1 )
-			{
-				dataPtr->getTrainTwoSet().setTrapThresholds(
-					( dataPtr->getNumTrain() > 100 ? 100 : dataPtr->getNumTrain() ) );
-				dataPtr->getTestTwoSet().setTrapThresholds(
-					( dataPtr->getNumTest() > 100 ? 100 : dataPtr->getNumTest() ) );
-			}
-
 			// Query to save training set to file
 			yesFlag = util::askYesNo( "Would you like to save the training set to a file (yes/no)? " );
 			if ( yesFlag )
@@ -589,7 +557,7 @@ void specify_ROC( DataSet* dataPtr )
 	cout << endl << "WARNING: DO NOT CHANGE THESE UNLESS YOU KNOW WHAT YOU'RE DOING" << endl;
 
 	unsigned choice = 0, // initial non-quit choice
-		quitChoice = 4, // final menu (quit) choice
+		quitChoice = 3, // final menu (quit) choice
 		n; // for unsigned replies
 
 	bool yesFlag; // for yes/no questions
@@ -604,18 +572,8 @@ void specify_ROC( DataSet* dataPtr )
 		// Print submenu
 		cout << endl << "Remember: If you reload a training/test set, these will be reset" << endl
 			<<  "                                                 Training Set       Test Set" << endl;
-		// Choose number for trapezoidal method
-		cout << "( 1 ) Trapezoidal thresholds:                    ";
-		if ( dataPtr->trainLoaded() )
-			COUT12 << dataPtr->getTrainTwoSet().getTrapThresholds();
-		else
-			COUT12 << "not loaded";
-		if ( dataPtr->testLoaded() )
-			COUT15 << dataPtr->getTestTwoSet().getTrapThresholds() << endl;
-		else
-			COUT15 << "not loaded" << endl;
 		// Choose if either or both of trapezoidal or statistical method is used
-		cout << "( 2 ) Statistical or trapezoidal method:         ";
+		cout << "( 1 ) Statistical or trapezoidal method:         ";
 		if ( dataPtr->trainLoaded() )
 		{
 			if ( dataPtr->getTrainTwoSet().getROCReportFlag() )
@@ -635,7 +593,7 @@ void specify_ROC( DataSet* dataPtr )
 		else
 			COUT15 << "not loaded" << endl;
 		// Choose minimum number of data points for statistical calculation
-		cout << "( 3 ) Minimum data for statistical calculation:  ";
+		cout << "( 2 ) Minimum data for statistical calculation:  ";
 		if ( dataPtr->trainLoaded() )
 			COUT12 << dataPtr->getTrainTwoSet().getROCthresh();
 		else
@@ -661,15 +619,7 @@ void specify_ROC( DataSet* dataPtr )
 			else
 			{
 				// Do choice
-				if ( choice == 1 ) // specify number ROC thresholds
-				{
-					n = util::askI( "How many thresholds to calculate trapezoidal ROC area? ", 2 );
-					if ( ( tSet == 1 ) || ( tSet == 3 ) )
-						dataPtr->getTrainTwoSet().setTrapThresholds( n );
-					if ( ( tSet == 2 ) || ( tSet == 3 ) )
-						dataPtr->getTestTwoSet().setTrapThresholds( n );
-				}
-				else if ( choice == 2 ) // specify if either or both of trap/stat method used
+				if ( choice == 1 ) // specify if either or both of trap/stat method used
 				{
 					n = util::askI( "Use both (1) or either (2) statistical/trapezoidal method(s)? ", 1, 2 );
 					if ( ( tSet == 1 ) || ( tSet == 3 ) )
@@ -687,7 +637,7 @@ void specify_ROC( DataSet* dataPtr )
 							dataPtr->getTestTwoSet().setROCReportFlag( false );
 					}
 				}
-				if ( choice == 3 ) // minimum data for statistical calculation
+				if ( choice == 2 ) // minimum data for statistical calculation
 				{
 					n = util::askI( "What are the minimum number of data for statistical ROC calculation? ", 2 );
 					if ( ( tSet == 1 ) || ( tSet == 3 ) )

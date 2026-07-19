@@ -42,9 +42,15 @@ cp ../xor_net.txt .
 # known-correct X2 is near zero — asserted below. (3.0's Pearson line ends
 # "see Hosmer-Lemeshow", so that exclusion catches it; the Pearson exclusion
 # below is for the oracle's own line.)
+# "Number thresholds" (2026-07-19): 3.0's trapezoidal ROC area is now the exact
+# AUC integrated over every operating point (the same operatingPoints() sweep
+# the statistical method and bootstrap use) instead of a fixed-count grid, so
+# there is no threshold count to print. The AREA itself is unchanged on this
+# perfectly separated XOR (1.0 either way), so only the oracle's now-orphaned
+# "Number thresholds = 4" line is excluded.
 strip() { grep -v -e 'Welcome to' -e 'Thank you for using' -e 'Kolmogorov-Smirnov' \
     -e '95% CI' -e 'Maximum number of bins' -e 'Setting Maximum number of bins' \
-    -e 'Hosmer-Lemeshow' -e 'Pearson' "$1"; }
+    -e 'Hosmer-Lemeshow' -e 'Pearson' -e 'Number thresholds' "$1"; }
 fail=0
 diff <(strip verify_oracle.txt) <(strip verify_30.txt) || fail=1
 grep -q 'Kolmogorov-Smirnov goodness of fit D = 1, p = 0.0970269' verify_30.txt \

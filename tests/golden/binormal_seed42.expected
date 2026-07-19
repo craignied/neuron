@@ -249,9 +249,8 @@ By statistical method, ROC area = 0.620527
 Chi-squared = 15.092772
 p = 1.000000e+00 (closer to 1 is better)
 Operating points fitted = 127
-By trapezoidal method, ROC area = 0.623609
-95% CI = 0.521339 - 0.725878 (SE = 0.052178, Hanley-McNeil)
-Number thresholds = 100
+By trapezoidal method, ROC area = 0.621173
+95% CI = 0.518810 - 0.723537 (SE = 0.052226, Hanley-McNeil)
 Kolmogorov-Smirnov goodness of fit D = 0.204082, p = 0.139907
 Pearson X2 = 142.643 (n = 142; no valid p at the individual level - see Hosmer-Lemeshow)
 Hosmer-Lemeshow goodness of fit p = 0.746803
@@ -275,9 +274,8 @@ By statistical method, ROC area = 0.669981
 Chi-squared = 3.741584
 p = 1.000000e+00 (closer to 1 is better)
 Operating points fitted = 37
-By trapezoidal method, ROC area = 0.689583
-95% CI = 0.519083 - 0.860084 (SE = 0.086990, Hanley-McNeil)
-Number thresholds = 47
+By trapezoidal method, ROC area = 0.678125
+95% CI = 0.506121 - 0.850129 (SE = 0.087757, Hanley-McNeil)
 Kolmogorov-Smirnov goodness of fit D = 0.310417, p = 0.229615
 Pearson X2 = 45.4687 (n = 47; no valid p at the individual level - see Hosmer-Lemeshow)
 Hosmer-Lemeshow goodness of fit p = 0.733198

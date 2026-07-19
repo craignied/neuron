@@ -412,19 +412,6 @@ string safeBasename( const string& name )
 	return base.empty() ? "upload.txt" : base;
 }
 
-// Match the driver: an appropriate number of trapezoid thresholds per set
-void tuneThresholds( DataSet& d )
-{
-	if ( !d.getDiscrete() || d.getOutput() != 1 )
-		return;
-	if ( d.trainLoaded() && d.getNumTrain() > 1 )
-		d.getTrainTwoSet().setTrapThresholds(
-			d.getNumTrain() > 100 ? 100 : d.getNumTrain() );
-	if ( d.testLoaded() && d.getNumTest() > 1 )
-		d.getTestTwoSet().setTrapThresholds(
-			d.getNumTest() > 100 ? 100 : d.getNumTest() );
-}
-
 // RAII engine-output capture: restores cout even if the engine throws
 struct Capture
 {
@@ -591,17 +578,16 @@ string handleLoad( const httplib::Request& req )
 	// --- ROC reporting settings (CLI dataset menu 13) ---------------------
 	//    Validated here, applied after the load (the TwoSets must exist);
 	//    both sets get the value, which is where the CLI's per-set choice
-	//    collapses when everything loads in one request.
-	string trapStr = param( req, "trap_thresholds" ),
-		rocReportStr = param( req, "roc_report" ),
+	//    collapses when everything loads in one request. (The trapezoidal ROC
+	//    area is now the exact AUC over every operating point -- there is no
+	//    threshold count to set, so that former option is gone.)
+	string rocReportStr = param( req, "roc_report" ),
 		rocMinStr = param( req, "roc_min" );
-	if ( !trapStr.empty() || !rocReportStr.empty() || !rocMinStr.empty() )
+	if ( !rocReportStr.empty() || !rocMinStr.empty() )
 	{
 		if ( !discrete || nO != 1 )
 			return jsonMsg( false, "ROC reporting settings need a discrete "
 				"1-output dataset" );
-		if ( !trapStr.empty() && atol( trapStr.c_str() ) < 2 )
-			return jsonMsg( false, "trap_thresholds must be at least 2" );
 		if ( !rocReportStr.empty() && rocReportStr != "both"
 			&& rocReportStr != "either" )
 			return jsonMsg( false, "roc_report must be both or either" );
@@ -674,17 +660,8 @@ string handleLoad( const httplib::Request& req )
 		return jsonMsg( false, why.empty() ? "load failed" : why );
 	}
 
-	tuneThresholds( *ds );
-
-	// Explicit ROC reporting overrides (validated above) after the automatic
-	//    tuning, exactly where the CLI lets a user revise them after a load
-	if ( !trapStr.empty() )
-	{
-		if ( ds->trainLoaded() )
-			ds->getTrainTwoSet().setTrapThresholds( ( unsigned ) atol( trapStr.c_str() ) );
-		if ( ds->testLoaded() )
-			ds->getTestTwoSet().setTrapThresholds( ( unsigned ) atol( trapStr.c_str() ) );
-	}
+	// Explicit ROC reporting overrides (validated above), exactly where the
+	//    CLI lets a user revise them after a load
 	if ( !rocReportStr.empty() )
 	{
 		bool both = ( rocReportStr == "both" );
