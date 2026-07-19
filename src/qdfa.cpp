@@ -3,6 +3,7 @@
 #include "stdafx.h" // For MSVC, must be first!
 
 #include "qdfa.h"
+#include "function_defs.h" // sigmoidal, for the graded discriminant score
 
 // Copy constructor
 QDFA::QDFA( const QDFA& rhs )
@@ -129,11 +130,13 @@ void QDFA::reportAccuracy( ostream& outputStream )
 				// Calculate discriminant functions
 				d0 = dotprod( X - U0, S0.dotprod( X - U0 ) ) + K0;
 				d1 = dotprod( X - U1, S1.dotprod( X - U1 ) ) + K1;
-				
-				if ( d0 < d1 ) // the *smaller* result is the predicted class
-					theData.getTrainTwoSet().test( r ) = 0;
-				else
-					theData.getTrainTwoSet().test( r ) = 1;
+
+				// Store the GRADED class-1 score, not a hard 0/1 decision (see
+				//    LDFA). Here the *smaller* discriminant wins, so class 1 is
+				//    predicted when d0 >= d1; the margin toward class 1 is
+				//    d0 - d1. The sigmoid keeps the 0.5 boundary (>= 0.5), so the
+				//    confusion table is unchanged and the ROC gains a real curve.
+				theData.getTrainTwoSet().test( r ) = sigmoidal()( d0 - d1 );
 			}
 				
 		if ( theData.getTestTwoSet().loaded() ) // if test TwoSet exists
@@ -145,10 +148,8 @@ void QDFA::reportAccuracy( ostream& outputStream )
 				d0 = dotprod( X - U0, S0.dotprod( X - U0 ) ) + K0;
 				d1 = dotprod( X - U1, S1.dotprod( X - U1 ) ) + K1;
 
-				if ( d0 < d1 ) // the *smaller* result is the predicted class
-					theData.getTestTwoSet().test( r ) = 0;
-				else
-					theData.getTestTwoSet().test( r ) = 1;
+				// Graded class-1 score (see the train loop above)
+				theData.getTestTwoSet().test( r ) = sigmoidal()( d0 - d1 );
 			}
 			
 		theData.metricsReport( outputStream ); // TwoSet metrics report for 1 output

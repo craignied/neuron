@@ -842,9 +842,31 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   restart" flows measured through the API; a live in-browser click-through of the plateau
   checkbox (from the Phase 3 thread) confirmed the page path. Gates green every commit.
   **The parity matrix now has zero gaps.** Rule 5 is the guard going forward.
-  **Still not run in a browser: the new Model/DFA/train-panel controls' DOM wiring** —
-  verified by curl + code inspection, not yet clicked (Chrome extension). **Next: ROADMAP
-  2 Phase 4** (OBD) as before.
+  **Browser-verified (2026-07-19, later):** clicked through the new Model panel (bias off →
+  BareProp, hidden `4,2` + LMS → BackProp), the Train panel (Change-limit field → the run
+  came back `min_change` with the header recording the condition), DFA (Run DFA → report
+  renders), and load-network (file injected → "loaded Binary logistic network"), zero page
+  JS errors. Reflow note: switching model type hides the NN options and shifts fixed
+  coordinates — use `find`/ref-based clicks (scroll- and reflow-proof), per
+  [[neuron-gui-browser-testing]]. **Next: ROADMAP 2 Phase 4** (OBD) as before.
+
+- **2026-07-19 (later) — DFA now has a real ROC AUC (graded discriminant score).** Craig
+  asked whether DFA had a ROC AUC; it did not, in either interface. `LDFA`/`QDFA`
+  `reportAccuracy` stored the **hard 0/1 class decision** (`d0 > d1` for LDFA, `d0 < d1`
+  for QDFA) into the TwoSet, so the ROC had a single operating point → trapezoid area =
+  (sens+spec)/2 and `binormal:null` ("too few distinct operating points"). Fix: store the
+  **graded class-1 score** `sigmoidal()( margin )` — margin `d1−d0` for LDFA, `d0−d1` for
+  QDFA (opposite convention) — which the engine's own `sigmoidal` functor maps to (0,1)
+  with the 0.5 boundary `calculate()` already uses (`A(i,1) >= T`), so the classification
+  is preserved exactly while the ROC sweep sees a real curve. Az is invariant to the
+  monotonic map. **Proven by a controlled old-vs-new run on a fixed (unsplit) training
+  set** (the seedless GUI split had masked it as noise): confusion **byte-identical**
+  (4/125/5/55, sens 0.0678, spec 0.9615) while binormal went **null → Az 0.6530 (169
+  points)** and trap 0.5147 → 0.6552. DFA is in **neither the goldens nor the oracle**, so
+  no re-bless or exclusion was needed (a worry I'd raised that measurement dissolved).
+  smoke asserts DFA's binormal is now a fittable `az` and **not** null (verified to fail
+  against the pre-graded code). Gates green. Not a legacy *bug* — the classification was
+  always right; DFA just never exposed a graded score for ROC.
 
 ## ROADMAP 3 (agreed with Craig 2026-07-15) — ROC inference
 

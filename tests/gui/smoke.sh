@@ -254,13 +254,18 @@ curl -s "$URL/api/save/train_guesses" -o dl_loaded
 
 # --- Discriminant function analysis (GUI/CLI parity, main menu 4) ----------
 # Linear and quadratic DFA on the loaded discrete dataset -> report + ROC +
-# stats, and it does not disturb the model. Reload low-birth-weight (discrete,
-# already copied above) for a meaningful analysis.
-curl -s -X POST "$URL/api/load" -d "mode=raw&path=lowbwt2-2train.txt&fraction=0.25" > /dev/null
+# stats, and it does not disturb the model. Load the fixed training set
+# (mode=train, no random split) so the ROC Az below is deterministic.
+curl -s -X POST "$URL/api/load" -d "mode=train&path=lowbwt2-2train.txt" > /dev/null
 curl -s -X POST "$URL/api/dfa" -d "type=linear" > dfa.json
 grep -q '"ok":true' dfa.json || fail "linear DFA"
 grep -q 'running LDFA' dfa.json || fail "no LDFA report in the output"
 grep -q '"stats":' dfa.json || fail "DFA should return the stats panel"
+# DFA now stores a GRADED discriminant score, so it has a real statistical ROC
+# Az -- not the single-operating-point degeneracy of the old hard 0/1 guess
+# (which gave binormal:null). Proven to fail against the pre-graded code.
+grep -q '"binormal":{"az":' dfa.json || fail "DFA should have a statistical ROC Az now"
+grep -q '"binormal":null' dfa.json && fail "DFA binormal must not be null on a fittable set"
 curl -s -X POST "$URL/api/dfa" -d "type=quadratic" \
     | grep -q 'quadratic discriminant' || fail "quadratic DFA"
 curl -s -X POST "$URL/api/dfa" -d "type=cubic" \

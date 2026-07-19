@@ -3,6 +3,7 @@
 #include "stdafx.h" // For MSVC, must be first!
 
 #include "ldfa.h"
+#include "function_defs.h" // sigmoidal, for the graded discriminant score
 
 // Copy constructor
 LDFA::LDFA( const LDFA& rhs )
@@ -115,11 +116,16 @@ void LDFA::reportAccuracy( ostream& outputStream )
 				// Calculate discriminant functions
 				d0 = dotprod( U0, S.dotprod( X ) ) - K0;
 				d1 = dotprod( U1, S.dotprod( X ) ) - K1;
-			
-				if ( d0 > d1 ) // the *larger* result is the predicted class
-					theData.getTrainTwoSet().test( r ) = 0;
-				else
-					theData.getTrainTwoSet().test( r ) = 1;
+
+				// Store the GRADED class-1 score, not a hard 0/1 decision (which
+				//    gave the ROC a single operating point -> trapezoid area
+				//    (sens+spec)/2 and no statistical fit). d1 > d0 predicts
+				//    class 1, so the margin d1-d0 is the discriminant toward
+				//    class 1; the sigmoid maps it into (0,1) with the 0.5
+				//    boundary the classification table already uses (>= 0.5), so
+				//    the confusion table is unchanged while the ROC sweep now
+				//    sees a real curve. Az is invariant to this monotonic map.
+				theData.getTrainTwoSet().test( r ) = sigmoidal()( d1 - d0 );
 			}
 				
 		if ( theData.getTestTwoSet().loaded() ) // if test TwoSet exists
@@ -130,11 +136,9 @@ void LDFA::reportAccuracy( ostream& outputStream )
 				// Calculate discriminant functions
 				d0 = dotprod( U0, S.dotprod( X ) ) - K0;
 				d1 = dotprod( U1, S.dotprod( X ) ) - K1;
-			
-				if ( d0 > d1 ) // the *larger* result is the predicted class
-					theData.getTestTwoSet().test( r ) = 0;
-				else
-					theData.getTestTwoSet().test( r ) = 1;
+
+				// Graded class-1 score (see the train loop above)
+				theData.getTestTwoSet().test( r ) = sigmoidal()( d1 - d0 );
 			}
 			
 		theData.metricsReport( outputStream ); // TwoSet metrics report for 1 output
