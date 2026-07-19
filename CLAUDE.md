@@ -138,6 +138,21 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
    Table 5.2 is built — the 12,000-row report went from minutes to seconds,
    byte-identical. Leaving the layer cost correctness once and performance twice.
 
+5. **GUI/CLI parity is a hard contract: every capability in the CLI menu interface MUST
+   have a GUI equivalent (a page control AND an HTTP API parameter).** The GUI is the
+   primary human interface; the CLI menus are frozen but remain the authoritative feature
+   list. A CLI menu option with no GUI equivalent is a **bug**, not a backlog item. Any
+   change that touches the menus or the GUI updates **`docs/gui_cli_parity.md`** — the
+   matrix of every menu option ↔ GUI control ↔ API param — in the same commit; that
+   matrix is the enforcement artifact (full automation of the mapping is brittle, so the
+   checklist is the guard). *Why this is a rule:* the parity was stated aloud when the GUI
+   began and then went unenforced — by 2026-07-19 the GUI exposed roughly a *third* of the
+   CLI surface (no learning rate, weight decay, most stopping conditions, batch/epoch,
+   print counter, output error function, load-network-from-file, or DFA), and Craig, who
+   had deliberately declined to also add new GUI features to the CLI ("the GUI is the
+   primary interface from now on"), had no way to reach half the engine. A rule left as
+   advice decays (cf. rule 2); this one already did.
+
 ## Housekeeping
 
 - **GitHub:** https://github.com/craignied/neuron (HTTPS remote per the locker's

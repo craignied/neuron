@@ -11,6 +11,12 @@ user what the numbers mean, not just what they are.
 
 Ground rules:
 
+- **GUI/CLI parity is a hard contract (standing rule 5).** Every capability in
+  the CLI menu interface must have a GUI equivalent — a page control *and* an
+  HTTP API parameter. The GUI is the primary human interface; the CLI menus are
+  frozen but authoritative. A CLI option with no GUI equivalent is a bug. If you
+  touch the menus or the GUI, update **`docs/gui_cli_parity.md`** (the menu ↔
+  control ↔ API matrix) in the same commit.
 - The engine is `build/neuron`, an interactive menu program. **Never drive
   it by typing interactively** — write the menu answers to a file, one per
   line, and run `./build/neuron --seed 42 < session.in > session.out`.
