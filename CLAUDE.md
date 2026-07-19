@@ -805,6 +805,47 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   sizing) — its plan claims (`setHidden` destructive, grow-with-zero-outgoing-weights =
   bit-identical forward pass, OBD needs a test set) are unverified; measure first.
 
+- **2026-07-19 (later) — full GUI/CLI parity + standing rule 5. The GUI was a third of
+  the CLI; now it is a superset, and a hard rule guards it.** Craig re-stated a rule that
+  was spoken when the GUI began and never enforced: **everything in the CLI menu interface
+  must also be in the GUI** (he had deliberately declined to add new GUI features back to
+  the frozen CLI — "the GUI is the primary interface from now on" — which makes GUI≥CLI
+  parity *more* important). A menu option with no GUI equivalent is a bug. Landed as
+  **standing rule 5** + `docs/gui_cli_parity.md` (the enforcement artifact: every menu
+  option ↔ GUI control ↔ API param, updated in the same commit as any menu/GUI change) +
+  an AGENTS.md banner. Then closed every gap the audit found, engine→API→page→smoke, one
+  commit per area, goldens byte-identical and oracle identical throughout (the GUI never
+  touches the CLI transcripts):
+  1. **Train panel** (994b25a): learning rate (manual η or automatic step size), weight
+     decay + λ, batch/epoch, print counter, the four stopping conditions (lower error,
+     change, error window, max gradient — joining max iterations), and the plateau
+     tol/window promoted from hardcoded defaults into fields. Each param is applied ONLY
+     when present in the request, so a bare train keeps the model's current value — which
+     is exactly how "stop, then continue from the held weights with **new** parameters"
+     works (Craig's core ask), and keeps every existing bare-train call byte-identical.
+     Settings ride into the autoalgo probe clones via `Network::copy`/`Iterative::copy`.
+  2. **Model panel** (24caafd): bias toggle (off → BareProp), multi-hidden-layer (comma
+     list → BackProp), output error function (X-entropy refuses continuous data), the two
+     logging toggles, and **load a saved network from a file** (upload → type read from
+     line 1 → weights loaded → treated as trained).
+  3. **DFA** (86c2261): `POST /api/dfa` type=linear|quadratic — LDFA/QDFA as a standalone
+     analysis (does NOT replace `modelPtr`), returning the report + ROC + stats via the
+     same `jsonROCSeries`/`jsonStatsSet` helpers. The last CLI main-menu branch.
+  4. **Audit log** (fb266d2): every user action (load/model/dfa/train/randomize/regress/
+     stop/save) appended to **`neuron_actions.log`** with a timestamp and its exact param
+     values, via `util::run_path` so it sits in the run directory beside the data,
+     `neuron.log`, and `model.txt` (Craig: store it locally with the run files). The other
+     half — a self-describing run header — was **already** true (`Network::runHeader`
+     prints algorithm/eta/weight-decay/batch, `Iterative::train` prints every stopping
+     condition), so `neuron.log` alone already records what a run used.
+  Verified: the "stop → continue from held weights with new params" and "randomize →
+  restart" flows measured through the API; a live in-browser click-through of the plateau
+  checkbox (from the Phase 3 thread) confirmed the page path. Gates green every commit.
+  **The parity matrix now has zero gaps.** Rule 5 is the guard going forward.
+  **Still not run in a browser: the new Model/DFA/train-panel controls' DOM wiring** —
+  verified by curl + code inspection, not yet clicked (Chrome extension). **Next: ROADMAP
+  2 Phase 4** (OBD) as before.
+
 ## ROADMAP 3 (agreed with Craig 2026-07-15) — ROC inference
 
 Rationale, citations, and Methods language: **`docs/roc_theory.md`**. Work in order.

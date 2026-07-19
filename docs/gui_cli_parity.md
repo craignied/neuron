@@ -10,7 +10,10 @@ The CLI is the authoritative feature list because its menus are frozen; the GUI
 is the primary human interface and must be a superset. "API param" is the field
 `POST` accepts; "GUI control" is the page element that sends it.
 
-Status: ✅ present · 🔲 planned (parity gap being closed 2026-07-19) · — n/a.
+Status: ✅ present · 🔲 gap (must be closed before the change lands) · — n/a.
+As of 2026-07-19 there are **no gaps** — every CLI menu capability has a GUI
+control + API param. A new 🔲 row appears only when a menu/GUI change opens a
+gap, and must be closed (turned ✅) in the same change.
 
 ## Main menu
 
