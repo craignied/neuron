@@ -37,13 +37,13 @@ Status: ✅ present · 🔲 planned (parity gap being closed 2026-07-19) · — 
 
 | CLI menu option | GUI control | API | Status |
 |---|---|---|---|
-| 1 Bias nodes on/off | Bias-nodes toggle | `POST /api/model` `bias=` | 🔲 |
-| 2 Hidden layers / nodes | Hidden nodes field | `POST /api/model` `hidden=` | ✅ (single layer) |
-| 3 Output error function (LMS / X-entropy) | Error-function select | `POST /api/model` `errfunc=` | 🔲 |
-| 4 Load network from a file | Load-network upload | `POST /api/model` `mode=load` | 🔲 |
+| 1 Bias nodes on/off | Bias-nodes toggle | `POST /api/model` `bias=` (off → BareProp) | ✅ |
+| 2 Hidden layers / nodes | Hidden nodes field | `POST /api/model` `hidden=` (comma list → BackProp) | ✅ |
+| 3 Output error function (LMS / X-entropy) | Error-function select | `POST /api/model` `errfunc=` | ✅ |
+| 4 Load network from a file | Load-network upload | `POST /api/model` `mode=load` | ✅ |
 | 5 Binary logistic regression | Model-type select | `POST /api/model` `type=logistic` | ✅ |
-| 6 Log last operation to file | Log-last-op toggle | `POST /api/model` `log_lastop=` | 🔲 |
-| 7 Log to history file | Log-history toggle | `POST /api/model` `log_history=` | 🔲 |
+| 6 Log last operation to file | Log-last-op toggle | `POST /api/model` `log_lastop=` | ✅ |
+| 7 Log to history file | Log-history toggle | `POST /api/model` `log_history=` | ✅ |
 
 ## Use-model / Train submenu
 

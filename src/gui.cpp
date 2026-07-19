@@ -30,6 +30,8 @@
 #include "dataset.h"
 #include "logistic.h"
 #include "simpleprop.h"
+#include "bareprop.h"
+#include "backprop.h"
 #include "network.h"
 #include "iterative.h"
 #include "regressnet.h"
@@ -571,10 +573,29 @@ string handleLoad( const httplib::Request& req )
 	return jsonMsg( true, msg.str() );
 }
 
+// Parse a hidden-layer spec: comma-separated positive integers ("5" or "5,3").
+//    Returns an empty vector if the spec is empty or holds any non-positive
+//    value, so the caller can reject it uniformly.
+static vector< unsigned > parseLayers( const string& spec )
+{
+	vector< unsigned > out;
+	stringstream ss( spec );
+	string tok;
+	while ( getline( ss, tok, ',' ) )
+	{
+		size_t a = tok.find_first_not_of( " \t" );
+		if ( a == string::npos ) continue; // skip a blank token
+		long v = atol( tok.c_str() + a );
+		if ( v < 1 ) return vector< unsigned >(); // any non-positive invalidates all
+		out.push_back( ( unsigned ) v );
+	}
+	return out;
+}
+
 string handleModel( const httplib::Request& req )
 {
 	string type = param( req, "type" );
-	unsigned hidden = ( unsigned ) atol( param( req, "hidden" ).c_str() );
+	string mode = param( req, "mode" ); // "load" = load a saved network from a file
 
 	if ( !dataPtr )
 		return jsonMsg( false, "load a dataset first" );
@@ -584,30 +605,102 @@ string handleModel( const httplib::Request& req )
 	Capture cap;
 	lastTrainError = -1; // a fresh model has not been trained yet
 
+	// Logging toggles (CLI model menu 6/7) -- default ON, matching the engine,
+	//    so a request that omits them logs as before.
+	bool logLastop  = !( req.has_param( "log_lastop" )  && param( req, "log_lastop" )  == "0" );
+	bool logHistory = !( req.has_param( "log_history" ) && param( req, "log_history" ) == "0" );
+
+	// --- Load a saved network from a file (CLI model menu 4) --------------
+	//    The type is the file's first line, exactly as the CLI loader reads it.
+	if ( mode == "load" )
+	{
+		string saved, err;
+		string netFile = resolveFile( req, "file", "path", saved, err );
+		if ( !err.empty() ) return jsonMsg( false, err );
+		if ( netFile.empty() || !fileExists( netFile ) )
+			return jsonMsg( false, "can't open network file: " + netFile );
+
+		string line;
+		{ ifstream f( netFile.c_str() ); getline( f, line ); }
+		if ( !line.empty() && line.back() == '\r' ) line.pop_back(); // CRLF files
+
+		if ( line == "Binary logistic" ) modelPtr = make_unique< Logistic >();
+		else if ( line == "SimpleProp" ) modelPtr = make_unique< SimpleProp >();
+		else if ( line == "BareProp" )   modelPtr = make_unique< BareProp >();
+		else if ( line == "BackProp" )   modelPtr = make_unique< BackProp >();
+		else return jsonMsg( false, "unrecognized network type on line 1: '" + line + "'" );
+
+		modelPtr->setDataSet( *dataPtr );
+		modelPtr->setLastop( logLastop );
+		modelPtr->setHistory( logHistory );
+		if ( line != "Binary logistic" ) // X-entropy by definition for logistic
+			dataPtr->getDiscrete() ? modelPtr->setXEerror() : modelPtr->setLMSerror();
+
+		if ( !dynamic_cast< Network* >( modelPtr.get() )->load( netFile ) )
+			return jsonMsg( false, "failed to load the network from " + netFile );
+		lastTrainError = 0; // a loaded network has weights -- treat it as trained
+		return jsonMsg( true, "loaded " + line + " network from " + netFile );
+	}
+
 	if ( type == "logistic" )
 	{
 		if ( !dataPtr->getDiscrete() )
 			return jsonMsg( false, "logistic regression needs a discrete output" );
 		modelPtr = make_unique< Logistic >();
 		modelPtr->setDataSet( *dataPtr );
+		modelPtr->setLastop( logLastop );
+		modelPtr->setHistory( logHistory );
 		return jsonMsg( true, "binary logistic regression ready" );
 	}
 
 	if ( type == "simpleprop" )
 	{
-		if ( hidden < 1 )
-			return jsonMsg( false, "at least 1 hidden node required" );
-		modelPtr = make_unique< SimpleProp >();
-		// The dataset must be loaded BEFORE the architecture is specified
-		modelPtr->setDataSet( *dataPtr );
-		if ( dataPtr->getDiscrete() )
-			modelPtr->setXEerror();
-		else
-			modelPtr->setLMSerror();
-		dynamic_cast< SimpleProp* >( modelPtr.get() )->setHidden( hidden );
+		// hidden = comma-separated layer sizes: one layer -> SimpleProp (bias)
+		//    or BareProp (no bias); several -> BackProp. Matches the CLI factory.
+		vector< unsigned > layers = parseLayers( param( req, "hidden" ) );
+		if ( layers.empty() )
+			return jsonMsg( false, "hidden nodes must be one or more positive integers (e.g. 5 or 5,3)" );
+		bool bias = !( req.has_param( "bias" ) && param( req, "bias" ) == "0" );
+
+		// Output error function (CLI model menu 3). Default follows the data;
+		//    an explicit choice overrides, but X-entropy needs a discrete output.
+		string ef = param( req, "errfunc" );
+		bool xe;
+		if ( ef == "xentropy" )
+		{
+			if ( !dataPtr->getDiscrete() )
+				return jsonMsg( false, "X-entropy error needs a discrete output" );
+			xe = true;
+		}
+		else if ( ef == "lms" ) xe = false;
+		else xe = dataPtr->getDiscrete(); // default, as the CLI initializes it
+
+		string kind;
+		if ( layers.size() == 1 )
+		{
+			if ( bias ) { modelPtr = make_unique< SimpleProp >(); kind = "SimpleProp"; }
+			else        { modelPtr = make_unique< BareProp >();   kind = "BareProp"; }
+			modelPtr->setDataSet( *dataPtr ); // dataset BEFORE architecture
+			xe ? modelPtr->setXEerror() : modelPtr->setLMSerror();
+			if ( bias ) dynamic_cast< SimpleProp* >( modelPtr.get() )->setHidden( layers[ 0 ] );
+			else        dynamic_cast< BareProp* >( modelPtr.get() )->setHidden( layers[ 0 ] );
+		}
+		else // multiple hidden layers -> general backpropagation network
+		{
+			modelPtr = make_unique< BackProp >(); kind = "BackProp";
+			dynamic_cast< Network* >( modelPtr.get() )->setBias( bias ); // before setDataSet
+			modelPtr->setDataSet( *dataPtr );
+			xe ? modelPtr->setXEerror() : modelPtr->setLMSerror();
+			dynamic_cast< BackProp* >( modelPtr.get() )->setHidden( layers );
+		}
+		modelPtr->setLastop( logLastop );
+		modelPtr->setHistory( logHistory );
+
 		ostringstream msg;
-		msg << "SimpleProp " << dataPtr->getInput() << "-" << hidden
-			<< "-1 network ready";
+		msg << kind << " " << dataPtr->getInput() << "-";
+		for ( size_t i = 0; i < layers.size(); i++ ) msg << ( i ? "," : "" ) << layers[ i ];
+		msg << "-1 network ready (" << ( xe ? "X-entropy" : "LMS" )
+			<< ( bias ? "" : ", no bias" ) << ")";
 		return jsonMsg( true, msg.str() );
 	}
 

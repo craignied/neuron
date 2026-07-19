@@ -230,6 +230,28 @@ curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
 curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=2000&seed=42" \
     | grep -q '"stopReason":"grad_max"' || fail "a bare train must keep default stopping"
 
+# --- Model-panel parity controls (GUI/CLI parity, 2026-07-19) --------------
+# Bias toggle (SimpleProp vs BareProp), multiple hidden layers (BackProp), the
+# output error function, and loading a saved network -- the CLI model menu.
+curl -s -X POST "$URL/api/load" -d "mode=train&path=xor_discrete.set" > /dev/null
+curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=3&bias=0" \
+    | grep -q 'BareProp' || fail "bias off should build a BareProp"
+curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=4,2" \
+    | grep -q 'BackProp' || fail "multiple hidden layers should build a BackProp"
+curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=3&errfunc=lms" \
+    | grep -q 'LMS' || fail "output error function (lms) not honored"
+curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=3&errfunc=xentropy" \
+    | grep -q '"ok":true' || fail "errfunc=xentropy on discrete data should work"
+curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=5,0" \
+    | grep -q '"ok":false' || fail "a non-positive hidden layer must be rejected"
+# Load a saved network from a file: type read from line 1, weights load, and a
+# loaded network is a trained one (it produces guesses).
+cp ../../oracle/xor_net.txt .
+curl -s -X POST "$URL/api/model" -F "file=@xor_net.txt;filename=net.txt" -F "mode=load" \
+    | grep -q 'loaded SimpleProp' || fail "load saved network from file"
+curl -s "$URL/api/save/train_guesses" -o dl_loaded
+[ -s dl_loaded ] || fail "a loaded network should produce guesses"
+
 # --- Async training (ROADMAP 2 Phase 1b) -----------------------------------
 # A slow, continuous-outcome regression set: iterations are heavy enough that
 #    a 50M-iteration budget cannot finish during the test, and a non-discrete
@@ -314,4 +336,4 @@ done
 grep -q '"running":false' status3.json || fail "async auto run never completed"
 grep -q '"autoAlgo":{"selected":' status3.json || fail "async result missing autoAlgo"
 
-echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, binormal fits + null when impossible, logistic Wald/condition number, regress, saves, plateau auto-stop + control + validation, train-panel parity controls (learning rate/weight decay/batch-epoch/stopping conditions/print counter) + behavioral proof + validation, async train/status/stop + 409 busy + cancel, algorithm=auto blocking + async)"
+echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, binormal fits + null when impossible, logistic Wald/condition number, regress, saves, plateau auto-stop + control + validation, train-panel parity controls (learning rate/weight decay/batch-epoch/stopping conditions/print counter) + behavioral proof + validation, model-panel parity (bias->BareProp/multi-layer->BackProp/error function/load-network), async train/status/stop + 409 busy + cancel, algorithm=auto blocking + async)"

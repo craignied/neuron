@@ -93,12 +93,30 @@ table.coef th { background: #f4f6fb; } table.coef td.name { text-align: left; }
 <legend>2 &mdash; Model</legend>
 <div class="row">
   <label><select id="mtype">
-    <option value="simpleprop">Neural network (SimpleProp)</option>
+    <option value="simpleprop">Neural network</option>
     <option value="logistic">Binary logistic regression</option>
   </select></label>
-  <label id="hiddenbox">Hidden nodes <input class="num" type="number" id="hidden"
-    value="5" min="1"></label>
+  <span id="nnopts">
+    <label id="hiddenbox" title="One layer (5) or several comma-separated (5,3); several make it a BackProp">Hidden
+      nodes <input class="num" type="text" id="hidden" value="5"></label>
+    <label title="Bias nodes on all layers (off makes it a BareProp)"><input
+      type="checkbox" id="bias" checked> Bias nodes</label>
+    <label>Error function <select id="errfunc">
+      <option value="auto">auto (from data)</option>
+      <option value="xentropy">X-entropy</option>
+      <option value="lms">LMS</option>
+    </select></label>
+  </span>
+  <label title="Write model.txt and the training report to neuron.log"><input
+    type="checkbox" id="log_lastop" checked> Log last op</label>
+  <label title="Append each operation to the neuron.log history"><input
+    type="checkbox" id="log_history" checked> Log history</label>
   <button onclick="setModel()">Create model</button><span class="status" id="mstatus"></span>
+</div>
+<div class="row">
+  <label title="Resume a saved network; its type is read from the file's first line">Load
+    saved network <input type="file" id="netfile"></label>
+  <button onclick="loadNetwork()">Load network</button>
 </div>
 </fieldset>
 
@@ -240,7 +258,7 @@ $("mode").onchange = () => {
   $("testbox").style.display = raw ? "none" : "";
 };
 $("mtype").onchange = () => {
-  $("hiddenbox").style.display = $("mtype").value === "simpleprop" ? "" : "none";
+  $("nnopts").style.display = $("mtype").value === "simpleprop" ? "" : "none";
 };
 async function loadData() {
   if (!$("file").files.length) {
@@ -260,7 +278,26 @@ async function loadData() {
 }
 async function setModel() {
   const j = await api("/api/model", { type: $("mtype").value,
-    hidden: $("hidden").value });
+    hidden: $("hidden").value, bias: $("bias").checked ? 1 : 0,
+    errfunc: $("errfunc").value,
+    log_lastop: $("log_lastop").checked ? 1 : 0,
+    log_history: $("log_history").checked ? 1 : 0 });
+  setStatus("mstatus", j.ok, j.message);
+}
+// Load a saved network from a file (uploads its content; the server reads the
+// network type from the file's first line).
+async function loadNetwork() {
+  if (!$("netfile").files.length) {
+    setStatus("mstatus", false, "choose a saved network file first");
+    return;
+  }
+  const fd = new FormData();
+  fd.append("file", $("netfile").files[0]);
+  fd.append("mode", "load");
+  fd.append("log_lastop", $("log_lastop").checked ? 1 : 0);
+  fd.append("log_history", $("log_history").checked ? 1 : 0);
+  const r = await fetch("/api/model", { method: "POST", body: fd });
+  const j = await r.json();
   setStatus("mstatus", j.ok, j.message);
 }
 async function randomizeWeights() {
