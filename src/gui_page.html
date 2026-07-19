@@ -114,6 +114,8 @@ table.coef th { background: #f4f6fb; } table.coef td.name { text-align: left; }
   <label>Max iterations <input class="num" type="number" id="maxiter" value="2000"
     min="1"></label>
   <label>Seed <input class="num" type="number" id="seed" placeholder="clock"></label>
+  <label title="Stop automatically when the training error stops improving (moving-average window 100, relative tolerance 1e-4)"><input
+    type="checkbox" id="autostop"> Auto-stop on plateau</label>
   <button id="randbtn" onclick="randomizeWeights()">Randomize weights</button>
   <button id="trainbtn" onclick="train()">Train</button>
   <span class="status" id="tstatus"></span>
@@ -242,8 +244,10 @@ async function train() {
     setStatus("tstatus", j.ok, j.message);
     return;
   }
-  const j = await api("/api/train", { algorithm: $("algo").value,
-    maxiter: $("maxiter").value, seed: $("seed").value, async: 1 });
+  const p = { algorithm: $("algo").value, maxiter: $("maxiter").value,
+    seed: $("seed").value, async: 1 };
+  if ($("autostop").checked) p.autostop = 1; // engine defaults for tol/window
+  const j = await api("/api/train", p);
   if (!j.ok) { setStatus("tstatus", false, j.message); return; }
   training = true;
   $("trainbtn").textContent = "Stop";
@@ -281,6 +285,8 @@ async function pollTraining() {
   const res = j.result;
   if (!res) return; // nothing ever ran
   setStatus("tstatus", res.ok, res.message);
+  if (res.ok && res.stopReason === "plateau")
+    $("errnote").textContent = "Stopped early — the training error plateaued.";
   if (res.ok && res.roc) { drawROC(res.roc); renderStats(res.roc); }
   if (res.ok && res.stats) renderFullStats(res.stats);
 }

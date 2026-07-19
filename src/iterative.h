@@ -14,6 +14,7 @@ using namespace std;
 
 #include "model.h"
 #include "utility.h"
+#include "plateau.h"
 
 class Iterative : public Model {
 public:
@@ -38,6 +39,7 @@ public:
 		STOP_CHANGE, // change in error over 1 iteration fell below delta
 		STOP_WINDOW, // error increased over the window
 		STOP_GRADMAX, // maximum absolute gradient fell below the limit
+		STOP_PLATEAU, // the error stopped improving (auto-stop, ROADMAP 2 Ph3)
 		STOP_OBSERVER // the observer said stop (GUI cancel)
 	};
 
@@ -78,6 +80,16 @@ public:
 	bool getWindowStop() { return windowStopFlag; } // returns flag indicating if will be used
 	void setWindow( const unsigned ); // sets window width
 	unsigned getWindow() { return window; } // returns window width
+
+	// Gets & sets auto-stop: stop when the training error plateaus (stops
+	//    improving) over a two-window moving average. Default OFF, so a run
+	//    without it is bit-identical to one before the feature (goldens' rule).
+	//    See src/plateau.h for the detector. tol is the relative-improvement
+	//    threshold; win is each averaging window's width.
+	void setAutoStop( const bool flag, const double tol, const unsigned win );
+	bool getAutoStop() { return autoStopFlag; }
+	double getAutoStopTol() { return autoStopTol; }
+	unsigned getAutoStopWindow() { return autoStopWindow; }
 
 	// The observer is NOT owned and NOT copied: a clone (RegressNet's working
 	//    copies) must never drive its original's GUI buffers, so copy() nulls it
@@ -121,12 +133,17 @@ protected:
 		windowStopFlag, // flag indicating if training stops if error increases over window
 		changeStopFlag, // flag indicating if change over 1 iteration used to stop training
 		gradMaxFlag, // flag indicating if training stops with a maximum gradient
+		autoStopFlag, // flag indicating if plateau auto-stop used
 		logPrintFlag, // flag indicating if log printing used
 		boundsErrorFlag; // flag indicating if out of bounds error encountered
 
 	double minError, // minimum error value
 		delta, // change in error value
-		gradMaxLimit; // limit of maximum gradient
+		gradMaxLimit, // limit of maximum gradient
+		autoStopTol; // relative-improvement threshold for plateau auto-stop
+
+	unsigned autoStopWindow; // averaging-window width for plateau auto-stop
+	static const unsigned autoStopPatience = 3; // consecutive strikes to stop
 
 	Observer* observerPtr; // non-owning; see setObserver
 	StopReason stopReason; // why the last train() ended

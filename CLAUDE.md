@@ -741,6 +741,55 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   getting its first NaN audit — two infinite loops so far (operatingPoints, KScalc),
   found by sampling actual hangs, not by reading for them.
 
+- **2026-07-19 — ROADMAP 2 Phase 3 DONE: plateau auto-stop. The plan's central
+  mechanism was built on a false premise, caught by measuring before building (rule 3).**
+  The handoff sketch (and the roadmap) called for a `plateauPeriodHint()=df()` /
+  `W_eff = max(window, 2·period)` scheme to average out the "period-df() sawtooth" that
+  CGD/Shanno restarts supposedly produce. **Reading network.cpp first killed it:** the
+  restart test is `( t == 0 ) || ( t == df() )` — a *one-time* equality, not
+  `t % df() == 0`. In batch/epoch mode `engine()` gets `t = iteration`, so conjugacy
+  restarts exactly once (at `iteration == df()`) and then accumulates unbroken. There is
+  no period-df() sawtooth to average out, and auto-step-size (the other oscillation
+  source) runs an inner η search *every* iteration, so it is aperiodic too. **Dropped the
+  hint/`W_eff` machinery entirely** — the detector is a plain two-window moving-average
+  comparison (`src/plateau.h`, header-only, engine-free), which smooths oscillation up to
+  ~window-scale on its own without any period assumption. Simpler, and not fiction.
+  1. **`src/plateau.h` `PlateauDetector(window, tol, patience)`** — holds the last
+     2·window errors as two adjacent windows, strikes when window-over-window relative
+     improvement `< tol` (rising counts too → crude overlearning guard), `patience`
+     strikes fire. **NaN decided at design time (the other rule-3 item):** a non-finite
+     error is a strike *outright* and is kept OUT of the windows so it can't poison the
+     means — the exact trap that hung the autoalgo probes twice. So a diverged run
+     plateau-stops instead of sailing to maxiter.
+  2. **`tests/plateau/check_plateau.cpp`** (ctest `plateau_detector`) — five synthetic
+     traces, **both directions proven non-vacuous by sabotage** per rule 2: forcing
+     "never strike on a finite plateau" fails exactly the two fire-detection assertions
+     (decay-then-flat, flat sawtooth); making non-finite a reset instead of a strike
+     fails exactly the two NaN assertions. Neither sabotage touches the other's tests.
+  3. **Engine wiring in `Iterative`** — `setAutoStop(flag,tol,win)` + getters,
+     `STOP_PLATEAU`, checked in the train loop AFTER gradMax (true convergence wins) and
+     before the observer. **Default OFF**, and `update()` is called only when the flag is
+     on, so a run without auto-stop is bit-identical — goldens byte-identical, oracle
+     numerically identical, both verified. `copy()` carries the config so the autoalgo
+     winner clone keeps it.
+  4. **GUI**: `POST /api/train` gains `autostop=1` (+ `autostop_tol` default 1e-4,
+     `autostop_window` default 100), validated in the handler (asserts vanish in release);
+     `stopReason:"plateau"` via a new `stopReasonName` case; page "Auto-stop on plateau"
+     checkbox + an honest "Stopped early — the training error plateaued." chart note.
+     Smoke asserts the fire, a **control** (same seed, no autostop → `grad_max`, proving
+     it's a real stop not a relabel), and both validation rejections.
+  5. **Confirmed-and-left**: the pre-existing gradMax-staleness quirk (`getGradMax()` only
+     refreshes inside the print block, so grad_max fires *on* a print iteration) is real
+     and oracle/golden-pinned; the plateau detector does NOT share it (it sees the fresh
+     `setError` every iteration). Not documented in AGENTS.md — it changes no recipe.
+  Gates: zero-warning build, goldens byte-identical, 6/6 ctest (new plateau_detector),
+  smoke (+ plateau block), verify_oracle identical, live curl drive of the plateau path
+  incl. report text and the no-autostop control. **Not yet run: in-browser click of the
+  checkbox** (needs the Chrome extension connected) — the endpoint it drives is fully
+  verified and the JS change is one param. **Next: ROADMAP 2 Phase 4** (OBD hidden-layer
+  sizing) — its plan claims (`setHidden` destructive, grow-with-zero-outgoing-weights =
+  bit-identical forward pass, OBD needs a test set) are unverified; measure first.
+
 ## ROADMAP 3 (agreed with Craig 2026-07-15) — ROC inference
 
 Rationale, citations, and Methods language: **`docs/roc_theory.md`**. Work in order.
@@ -1032,11 +1081,16 @@ as any API change. Invoke the `dataviz` skill before writing chart code (Phase 1
   w/ 3 probes + `Selected` in report, blocking AND async (adoption replaces modelPtr
   mid-job — the worker re-derives its pointers). Probes carry per-probe stopReason;
   bootstrap disabled on probe clones; diverged probes are results, not failures.
-- **3 — plateau auto-stop**. New plateau.h + tests/plateau ctest (4 synthetic traces:
-  improving decay no-trigger, decay-then-flat trigger, flat sawtooth w/ window ≥2p
-  trigger, sawtooth+slow-decay no-trigger). Smoke `autostop=1` → `stopReason`. Also
-  document (AGENTS.md) the pre-existing quirk: gradMax stop only refreshes on print
-  iterations — leave as-is.
+- **3 — plateau auto-stop** (**DONE** 2026-07-19, see status entry). New plateau.h +
+  tests/plateau ctest (five synthetic traces: clean decay no-fire, decay-then-flat
+  fire, flat sawtooth fire, sawtooth+slow-decay no-fire, NaN divergence fire).
+  Smoke `autostop=1` → `stopReason:"plateau"` + control run + validation. **The plan's
+  `plateauPeriodHint()=df()`/`W_eff` sawtooth-averaging mechanism was DROPPED** — a
+  Rule-3 measurement showed its premise false (see status entry). The pre-existing
+  gradMax-staleness quirk (`getGradMax()` only refreshes on print iterations, so
+  grad_max fires *on* a print iteration) was confirmed real and left as-is — it is
+  oracle/golden-pinned and the plateau detector does NOT share it (`update()` sees the
+  fresh `setError` every iteration).
 - **4 — OBD**. simpleprop grow/shrink/saliency + obd driver + `/api/obd` +
   tests/obd ctest (grow-with-zero-oW → `forward()` bit-identical; grow-then-shrink-back
   restores outputs; zeroed unit saliency 0). Smoke: raw load fraction=0.25 → obd →

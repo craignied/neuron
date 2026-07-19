@@ -135,7 +135,7 @@ struct GuiObserver : Iterative::Observer
 
 // The engine's stop reason as a JSON-friendly name. STOP_OBSERVER reads as
 //    "cancelled" here because the GUI's observer only ever stops on the Stop
-//    button; a future auto-stop gets its own reason (STOP_PLATEAU, ROADMAP 2).
+//    button; the plateau auto-stop reports separately as "plateau".
 const char* stopReasonName( Iterative::StopReason r )
 {
 	switch ( r )
@@ -145,6 +145,7 @@ const char* stopReasonName( Iterative::StopReason r )
 	case Iterative::STOP_CHANGE: return "min_change";
 	case Iterative::STOP_WINDOW: return "error_window";
 	case Iterative::STOP_GRADMAX: return "grad_max";
+	case Iterative::STOP_PLATEAU: return "plateau";
 	case Iterative::STOP_OBSERVER: return "cancelled";
 	default: return "none";
 	}
@@ -785,6 +786,24 @@ string handleTrain( const httplib::Request& req )
 		return jsonMsg( false, "algorithm must be 1, 2, 3 or auto" );
 	if ( maxIter < 1 )
 		return jsonMsg( false, "max iterations must be at least 1" );
+
+	// Plateau auto-stop (default off). tol/window fall back to the engine's
+	//    own defaults when the fields are absent; validated here rather than
+	//    let setAutoStop's asserts fire (asserts vanish in release builds).
+	bool autoStop = ( param( req, "autostop" ) == "1" );
+	double autoStopTol = 1e-4;
+	unsigned autoStopWin = 100;
+	if ( autoStop )
+	{
+		string t = param( req, "autostop_tol" ), w = param( req, "autostop_window" );
+		if ( !t.empty() ) autoStopTol = atof( t.c_str() );
+		if ( !w.empty() ) autoStopWin = ( unsigned ) atol( w.c_str() );
+		if ( !( autoStopTol > 0 && autoStopTol < 1 ) )
+			return jsonMsg( false, "autostop_tol must be between 0 and 1" );
+		if ( autoStopWin < 2 )
+			return jsonMsg( false, "autostop_window must be at least 2" );
+	}
+
 	if ( !seed.empty() )
 		util::set_seed( ( unsigned ) atol( seed.c_str() ) );
 
@@ -801,6 +820,7 @@ string handleTrain( const httplib::Request& req )
 	if ( !net->getWeightsSet() )
 		net->randomize();
 	iter->setMaxIterations( maxIter );
+	iter->setAutoStop( autoStop, autoStopTol, autoStopWin );
 	if ( !autoSelect ) // auto: each probe sets its own; the winner's sticks
 		net->setTrainingType( algorithm - 1 );
 

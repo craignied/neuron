@@ -175,6 +175,32 @@ for setname, s in (d.get("stats") or {}).items():
         sys.exit(1)
 PY
 
+# --- Plateau auto-stop (ROADMAP 2 Phase 3) ---------------------------------
+# On the low-birth-weight logistic (loaded above), an aggressive plateau
+#    detector must stop the run early, reporting stopReason "plateau" and the
+#    report line. The SAME run WITHOUT autostop must NOT -- it converges to
+#    grad_max -- which proves the feature is off by default and is doing real
+#    work, not relabeling a stop that would have happened anyway.
+curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
+curl -s -X POST "$URL/api/train" \
+    -d "algorithm=1&maxiter=2000&seed=42&autostop=1&autostop_tol=0.001&autostop_window=10" \
+    > plateau.json
+grep -q '"ok":true' plateau.json || fail "autostop train"
+grep -q '"stopReason":"plateau"' plateau.json || fail "autostop run should stop on plateau"
+grep -q 'The error plateaued' plateau.json || fail "no plateau line in the report"
+curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=2000&seed=42" > plateau_ctl.json
+grep -q '"stopReason":"plateau"' plateau_ctl.json \
+    && fail "a run without autostop must never plateau-stop"
+# Invalid auto-stop parameters are rejected cleanly, not asserted away (asserts
+#    vanish in release builds, so the handler must guard the ranges itself)
+curl -s -X POST "$URL/api/train" \
+    -d "algorithm=1&maxiter=100&seed=42&autostop=1&autostop_tol=5" \
+    | grep -q '"ok":false' || fail "autostop_tol out of range should be rejected"
+curl -s -X POST "$URL/api/train" \
+    -d "algorithm=1&maxiter=100&seed=42&autostop=1&autostop_window=1" \
+    | grep -q '"ok":false' || fail "autostop_window < 2 should be rejected"
+
 # --- Async training (ROADMAP 2 Phase 1b) -----------------------------------
 # A slow, continuous-outcome regression set: iterations are heavy enough that
 #    a 50M-iteration budget cannot finish during the test, and a non-discrete
@@ -259,4 +285,4 @@ done
 grep -q '"running":false' status3.json || fail "async auto run never completed"
 grep -q '"autoAlgo":{"selected":' status3.json || fail "async result missing autoAlgo"
 
-echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, binormal fits + null when impossible, logistic Wald/condition number, regress, saves, async train/status/stop + 409 busy + cancel, algorithm=auto blocking + async)"
+echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, binormal fits + null when impossible, logistic Wald/condition number, regress, saves, plateau auto-stop + control + validation, async train/status/stop + 409 busy + cancel, algorithm=auto blocking + async)"

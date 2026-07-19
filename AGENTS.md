@@ -267,7 +267,17 @@ it to `maxiter`. The result JSON gains
 `autoAlgo{selected, selectedName, probes[{algorithm, name, error,
 iterations, stopReason}]}` and the report opens with the decision summary;
 a probe whose `stopReason` is `grad_max` **converged inside its budget**,
-which usually settles the choice outright. `POST /api/load` also accepts `discrete=0` for a continuous
+which usually settles the choice outright. `POST /api/train` also accepts
+**`autostop=1`** (since 2026-07-19, off by default): the run stops once the
+training error stops improving — a two-window moving average of the error,
+compared window-over-window, that strikes when relative improvement falls
+below `autostop_tol` (default `1e-4`) and stops after three consecutive
+strikes; each window is `autostop_window` iterations wide (default `100`).
+A rising error strikes too, so it doubles as crude overlearning protection,
+and a diverged (NaN) run stops rather than running to `maxiter`. The result's
+`stopReason` reads `plateau`; the page exposes it as an "Auto-stop on plateau"
+checkbox. It is a genuine early stop, not a relabeling: the same run without
+it runs on to `grad_max` or `max_iterations`. `POST /api/load` also accepts `discrete=0` for a continuous
 (regression) outcome — with `mode=raw` that requires `fraction=0` (the
 stratified split needs classes), so pre-split regression data loads via
 `mode=train` plus `testfile`/`testpath`.

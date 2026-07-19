@@ -55,6 +55,13 @@ add_executable(check_hl
 target_include_directories(check_hl PRIVATE src)
 add_test(NAME hosmer_lemeshow_large COMMAND check_hl)
 
+# Unit test: the plateau early-stop detector (ROADMAP 2 Phase 3). Header-only
+# and engine-free -- five synthetic error traces. No GSL needed.
+add_executable(check_plateau
+    tests/plateau/check_plateau.cpp)
+target_include_directories(check_plateau PRIVATE src)
+add_test(NAME plateau_detector COMMAND check_plateau)
+
 # Unit test: engine output is capturable via util::set_screen() (the
 # GUI/server contract). No GSL needed.
 add_executable(check_capture

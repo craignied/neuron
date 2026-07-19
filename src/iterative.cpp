@@ -12,9 +12,10 @@
 // Default constructor with initial conditions
 Iterative::Iterative() : maxIterations ( 1000000 ), printCount ( 1000 ),
 	window ( 1000 ), minStopFlag ( false ), windowStopFlag ( false ),
-	changeStopFlag ( false ), gradMaxFlag ( true ), logPrintFlag ( true ),
-	boundsErrorFlag ( false ), minError ( 1e-30 ), delta ( 1e-16 ),
-	gradMaxLimit ( 1e-6 ), observerPtr ( nullptr ), stopReason ( STOP_NONE ) { }
+	changeStopFlag ( false ), gradMaxFlag ( true ), autoStopFlag ( false ),
+	logPrintFlag ( true ), boundsErrorFlag ( false ), minError ( 1e-30 ),
+	delta ( 1e-16 ), gradMaxLimit ( 1e-6 ), autoStopTol ( 1e-4 ),
+	autoStopWindow ( 100 ), observerPtr ( nullptr ), stopReason ( STOP_NONE ) { }
 
 // Default destructor
 Iterative::~Iterative() { }
@@ -46,11 +47,14 @@ void Iterative::copy( const Iterative& rhs )
 	windowStopFlag = rhs.windowStopFlag;
 	changeStopFlag = rhs.changeStopFlag;
 	gradMaxFlag = rhs.gradMaxFlag;
+	autoStopFlag = rhs.autoStopFlag;
 	logPrintFlag = rhs.logPrintFlag;
 	boundsErrorFlag = rhs.boundsErrorFlag;
 	minError = rhs.minError;
 	delta = rhs.delta;
 	gradMaxLimit = rhs.gradMaxLimit;
+	autoStopTol = rhs.autoStopTol;
+	autoStopWindow = rhs.autoStopWindow;
 	stopReason = rhs.stopReason;
 	// Deliberately NOT copied: a clone (RegressNet's working copies, the
 	//    coming autoalgo probes) must never drive its original's observer
@@ -99,6 +103,18 @@ void Iterative::setWindow( const unsigned n )
 	window = n; // set the private member window
 }
 
+// Sets plateau auto-stop: whether it is used, the relative-improvement
+//    tolerance, and the averaging-window width (see src/plateau.h)
+void Iterative::setAutoStop( const bool flag, const double tol,
+	const unsigned win )
+{
+	assert ( tol > 0 && tol < 1 ); // relative improvement is a fraction
+	assert ( win >= 2 ); // each averaging window needs at least 2 points
+	autoStopFlag = flag;
+	autoStopTol = tol;
+	autoStopWindow = win;
+}
+
 // Trains the model, returns the final error
 double Iterative::train()
 {
@@ -119,6 +135,11 @@ double Iterative::train()
 	stopReason = STOP_MAX_ITERATIONS;
 
 	deque< double > errorsWindow; // window of error values, use deque for speed
+
+	// Plateau auto-stop detector (inert unless autoStopFlag; constructed from
+	//    the copied config so a clone trains with the same settings). Local,
+	//    like errorsWindow -- its state is per-run, so it stays off the class.
+	PlateauDetector plateau( autoStopWindow, autoStopTol, autoStopPatience );
 
 	// For reporting to screen and file
 	ostringstream screenStream, fileStream;
@@ -158,6 +179,10 @@ double Iterative::train()
 	if ( gradMaxFlag ) // error increases over a window
 		screenStream << "Stop if maximum absolute gradient decreases below "
 			<< gradMaxLimit << endl;
+
+	if ( autoStopFlag ) // error plateaus (auto-stop)
+		screenStream << "Stop if the error plateaus over a window of "
+			<< autoStopWindow << " iterations" << endl;
 
 	// Output header for printout to follow, then finish off screen stream for now
 	screenStream << endl << "    Iteration:";
@@ -325,6 +350,25 @@ double Iterative::train()
 				stopReason = STOP_GRADMAX;
 				break;
 			}
+		}
+
+		// Exit if the error has plateaued (stopped improving). The detector
+		//    must see every iteration to accumulate, so update() is called
+		//    whenever the flag is on -- but only then, so a run with auto-stop
+		//    off never touches it and stays bit-identical (goldens' rule).
+		if ( autoStopFlag && plateau.update( setError ) )
+		{
+			screenStream.str( "" ); // reset screen stream
+
+			// Prepare line for printing to screen
+			screenStream << "The error plateaued over a window of "
+				<< autoStopWindow << " iterations." << endl;
+
+			fileStream << screenStream.str(); // stream line into file stream
+			util::screen() << screenStream.str(); // then print to screen
+
+			stopReason = STOP_PLATEAU;
+			break;
 		}
 
 		// Give the observer its look at the finished iteration -- at the
