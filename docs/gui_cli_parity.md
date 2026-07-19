@@ -19,7 +19,7 @@ Status: ✅ present · 🔲 planned (parity gap being closed 2026-07-19) · — 
 | 1 Specify dataset | § Dataset panel | `POST /api/load` | ✅ |
 | 2 Specify model | § Model panel | `POST /api/model` | ✅ |
 | 3 Use model (train) | § Train panel | `POST /api/train` | ✅ |
-| 4 Discriminant function analysis | § DFA panel | `POST /api/dfa` | 🔲 |
+| 4 Discriminant function analysis | § DFA panel | `POST /api/dfa` | ✅ |
 | 9 Quit | — (server lifecycle) | — | — |
 
 ## Dataset submenu
@@ -69,8 +69,8 @@ Status: ✅ present · 🔲 planned (parity gap being closed 2026-07-19) · — 
 
 | CLI menu option | GUI control | API | Status |
 |---|---|---|---|
-| 1 Linear DFA | DFA panel → Linear + Run | `POST /api/dfa` `type=linear` | 🔲 |
-| 2 Quadratic DFA | DFA panel → Quadratic + Run | `POST /api/dfa` `type=quadratic` | 🔲 |
+| 1 Linear DFA | DFA panel → Linear + Run | `POST /api/dfa` `type=linear` | ✅ |
+| 2 Quadratic DFA | DFA panel → Quadratic + Run | `POST /api/dfa` `type=quadratic` | ✅ |
 
 ## Logging (cross-cutting)
 

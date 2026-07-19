@@ -204,6 +204,23 @@ beside your data.</span></div>
 </fieldset>
 
 <fieldset>
+<legend>4b &mdash; Discriminant function analysis</legend>
+<div class="row">
+  <label><select id="dfatype">
+    <option value="linear">Linear (LDFA)</option>
+    <option value="quadratic">Quadratic (QDFA)</option>
+  </select></label>
+  <button onclick="runDFA()">Run DFA</button>
+  <span class="status" id="dfastatus"></span>
+</div>
+<div class="row"><span class="status">Discriminant analysis on the loaded
+dataset (needs a discrete outcome). It is a standalone analysis &mdash; it does
+not disturb the trained model above. Results appear below and in the ROC/stats
+panels.</span></div>
+<pre id="dfaout" style="display:none;overflow:auto;max-height:24em"></pre>
+</fieldset>
+
+<fieldset>
 <legend>5 &mdash; Session files</legend>
 <div class="row">
   <button onclick="saveFile('network')">Network</button>
@@ -552,6 +569,20 @@ async function regress() {
       direction: $("rdir").value, threshold: $("pthreshold").value });
     setStatus("rstatus", j.ok, j.message);
   } finally { $("regressbtn").disabled = false; }
+}
+// Discriminant function analysis: linear or quadratic on the loaded dataset.
+async function runDFA() {
+  setStatus("dfastatus", true, "running…");
+  const j = await api("/api/dfa", { type: $("dfatype").value,
+    log_lastop: $("log_lastop").checked ? 1 : 0,
+    log_history: $("log_history").checked ? 1 : 0 });
+  setStatus("dfastatus", j.ok, j.message);
+  if (j.ok && j.output) {
+    $("dfaout").style.display = "block";
+    $("dfaout").textContent = j.output;
+  }
+  if (j.ok && j.roc) { drawROC(j.roc); renderStats(j.roc); }
+  if (j.ok && j.stats) renderFullStats(j.stats);
 }
 function drawROC(roc) {
   $("rocbox").style.display = "flex";

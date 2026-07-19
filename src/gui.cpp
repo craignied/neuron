@@ -33,6 +33,8 @@
 #include "bareprop.h"
 #include "backprop.h"
 #include "network.h"
+#include "ldfa.h"
+#include "qdfa.h"
 #include "iterative.h"
 #include "regressnet.h"
 #include "utility.h"
@@ -707,6 +709,70 @@ string handleModel( const httplib::Request& req )
 	return jsonMsg( false, "unknown model type: " + type );
 }
 
+// Discriminant function analysis (CLI main menu 4). A standalone analysis on
+//    the loaded dataset -- it does NOT replace the trained model in modelPtr.
+//    Linear (LDFA) or quadratic (QDFA); the choice is the only parameter, as in
+//    the CLI. Returns the captured report plus the ROC curves and stats panel
+//    built from the analysis's own TwoSets (same helpers as training).
+string handleDFA( const httplib::Request& req )
+{
+	string type = param( req, "type" );
+	if ( type != "linear" && type != "quadratic" )
+		return jsonMsg( false, "DFA type must be linear or quadratic" );
+	if ( !dataPtr )
+		return jsonMsg( false, "load a dataset first" );
+	if ( dataPtr->getOutput() != 1 )
+		return jsonMsg( false, "the GUI supports 1-output models" );
+	if ( !dataPtr->getDiscrete() )
+		return jsonMsg( false, "discriminant analysis needs a discrete output" );
+
+	bool logLastop  = !( req.has_param( "log_lastop" )  && param( req, "log_lastop" )  == "0" );
+	bool logHistory = !( req.has_param( "log_history" ) && param( req, "log_history" ) == "0" );
+
+	unique_ptr< Model > dfa;
+	if ( type == "linear" ) dfa = make_unique< LDFA >();
+	else dfa = make_unique< QDFA >();
+
+	Capture cap;
+	dfa->setDataSet( *dataPtr );
+	dfa->setLastop( logLastop );
+	dfa->setHistory( logHistory );
+	try { dfa->train(); }
+	catch ( const exception& e )
+	{
+		return string( "{\"ok\":false,\"message\":\"DFA failed: " )
+			+ jsonEscape( e.what() ) + "\",\"output\":\""
+			+ jsonEscape( cap.text.str() ) + "\"}";
+	}
+
+	// ROC curves and the stats panel from the analysis's TwoSets (the guesses
+	//    reportAccuracy just wrote), via the same helpers training uses.
+	DataSet& dd = dfa->getDataSet();
+	string roc, stats;
+	if ( dd.getDiscrete() && dd.getOutput() == 1 && dd.trainLoaded()
+		&& dd.getTrainTwoSet().loaded() )
+	{
+		roc = ",\"roc\":{\"train\":" + jsonROCSeries( dd.getTrainTwoSet() );
+		bool haveTest = ( dd.testLoaded() && dd.getTestTwoSet().loaded() );
+		if ( haveTest )
+			roc += ",\"test\":" + jsonROCSeries( dd.getTestTwoSet() );
+		roc += "}";
+
+		ostringstream s;
+		s << "{\"train\":" << jsonStatsSet( dd.getTrainTwoSet() );
+		if ( haveTest )
+			s << ",\"test\":" << jsonStatsSet( dd.getTestTwoSet() );
+		s << "}";
+		stats = ",\"stats\":" + s.str();
+	}
+
+	lastReport = cap.text.str(); // downloadable as report.txt
+	string msg = string( type == "linear" ? "linear" : "quadratic" )
+		+ " discriminant function analysis complete";
+	return string( "{\"ok\":true,\"message\":\"" ) + jsonEscape( msg )
+		+ "\",\"output\":\"" + jsonEscape( lastReport ) + "\"" + roc + stats + "}";
+}
+
 string handleRandomize( const httplib::Request& req )
 {
 	string seed = param( req, "seed" );
@@ -1325,6 +1391,13 @@ int run_gui( bool openBrowser )
 		lock_guard< mutex > lock( engineMutex );
 		if ( busyGate( res ) ) return;
 		res.set_content( handleRegress( req ), "application/json" );
+	} );
+
+	svr.Post( "/api/dfa", []( const httplib::Request& req, httplib::Response& res )
+	{
+		lock_guard< mutex > lock( engineMutex );
+		if ( busyGate( res ) ) return;
+		res.set_content( handleDFA( req ), "application/json" );
 	} );
 
 	// Session artifacts: written into the workspace by the engine's own

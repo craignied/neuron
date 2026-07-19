@@ -252,6 +252,20 @@ curl -s -X POST "$URL/api/model" -F "file=@xor_net.txt;filename=net.txt" -F "mod
 curl -s "$URL/api/save/train_guesses" -o dl_loaded
 [ -s dl_loaded ] || fail "a loaded network should produce guesses"
 
+# --- Discriminant function analysis (GUI/CLI parity, main menu 4) ----------
+# Linear and quadratic DFA on the loaded discrete dataset -> report + ROC +
+# stats, and it does not disturb the model. Reload low-birth-weight (discrete,
+# already copied above) for a meaningful analysis.
+curl -s -X POST "$URL/api/load" -d "mode=raw&path=lowbwt2-2train.txt&fraction=0.25" > /dev/null
+curl -s -X POST "$URL/api/dfa" -d "type=linear" > dfa.json
+grep -q '"ok":true' dfa.json || fail "linear DFA"
+grep -q 'running LDFA' dfa.json || fail "no LDFA report in the output"
+grep -q '"stats":' dfa.json || fail "DFA should return the stats panel"
+curl -s -X POST "$URL/api/dfa" -d "type=quadratic" \
+    | grep -q 'quadratic discriminant' || fail "quadratic DFA"
+curl -s -X POST "$URL/api/dfa" -d "type=cubic" \
+    | grep -q '"ok":false' || fail "an unknown DFA type must be rejected"
+
 # --- Async training (ROADMAP 2 Phase 1b) -----------------------------------
 # A slow, continuous-outcome regression set: iterations are heavy enough that
 #    a 50M-iteration budget cannot finish during the test, and a non-discrete
@@ -336,4 +350,4 @@ done
 grep -q '"running":false' status3.json || fail "async auto run never completed"
 grep -q '"autoAlgo":{"selected":' status3.json || fail "async result missing autoAlgo"
 
-echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, binormal fits + null when impossible, logistic Wald/condition number, regress, saves, plateau auto-stop + control + validation, train-panel parity controls (learning rate/weight decay/batch-epoch/stopping conditions/print counter) + behavioral proof + validation, model-panel parity (bias->BareProp/multi-layer->BackProp/error function/load-network), async train/status/stop + 409 busy + cancel, algorithm=auto blocking + async)"
+echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, binormal fits + null when impossible, logistic Wald/condition number, regress, saves, plateau auto-stop + control + validation, train-panel parity controls (learning rate/weight decay/batch-epoch/stopping conditions/print counter) + behavioral proof + validation, model-panel parity (bias->BareProp/multi-layer->BackProp/error function/load-network), DFA (linear/quadratic + report/stats), async train/status/stop + 409 busy + cancel, algorithm=auto blocking + async)"
