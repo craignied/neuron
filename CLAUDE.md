@@ -1238,10 +1238,17 @@ as any API change. Invoke the `dataviz` skill before writing chart code (Phase 1
   grad_max fires *on* a print iteration) was confirmed real and left as-is — it is
   oracle/golden-pinned and the plateau detector does NOT share it (`update()` sees the
   fresh `setError` every iteration).
-- **4 — OBD**. simpleprop grow/shrink/saliency + obd driver + `/api/obd` +
-  tests/obd ctest (grow-with-zero-oW → `forward()` bit-identical; grow-then-shrink-back
-  restores outputs; zeroed unit saliency 0). Smoke: raw load fraction=0.25 → obd →
-  `selectedHidden`+`history`; refusal without test set.
+- **4 — OBD**. **Detailed implementation plan: `docs/obd_plan.md`** (Fable,
+  2026-07-19) — supersedes the sketch in "Architecture decisions" above where they
+  differ. The sketch's rule-3 claims are now VERIFIED against the code (setHidden
+  destructive; zero-oW grow bit-identical *with the bias-slot relocation trap*;
+  CGD/Shanno state self-heals at t==0 so no manual clearing is load-bearing;
+  sampleTestError is both the refusal check and the per-size measurement; pruning
+  uses the existing `includerows`, no new primitive). simpleprop grow/remove/
+  saliency + obd driver + `/api/obd` + tests/obd ctest (grow-with-zero-oW →
+  `forward()` bit-identical; grow-then-remove-back restores outputs; zeroed unit
+  saliency 0). Smoke: raw load fraction=0.25 → obd → `selectedHidden`+`history`;
+  refusal without test set.
 - **5 (later) — new training algorithms from the literature**: Rprop (ideal full-batch),
   Adam, L-BFGS (`gsl_multimin_fdfminimizer_vector_bfgs2`), optional Levenberg–Marquardt;
   Muon = experimental novel candidate (2026 tabular-MLP benchmark, arXiv 2604.15297).
