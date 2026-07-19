@@ -26,6 +26,7 @@ done
 [ -n "$URL" ] || { echo "FAIL: server URL never appeared" >&2; cat gui.out; exit 1; }
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
+PY=python3; command -v python3 >/dev/null || PY=python
 
 curl -s "$URL/api/version" | grep -q "neuron" || fail "version endpoint"
 curl -s "$URL/" | grep -q "<title>neuron</title>" || fail "page not served"
@@ -252,11 +253,59 @@ curl -s -X POST "$URL/api/model" -F "file=@xor_net.txt;filename=net.txt" -F "mod
 curl -s "$URL/api/save/train_guesses" -o dl_loaded
 [ -s dl_loaded ] || fail "a loaded network should produce guesses"
 
+# A no-bias BackProp survives a save/load round trip WITH ITS WEIGHTS. The
+# assertion is error continuity, because the message-level checks alone cannot
+# see this bug: BackProp::load reads its line-2 bias flag but never APPLIES
+# it, so without setBias before load() the weight matrices are sized for bias,
+# operator>> desyncs on the file, load still returns true -- and the trained
+# net silently comes back as garbage (error snaps to ln 2 ~ 0.693). Measured
+# against the pre-fix handler: 0.587 -> 0.692; with the fix: 0.587 -> 0.587.
+curl -s -X POST "$URL/api/load" -d "mode=train&path=lowbwt2-2train.txt" > /dev/null
+curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=4,2&bias=0" \
+    | grep -q 'BackProp' || fail "no-bias multi-layer should build a BackProp"
+curl -s -X POST "$URL/api/train" -d "algorithm=1&autostep=1&maxiter=3000&seed=42" \
+    > nb_pre.json
+grep -q '"ok":true' nb_pre.json || fail "train the no-bias BackProp"
+curl -s "$URL/api/save/network" -o /dev/null
+sed -n 2p network.txt | grep -q '^0' || fail "saved network should record bias absent"
+curl -s -X POST "$URL/api/model" -d "mode=load&path=network.txt" \
+    | grep -q 'loaded BackProp' || fail "no-bias BackProp did not load back"
+curl -s -X POST "$URL/api/train" \
+    -d "algorithm=1&autostep=0&batch_epoch=0&eta=0.0001&maxiter=1&seed=42" \
+    > nb_post.json
+grep -q 'continued training' nb_post.json || fail "loaded no-bias BackProp should train on"
+$PY - <<'PY' || fail "no-bias BackProp weights did not survive the save/load round trip"
+import json, re
+err = lambda f: float(re.search(r"final error ([0-9.eE+-]+)",
+                                json.load(open(f))["message"]).group(1))
+e1, e2 = err("nb_pre.json"), err("nb_post.json")
+assert abs(e2 - e1) / e1 < 0.05, (e1, e2)
+PY
+
+# Multipart posts must honor the log toggles too (the page's file-upload posts
+# are multipart, where req.has_param alone is false and the toggles used to be
+# silently ignored). With log_lastop=0 a training run must NOT write model.txt.
+rm -f model.txt
+curl -s -X POST "$URL/api/model" -F type=simpleprop -F hidden=3 -F log_lastop=0 \
+    | grep -q '"ok":true' || fail "multipart model create"
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=100&seed=42" \
+    | grep -q '"ok":true' || fail "train with lastop logging off"
+[ -f model.txt ] && fail "log_lastop=0 sent as multipart was ignored"
+
+# Logistic regression is batch/epoch by definition: the CLI refuses to turn it
+# off, so the API must refuse batch_epoch=0 rather than mistrain.
+curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=50&batch_epoch=0" \
+    | grep -q '"ok":false' || fail "batch_epoch=0 on logistic must be refused"
+
 # --- Discriminant function analysis (GUI/CLI parity, main menu 4) ----------
 # Linear and quadratic DFA on the loaded discrete dataset -> report + ROC +
 # stats, and it does not disturb the model. Load the fixed training set
 # (mode=train, no random split) so the ROC Az below is deterministic.
 curl -s -X POST "$URL/api/load" -d "mode=train&path=lowbwt2-2train.txt" > /dev/null
+# No DFA has run since that load, so its guesses must refuse cleanly
+curl -s "$URL/api/save/dfa_train_guesses" | grep -q '"ok":false' \
+    || fail "dfa guesses should refuse before any DFA has run"
 curl -s -X POST "$URL/api/dfa" -d "type=linear" > dfa.json
 grep -q '"ok":true' dfa.json || fail "linear DFA"
 grep -q 'running LDFA' dfa.json || fail "no LDFA report in the output"
@@ -270,6 +319,82 @@ curl -s -X POST "$URL/api/dfa" -d "type=quadratic" \
     | grep -q 'quadratic discriminant' || fail "quadratic DFA"
 curl -s -X POST "$URL/api/dfa" -d "type=cubic" \
     | grep -q '"ok":false' || fail "an unknown DFA type must be rejected"
+# The analysis's guesses stay savable after the run (the CLI offers this save
+# right after a DFA; the handler used to destroy the analysis object)
+curl -s "$URL/api/save/dfa_train_guesses" -o dl_dfa_guesses
+[ -s dl_dfa_guesses ] || fail "DFA train guesses download"
+grep -q '"ok":false' dl_dfa_guesses && fail "DFA train guesses refused after a run"
+[ -f dfa_train_guesses.txt ] || fail "dfa_train_guesses.txt not written to the workspace"
+# No test set on this dataset -> the test guesses refuse with the engine's message
+curl -s "$URL/api/save/dfa_test_guesses" | grep -q '"ok":false' \
+    || fail "dfa test guesses should refuse without a test set"
+
+# --- Dataset characteristics + ROC reporting (CLI dataset menus 11/12/13) ---
+# The load-time params: invalid values are rejected before anything loads;
+# trap_thresholds is proven behaviorally (5 thresholds -> exactly 5 ROC curve
+# points in the train JSON, not the auto-tuned count).
+curl -s -X POST "$URL/api/load" -d "mode=train&path=lowbwt2-2train.txt&out_lower=0.2" \
+    | grep -q '"ok":false' || fail "output bounds on a discrete outcome must be rejected"
+curl -s -X POST "$URL/api/load" -d "mode=train&path=lowbwt2-2train.txt&threshold=1.5" \
+    | grep -q '"ok":false' || fail "threshold outside (0,1) must be rejected"
+curl -s -X POST "$URL/api/load" -d "mode=train&path=lowbwt2-2train.txt&trap_thresholds=1" \
+    | grep -q '"ok":false' || fail "trap_thresholds < 2 must be rejected"
+curl -s -X POST "$URL/api/load" -d "mode=train&path=lowbwt2-2train.txt&roc_report=maybe" \
+    | grep -q '"ok":false' || fail "roc_report must be both or either"
+curl -s -X POST "$URL/api/load" -d "mode=train&path=lowbwt2-2train.txt&in_lower=1&in_upper=-1" \
+    | grep -q '"ok":false' || fail "inverted input bounds must be rejected"
+curl -s -X POST "$URL/api/load" \
+    -d "mode=train&path=lowbwt2-2train.txt&threshold=0.4&in_lower=-0.8&in_upper=0.8&history=1&trap_thresholds=5" \
+    | grep -q '"ok":true' || fail "valid characteristics + ROC settings must load"
+curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=500&seed=42" > tp5.json
+$PY - <<'PY' || fail "trap_thresholds=5 did not reach the ROC sweep"
+import json
+d = json.load(open("tp5.json"))
+assert len(d["roc"]["train"]["x"]) == 5, len(d["roc"]["train"]["x"])
+PY
+
+# The whole-number split form: test_n places EXACTLY n exemplars in the test
+# set (randomizeD truncates ratio*N, so a fraction cannot promise this)
+curl -s -X POST "$URL/api/load" -d "mode=raw&path=lowbwt2-2train.txt&test_n=47" > testn.json
+grep -q '"ok":true' testn.json || fail "test_n load"
+grep -q '47 test exemplars' testn.json || fail "test_n=47 should yield exactly 47"
+
+# --- Multi-output (the CLI supports it; the GUI must too) -------------------
+# A 2-output one-hot pair: loads with outputs=2, models as a BackProp, trains,
+# and DFA reports per-set accuracy -- all accuracy-only, as in the CLI. The
+# 1-output-only machinery must refuse it honestly, not crash.
+$PY - <<'PY'
+import random
+random.seed(7)
+def rows(n):
+    for _ in range(n):
+        x = [random.uniform(-0.9, 0.9) for _ in range(4)]
+        cls = 1 if x[0] + 0.5 * x[1] > 0 else 0
+        o = "1 0" if cls == 0 else "0 1"
+        yield " ".join("%.6f" % v for v in x) + " " + o + " \n"
+with open("mo_train.set", "w", newline="\n") as f:
+    f.writelines(rows(40))
+with open("mo_test.set", "w", newline="\n") as f:
+    f.writelines(rows(20))
+PY
+curl -s -X POST "$URL/api/load" -d "mode=train&path=mo_train.set&testpath=mo_test.set&outputs=2" \
+    > mo.json
+grep -q '"ok":true' mo.json || fail "multi-output load"
+grep -q '2 outputs' mo.json || fail "output count not reported"
+curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=3" > mo_model.json
+grep -q 'BackProp 4-3-2' mo_model.json || fail "multi-output should build a BackProp"
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=100&seed=42" > mo_train.json
+grep -q '"ok":true' mo_train.json || fail "multi-output train"
+grep -q 'classification accuracy in the training set' mo_train.json \
+    || fail "no multi-output accuracy report"
+curl -s -X POST "$URL/api/dfa" -d "type=linear" > mo_dfa.json
+grep -q '"ok":true' mo_dfa.json || fail "multi-output DFA"
+grep -q 'Classification accuracy in the test set' mo_dfa.json \
+    || fail "no multi-output DFA test accuracy"
+# Logistic is 1-output by definition -- the CLI's own refusal, kept
+curl -s -X POST "$URL/api/model" -d "type=logistic" \
+    | grep -q '"ok":false' || fail "logistic must refuse a multi-output dataset"
 
 # --- Async training (ROADMAP 2 Phase 1b) -----------------------------------
 # A slow, continuous-outcome regression set: iterations are heavy enough that
@@ -366,4 +491,4 @@ grep -qE '^[0-9-]+T[0-9:]+ train ' neuron_actions.log || fail "train not audited
 grep -q 'algorithm=' neuron_actions.log || fail "train parameters not recorded in the audit log"
 grep -qE '^[0-9-]+T[0-9:]+ dfa '   neuron_actions.log || fail "dfa not audited"
 
-echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, binormal fits + null when impossible, logistic Wald/condition number, regress, saves, plateau auto-stop + control + validation, train-panel parity controls (learning rate/weight decay/batch-epoch/stopping conditions/print counter) + behavioral proof + validation, model-panel parity (bias->BareProp/multi-layer->BackProp/error function/load-network), DFA (linear/quadratic + report/stats), async train/status/stop + 409 busy + cancel, algorithm=auto blocking + async)"
+echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, binormal fits + null when impossible, logistic Wald/condition number, regress, saves, plateau auto-stop + control + validation, train-panel parity controls (learning rate/weight decay/batch-epoch/stopping conditions/print counter) + behavioral proof + validation, model-panel parity (bias->BareProp/multi-layer->BackProp/error function/load-network), no-bias BackProp save/load round trip, multipart log toggles, logistic batch/epoch guard, DFA (linear/quadratic + report/stats + guesses saves), dataset characteristics + ROC reporting load params + trap_thresholds behavioral proof, test_n exact split, multi-output load/BackProp/train/DFA + logistic refusal, async train/status/stop + 409 busy + cancel, algorithm=auto blocking + async, per-action audit log)"

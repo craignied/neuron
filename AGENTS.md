@@ -237,8 +237,10 @@ training set** — and in the latter mode a second picker takes an optional
 **matched test set**, so a pre-split pair like
 `docs/datasets/prostate-biopsy/BP40train.txt` + `BP40test.txt` loads in one
 step and trains with a proper held-out test evaluation. The input count is
-read from the file (columns minus the single output), so there is nothing to
-type — neuron is a one-output system throughout. **Train continues from the
+read from the file (its columns minus the output count — one output unless
+the Outputs field says otherwise; multi-output datasets train as BackProp
+with accuracy-only reports, since every ROC/classification statistic is
+single-output). **Train continues from the
 current weights**, so clicking Train again runs more iterations from where it
 left off; **Randomize weights** (honoring the seed) resets to a fresh random
 start. After each run the key results — ROC area with its 95% CI, accuracy,
@@ -287,6 +289,32 @@ it runs on to `grad_max` or `max_iterations`. `POST /api/load` also accepts `dis
 (regression) outcome — with `mode=raw` that requires `fraction=0` (the
 stratified split needs classes), so pre-split regression data loads via
 `mode=train` plus `testfile`/`testpath`.
+
+Since the 2026-07-19 parity work the API covers the **entire CLI menu surface**
+(the authoritative option-by-option map is `docs/gui_cli_parity.md`). The
+highlights for scripted use: `POST /api/model` takes `hidden=` (comma list —
+several layers make it a BackProp), `bias=0` (→ BareProp),
+`errfunc=auto|xentropy|lms`, `log_lastop=`/`log_history=`, and `mode=load`
+(with the saved network as a `file` upload or `path=`) to resume a network
+whose type is read from the file's first line. `POST /api/train` additionally
+accepts `eta=`, `autostep=`, `batch_epoch=` (must stay on for logistic — the
+API refuses otherwise, as the CLI does), `weight_decay=` + `decay=`,
+`logprint=`/`printcount=`, and the stopping conditions `minerr=`, `change=`,
+`errwindow=`, `gradmax=` — each applied **only when present** (omitting a
+field keeps the model's current value; a present-but-empty stopping condition
+disables it), which is how "stop, then continue from the held weights with new
+parameters" works. `POST /api/dfa` `type=linear|quadratic` runs a standalone
+discriminant analysis — captured report plus, on 1-output data, ROC curves and
+the statistics object; it does not disturb the trained model — and its guesses
+save via `GET /api/save/dfa_train_guesses` / `dfa_test_guesses`.
+`POST /api/load` further accepts `outputs=` (more than one → a multi-output
+BackProp with accuracy-only reports, exactly the CLI's behavior), `test_n=`
+(an exact test-set count instead of a fraction), `threshold=`,
+`in_lower=`/`in_upper=`, `out_lower=`/`out_upper=` (continuous outcomes only),
+`history=0` (dataset-operations logging off), and the ROC reporting settings
+`trap_thresholds=`, `roc_report=both|either`, `roc_min=`. Every GUI/API user
+action is also appended — timestamped, with its exact parameter values — to
+**`neuron_actions.log`** in the run directory beside the data.
 
 The GUI also runs **stepwise regression** on a trained network (the
 "Stepwise regression" panel): give it the input-variable structure — the

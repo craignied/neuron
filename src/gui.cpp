@@ -51,6 +51,10 @@ namespace {
 mutex engineMutex;
 unique_ptr< DataSet > dataPtr;
 unique_ptr< Model > modelPtr;
+// The last discriminant function analysis, kept so its guesses stay savable
+//    (the CLI offers to save them right after a DFA run); it never becomes
+//    the trained model
+unique_ptr< Model > dfaPtr;
 // The last training run's captured report, downloadable as report.txt
 string lastReport;
 // The last training run's final error, the baseline for stepwise regression
@@ -392,6 +396,14 @@ string param( const httplib::Request& req, const string& name )
 	return "";
 }
 
+// Whether the field arrived at all -- req.has_param alone is FALSE for a
+//    field sent as a multipart part (the page's file-upload posts), which is
+//    exactly when get_file_value holds it instead
+bool hasParam( const httplib::Request& req, const string& name )
+{
+	return req.has_param( name ) || req.has_file( name );
+}
+
 // Just the final component of a picked file's name — no directory parts
 string safeBasename( const string& name )
 {
@@ -530,8 +542,80 @@ string handleLoad( const httplib::Request& req )
 	if ( !discrete )
 		ds->setDiscrete( false );
 
+	// --- Dataset characteristics (CLI dataset menu 11/12) -----------------
+	//    Validated and applied BEFORE the load: the variate bounds drive the
+	//    scaling, and the threshold classifies every guess from then on. All
+	//    read through param() (multipart-safe); an empty field means "keep the
+	//    engine's default".
+	string thresholdStr = param( req, "threshold" );
+	if ( !thresholdStr.empty() )
+	{
+		double threshold = atof( thresholdStr.c_str() );
+		if ( !discrete )
+			return jsonMsg( false, "a classification threshold applies only to "
+				"a discrete outcome" );
+		if ( !( threshold > 0 && threshold < 1 ) )
+			return jsonMsg( false, "threshold must be between 0 and 1" );
+		ds->setThreshold( threshold );
+	}
+
+	string inLoStr = param( req, "in_lower" ), inHiStr = param( req, "in_upper" );
+	if ( !inLoStr.empty() || !inHiStr.empty() )
+	{
+		double lo = inLoStr.empty() ? ds->getInLower() : atof( inLoStr.c_str() );
+		double hi = inHiStr.empty() ? ds->getInUpper() : atof( inHiStr.c_str() );
+		if ( !( lo < hi ) )
+			return jsonMsg( false, "input variate bounds must have lower < upper" );
+		ds->setInLower( lo );
+		ds->setInUpper( hi );
+	}
+
+	string outLoStr = param( req, "out_lower" ), outHiStr = param( req, "out_upper" );
+	if ( !outLoStr.empty() || !outHiStr.empty() )
+	{
+		// The CLI refuses these while the output is discrete (fixed at 0/1)
+		if ( discrete )
+			return jsonMsg( false, "output variate bounds apply only to a "
+				"continuous outcome (discrete=0)" );
+		double lo = outLoStr.empty() ? ds->getOutLower() : atof( outLoStr.c_str() );
+		double hi = outHiStr.empty() ? ds->getOutUpper() : atof( outHiStr.c_str() );
+		if ( !( lo < hi ) )
+			return jsonMsg( false, "output variate bounds must have lower < upper" );
+		ds->setOutLower( lo );
+		ds->setOutUpper( hi );
+	}
+
+	if ( !param( req, "history" ).empty() ) // dataset-operations logging
+		ds->setHistory( param( req, "history" ) == "1" );
+
+	// --- ROC reporting settings (CLI dataset menu 13) ---------------------
+	//    Validated here, applied after the load (the TwoSets must exist);
+	//    both sets get the value, which is where the CLI's per-set choice
+	//    collapses when everything loads in one request.
+	string trapStr = param( req, "trap_thresholds" ),
+		rocReportStr = param( req, "roc_report" ),
+		rocMinStr = param( req, "roc_min" );
+	if ( !trapStr.empty() || !rocReportStr.empty() || !rocMinStr.empty() )
+	{
+		if ( !discrete || nO != 1 )
+			return jsonMsg( false, "ROC reporting settings need a discrete "
+				"1-output dataset" );
+		if ( !trapStr.empty() && atol( trapStr.c_str() ) < 2 )
+			return jsonMsg( false, "trap_thresholds must be at least 2" );
+		if ( !rocReportStr.empty() && rocReportStr != "both"
+			&& rocReportStr != "either" )
+			return jsonMsg( false, "roc_report must be both or either" );
+		if ( !rocMinStr.empty() && atol( rocMinStr.c_str() ) < 2 )
+			return jsonMsg( false, "roc_min must be at least 2" );
+	}
+
 	Capture cap;
 	bool ok = false;
+
+	// test_n: the CLI's whole-number split form ("place exactly n exemplars
+	//    in the test set") -- fraction covers the decimal and n/d forms, but
+	//    randomizeD truncates ratio*N, so an exact count needs randomize(n)
+	string testNStr = param( req, "test_n" );
 
 	if ( mode == "raw" )
 	{
@@ -543,13 +627,15 @@ string handleLoad( const httplib::Request& req )
 			//    pre-split regression data loads through mode=train + testfile
 			if ( !discrete )
 			{
-				if ( fraction > 0 )
+				if ( fraction > 0 || !testNStr.empty() )
 					return jsonMsg( false, "a continuous outcome cannot be "
 						"stratified into a train/test split; load with "
 						"fraction=0, or pre-split the data and use mode=train "
 						"with a testfile" );
 				ok = ds->raw2train();
 			}
+			else if ( !testNStr.empty() )
+				ok = ds->randomize( ( unsigned ) atol( testNStr.c_str() ) );
 			else
 				ok = ds->randomizeD( fraction );
 		}
@@ -590,8 +676,34 @@ string handleLoad( const httplib::Request& req )
 
 	tuneThresholds( *ds );
 
+	// Explicit ROC reporting overrides (validated above) after the automatic
+	//    tuning, exactly where the CLI lets a user revise them after a load
+	if ( !trapStr.empty() )
+	{
+		if ( ds->trainLoaded() )
+			ds->getTrainTwoSet().setTrapThresholds( ( unsigned ) atol( trapStr.c_str() ) );
+		if ( ds->testLoaded() )
+			ds->getTestTwoSet().setTrapThresholds( ( unsigned ) atol( trapStr.c_str() ) );
+	}
+	if ( !rocReportStr.empty() )
+	{
+		bool both = ( rocReportStr == "both" );
+		if ( ds->trainLoaded() )
+			ds->getTrainTwoSet().setROCReportFlag( both );
+		if ( ds->testLoaded() )
+			ds->getTestTwoSet().setROCReportFlag( both );
+	}
+	if ( !rocMinStr.empty() )
+	{
+		if ( ds->trainLoaded() )
+			ds->getTrainTwoSet().setROCthresh( ( unsigned ) atol( rocMinStr.c_str() ) );
+		if ( ds->testLoaded() )
+			ds->getTestTwoSet().setROCthresh( ( unsigned ) atol( rocMinStr.c_str() ) );
+	}
+
 	ostringstream msg;
-	msg << ds->getInput() << " inputs, 1 output; "
+	msg << ds->getInput() << " inputs, " << ds->getOutput() << " output"
+		<< ( ds->getOutput() == 1 ? "; " : "s; " )
 		<< ds->getNumTrain() << " training exemplars";
 	if ( ds->testLoaded() )
 		msg << ", " << ds->getNumTest() << " test exemplars";
@@ -606,6 +718,7 @@ string handleLoad( const httplib::Request& req )
 
 	dataPtr = std::move( ds );
 	modelPtr.reset(); // a new dataset invalidates any existing model
+	dfaPtr.reset();   // and any prior discriminant analysis
 	lastTrainError = -1; // and any prior training
 
 	return jsonMsg( true, msg.str() );
@@ -638,16 +751,27 @@ string handleModel( const httplib::Request& req )
 
 	if ( !dataPtr )
 		return jsonMsg( false, "load a dataset first" );
-	if ( dataPtr->getOutput() != 1 )
-		return jsonMsg( false, "the GUI supports 1-output models" );
 
 	Capture cap;
 	lastTrainError = -1; // a fresh model has not been trained yet
 
 	// Logging toggles (CLI model menu 6/7) -- default ON, matching the engine,
-	//    so a request that omits them logs as before.
-	bool logLastop  = !( req.has_param( "log_lastop" )  && param( req, "log_lastop" )  == "0" );
-	bool logHistory = !( req.has_param( "log_history" ) && param( req, "log_history" ) == "0" );
+	//    so a request that omits them logs as before. hasParam, not
+	//    req.has_param: the page's load-network post is multipart, where these
+	//    arrive as parts and has_param alone would silently keep the default.
+	bool logLastop  = !( hasParam( req, "log_lastop" )  && param( req, "log_lastop" )  == "0" );
+	bool logHistory = !( hasParam( req, "log_history" ) && param( req, "log_history" ) == "0" );
+
+	// Output error function (CLI model menu 3), shared by the create and load
+	//    paths. Default follows the data; an explicit choice overrides, but
+	//    X-entropy needs a discrete output. (Logistic is X-entropy by
+	//    definition and never consults this.)
+	string ef = param( req, "errfunc" );
+	if ( ef == "xentropy" && !dataPtr->getDiscrete() )
+		return jsonMsg( false, "X-entropy error needs a discrete output" );
+	bool xe = ( ef == "xentropy" ) ? true
+		: ( ef == "lms" ) ? false
+		: dataPtr->getDiscrete(); // default, as the CLI initializes it
 
 	// --- Load a saved network from a file (CLI model menu 4) --------------
 	//    The type is the file's first line, exactly as the CLI loader reads it.
@@ -660,31 +784,51 @@ string handleModel( const httplib::Request& req )
 			return jsonMsg( false, "can't open network file: " + netFile );
 
 		string line;
-		{ ifstream f( netFile.c_str() ); getline( f, line ); }
-		if ( !line.empty() && line.back() == '\r' ) line.pop_back(); // CRLF files
+		bool backpropBias = true;
+		{
+			ifstream f( netFile.c_str() );
+			getline( f, line );
+			if ( !line.empty() && line.back() == '\r' ) line.pop_back(); // CRLF files
+			// A BackProp file carries its bias flag on line 2, and load()
+			//    reads but never APPLIES it -- setHidden inside load sizes the
+			//    weight matrices from biasFlag, so it must be set before load,
+			//    exactly as the CLI driver does (neuron.cpp, model menu 4)
+			if ( line == "BackProp" )
+				f >> backpropBias;
+		}
 
 		if ( line == "Binary logistic" ) modelPtr = make_unique< Logistic >();
 		else if ( line == "SimpleProp" ) modelPtr = make_unique< SimpleProp >();
 		else if ( line == "BareProp" )   modelPtr = make_unique< BareProp >();
-		else if ( line == "BackProp" )   modelPtr = make_unique< BackProp >();
+		else if ( line == "BackProp" )
+		{
+			modelPtr = make_unique< BackProp >();
+			dynamic_cast< Network* >( modelPtr.get() )->setBias( backpropBias );
+		}
 		else return jsonMsg( false, "unrecognized network type on line 1: '" + line + "'" );
 
 		modelPtr->setDataSet( *dataPtr );
 		modelPtr->setLastop( logLastop );
 		modelPtr->setHistory( logHistory );
 		if ( line != "Binary logistic" ) // X-entropy by definition for logistic
-			dataPtr->getDiscrete() ? modelPtr->setXEerror() : modelPtr->setLMSerror();
+			xe ? modelPtr->setXEerror() : modelPtr->setLMSerror();
 
 		if ( !dynamic_cast< Network* >( modelPtr.get() )->load( netFile ) )
-			return jsonMsg( false, "failed to load the network from " + netFile );
+		{
+			string why = cap.text.str(); // the engine says what mismatched
+			return jsonMsg( false, why.empty()
+				? ( "failed to load the network from " + netFile ) : why );
+		}
 		lastTrainError = 0; // a loaded network has weights -- treat it as trained
 		return jsonMsg( true, "loaded " + line + " network from " + netFile );
 	}
 
 	if ( type == "logistic" )
 	{
-		if ( !dataPtr->getDiscrete() )
-			return jsonMsg( false, "logistic regression needs a discrete output" );
+		// The CLI's own check: only 1 output, and it must be discrete
+		if ( dataPtr->getOutput() != 1 || !dataPtr->getDiscrete() )
+			return jsonMsg( false, "for logistic regression, there can be only "
+				"1 output, and it must be discrete" );
 		modelPtr = make_unique< Logistic >();
 		modelPtr->setDataSet( *dataPtr );
 		modelPtr->setLastop( logLastop );
@@ -694,28 +838,16 @@ string handleModel( const httplib::Request& req )
 
 	if ( type == "simpleprop" )
 	{
-		// hidden = comma-separated layer sizes: one layer -> SimpleProp (bias)
-		//    or BareProp (no bias); several -> BackProp. Matches the CLI factory.
+		// hidden = comma-separated layer sizes. The CLI factory's rule: one
+		//    layer AND one output -> SimpleProp (bias) or BareProp (no bias);
+		//    several layers OR several outputs -> BackProp.
 		vector< unsigned > layers = parseLayers( param( req, "hidden" ) );
 		if ( layers.empty() )
 			return jsonMsg( false, "hidden nodes must be one or more positive integers (e.g. 5 or 5,3)" );
-		bool bias = !( req.has_param( "bias" ) && param( req, "bias" ) == "0" );
-
-		// Output error function (CLI model menu 3). Default follows the data;
-		//    an explicit choice overrides, but X-entropy needs a discrete output.
-		string ef = param( req, "errfunc" );
-		bool xe;
-		if ( ef == "xentropy" )
-		{
-			if ( !dataPtr->getDiscrete() )
-				return jsonMsg( false, "X-entropy error needs a discrete output" );
-			xe = true;
-		}
-		else if ( ef == "lms" ) xe = false;
-		else xe = dataPtr->getDiscrete(); // default, as the CLI initializes it
+		bool bias = !( hasParam( req, "bias" ) && param( req, "bias" ) == "0" );
 
 		string kind;
-		if ( layers.size() == 1 )
+		if ( dataPtr->getOutput() == 1 && layers.size() == 1 )
 		{
 			if ( bias ) { modelPtr = make_unique< SimpleProp >(); kind = "SimpleProp"; }
 			else        { modelPtr = make_unique< BareProp >();   kind = "BareProp"; }
@@ -724,7 +856,7 @@ string handleModel( const httplib::Request& req )
 			if ( bias ) dynamic_cast< SimpleProp* >( modelPtr.get() )->setHidden( layers[ 0 ] );
 			else        dynamic_cast< BareProp* >( modelPtr.get() )->setHidden( layers[ 0 ] );
 		}
-		else // multiple hidden layers -> general backpropagation network
+		else // several layers or several outputs -> general backpropagation network
 		{
 			modelPtr = make_unique< BackProp >(); kind = "BackProp";
 			dynamic_cast< Network* >( modelPtr.get() )->setBias( bias ); // before setDataSet
@@ -738,8 +870,8 @@ string handleModel( const httplib::Request& req )
 		ostringstream msg;
 		msg << kind << " " << dataPtr->getInput() << "-";
 		for ( size_t i = 0; i < layers.size(); i++ ) msg << ( i ? "," : "" ) << layers[ i ];
-		msg << "-1 network ready (" << ( xe ? "X-entropy" : "LMS" )
-			<< ( bias ? "" : ", no bias" ) << ")";
+		msg << "-" << dataPtr->getOutput() << " network ready ("
+			<< ( xe ? "X-entropy" : "LMS" ) << ( bias ? "" : ", no bias" ) << ")";
 		return jsonMsg( true, msg.str() );
 	}
 
@@ -759,13 +891,11 @@ string handleDFA( const httplib::Request& req )
 		return jsonMsg( false, "DFA type must be linear or quadratic" );
 	if ( !dataPtr )
 		return jsonMsg( false, "load a dataset first" );
-	if ( dataPtr->getOutput() != 1 )
-		return jsonMsg( false, "the GUI supports 1-output models" );
 	if ( !dataPtr->getDiscrete() )
 		return jsonMsg( false, "discriminant analysis needs a discrete output" );
 
-	bool logLastop  = !( req.has_param( "log_lastop" )  && param( req, "log_lastop" )  == "0" );
-	bool logHistory = !( req.has_param( "log_history" ) && param( req, "log_history" ) == "0" );
+	bool logLastop  = !( hasParam( req, "log_lastop" )  && param( req, "log_lastop" )  == "0" );
+	bool logHistory = !( hasParam( req, "log_history" ) && param( req, "log_history" ) == "0" );
 
 	unique_ptr< Model > dfa;
 	if ( type == "linear" ) dfa = make_unique< LDFA >();
@@ -783,9 +913,15 @@ string handleDFA( const httplib::Request& req )
 			+ jsonEscape( cap.text.str() ) + "\"}";
 	}
 
+	// Keep the finished analysis so its guesses stay savable (the CLI offers
+	//    that right after a DFA run); the trained model is untouched
+	dfaPtr = std::move( dfa );
+
 	// ROC curves and the stats panel from the analysis's TwoSets (the guesses
 	//    reportAccuracy just wrote), via the same helpers training uses.
-	DataSet& dd = dfa->getDataSet();
+	//    Multi-output DFA reports accuracy only, as in the CLI -- the guard
+	//    below skips the 1-output ROC/statistics machinery for it.
+	DataSet& dd = dfaPtr->getDataSet();
 	string roc, stats;
 	if ( dd.getDiscrete() && dd.getOutput() == 1 && dd.trainLoaded()
 		&& dd.getTrainTwoSet().loaded() )
@@ -986,6 +1122,13 @@ string handleTrain( const httplib::Request& req )
 	if ( maxIter < 1 )
 		return jsonMsg( false, "max iterations must be at least 1" );
 
+	// The CLI's hard constraint: logistic regression is batch/epoch by
+	//    definition (logistic.cpp sets it in the constructor and the menu
+	//    refuses to turn it off) -- so does the API
+	if ( req.has_param( "batch_epoch" ) && param( req, "batch_epoch" ) != "1"
+		&& dynamic_cast< Logistic* >( modelPtr.get() ) )
+		return jsonMsg( false, "for logistic regression, batch/epoch must be on" );
+
 	// Plateau auto-stop (default off). tol/window fall back to the engine's
 	//    own defaults when the fields are absent; validated here rather than
 	//    let setAutoStop's asserts fire (asserts vanish in release builds).
@@ -1084,12 +1227,11 @@ string handleTrain( const httplib::Request& req )
 		net->setDecay( wdOn ? decayVal : 0 );
 	}
 	if ( req.has_param( "logprint" ) )
-	{
-		bool lg = ( param( req, "logprint" ) == "1" );
-		iter->setLogPrint( lg );
-		if ( !lg && req.has_param( "printcount" ) && !param( req, "printcount" ).empty() )
-			iter->setPrintCount( ( unsigned ) atol( param( req, "printcount" ).c_str() ) );
-	}
+		iter->setLogPrint( param( req, "logprint" ) == "1" );
+	// Applied whenever present (it only matters when the counter is linear),
+	//    so a curl caller can set it without also sending logprint
+	if ( req.has_param( "printcount" ) && !param( req, "printcount" ).empty() )
+		iter->setPrintCount( ( unsigned ) atol( param( req, "printcount" ).c_str() ) );
 	// Stopping conditions: present+value enables & sets, present+empty disables.
 	if ( req.has_param( "minerr" ) )
 	{
@@ -1286,7 +1428,9 @@ bool saveArtifact( const string& what, string& name, string& err )
 		{ "network", "network.txt" }, { "scales", "scales.txt" },
 		{ "train_set", "train_set.txt" }, { "test_set", "test_set.txt" },
 		{ "train_guesses", "train_guesses.txt" },
-		{ "test_guesses", "test_guesses.txt" } };
+		{ "test_guesses", "test_guesses.txt" },
+		{ "dfa_train_guesses", "dfa_train_guesses.txt" },
+		{ "dfa_test_guesses", "dfa_test_guesses.txt" } };
 	name.clear();
 	for ( const auto& n : names )
 		if ( what == n.what )
@@ -1320,6 +1464,17 @@ bool saveArtifact( const string& what, string& name, string& err )
 			err = "no test set in this session";
 		else
 			ok = dataPtr->saveTest( name );
+	}
+	else if ( what == "dfa_train_guesses" || what == "dfa_test_guesses" )
+	{
+		// The last discriminant analysis's guesses (kept in dfaPtr; the CLI
+		//    offers this save right after a DFA run)
+		if ( !dfaPtr )
+			err = "run a discriminant function analysis first";
+		else if ( what == "dfa_train_guesses" )
+			ok = dfaPtr->getDataSet().saveTrainTwoSet( name );
+		else
+			ok = dfaPtr->getDataSet().saveTestTwoSet( name );
 	}
 	else // guesses live in the model's DataSet copy, written by train()
 	{

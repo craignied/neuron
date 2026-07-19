@@ -11,9 +11,10 @@ is the primary human interface and must be a superset. "API param" is the field
 `POST` accepts; "GUI control" is the page element that sends it.
 
 Status: ✅ present · 🔲 gap (must be closed before the change lands) · — n/a.
-As of 2026-07-19 there are **no gaps** — every CLI menu capability has a GUI
-control + API param. A new 🔲 row appears only when a menu/GUI change opens a
-gap, and must be closed (turned ✅) in the same change.
+As of 2026-07-19 (second audit — the first missed the dataset characteristics,
+ROC-reporting, and DFA-guesses rows below, all closed the same day) there are
+**no gaps**. A new 🔲 row appears only when a menu/GUI change opens a gap, and
+must be closed (turned ✅) in the same change.
 
 ## Main menu
 
@@ -29,12 +30,28 @@ gap, and must be closed (turned ✅) in the same change.
 
 | CLI menu option | GUI control | API | Status |
 |---|---|---|---|
-| Load raw + randomize into train/test | mode=raw + Test fraction | `POST /api/load` `mode=raw&fraction=` | ✅ |
-| Load training set / test set | mode=train + Test set upload | `POST /api/load` `mode=train`,`testfile` | ✅ |
-| Convert raw → training set (scale, no split) | mode=raw + fraction=0 | `POST /api/load` `fraction=0` | ✅ |
-| Save training set / test set | § Session files buttons | `GET /api/save/{train_set,test_set}` | ✅ |
-| Save scaling factors | § Session files → Scaling factors | `GET /api/save/scales` | ✅ |
-| Continuous (non-discrete) outcome | mode=raw fraction=0 / mode=train | `POST /api/load` `discrete=0` | ✅ |
+| 1 Number of input nodes | derived from the file's columns | `POST /api/load` `inputs=` (override) | ✅ |
+| 2 Number of output nodes (incl. >1 → BackProp) | Outputs field | `POST /api/load` `outputs=` | ✅ |
+| 3+5 Load raw + randomize into train/test | mode=raw + Test fraction / exact n | `POST /api/load` `mode=raw&fraction=` or `test_n=` | ✅ |
+| 4 Convert raw → training set (scale, no split) | mode=raw + fraction=0 | `POST /api/load` `fraction=0` | ✅ |
+| 6+9 Load training set / test set | mode=train + Test set upload | `POST /api/load` `mode=train`,`testfile` | ✅ |
+| 7+10 Save training set / test set | § Session files buttons | `GET /api/save/{train_set,test_set}` | ✅ |
+| 8 Save scaling factors | § Session files → Scaling factors | `GET /api/save/scales` | ✅ |
+| 11 Log dataset operations to history file | Log-dataset-ops toggle | `POST /api/load` `history=` | ✅ |
+| 12 Output discrete / continuous | Outcome select | `POST /api/load` `discrete=` | ✅ |
+| 12 Threshold for discrete output | Threshold field | `POST /api/load` `threshold=` | ✅ |
+| 12 Input variate lower/upper limits | Scaling-bounds inputs fields | `POST /api/load` `in_lower=`,`in_upper=` | ✅ |
+| 12 Output variate lower/upper limits (continuous) | Scaling-bounds outputs fields | `POST /api/load` `out_lower=`,`out_upper=` | ✅ |
+| 13 Trapezoidal ROC thresholds | ROC trapezoid-thresholds field | `POST /api/load` `trap_thresholds=` | ✅ |
+| 13 Statistical/trapezoidal both-or-either | ROC report select | `POST /api/load` `roc_report=both|either` | ✅ |
+| 13 Minimum data for statistical ROC | ROC statistical-min field | `POST /api/load` `roc_min=` | ✅ |
+
+Menu 13's per-set (train/test/both) selector collapses in the GUI: both sets
+arrive in one `/api/load`, and an explicit setting is applied to both. Menu 5's
+three entry forms map to two params: `fraction` covers the decimal and
+numerator/denominator forms (the CLI's own `randomize(n,d)` delegates to
+`randomizeD`), and `test_n` is the whole-number form (`randomize(n)` exactly —
+`randomizeD` truncates `ratio·N`, so a fraction cannot promise an exact count).
 
 ## Model submenu
 
@@ -42,8 +59,9 @@ gap, and must be closed (turned ✅) in the same change.
 |---|---|---|---|
 | 1 Bias nodes on/off | Bias-nodes toggle | `POST /api/model` `bias=` (off → BareProp) | ✅ |
 | 2 Hidden layers / nodes | Hidden nodes field | `POST /api/model` `hidden=` (comma list → BackProp) | ✅ |
-| 3 Output error function (LMS / X-entropy) | Error-function select | `POST /api/model` `errfunc=` | ✅ |
-| 4 Load network from a file | Load-network upload | `POST /api/model` `mode=load` | ✅ |
+| (factory) Multi-output dataset → BackProp | Outputs field (Dataset panel) | `POST /api/model` (automatic, as the CLI factory) | ✅ |
+| 3 Output error function (LMS / X-entropy) | Error-function select | `POST /api/model` `errfunc=` (create AND load) | ✅ |
+| 4 Load network from a file (incl. BackProp bias from line 2) | Load-network upload | `POST /api/model` `mode=load` | ✅ |
 | 5 Binary logistic regression | Model-type select | `POST /api/model` `type=logistic` | ✅ |
 | 6 Log last operation to file | Log-last-op toggle | `POST /api/model` `log_lastop=` | ✅ |
 | 7 Log to history file | Log-history toggle | `POST /api/model` `log_history=` | ✅ |
@@ -60,20 +78,22 @@ gap, and must be closed (turned ✅) in the same change.
 | 3 Stopping: error-window increase | Window field | `POST /api/train` `errwindow=` | ✅ |
 | 3 Stopping: max absolute gradient | Grad-max field | `POST /api/train` `gradmax=` | ✅ |
 | (new) Plateau auto-stop tol / window | Auto-stop checkbox + tol/window fields | `POST /api/train` `autostop`,`autostop_tol`,`autostop_window` | ✅ |
-| 4 Batch/epoch on/off | Batch/epoch toggle | `POST /api/train` `batch_epoch=` | ✅ |
+| 4 Batch/epoch on/off (forced ON for logistic, as the CLI forces it) | Batch/epoch toggle | `POST /api/train` `batch_epoch=` | ✅ |
 | 5 Weight decay (on/off + λ) | Weight-decay toggle + λ field | `POST /api/train` `weight_decay=`,`decay=` | ✅ |
 | 6 Print counter (log / linear) | Print-counter select + count | `POST /api/train` `logprint=`,`printcount=` | ✅ |
 | (train-time) Algorithm (GD/CGD/Shanno/auto) | Algorithm select | `POST /api/train` `algorithm=` | ✅ |
 | 7 Train model | Train button | `POST /api/train` | ✅ |
-| 8 Save network | § Session files → Network | `GET /api/save/network` | ✅ |
+| 7/8 Save network + guesses after training | § Session files → Network / guesses | `GET /api/save/{network,train_guesses,test_guesses}` | ✅ |
 | 9 Stepwise regression | § Stepwise regression panel | `POST /api/regress` | ✅ |
 
 ## DFA submenu
 
 | CLI menu option | GUI control | API | Status |
 |---|---|---|---|
-| 1 Linear DFA | DFA panel → Linear + Run | `POST /api/dfa` `type=linear` | ✅ |
-| 2 Quadratic DFA | DFA panel → Quadratic + Run | `POST /api/dfa` `type=quadratic` | ✅ |
+| 1 Linear DFA (incl. multi-output accuracy report) | DFA panel → Linear + Run | `POST /api/dfa` `type=linear` | ✅ |
+| 2 Quadratic DFA (incl. multi-output) | DFA panel → Quadratic + Run | `POST /api/dfa` `type=quadratic` | ✅ |
+| 3+4 Logging toggles | Model panel's log toggles (sent along) | `POST /api/dfa` `log_lastop=`,`log_history=` | ✅ |
+| (after run) Save the DFA's guesses | DFA train/test guesses buttons | `GET /api/save/{dfa_train_guesses,dfa_test_guesses}` | ✅ |
 
 ## Logging (cross-cutting)
 

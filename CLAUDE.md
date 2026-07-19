@@ -868,6 +868,75 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   against the pre-graded code). Gates green. Not a legacy *bug* — the classification was
   always right; DFA just never exposed a graded score for ROC.
 
+- **2026-07-19 (night) — full-codebase audit: the parity "zero gaps" claim was
+  premature. Three GUI bugs fixed, the three missed submenus closed, multi-output
+  unlocked.** Craig asked for a docs-sync + bug + parity pass over the day's work.
+  Every finding was measured before being believed (rule 3), and every new test was
+  watched to fail against the pre-fix code (rule 2) — which twice corrected *this
+  audit's own* first drafts (see 1 and the lesson at the end).
+  1. **Bug: the GUI's load-network path silently destroyed no-bias BackProp nets.**
+     `BackProp::load()` reads the line-2 bias flag but never APPLIES it; the CLI
+     driver compensates by calling `setBias` before `load()` (neuron.cpp model
+     menu 4) — the GUI didn't. `setHidden` then sizes the weight matrices for bias,
+     `Matrix::operator>>` (which never resizes — "nrows_ and ncols_ MUST have been
+     already set") desyncs against the smaller no-bias file, **load still returns
+     true**, and the trained network comes back as garbage. Measured: pre-save error
+     0.587 → post-load 0.692 ≈ ln 2, i.e. the net was erased. **My first probe
+     missed it** — an XOR no-bias BackProp never trains below ln 2 (no bias, can't
+     break symmetry), so "error continuity" held vacuously between two equally
+     useless nets. The smoke assert is now numeric error continuity on a net that
+     genuinely converged (lbw, 0.587 → 0.587 fixed; watched fail at exactly
+     (0.587352, 0.691923) against the old handler).
+  2. **Bug: multipart posts ignored the model log toggles.** `req.has_param` is
+     false for fields sent as multipart parts — which is exactly what the page's
+     load-network post sends — so unchecking the logging boxes there did nothing.
+     New `hasParam()` (has_param OR has_file); smoke proves it behaviorally
+     (`log_lastop=0` as multipart → `model.txt` must NOT be written; watched fail).
+  3. **Bug: the GUI allowed `batch_epoch=0` on Logistic.** The engine is batch-only
+     by definition (logistic.cpp ctor) and the CLI refuses to turn it off; the API
+     accepted it and trained (old code: error 0.605 vs the batch answer). Now
+     refused with the CLI's own message.
+  4. **Parity: dataset submenus 11/12/13 had NO GUI equivalent and the matrix
+     claimed zero gaps.** Closed as `/api/load` params + page controls: `history=`
+     (dataset-ops logging), `threshold=`, `in_lower/in_upper`, `out_lower/out_upper`
+     (continuous only, refused on discrete as the CLI refuses), `trap_thresholds=`,
+     `roc_report=both|either`, `roc_min=`. All validated in the handler; behavioral
+     proof: `trap_thresholds=5` → exactly 5 ROC curve points in the train JSON.
+     Also: the page had **no discrete/continuous control at all** (the API param
+     existed; the matrix row pointed at the split mode) — an Outcome select now
+     sends it. And `test_n=` covers the CLI's whole-number split form exactly
+     (`randomizeD` truncates ratio·N, so a fraction cannot promise an exact count).
+  5. **Parity: DFA guesses were unsavable** (the CLI offers the save right after a
+     run; `handleDFA` destroyed the analysis object). The last analysis is retained
+     (`dfaPtr`, reset on dataset load) and saved via
+     `/api/save/dfa_{train,test}_guesses` + page buttons.
+  6. **Parity: multi-output. Measured first: a scripted 2-output CLI session works
+     end-to-end** (4-3-2 BackProp trains to 100% CA; LDFA/QDFA print per-set
+     accuracy), so the GUI's blanket "1-output models only" refusal was a real gap.
+     Lifted: `outputs=N` loads (message reports the count), the model factory
+     follows the CLI's own rule (multi-output → BackProp), DFA runs, and the API
+     reproduces the CLI numbers exactly (LDFA 92.5%/100%). ROC/statistics stay
+     1-output (engine fact; handlers skip them, as the CLI does), logistic keeps
+     its 1-output refusal, and the stratified split still refuses multi-output
+     (engine, same as CLI) — pre-split pairs are the path, page Outputs field added.
+  7. **Docs destaled:** `docs/gui_cli_parity.md` rewritten with every missed row
+     (node counts, characteristics, ROC reporting, guesses incl. DFA's,
+     multi-output factory) — all ✅, none aspirational; AGENTS.md finally documents
+     `/api/dfa`, the model/train parity params, the audit log, and the new load
+     params (rule-1 debt from the parity session — none of it had been written
+     down), and its "one-output system" line corrected. En passant: `errfunc` now
+     also applies on the load-network path (the CLI applies its menu error choice
+     there; the GUI hardcoded the default), engine load errors pass through to the
+     API caller, and `printcount` no longer requires `logprint` in the same request.
+  Gates: zero-warning clean build, goldens byte-identical (3/3 + coverage), 6/6
+  ctest, smoke green (all new assertions individually watched to fail against the
+  stashed pre-fix code), verify_oracle numerically identical.
+  **Lesson, recorded because it repeated within one session:** a test that passes
+  against the bug it was written for is worse than no test — the first no-bias
+  round-trip assert passed against the broken loader because both sides of the
+  comparison sat at ln 2. "Watched it fail" means watched it fail *for the measured
+  reason*, not merely that the script printed FAIL somewhere.
+
 ## ROADMAP 3 (agreed with Craig 2026-07-15) — ROC inference
 
 Rationale, citations, and Methods language: **`docs/roc_theory.md`**. Work in order.

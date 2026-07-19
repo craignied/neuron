@@ -77,12 +77,45 @@ table.coef th { background: #f4f6fb; } table.coef td.name { text-align: left; }
     <option value="train">already a training set</option>
   </select></label>
   <label id="fracbox">Test fraction <input class="num" type="number" id="fraction"
-    value="0.25" min="0" max="0.9" step="0.05"></label>
-  <span class="status">inputs are read from the file &mdash; neuron uses a single output</span>
+    value="0.25" min="0" max="0.9" step="0.05">
+    or exact n <input class="num" type="number" id="test_n" min="0"
+    placeholder="fraction"></label>
+  <span class="status">inputs are read from the file (its columns minus the outputs)</span>
 </div>
 <div class="row" id="testbox" style="display:none">
   <label>Test set (optional) <input type="file" id="testfile"></label>
   <span class="status">a matched, already-split held-out set &mdash; e.g. BP40test.txt</span>
+</div>
+<div class="row">
+  <label title="Output nodes; more than one makes the model a BackProp (accuracy-only reports)">Outputs
+    <input class="num" type="number" id="outputs" value="1" min="1"></label>
+  <label>Outcome <select id="discrete">
+    <option value="1">discrete (0/1)</option>
+    <option value="0">continuous</option>
+  </select></label>
+  <label title="Classification threshold on the normalized output (discrete only)">Threshold
+    <input class="num" type="number" id="threshold" step="any" placeholder="0.5"></label>
+  <label title="Log dataset operations to neuron.log"><input type="checkbox"
+    id="ds_history" checked> Log dataset ops</label>
+</div>
+<div class="row">
+  <span class="status">Scaling bounds &mdash; blank = defaults:</span>
+  <label>inputs <input class="num" type="number" id="in_lower" step="any"
+    placeholder="-0.9"> to <input class="num" type="number" id="in_upper" step="any"
+    placeholder="0.9"></label>
+  <label title="Continuous outcome only">outputs <input class="num" type="number"
+    id="out_lower" step="any" placeholder="0.1"> to <input class="num" type="number"
+    id="out_upper" step="any" placeholder="0.9"></label>
+</div>
+<div class="row">
+  <span class="status">ROC reporting &mdash; blank = automatic:</span>
+  <label title="Thresholds for the trapezoidal ROC area">trapezoid thresholds
+    <input class="num" type="number" id="trap_thresholds" placeholder="auto"></label>
+  <label title="Report both the statistical and trapezoidal areas, or whichever applies">report
+    <select id="roc_report"><option value="">default</option>
+    <option value="both">both</option><option value="either">either</option></select></label>
+  <label title="Minimum data for the statistical (binormal) ROC">statistical min
+    <input class="num" type="number" id="roc_min" placeholder="default"></label>
 </div>
 <div class="row">
   <button onclick="loadData()">Load dataset</button><span class="status" id="dstatus"></span>
@@ -211,6 +244,8 @@ beside your data.</span></div>
     <option value="quadratic">Quadratic (QDFA)</option>
   </select></label>
   <button onclick="runDFA()">Run DFA</button>
+  <button onclick="saveFile('dfa_train_guesses')">DFA train guesses</button>
+  <button onclick="saveFile('dfa_test_guesses')">DFA test guesses</button>
   <span class="status" id="dfastatus"></span>
 </div>
 <div class="row"><span class="status">Discriminant analysis on the loaded
@@ -289,6 +324,13 @@ async function loadData() {
   fd.append("fraction", $("fraction").value);
   if ($("mode").value === "train" && $("testfile").files.length)
     fd.append("testfile", $("testfile").files[0]);
+  fd.append("outputs", $("outputs").value);
+  fd.append("discrete", $("discrete").value);
+  fd.append("history", $("ds_history").checked ? 1 : 0);
+  // Optional characteristics / ROC settings: sent only when filled in
+  for (const id of ["test_n", "threshold", "in_lower", "in_upper", "out_lower",
+                    "out_upper", "trap_thresholds", "roc_report", "roc_min"])
+    if ($(id).value !== "") fd.append(id, $(id).value);
   const r = await fetch("/api/load", { method: "POST", body: fd });
   const j = await r.json();
   setStatus("dstatus", j.ok, j.message);
@@ -311,6 +353,7 @@ async function loadNetwork() {
   const fd = new FormData();
   fd.append("file", $("netfile").files[0]);
   fd.append("mode", "load");
+  fd.append("errfunc", $("errfunc").value);
   fd.append("log_lastop", $("log_lastop").checked ? 1 : 0);
   fd.append("log_history", $("log_history").checked ? 1 : 0);
   const r = await fetch("/api/model", { method: "POST", body: fd });
