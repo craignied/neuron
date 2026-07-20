@@ -121,7 +121,7 @@ protected:
 		x,                  // argument in sigmoidal transfer function for 1 output Network
 		randomLimit,        // the limit for the random weights
 		eta,                // learning rate
-		decay,              // decay value 2 * lambda for weight decay
+		decay,              // weight-decay strength = 2*lambda = 1/sigma^2 (see the Network ctor)
 		regularizer,        // the regularization term lambda, calculated in runHeader method
 		decayTerm,	        // 1 - ( eta * decay ), also calculated in runHeader method
 		o_errAccumulate,    // stores average output error accumulation over the examplars

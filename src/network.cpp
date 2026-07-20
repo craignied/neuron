@@ -21,7 +21,18 @@ Network::Network()
 	biasFlag = true; // Networks should generally have bias nodes
 	batchEpochFlag = true; // Networks should generally use batch/epoch training
 	weightDecayFlag = true; // Networks should generally use weight decay
-	decay = 5e-5; // lambda = 1/(2*sigma^2) where sigma = 100
+	// Weight-decay strength. The L2 penalty added to the error is
+	//    lambda*sum(w^2) = (1/(2*sigma^2))*sum(w^2) -- a zero-mean Gaussian prior
+	//    N(0, sigma^2) on the weights, sigma being how large a weight is expected
+	//    a priori (large sigma = weak decay). The value STORED here is 2*lambda =
+	//    1/sigma^2 (the code reads it as 2*lambda: runHeader sets regularizer =
+	//    decay/2, and the gradient of the penalty is decay*w). So 5e-5 is a
+	//    deliberately weak default -- weights are only nudged, not biased.
+	//    Historical wrinkle: the value was chosen as lambda for sigma=100
+	//    (1/(2*100^2) = 5e-5) but stored where 2*lambda belongs, so the EFFECTIVE
+	//    sigma is 1/sqrt(5e-5) ~ 141, not 100. Left as-is: it is oracle/golden-
+	//    pinned and the difference is immaterial for so weak a prior.
+	decay = 5e-5;
 
 	// Constants for automatic stepsize selection
 	automaticStepSizeFlag = false; // doesn't start with automatic stepsize

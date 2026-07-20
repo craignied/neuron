@@ -1151,8 +1151,9 @@ string handleTrain( const httplib::Request& req )
 	if ( wdOn )
 	{
 		// A blank lambda falls back to the engine's own default (Network ctor:
-		//    5e-5, a prior weight std dev of 100), so turning weight decay on
-		//    never demands a value the user may not have a feel for
+		//    5e-5 -- a deliberately weak L2 prior; see the ctor for the sigma
+		//    relationship), so turning weight decay on never demands a value the
+		//    user may not have a feel for
 		string d = param( req, "decay" );
 		decayVal = d.empty() ? 5e-5 : atof( d.c_str() );
 		if ( !( decayVal >= 0 && decayVal <= 1 ) )
