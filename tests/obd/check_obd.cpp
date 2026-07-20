@@ -240,6 +240,13 @@ static void test_driver()
 	expect( consecutive,
 		"grow-phase sizes step up by one from hStart (warm-start growth)" );
 
+	// Every trial carries a per-size classification accuracy in 0..1
+	bool caOk = !r.history.empty();
+	for ( const obd::SizeTrial& t : r.history )
+		if ( !( t.trainCA >= 0 && t.trainCA <= 1 && t.testCA >= 0 && t.testCA <= 1 ) )
+			caOk = false;
+	expect( caOk, "each size trial records train and test classification accuracy in 0..1" );
+
 	// Refusal: no held-out test set means no validation signal for early stopping
 	DataSet trainOnly = makeTrainOnly( 120 );
 	obd::Result refused = obd::run( trainOnly, cfg, nullptr, nullptr );

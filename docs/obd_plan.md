@@ -144,6 +144,7 @@ owns clones and prints its trail through `util::screen()`).
 ```cpp
 namespace obd {
 struct SizeTrial { unsigned hidden; double trainErr, testErr;
+                   double trainCA, testCA; // classification accuracy 0..1, -1 if n/a
                    Iterative::StopReason stop; bool phaseGrow; };
 struct Result {
     bool ok = false; string message;       // refusals travel here
@@ -221,12 +222,17 @@ over train/test, which reportAccuracy does itself.) Print the size-vs-error
 table through `util::screen()` before the final report:
 
 ```
-OBD hidden-layer search:
-  phase   hidden   train error   test error   stopped by
-  grow         2      1.23e-01     1.51e-01   plateau
+OBD hidden-layer search (validation early stopping):
+  phase   hidden   train error   test error   CA train   CA test   stopped by
+  grow         2      1.22e-01     1.22e-01      53.9%     54.2%   budget
   ...
-Selected: 5 hidden nodes (grew to 8, pruned back 3).
+  prune        2      6.00e-02     6.44e-02      96.4%     95.0%   budget
+Selected: 2 hidden nodes (grew to 8).
 ```
+
+The per-size classification accuracy (`trainCA`/`testCA`, at the early-stop point,
+also in the JSON history and the page tooltip) is Craig's addition, 2026-07-20 —
+it reads the CA the train() epilogue's reportAccuracy leaves in the net's TwoSets.
 
 **Observer/cancel plumbing**: `run()` takes the caller's Observer and installs
 it on whichever net is currently training (so the GUI's realtime chart streams

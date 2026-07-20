@@ -118,6 +118,21 @@ unsigned argmin( const vector< double >& v )
 	return best;
 }
 
+// Read the classification accuracy the last train() epilogue's reportAccuracy
+//    left in a net's TwoSets (the guesses at the early-stop point). Fractions in
+//    0..1; -1 when the set has no usable TwoSet. Measured at the early-stop
+//    endpoint, which is where the snapshot net sits -- a few patience samples
+//    past the min-error point the testErr score records.
+void readAccuracies( SimpleProp& net, double& trainCA, double& testCA )
+{
+	trainCA = testCA = -1;
+	DataSet& d = net.getDataSet();
+	if ( d.trainLoaded() && d.getTrainTwoSet().loaded() )
+		trainCA = d.getTrainTwoSet().getClassAcc();
+	if ( d.testLoaded() && d.getTestTwoSet().loaded() )
+		testCA = d.getTestTwoSet().getClassAcc();
+}
+
 // Train one size to its validation minimum (early stopped). Fills score (the
 //    minimum test error) and trainAtMin; returns the net's stop reason.
 Iterative::StopReason trainToValidationMin( SimpleProp& net, const obd::Config& cfg,
@@ -150,7 +165,8 @@ void printTable( ostream& out, const vector< obd::SizeTrial >& history,
 	unsigned selected, unsigned grewTo )
 {
 	out << endl << "OBD hidden-layer search (validation early stopping):" << endl;
-	out << "  phase   hidden   train error   test error   stopped by" << endl;
+	out << "  phase   hidden   train error   test error   CA train   CA test   "
+		"stopped by" << endl;
 	for ( vector< obd::SizeTrial >::const_iterator t = history.begin();
 		t != history.end(); t++ )
 	{
@@ -159,7 +175,13 @@ void printTable( ostream& out, const vector< obd::SizeTrial >& history,
 			<< "   " << resetiosflags( ios::fixed ) << setiosflags( ios::scientific )
 			<< setprecision( 4 ) << setw( 11 ) << t->trainErr
 			<< "  " << setw( 11 ) << t->testErr
-			<< resetiosflags( ios::scientific ) << "   "
+			<< resetiosflags( ios::scientific ) << setiosflags( ios::fixed )
+			<< setprecision( 1 );
+		if ( t->trainCA >= 0 ) out << setw( 9 ) << t->trainCA * 100 << "%";
+		else out << setw( 10 ) << "n/a";
+		if ( t->testCA >= 0 ) out << setw( 8 ) << t->testCA * 100 << "%";
+		else out << setw( 9 ) << "n/a";
+		out << resetiosflags( ios::fixed ) << "   "
 			<< ( t->stop == Iterative::STOP_OBSERVER ? "early stop"
 				: t->stop == Iterative::STOP_PLATEAU ? "plateau"
 				: t->stop == Iterative::STOP_GRADMAX ? "converged"
@@ -245,10 +267,11 @@ obd::Result obd::run( DataSet& data, const Config& cfg,
 		if ( cancel && cancel->load() ) { result.cancelled = true; break; }
 
 		grewTo = h;
-		double score, trainAtMin;
+		double score, trainAtMin, trainCA, testCA;
 		Iterative::StopReason stop = trainToValidationMin( *net, cfg, testStride,
 			progress, cancel, "grow", h, cfg.iterBudget, score, trainAtMin, discard );
-		result.history.push_back( { h, trainAtMin, score, stop, true } );
+		readAccuracies( *net, trainCA, testCA );
+		result.history.push_back( { h, trainAtMin, score, trainCA, testCA, stop, true } );
 
 		if ( score < bestTestErr ) // a larger net helped: snapshot it
 		{
@@ -281,10 +304,11 @@ obd::Result obd::run( DataSet& data, const Config& cfg,
 			hCur--;
 
 			unsigned budget = cfg.iterBudget / 4 < 100 ? 100 : cfg.iterBudget / 4;
-			double score, trainAtMin;
+			double score, trainAtMin, trainCA, testCA;
 			Iterative::StopReason stop = trainToValidationMin( *work, cfg, testStride,
 				progress, cancel, "prune", hCur, budget, score, trainAtMin, discard );
-			result.history.push_back( { hCur, trainAtMin, score, stop, false } );
+			readAccuracies( *work, trainCA, testCA );
+			result.history.push_back( { hCur, trainAtMin, score, trainCA, testCA, stop, false } );
 
 			if ( score <= bestTestErr * ( 1.0 + cfg.pruneTol ) ) // small net still good
 			{

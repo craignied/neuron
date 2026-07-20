@@ -1358,6 +1358,8 @@ string jsonObdHistory( const vector< obd::SizeTrial >& h )
 		out << ( i ? "," : "" ) << "{\"hidden\":" << t.hidden
 			<< ",\"trainErr\":" << jnum( t.trainErr )
 			<< ",\"testErr\":" << jnum( t.testErr )
+			<< ",\"trainCA\":" << ( t.trainCA < 0 ? "null" : jnum( t.trainCA ) )
+			<< ",\"testCA\":" << ( t.testCA < 0 ? "null" : jnum( t.testCA ) )
 			<< ",\"phase\":\"" << ( t.phaseGrow ? "grow" : "prune" )
 			<< "\",\"stop\":\"" << stopReasonName( t.stop ) << "\"}";
 	}

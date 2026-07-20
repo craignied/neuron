@@ -41,6 +41,8 @@ struct SizeTrial {
 	unsigned hidden;
 	double trainErr; // training error at the validation minimum
 	double testErr;  // the minimum held-out error reached (the score)
+	double trainCA;  // training-set classification accuracy at the early-stop point (0..1)
+	double testCA;   // test-set classification accuracy at the early-stop point (0..1)
 	Iterative::StopReason stop;
 	bool phaseGrow;
 };

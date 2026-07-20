@@ -612,8 +612,10 @@ $("obdc").addEventListener("mousemove", ev => {
   const L = 56, W = $("obdc").width - L - 12, n = h.length;
   const frac = Math.min(1, Math.max(0, (px - L) / W));
   const i = Math.min(n - 1, Math.max(0, Math.round(frac * (n - 1))));
+  const ca = v => (v === null || v === undefined) ? "n/a" : (v * 100).toFixed(1) + "%";
   tip.textContent = h[i].phase + " · " + h[i].hidden + " hidden · train "
-    + fmtE(h[i].trainErr) + " · test " + fmtE(h[i].testErr);
+    + fmtE(h[i].trainErr) + " · test " + fmtE(h[i].testErr)
+    + " · CA " + ca(h[i].trainCA) + "/" + ca(h[i].testCA);
   tip.style.display = "block";
   tip.style.left = Math.min(ev.clientX - rect.left + 14, rect.width - 200) + "px";
   tip.style.top = (ev.clientY - rect.top - 30) + "px";
