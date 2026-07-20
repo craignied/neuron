@@ -70,3 +70,15 @@ add_executable(check_capture
     src/vector_ops.cpp src/utility.cpp)
 target_include_directories(check_capture PRIVATE src)
 add_test(NAME screen_capture COMMAND check_capture)
+
+# Unit test: the OBD hidden-layer resizing primitives (ROADMAP 2 Phase 4).
+# Trains real SimpleProp networks, so it links the training engine (and GSL,
+# which network.cpp references).
+add_executable(check_obd
+    tests/obd/check_obd.cpp
+    src/simpleprop.cpp src/network.cpp src/iterative.cpp
+    src/model.cpp src/dataset.cpp src/twoset.cpp src/stats.cpp src/matrix.cpp
+    src/vector_ops.cpp src/utility.cpp)
+target_include_directories(check_obd PRIVATE src)
+target_link_libraries(check_obd PRIVATE GSL::gsl GSL::gslcblas)
+add_test(NAME obd_sizing COMMAND check_obd)

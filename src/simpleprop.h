@@ -27,6 +27,29 @@ public:
 	//    specify the architecture for a SimpleProp object
 	void setHidden( const unsigned );
 
+	// --- Hidden-layer resizing for OBD sizing (ROADMAP 2 Phase 4) ---------
+	//    These operate on a network whose weights are already set. See
+	//    src/obd.{h,cpp} for the grow-then-prune driver that uses them.
+
+	// Add 'extra' hidden units as a WARM START: existing units keep their
+	//    weights, the new units get small random incoming weights and ZERO
+	//    outgoing weights, so forward() is bit-identical immediately after
+	//    (the new units contribute exactly 0 to the output) but gradients flow
+	//    into them from the first training step. Requires set weights.
+	void growHidden( const unsigned extra );
+
+	// Remove the hidden units at the given indices (0..nHidden-1; the bias
+	//    pseudo-unit is not addressable). Kept units keep their weights and
+	//    order; at least one unit must survive. Removing a unit whose outgoing
+	//    weight is zero leaves forward() bit-identical. Requires set weights.
+	void removeHidden( const vector< unsigned >& );
+
+	// Saliency of each hidden unit j = |oW[j]| * std(hidden output j over the
+	//    training set): a unit is prunable when its output barely varies or
+	//    barely reaches the output. Returns one value per hidden unit (the bias
+	//    is excluded). Requires a loaded training set and set weights.
+	vector< double > hiddenSaliency();
+
 	// Degrees of freedom of this network
 	virtual unsigned df(); 
 
