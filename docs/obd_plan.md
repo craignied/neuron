@@ -158,37 +158,67 @@ Result run( DataSet& data, const Config& cfg,
 ```
 
 Config (all API-settable, defaults in parentheses): `hStart` (2), `hMax` (30),
-`iterBudget` per size (2000 — the bank lesson: capped, not 1M), `riseTol`
-(0.05), `pruneTol` (0.02), `algorithm` (0 = canonical; `auto` runs
-`autoalgo::pick` ONCE on the first net and keeps that choice for every size),
-plus eta/autostep/seed handled by the caller as for /api/train.
+`iterBudget` per size (2000 — the bank lesson: capped, not 1M — a *ceiling*, not
+a target; early stopping should almost always end a size first), `earlyStopTol`
+(0.02, the fraction the test error must rise above its running minimum to count
+as overtraining), `earlyStopPatience` (in samples), `testStride`
+(sample-test-error cadence, wall-clock-based like the GUI observer),
+`pruneTol` (0.02), `algorithm` (0 = canonical; `auto` runs `autoalgo::pick`
+ONCE on the first net and keeps that choice for every size), plus
+eta/autostep/seed handled by the caller as for /api/train.
 
 Refusals (return `ok=false`, message text): no 1-output discrete test set
 (`sampleTestError` returning −1 is the check); dataset not loaded; hStart < 1
 or hMax < hStart.
 
-**GROW phase**: build a SimpleProp at `hStart` (setDataSet → setHidden →
-randomize), disable bootstrap on both TwoSets (§1.7). For each size: `train()`
-with plateau auto-stop FORCED ON (that is how features 3+4 compose — each size
-trial self-terminates) and maxIterations = iterBudget; record
-`SizeTrial{ h, finalTrainErr, sampleTestError(1), stopReason, true }`. Track
-the best test error and snapshot the best net with `cloneNetwork`. Overlearning
-= test error > bestTestErr·(1+riseTol) for **2 consecutive sizes** while train
-error is non-increasing → stop growing. Otherwise `growHidden( 1 )` (warm
-start — the whole point of §1.2) and continue to hMax.
+**How overtraining is detected — VALIDATION EARLY STOPPING (Craig, 2026-07-19).**
+*No model trains to completion.* Overtraining is not a property of a finished
+model — it is the point *during* training where the held-out (test) error turns
+back up while the training error keeps falling — so comparing finished models
+can't see it. The driver installs an `Iterative::Observer` on each training run
+that, on a `testStride` cadence, calls `sampleTestError(stride)` (Phase 1b: it
+reads the held-out error WITHOUT writing the TwoSet guesses, so it never
+disturbs cached statistics) and tracks the running MINIMUM test error. When test
+error has risen `earlyStopTol` above that minimum and stayed up for
+`earlyStopPatience` samples, the observer returns `false` and the run stops
+right there. `iterBudget` and train-plateau are only backstops — whichever of
+{overtraining onset, plateau, budget} fires first ends the size. **The size's
+score is that running minimum test error, not the final error.** This is the
+whole reason `sampleTestError` and the observer hook exist.
+
+**GROW phase — WARM-START-THEN-SETTLE.** Build a SimpleProp at `hStart`
+(setDataSet → setHidden → randomize), disable bootstrap on both TwoSets (§1.7).
+For each size: train with the validation-early-stop observer above (score = min
+test error reached, snapshot the net AT that minimum with `cloneNetwork`). Then
+`growHidden( 1 )` — a warm start that PRESERVES the smaller net's fit exactly
+(§1.2), so the next size does not retrain from scratch; it only settles the one
+new unit's zero outgoing weight, again under the early-stop observer. Keep
+growing while a larger net lowers the best (minimum) test error; when an added
+unit fails to lower it for a small patience of sizes, stop growing. Record a
+`SizeTrial{ h, trainErrAtMin, minTestErr, stopReason, true }` per size.
+
+*Note (Craig, 2026-07-19): if per-size warm-start-then-settle still costs too
+much wall clock on large data, the fallback is to collapse the grow phase into
+ONE continuous grow-while-training trajectory — add a unit whenever training
+progress stalls, never stopping between sizes — which is faster but blurs the
+clean per-size test-error comparison. Not built now; revisit only if time
+requirements force it.*
 
 **PRUNE phase**: from the best snapshot. Loop while nHidden > 1: compute
-`hiddenSaliency`, `removeHidden` of the argmin, confirm-retrain with a fraction
-of iterBudget (recommend iterBudget/4, floor 100), re-measure test error. If
-≤ bestTestErr·(1+pruneTol): accept (this becomes the new candidate), record the
-trial, continue. Else: restore the last accepted snapshot and stop.
+`hiddenSaliency`, `removeHidden` of the argmin, a brief warm-start settle under
+the same early-stop observer (the removal is near-lossless when the pruned unit
+had small saliency), re-measure min test error. If ≤ bestTestErr·(1+pruneTol):
+accept (this becomes the new candidate), record the trial, continue. Else:
+restore the last accepted snapshot and stop.
 
-**Finish**: one full `train()` of the selected net at the user's real
-iteration budget with their plateau settings, re-enable the bootstrap
-(`setBootstrapResamples` back to the default — read the default from the
-TwoSet before zeroing it, don't hardcode 2000), and let the normal
-`reportAccuracy` epilogue run. Print the size-vs-error table through
-`util::screen()` before the final report:
+**Finish**: the selected net is ALREADY at its validation-minimum snapshot —
+training it further would be the overtraining the whole search avoided, so do
+NOT retrain it to completion. Re-enable the bootstrap (`setBootstrapResamples`
+back to the default — read the default from the TwoSet before zeroing it, don't
+hardcode 2000) and run `reportAccuracy` on the snapshot to produce the final
+report and stats. (The guesses the report needs come from a single forward pass
+over train/test, which reportAccuracy does itself.) Print the size-vs-error
+table through `util::screen()` before the final report:
 
 ```
 OBD hidden-layer search:

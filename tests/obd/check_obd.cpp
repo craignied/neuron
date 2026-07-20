@@ -20,6 +20,7 @@
 // off-by-one keep-list breaks (2); indexing the bias slot in saliency breaks
 // (3). See docs/obd_plan.md.
 
+#include <atomic>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -29,6 +30,7 @@
 #include "simpleprop.h"
 #include "dataset.h"
 #include "utility.h"
+#include "obd.h"
 
 using namespace std;
 
@@ -190,6 +192,105 @@ static void test_train_after_ops()
 		"canonical training keeps reducing the error from the resized network" );
 }
 
+// A raw-only DataSet (a training set, no held-out test set) for the refusal test
+static DataSet makeTrainOnly( unsigned n )
+{
+	Matrix< double > raw( n, 3 );
+	for ( unsigned i = 0; i < n; i++ )
+	{
+		double x0 = -1.0 + 2.0 * ( ( i * 37 ) % 100 ) / 99.0;
+		double x1 = -1.0 + 2.0 * ( ( i * 53 ) % 100 ) / 99.0;
+		raw( i, 0 ) = x0;
+		raw( i, 1 ) = x1;
+		raw( i, 2 ) = ( x0 + x1 > 0 ) ? 1 : 0;
+	}
+	DataSet d;
+	d.setInput( 2 ); d.setOutput( 1 ); d.setDiscrete( true ); d.setHistory( false );
+	d.setRawMatrix( raw );
+	d.raw2train(); // convert to a training set with NO test split
+	return d;
+}
+
+// The grow-then-prune driver: a real end-to-end search on the learnable set.
+static void test_driver()
+{
+	util::set_seed( 7 );
+	DataSet d = makeData( 150, 45 );
+
+	obd::Config cfg;
+	cfg.hStart = 2; cfg.hMax = 5; cfg.iterBudget = 300; cfg.sampleEvery = 10;
+	cfg.earlyStopPatience = 2; cfg.growPatience = 1;
+
+	obd::Result r = obd::run( d, cfg, nullptr, nullptr );
+
+	expect( r.ok && r.winner != nullptr,
+		"the search returns ok with a trained winning network" );
+	expect( r.selectedHidden >= 1 && r.selectedHidden <= cfg.hMax,
+		"the selected hidden count is within the searched range" );
+
+	// The grow-phase sizes are consecutive from hStart -- the warm-start growth
+	vector< unsigned > grow;
+	for ( const obd::SizeTrial& t : r.history )
+		if ( t.phaseGrow )
+			grow.push_back( t.hidden );
+	bool consecutive = !grow.empty() && grow.front() == cfg.hStart;
+	for ( size_t i = 1; i < grow.size(); i++ )
+		if ( grow[ i ] != grow[ i - 1 ] + 1 )
+			consecutive = false;
+	expect( consecutive,
+		"grow-phase sizes step up by one from hStart (warm-start growth)" );
+
+	// Refusal: no held-out test set means no validation signal for early stopping
+	DataSet trainOnly = makeTrainOnly( 120 );
+	obd::Result refused = obd::run( trainOnly, cfg, nullptr, nullptr );
+	expect( !refused.ok && refused.winner == nullptr && !refused.message.empty(),
+		"the search refuses a dataset with no test set" );
+
+	// Cancel: an already-set flag ends the search with no winner
+	atomic< bool > cancel{ true };
+	obd::Result cancelled = obd::run( d, cfg, nullptr, &cancel );
+	expect( cancelled.cancelled && cancelled.winner == nullptr,
+		"a set cancel flag ends the search as cancelled" );
+}
+
+// Overtraining MUST early-stop a size, not run to the iteration budget. Built
+// deterministically: the test set's labels are INVERTED relative to the rule the
+// training set teaches, so the held-out error can only RISE as the net learns --
+// its minimum is at the very start, and validation early stopping must fire.
+static void test_early_stop_fires()
+{
+	util::set_seed( 3 );
+
+	// Same inputs, opposite labels in train vs test
+	unsigned n = 80;
+	Matrix< double > tr( n, 3 ), te( n, 3 );
+	for ( unsigned i = 0; i < n; i++ )
+	{
+		double x0 = -1.0 + 2.0 * ( ( i * 37 ) % 100 ) / 99.0;
+		double x1 = -1.0 + 2.0 * ( ( i * 53 ) % 100 ) / 99.0;
+		unsigned rule = ( x0 + x1 > 0 ) ? 1 : 0;
+		tr( i, 0 ) = x0; tr( i, 1 ) = x1; tr( i, 2 ) = rule;
+		te( i, 0 ) = x0; te( i, 1 ) = x1; te( i, 2 ) = 1 - rule; // inverted
+	}
+	DataSet d;
+	d.setInput( 2 ); d.setOutput( 1 ); d.setDiscrete( true ); d.setHistory( false );
+	d.setTrainMatrix( tr );
+	d.setTestMatrix( te );
+
+	obd::Config cfg;
+	cfg.hStart = 4; cfg.hMax = 5; cfg.iterBudget = 2000; cfg.sampleEvery = 5;
+	cfg.earlyStopPatience = 2; cfg.growPatience = 1;
+
+	obd::Result r = obd::run( d, cfg, nullptr, nullptr );
+
+	bool anyEarlyStop = false;
+	for ( const obd::SizeTrial& t : r.history )
+		if ( t.stop == Iterative::STOP_OBSERVER )
+			anyEarlyStop = true;
+	expect( r.ok && anyEarlyStop && !r.cancelled,
+		"a size whose test error only rises is early-stopped, not run to budget" );
+}
+
 int main()
 {
 	// The engine's training reports go to util::screen(); this test reads none
@@ -201,6 +302,8 @@ int main()
 	test_grow_remove();
 	test_saliency();
 	test_train_after_ops();
+	test_driver();
+	test_early_stop_fires();
 
 	util::set_screen( cout );
 
