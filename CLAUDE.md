@@ -967,6 +967,60 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   wrong before? Only approximate — 100 thresholds was close on real data (~0.002 off)
   but the grid was an arbitrary choice the exact AUC removes. **Next: resume OBD.**
 
+- **2026-07-20 — ROADMAP 2 Phase 4 DONE: OBD hidden-layer sizing. Its central
+  mechanism was redesigned mid-build after Craig asked the right question.** The
+  plan (`docs/obd_plan.md`, written by Fable 2026-07-19 and verified against the
+  code before building, per rule 3) originally trained each hidden size to a
+  plateau/budget and compared final errors — Craig stopped the work with "how are
+  you determining when overtraining is happening? A model shouldn't need to train
+  to completion." He was right: overtraining is not a property of a finished model,
+  it is the point DURING a run where the held-out error turns back up while the
+  training error keeps falling, so comparing finished models cannot see it.
+  Redesigned to **validation early stopping** using the Phase 1b machinery
+  (`Iterative::Observer` + `sampleTestError`, which reads the test error without
+  writing the TwoSet guesses): a `ValidationObserver` samples test error on a fixed
+  iteration cadence, tracks its running MINIMUM, and stops each size the moment the
+  error has risen `earlyStopTol` above that minimum for `earlyStopPatience` samples.
+  That minimum is the size's score; no size trains to completion. Warm-start growth
+  (`growHidden` preserves the smaller net's fit) means each size continues from the
+  last, not from scratch. Craig chose per-size warm-start-then-settle over one
+  continuous grow-while-training trajectory, with a note in the plan to revisit the
+  continuous form only if wall clock forces it. Landed in five pieces:
+  1. **Engine primitives** (`src/simpleprop.{h,cpp}`, commit 3c054ab):
+     `growHidden`/`removeHidden`/`hiddenSaliency`. The bias slot MOVES on grow (it
+     is the last element of `hO`/`oW`), and botching its relocation is the whole
+     trap — `check_obd` (ctest `obd_sizing`) watches grow-invisible, grow-then-remove
+     round-trip, and zero-outgoing saliency=0 each FAIL against a targeted sabotage
+     (rule 2). Pruning uses the existing `includerows`, no new primitive (rule 4).
+  2. **Driver** (`src/obd.{h,cpp}`, commit 070bd21): the grow-then-prune search,
+     per-size bootstrap disabled (each size runs `reportAccuracy`; 2000 resamples per
+     size would dwarf training), `algorithm=auto` probes the optimizer once. The
+     winner is already at its validation minimum, so it is NOT retrained — bootstrap
+     re-enabled and `reportAccuracy` run once for the final report. The early-stop
+     firing is proven by an inverted-test-label scenario (test error can only rise)
+     whose assertion FAILS when the early-stop `return false` is disabled.
+  3. **GUI** (`POST /api/obd`, async-only, shares the TrainJob machinery; the winner
+     REPLACES modelPtr so the worker re-derives pointers, the Phase 2 pattern):
+     `obd:{phase,hidden}` on `GET /api/train/status`; `jsonObdHistory`; the decimated
+     progress push factored into `TrainJob::pushSample` (shared with `GuiObserver`,
+     goldens/existing-train unaffected).
+  4. **Page**: OBD panel + a size-vs-error chart (search order on x, train/test error
+     in the SAME two entity colors as the other charts — color follows the entity,
+     dataviz — the selected size a neutral-ink dashed annotation, not a third series).
+  5. **Docs**: parity matrix gained a **"GUI-beyond-CLI features"** section (OBD is a
+     legal GUI-only feature — the CLI menus are frozen, so no-CLI-equivalent is not a
+     gap); AGENTS.md documents `/api/obd` + the cost note.
+  A false alarm worth recording: an early curl test looked like the OBD result had
+  unescaped newlines (a JSON parse error). It did not — `echo "$json" | python` was
+  mangling `\n` into real newlines; `printf '%s'` showed the response was correctly
+  escaped all along. Instrument before believing the bug (rule 3 applies to test
+  harnesses too). Gates: zero-warning build, goldens byte-identical, 7/7 ctest,
+  smoke (+6 OBD assertions), verify_oracle identical. **Not yet done: in-browser
+  click of the OBD panel** (needs the Chrome extension; the endpoint is fully
+  curl/smoke-verified and the page elements are served, but the chart render is
+  inspection-only — the standing browser-verification debt). ROADMAP 2 is now
+  **complete through Phase 4**; Phase 5 (new optimizers) remains backlog.
+
 ## ROADMAP 3 (agreed with Craig 2026-07-15) — ROC inference
 
 Rationale, citations, and Methods language: **`docs/roc_theory.md`**. Work in order.
@@ -1268,17 +1322,18 @@ as any API change. Invoke the `dataviz` skill before writing chart code (Phase 1
   grad_max fires *on* a print iteration) was confirmed real and left as-is — it is
   oracle/golden-pinned and the plateau detector does NOT share it (`update()` sees the
   fresh `setError` every iteration).
-- **4 — OBD**. **Detailed implementation plan: `docs/obd_plan.md`** (Fable,
-  2026-07-19) — supersedes the sketch in "Architecture decisions" above where they
-  differ. The sketch's rule-3 claims are now VERIFIED against the code (setHidden
-  destructive; zero-oW grow bit-identical *with the bias-slot relocation trap*;
-  CGD/Shanno state self-heals at t==0 so no manual clearing is load-bearing;
-  sampleTestError is both the refusal check and the per-size measurement; pruning
-  uses the existing `includerows`, no new primitive). simpleprop grow/remove/
-  saliency + obd driver + `/api/obd` + tests/obd ctest (grow-with-zero-oW →
-  `forward()` bit-identical; grow-then-remove-back restores outputs; zeroed unit
-  saliency 0). Smoke: raw load fraction=0.25 → obd → `selectedHidden`+`history`;
-  refusal without test set.
+- **4 — OBD (DONE 2026-07-20, see status entry).** Plan: `docs/obd_plan.md`
+  (Fable, 2026-07-19; updated the same day with Craig's validation-early-stopping
+  redesign). The overtraining detector is **validation early stopping** (watch the
+  held-out error during each size's training; stop at the onset of its rise — no
+  size trains to completion), NOT a compare-finished-models scheme; warm-start
+  growth (`growHidden` preserves the smaller net's fit) so each size continues from
+  the last. Landed as engine primitives (grow/remove/saliency, commit 3c054ab) +
+  driver (`obd.{h,cpp}`, 070bd21) + GUI (`/api/obd` async, page panel + size-vs-
+  error chart). `tests/obd` ctest (`obd_sizing`): grow bit-identical, grow-then-
+  remove round-trip, zero-oW saliency 0, end-to-end search, refusal without a test
+  set, cancel, and early-stop-fires — each sabotage-proven (rule 2). Smoke: refusal,
+  async grow-then-prune, `obd` status phase, plain-train-has-none, 409 busy, cancel.
 - **5 (later) — new training algorithms from the literature**: Rprop (ideal full-batch),
   Adam, L-BFGS (`gsl_multimin_fdfminimizer_vector_bfgs2`), optional Levenberg–Marquardt;
   Muon = experimental novel candidate (2026 tabular-MLP benchmark, arXiv 2604.15297).

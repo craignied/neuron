@@ -102,6 +102,26 @@ statistical/trapezoidal, 2 minimum data, 3 return); the GUI dropped the
 | 3+4 Logging toggles | Model panel's log toggles (sent along) | `POST /api/dfa` `log_lastop=`,`log_history=` | ✅ |
 | (after run) Save the DFA's guesses | DFA train/test guesses buttons | `GET /api/save/{dfa_train_guesses,dfa_test_guesses}` | ✅ |
 
+## GUI-beyond-CLI features
+
+The contract is GUI ⊇ CLI: the GUI must cover every CLI menu option, but it may
+also do MORE. The CLI menus are frozen (no new features, 2026-07-14), so these
+have **no CLI equivalent by design** — that is not a parity gap.
+
+| Feature | GUI control | API | CLI |
+|---|---|---|---|
+| Automatic training-algorithm selection | Algorithm → "Auto" | `POST /api/train` `algorithm=auto` | — n/a (menus frozen) |
+| Plateau auto-stop | "Auto-stop on plateau" + tol/window | `POST /api/train` `autostop=` | — n/a (menus frozen) |
+| Realtime error-vs-iteration chart | Training-error chart | `GET /api/train/status` series | — n/a (menus frozen) |
+| DFA graded ROC AUC | DFA ROC/stats panels | `POST /api/dfa` (ROC in the response) | — n/a (menus frozen) |
+| OBD hidden-layer sizing (grow-then-prune, validation early stopping) | OBD panel + size-vs-error chart | `POST /api/obd` (async; `GET /api/train/status` `obd{phase,hidden}`) | — n/a (menus frozen) |
+
+`POST /api/obd` params: `hidden_start`, `hidden_max`, `iter_budget`,
+`sample_every`, `early_stop_tol`, `early_stop_patience`, `grow_patience`,
+`prune_tol`, `algorithm` (1|2|3|auto), `seed`. It is async-only and shares the
+training job (status + stop reach it through the same doors); the winning sized
+network replaces the current model.
+
 ## Logging (cross-cutting)
 
 Standing requirement (Craig, 2026-07-19): **every user action is logged.**
@@ -109,5 +129,5 @@ Standing requirement (Craig, 2026-07-19): **every user action is logged.**
 | Behavior | Mechanism | Status |
 |---|---|---|
 | Engine operations (dataset split, randomize, each training run incl. stopped) | `neuron.log` via `addHistory` | ✅ (pre-existing) |
-| Per-action audit trail (load/model/dfa/train/randomize/stop/save) with timestamp + values | `neuron_actions.log` via `logAction` | ✅ |
+| Per-action audit trail (load/model/dfa/train/obd/randomize/stop/save) with timestamp + values | `neuron_actions.log` via `logAction` | ✅ |
 | Each training run's header records ALL params in effect (η, decay, stopping conditions, plateau) | run header (self-describing) | ✅ (already: `Network::runHeader` + `Iterative::train`) |

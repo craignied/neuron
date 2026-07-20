@@ -28,6 +28,7 @@
 
 #include "gui.h"
 #include "autoalgo.h"
+#include "obd.h"
 #include "dataset.h"
 #include "logistic.h"
 #include "simpleprop.h"
@@ -69,6 +70,8 @@ double lastTrainError = -1;
 // duration and does NOT hold engineMutex while training -- the gate is what
 // keeps everyone else out. The worker captures engine output through its own
 // thread_local screen (see utility.cpp).
+const unsigned JOB_MAX_POINTS = 2000;
+
 struct TrainJob
 {
 	thread worker;
@@ -84,10 +87,39 @@ struct TrainJob
 	vector< double > trainErr, testErr; // testErr < 0 = not sampled
 	unsigned keepEvery = 1, sampleCounter = 0;
 	string result; // the finished run's response JSON, "" while running
+
+	// OBD progress for the status poll (empty phase = not an OBD run)
+	string obdPhase;
+	unsigned obdHidden = 0;
+
+	// Append one decimated (iteration, train, test) sample. Guards its own
+	//    mutex, so callers must NOT already hold progressMutex.
+	void pushSample( unsigned iteration, double trainError, double testError )
+	{
+		lock_guard< mutex > lock( progressMutex );
+		if ( ++sampleCounter % keepEvery == 0 )
+		{
+			iters.push_back( iteration );
+			trainErr.push_back( trainError );
+			testErr.push_back( testError );
+			if ( iters.size() >= JOB_MAX_POINTS )
+			{
+				// Halve the series, double the stride for future samples
+				for ( unsigned i = 0, j = 0; j < iters.size(); i++, j += 2 )
+				{
+					iters[ i ] = iters[ j ];
+					trainErr[ i ] = trainErr[ j ];
+					testErr[ i ] = testErr[ j ];
+				}
+				iters.resize( iters.size() / 2 );
+				trainErr.resize( trainErr.size() / 2 );
+				testErr.resize( testErr.size() / 2 );
+				keepEvery *= 2;
+			}
+		}
+	}
 };
 TrainJob job;
-
-const unsigned JOB_MAX_POINTS = 2000;
 
 // The worker-side observer: samples the error curve on a wall-clock schedule
 //    (>= 250 ms apart, so observing costs nothing measurable) and carries the
@@ -115,28 +147,7 @@ struct GuiObserver : Iterative::Observer
 
 			// Sampled OUTSIDE progressMutex: only the worker touches the engine
 			double testError = net ? net->sampleTestError( testStride ) : -1;
-
-			lock_guard< mutex > lock( job.progressMutex );
-			if ( ++job.sampleCounter % job.keepEvery == 0 )
-			{
-				job.iters.push_back( iteration );
-				job.trainErr.push_back( setError );
-				job.testErr.push_back( testError );
-				if ( job.iters.size() >= JOB_MAX_POINTS )
-				{
-					// Halve the series, double the stride for future samples
-					for ( unsigned i = 0, j = 0; j < job.iters.size(); i++, j += 2 )
-					{
-						job.iters[ i ] = job.iters[ j ];
-						job.trainErr[ i ] = job.trainErr[ j ];
-						job.testErr[ i ] = job.testErr[ j ];
-					}
-					job.iters.resize( job.iters.size() / 2 );
-					job.trainErr.resize( job.trainErr.size() / 2 );
-					job.testErr.resize( job.testErr.size() / 2 );
-					job.keepEvery *= 2;
-				}
-			}
+			job.pushSample( iteration, setError, testError );
 		}
 		return !job.cancel.load();
 	}
@@ -1255,6 +1266,8 @@ string handleTrain( const httplib::Request& req )
 		job.keepEvery = 1;
 		job.sampleCounter = 0;
 		job.result.clear();
+		job.obdPhase.clear(); // a plain train reports no obd phase
+		job.obdHidden = 0;
 	}
 	job.cancel = false;
 	job.running = true;
@@ -1298,7 +1311,13 @@ string handleTrainStatus()
 	for ( unsigned i = 0; i < job.testErr.size(); i++ ) // < 0 = not sampled
 		out << ( i ? "," : "" )
 			<< ( job.testErr[ i ] < 0 ? "null" : jnum( job.testErr[ i ] ) );
-	out << "]},\"result\":" << ( job.result.empty() ? "null" : job.result )
+	out << "]}";
+	// OBD runs report which phase (grow/prune) and hidden count they are on;
+	//    absent for a plain training run
+	if ( !job.obdPhase.empty() )
+		out << ",\"obd\":{\"phase\":\"" << jsonEscape( job.obdPhase )
+			<< "\",\"hidden\":" << job.obdHidden << "}";
+	out << ",\"result\":" << ( job.result.empty() ? "null" : job.result )
 		<< "}";
 	return out.str();
 }
@@ -1324,6 +1343,187 @@ string handleStats()
 	if ( stats.empty() )
 		return jsonMsg( false, "no classification statistics for this model" );
 	return string( "{\"ok\":true,\"stats\":" ) + stats + "}";
+}
+
+// --- OBD hidden-layer sizing (ROADMAP 2 Phase 4) --------------------------
+
+string jsonObdHistory( const vector< obd::SizeTrial >& h )
+{
+	ostringstream out;
+	out.precision( 6 );
+	out << "[";
+	for ( unsigned i = 0; i < h.size(); i++ )
+	{
+		const obd::SizeTrial& t = h[ i ];
+		out << ( i ? "," : "" ) << "{\"hidden\":" << t.hidden
+			<< ",\"trainErr\":" << jnum( t.trainErr )
+			<< ",\"testErr\":" << jnum( t.testErr )
+			<< ",\"phase\":\"" << ( t.phaseGrow ? "grow" : "prune" )
+			<< "\",\"stop\":\"" << stopReasonName( t.stop ) << "\"}";
+	}
+	out << "]";
+	return out.str();
+}
+
+// The whole OBD search on the worker thread: run the driver (capturing its
+//    size table + final report), adopt the winning net as modelPtr (like the
+//    auto-algorithm adoption -- it REPLACES modelPtr, so every pointer is
+//    re-derived after), then build the result JSON (history + the winner's ROC
+//    and stats). The caller must own the engine (the async worker does).
+string runObdJob( const obd::Config& cfg )
+{
+	Capture cap; // the driver's size table + final report
+
+	// Feed the realtime chart and the status poll's obd phase/hidden
+	obd::ProgressFn progress = []( const char* phase, unsigned hidden,
+		unsigned iteration, double trainErr, double testErr )
+	{
+		{
+			lock_guard< mutex > lock( job.progressMutex );
+			job.obdPhase = phase;
+			job.obdHidden = hidden;
+		}
+		job.pushSample( iteration, trainErr, testErr );
+	};
+
+	obd::Result r = obd::run( *dataPtr, cfg, progress, &job.cancel );
+
+	if ( !r.ok )
+		return string( "{\"ok\":false,\"message\":\"" )
+			+ jsonEscape( r.message.empty()
+				? ( r.cancelled ? "cancelled" : "OBD did not produce a model" )
+				: r.message )
+			+ "\",\"cancelled\":" + ( r.cancelled ? "true" : "false" )
+			+ ",\"output\":\"" + jsonEscape( cap.text.str() ) + "\"}";
+
+	// Adopt the winner (probe/search progress kept); it is already trained
+	modelPtr = std::move( r.winner );
+	dfaPtr.reset(); // any prior DFA guesses belong to the old model
+	lastTrainError = 0; // the winner has weights -- treat it as trained
+	lastReport = cap.text.str();
+
+	DataSet& md = modelPtr->getDataSet();
+	string roc;
+	if ( md.getDiscrete() && md.getOutput() == 1 && md.trainLoaded() )
+	{
+		roc = ",\"roc\":{\"train\":" + jsonROCSeries( md.getTrainTwoSet() );
+		if ( md.testLoaded() )
+			roc += ",\"test\":" + jsonROCSeries( md.getTestTwoSet() );
+		roc += "}";
+	}
+	string stats = jsonStats();
+	string statsField = stats.empty() ? "" : ( ",\"stats\":" + stats );
+
+	ostringstream msg;
+	msg << "OBD selected " << r.selectedHidden << " hidden node"
+		<< ( r.selectedHidden == 1 ? "" : "s" );
+	if ( r.cancelled )
+		msg << " (stopped by request)";
+
+	return string( "{\"ok\":true,\"message\":\"" ) + jsonEscape( msg.str() )
+		+ "\",\"cancelled\":" + ( r.cancelled ? "true" : "false" )
+		+ ",\"selectedHidden\":" + to_string( r.selectedHidden )
+		+ ",\"obd\":{\"selectedHidden\":" + to_string( r.selectedHidden )
+		+ ",\"history\":" + jsonObdHistory( r.history ) + "}"
+		+ ",\"output\":\"" + jsonEscape( lastReport ) + "\"" + roc + statsField + "}";
+}
+
+string handleObd( const httplib::Request& req )
+{
+	logAction( req, "obd" );
+
+	if ( !dataPtr )
+		return jsonMsg( false, "load a dataset first" );
+	// The driver refuses these too (defence in depth), but a synchronous refusal
+	//    is a better experience than one that only surfaces via the status poll
+	if ( !( dataPtr->getDiscrete() && dataPtr->getOutput() == 1 ) )
+		return jsonMsg( false, "OBD needs a discrete, single-output dataset" );
+	if ( !dataPtr->testLoaded() )
+		return jsonMsg( false, "OBD needs a held-out test set -- it is the "
+			"validation signal early stopping watches" );
+
+	obd::Config cfg;
+
+	// Each field overrides its default only when present; validate here (the
+	//    engine's own asserts vanish in release builds)
+	auto uintParam = [ & ]( const char* name, unsigned& dst, unsigned lo,
+		const char* err, string& bad )
+	{
+		string s = param( req, name );
+		if ( s.empty() ) return;
+		long v = atol( s.c_str() );
+		if ( v < ( long ) lo ) { bad = err; return; }
+		dst = ( unsigned ) v;
+	};
+	auto fracParam = [ & ]( const char* name, double& dst, const char* err, string& bad )
+	{
+		string s = param( req, name );
+		if ( s.empty() ) return;
+		double v = atof( s.c_str() );
+		if ( !( v > 0 && v < 1 ) ) { bad = err; return; }
+		dst = v;
+	};
+
+	string bad;
+	uintParam( "hidden_start", cfg.hStart, 1, "hidden_start must be at least 1", bad );
+	uintParam( "hidden_max", cfg.hMax, 1, "hidden_max must be at least 1", bad );
+	uintParam( "iter_budget", cfg.iterBudget, 1, "iter_budget must be at least 1", bad );
+	uintParam( "sample_every", cfg.sampleEvery, 1, "sample_every must be at least 1", bad );
+	uintParam( "early_stop_patience", cfg.earlyStopPatience, 1,
+		"early_stop_patience must be at least 1", bad );
+	uintParam( "grow_patience", cfg.growPatience, 1,
+		"grow_patience must be at least 1", bad );
+	fracParam( "early_stop_tol", cfg.earlyStopTol,
+		"early_stop_tol must be between 0 and 1", bad );
+	fracParam( "prune_tol", cfg.pruneTol, "prune_tol must be between 0 and 1", bad );
+	if ( !bad.empty() )
+		return jsonMsg( false, bad );
+	if ( cfg.hMax < cfg.hStart )
+		return jsonMsg( false, "hidden_max must be at least hidden_start" );
+
+	// algorithm: 1|2|3 or auto (probe once)
+	string algoStr = param( req, "algorithm" );
+	if ( algoStr == "auto" ) cfg.algorithm = -1;
+	else if ( algoStr.empty() || algoStr == "1" ) cfg.algorithm = 0;
+	else if ( algoStr == "2" ) cfg.algorithm = 1;
+	else if ( algoStr == "3" ) cfg.algorithm = 2;
+	else return jsonMsg( false, "algorithm must be 1, 2, 3 or auto" );
+
+	string seed = param( req, "seed" );
+	if ( !seed.empty() )
+		util::set_seed( ( unsigned ) atol( seed.c_str() ) );
+
+	// OBD is async-only (it is many training runs): hand it to the worker and
+	//    return at once, exactly like async training. The caller holds
+	//    engineMutex here; job.running (set before the worker) gates everyone else.
+	if ( job.worker.joinable() )
+		job.worker.join(); // reap the previous, finished run's thread
+
+	{
+		lock_guard< mutex > lock( job.progressMutex );
+		job.iters.clear();
+		job.trainErr.clear();
+		job.testErr.clear();
+		job.keepEvery = 1;
+		job.sampleCounter = 0;
+		job.result.clear();
+		job.obdPhase.clear();
+		job.obdHidden = 0;
+	}
+	job.cancel = false;
+	job.running = true;
+
+	job.worker = thread( [ cfg ]
+	{
+		string result = runObdJob( cfg );
+		{
+			lock_guard< mutex > lock( job.progressMutex );
+			job.result = result; // publish BEFORE running goes false
+		}
+		job.running = false;
+	} );
+
+	return jsonMsg( true, "OBD hidden-layer search started" );
 }
 
 string handleRegress( const httplib::Request& req )
@@ -1572,6 +1772,15 @@ int run_gui( bool openBrowser )
 		lock_guard< mutex > lock( engineMutex );
 		if ( busyGate( res ) ) return;
 		res.set_content( handleDFA( req ), "application/json" );
+	} );
+
+	// OBD hidden-layer sizing: async-only, shares the train job machinery
+	//    (status + stop reach it through the same doors as async training)
+	svr.Post( "/api/obd", []( const httplib::Request& req, httplib::Response& res )
+	{
+		lock_guard< mutex > lock( engineMutex );
+		if ( busyGate( res ) ) return;
+		res.set_content( handleObd( req ), "application/json" );
 	} );
 
 	// Session artifacts: written into the workspace by the engine's own

@@ -471,6 +471,65 @@ done
 grep -q '"running":false' status3.json || fail "async auto run never completed"
 grep -q '"autoAlgo":{"selected":' status3.json || fail "async result missing autoAlgo"
 
+# --- OBD hidden-layer sizing (ROADMAP 2 Phase 4) ---------------------------
+# Refusal without a held-out test set: it is the validation signal early
+#    stopping watches, so there is nothing to size against
+curl -s -X POST "$URL/api/load" -d "mode=raw&path=lowbwt2-2train.txt&fraction=0" >/dev/null
+curl -s -X POST "$URL/api/obd" -d "hidden_start=2&hidden_max=4" \
+    | grep -q '"ok":false' || fail "OBD must refuse a dataset with no test set"
+
+# Happy path: an async grow-then-prune search that reports its phase while it
+#    runs and returns a size-vs-error history plus the winner's ROC and stats
+curl -s -X POST "$URL/api/load" -d "mode=raw&path=lowbwt2-2train.txt&fraction=0.3&seed=1" >/dev/null
+curl -s -X POST "$URL/api/obd" \
+    -d "hidden_start=2&hidden_max=4&iter_budget=200&sample_every=10&grow_patience=1&seed=1" \
+    | grep -q '"ok":true' || fail "OBD search did not start"
+sawObd=0
+for i in $(seq 1 120); do
+    curl -s "$URL/api/train/status" > obd_status.json
+    grep -q '"obd":{"phase"' obd_status.json && sawObd=1
+    grep -q '"running":false' obd_status.json && break
+    sleep 0.3
+done
+[ "$sawObd" = 1 ] || fail "status never reported an obd phase during the search"
+grep -q '"running":false' obd_status.json || fail "OBD search never completed"
+$PY - <<'PY' || fail "OBD result malformed"
+import json
+d = json.load(open("obd_status.json"))["result"]
+assert d["ok"], d
+assert d["selectedHidden"] >= 1, d["selectedHidden"]
+h = d["obd"]["history"]
+assert h and h[0]["hidden"] == 2, h                 # grow starts at hidden_start
+assert "stats" in d and "roc" in d, list(d)
+PY
+
+# A plain training run reports NO obd field in its status (that field is
+#    OBD-only, so its absence proves a plain train is not mislabelled)
+curl -s -X POST "$URL/api/model" -d "type=logistic" >/dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=200&seed=42&async=1" >/dev/null
+for i in $(seq 1 120); do
+    curl -s "$URL/api/train/status" > pt_status.json
+    grep -q '"running":false' pt_status.json && break
+    sleep 0.3
+done
+grep -q '"obd":' pt_status.json && fail "a plain train must not report an obd status field"
+
+# 409 busy while a search runs, and Stop cancels it
+curl -s -X POST "$URL/api/obd" \
+    -d "hidden_start=2&hidden_max=8&iter_budget=200000&sample_every=50&seed=1" \
+    | grep -q '"ok":true' || fail "long OBD search did not start"
+obdbusy=$(curl -s -w '\n%{http_code}' -X POST "$URL/api/obd" -d "hidden_start=2&hidden_max=3")
+echo "$obdbusy" | grep -q '"busy":true' || fail "no busy flag while an OBD search runs"
+echo "$obdbusy" | tail -1 | grep -q '409' || fail "OBD busy refusal should be HTTP 409"
+curl -s -X POST "$URL/api/train/stop" | grep -q '"ok":true' || fail "stop did not accept during OBD"
+for i in $(seq 1 120); do
+    curl -s "$URL/api/train/status" > obd_cancel.json
+    grep -q '"running":false' obd_cancel.json && break
+    sleep 0.3
+done
+grep -q '"running":false' obd_cancel.json || fail "cancelled OBD never completed"
+grep -q '"cancelled":true' obd_cancel.json || fail "a stopped OBD result must say cancelled"
+
 # --- Per-action audit log (every user action logged, 2026-07-19) -----------
 # Every GUI action lands in neuron_actions.log beside the data, timestamped,
 # with the exact parameter values it carried. The session above drove load,
@@ -482,4 +541,4 @@ grep -qE '^[0-9-]+T[0-9:]+ train ' neuron_actions.log || fail "train not audited
 grep -q 'algorithm=' neuron_actions.log || fail "train parameters not recorded in the audit log"
 grep -qE '^[0-9-]+T[0-9:]+ dfa '   neuron_actions.log || fail "dfa not audited"
 
-echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, binormal fits + null when impossible, logistic Wald/condition number, regress, saves, plateau auto-stop + control + validation, train-panel parity controls (learning rate/weight decay/batch-epoch/stopping conditions/print counter) + behavioral proof + validation, model-panel parity (bias->BareProp/multi-layer->BackProp/error function/load-network), no-bias BackProp save/load round trip, multipart log toggles, logistic batch/epoch guard, DFA (linear/quadratic + report/stats + guesses saves), dataset characteristics + ROC reporting load params, test_n exact split, multi-output load/BackProp/train/DFA + logistic refusal, async train/status/stop + 409 busy + cancel, algorithm=auto blocking + async, per-action audit log)"
+echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, binormal fits + null when impossible, logistic Wald/condition number, regress, saves, plateau auto-stop + control + validation, train-panel parity controls (learning rate/weight decay/batch-epoch/stopping conditions/print counter) + behavioral proof + validation, model-panel parity (bias->BareProp/multi-layer->BackProp/error function/load-network), no-bias BackProp save/load round trip, multipart log toggles, logistic batch/epoch guard, DFA (linear/quadratic + report/stats + guesses saves), dataset characteristics + ROC reporting load params, test_n exact split, multi-output load/BackProp/train/DFA + logistic refusal, async train/status/stop + 409 busy + cancel, algorithm=auto blocking + async, OBD sizing (refusal/async grow-then-prune/obd status phase/plain-train has none/409 busy/cancel), per-action audit log)"

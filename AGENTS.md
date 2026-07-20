@@ -329,6 +329,24 @@ and reports the Wilks-GLRT p-values, the engine's classic input-selection
 tool. The network must be trained first; output appears in the report pane
 and, with history logging on, is appended to `neuron.log`.
 
+The GUI also sizes the hidden layer automatically — **OBD** (`POST /api/obd`,
+the "OBD hidden-layer sizing" panel). It grows a SimpleProp's hidden layer while
+a larger net lowers the held-out error, detecting overtraining by **validation
+early stopping** (it samples the test error during each size's training and stops
+that size the moment the error turns back up — no size trains to completion), then
+prunes back by saliency. It needs a training/test split, and the winning sized,
+trained network REPLACES the current model. Params: `hidden_start` (2),
+`hidden_max` (30), `iter_budget` (per-size ceiling, 2000), `sample_every` (20),
+`early_stop_tol` (0.02), `early_stop_patience` (3), `grow_patience` (2),
+`prune_tol` (0.02), `algorithm` (1|2|3|auto — `auto` probes once and keeps the
+choice), `seed`. It is **async-only**: the call returns at once, and progress +
+completion arrive through the same `GET /api/train/status` (a running OBD adds an
+`obd:{phase,hidden}` field) and `POST /api/train/stop` doors as async training.
+**Cost:** an OBD run is many training runs — roughly `iter_budget` × (sizes grown
++ pruned) iterations, though early stopping usually ends each size well under the
+budget; keep `iter_budget` modest (hundreds to low thousands) and `hidden_max`
+sane. See `docs/obd_plan.md`.
+
 ## 4. Verifying the installation
 
 - Quick: `./tests/tools/run_tools.sh` (Python tools vs committed outputs,

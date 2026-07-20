@@ -27,10 +27,18 @@ button { padding: .35rem .9rem; cursor: pointer; }
 #errbox .sw { display: inline-block; width: .7em; height: .7em; border-radius: 2px;
           margin: 0 .3em 0 1em; vertical-align: baseline; }
 #errbox .sw:first-child { margin-left: 0; }
-#errwrap { position: relative; }
-#errtip { display: none; position: absolute; pointer-events: none; background: #fff;
+#errwrap, #obdwrap { position: relative; }
+#errtip, #obdtip { display: none; position: absolute; pointer-events: none; background: #fff;
           border: 1px solid #ddd; border-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,.12);
           font-size: .75rem; padding: .25rem .5rem; color: #52514e; white-space: nowrap; }
+/* OBD size-vs-error chart -- same card + legend style as the error chart */
+#obdbox { display: none; background: #fff; border: 1px solid #ddd; border-radius: 8px;
+          padding: 1rem; margin-bottom: 1rem; }
+#obdbox h3 { font-size: .95rem; margin: 0 0 .1rem; }
+#obdbox .legend { font-size: .8rem; color: #52514e; margin-bottom: .4rem; }
+#obdbox .sw { display: inline-block; width: .7em; height: .7em; border-radius: 2px;
+          margin: 0 .3em 0 1em; vertical-align: baseline; }
+#obdbox .sw:first-child { margin-left: 0; }
 #rocstats { flex: 1; min-width: 15rem; font-size: .9rem; }
 #rocstats h3 { font-size: .95rem; margin: .2rem 0 .6rem; }
 #rocstats .sblk { margin-bottom: 1rem; }
@@ -254,6 +262,39 @@ panels.</span></div>
 </fieldset>
 
 <fieldset>
+<legend>4c &mdash; OBD hidden-layer sizing</legend>
+<div class="row">
+  <label>Start hidden <input class="num" type="number" id="obd_hstart" value="2"
+    min="1"></label>
+  <label>Max hidden <input class="num" type="number" id="obd_hmax" value="30"
+    min="1"></label>
+  <label>Iteration budget <input class="num" type="number" id="obd_budget"
+    value="2000" min="1"></label>
+  <label>Algorithm <select id="obd_algo">
+    <option value="1">Canonical backpropagation</option>
+    <option value="2">Conjugate gradient descent</option>
+    <option value="3">Shanno's algorithm</option>
+    <option value="auto">Auto &mdash; probe once, keep the choice</option>
+  </select></label>
+  <label>Seed <input class="num" type="number" id="obd_seed"
+    placeholder="clock"></label>
+  <button id="obdbtn" onclick="runObd()">Run OBD</button>
+  <span class="status" id="obdstatus"></span>
+</div>
+<div class="row">
+  <label title="How far the held-out error may rise above its minimum before a size is judged to be overtraining">Overtrain tol
+    <input class="num" type="number" id="obd_tol" step="any" value="0.02"></label>
+  <label title="Sizes without a held-out improvement before growth stops">Grow patience
+    <input class="num" type="number" id="obd_grow" value="2" min="1"></label>
+</div>
+<div class="row"><span class="status">Grows the hidden layer while a larger net
+lowers the held-out error &mdash; watching for overtraining by validation early
+stopping, so no size trains to completion &mdash; then prunes back by saliency.
+Needs a training/test split. It replaces the model above with the sized, trained
+network; the size-vs-error search appears in the chart below.</span></div>
+</fieldset>
+
+<fieldset>
 <legend>5 &mdash; Session files</legend>
 <div class="row">
   <button onclick="saveFile('network')">Network</button>
@@ -277,6 +318,14 @@ deploy the model; training/test sets and guesses document the run.</span></div>
     <span id="errnote"></span></div>
   <div id="errwrap"><canvas id="errc" width="880" height="240"></canvas>
     <div id="errtip"></div></div>
+</div>
+<div id="obdbox">
+  <h3>OBD size search</h3>
+  <div class="legend"><span class="sw" style="background:#2a78d6"></span>training error
+    <span class="sw" style="background:#008300"></span>test error (the score)
+    <span id="obdnote"></span></div>
+  <div id="obdwrap"><canvas id="obdc" width="880" height="240"></canvas>
+    <div id="obdtip"></div></div>
 </div>
 <div id="rocbox">
   <canvas id="roc" width="440" height="440"></canvas>
@@ -442,6 +491,134 @@ async function pollTraining() {
   if (res.ok && res.roc) { drawROC(res.roc); renderStats(res.roc); }
   if (res.ok && res.stats) renderFullStats(res.stats);
 }
+// OBD hidden-layer sizing: async like training, sharing the same status/stop
+// doors. While it runs, the realtime error chart shows the CURRENT size's
+// training and the status names the phase (grow/prune) and hidden count; on
+// completion it draws the size-vs-error search and adopts the sized model, so
+// the ROC and statistics panels below are the winner's.
+let obding = false, obdHistory = null;
+async function runObd() {
+  if (obding) { // the button reads "Stop"
+    const j = await api("/api/train/stop", {});
+    setStatus("obdstatus", j.ok, j.message);
+    return;
+  }
+  const p = { hidden_start: $("obd_hstart").value, hidden_max: $("obd_hmax").value,
+    iter_budget: $("obd_budget").value, algorithm: $("obd_algo").value,
+    seed: $("obd_seed").value, early_stop_tol: $("obd_tol").value,
+    grow_patience: $("obd_grow").value };
+  const j = await api("/api/obd", p);
+  if (!j.ok) { setStatus("obdstatus", false, j.message); return; }
+  obding = true;
+  $("obdbtn").textContent = "Stop";
+  $("errbox").style.display = "block"; // the live per-size training error
+  $("errnote").textContent = "";
+  errSeries = null; lastIterSeen = -1; stalePolls = 0;
+  setStatus("obdstatus", true, "searching…");
+  pollObd();
+}
+async function pollObd() {
+  let j;
+  try { j = await (await fetch("/api/train/status")).json(); }
+  catch (e) { setTimeout(pollObd, 1000); return; }
+  if (j.series && j.series.iter.length) { errSeries = j.series; drawErr(j.series); }
+  if (j.running) {
+    const ph = j.obd ? (j.obd.phase + ", " + j.obd.hidden + " hidden") : "starting up";
+    setStatus("obdstatus", true, "searching… (" + ph + ")");
+    setTimeout(pollObd, 400); return;
+  }
+  obding = false;
+  $("obdbtn").textContent = "Run OBD";
+  const res = j.result;
+  if (!res) return;
+  setStatus("obdstatus", res.ok, res.message);
+  if (res.ok && res.obd) {
+    $("obdbox").style.display = "block";
+    drawObd(res.obd, res.selectedHidden);
+  }
+  if (res.ok && res.roc) { drawROC(res.roc); renderStats(res.roc); }
+  if (res.ok && res.stats) renderFullStats(res.stats);
+}
+// The size search: training and held-out error at each size the search tried,
+// in search order (grow then prune). Same two entity colors as the error and
+// ROC charts; the selected size is marked with a neutral-ink annotation, not a
+// third series color. Linear y (the errors span a narrow band).
+function drawObd(obd, selected) {
+  obdHistory = obd.history || [];
+  const h = obdHistory, c = $("obdc"), g = c.getContext("2d");
+  const L = 56, T = 12, R = 12, B = 34;
+  const W = c.width - L - R, H = c.height - T - B;
+  g.clearRect(0, 0, c.width, c.height);
+  if (!h.length) return;
+  const vals = [];
+  for (const t of h) {
+    if (t.trainErr != null) vals.push(t.trainErr);
+    if (t.testErr != null) vals.push(t.testErr);
+  }
+  if (!vals.length) return;
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  const pad = (hi - lo < 1e-9) ? 0.01 : (hi - lo) * 0.08;
+  lo -= pad; hi += pad;
+  const n = h.length;
+  const X = i => L + (n > 1 ? i / (n - 1) : 0.5) * W;
+  const Y = v => T + (1 - (v - lo) / (hi - lo)) * H;
+
+  g.strokeStyle = "#e1e0d9"; g.lineWidth = 1; g.strokeRect(L, T, W, H);
+  g.fillStyle = "#898781"; g.font = "11px system-ui"; g.textAlign = "right";
+  for (let k = 0; k <= 4; k++) {
+    const v = lo + (hi - lo) * k / 4, y = Y(v);
+    g.beginPath(); g.moveTo(L, y); g.lineTo(L + W, y); g.stroke();
+    g.fillText(v.toFixed(3), L - 6, y + 4);
+  }
+  g.textAlign = "center";
+  for (let i = 0; i < n; i++) g.fillText(h[i].hidden, X(i), T + H + 16);
+  g.fillText("hidden nodes (search order: grow, then prune)", L + W / 2, T + H + 28);
+
+  // Selected size: a dashed ink annotation at the last step with that count
+  let sel = -1;
+  for (let i = 0; i < n; i++) if (h[i].hidden === selected) sel = i;
+  if (sel >= 0) {
+    g.strokeStyle = "#44403a"; g.setLineDash([4, 3]); g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(X(sel), T); g.lineTo(X(sel), T + H); g.stroke();
+    g.setLineDash([]);
+    g.fillStyle = "#44403a"; g.fillText("selected " + selected, X(sel), T + 9);
+  }
+
+  // The two series: 2px lines with dots, entity colors matching the other charts
+  for (const [key, color] of [["trainErr", "#2a78d6"], ["testErr", "#008300"]]) {
+    g.strokeStyle = color; g.lineWidth = 2; g.beginPath();
+    let pen = false;
+    for (let i = 0; i < n; i++) {
+      const v = h[i][key];
+      if (v == null) { pen = false; continue; }
+      if (pen) g.lineTo(X(i), Y(v)); else { g.moveTo(X(i), Y(v)); pen = true; }
+    }
+    g.stroke();
+    g.fillStyle = color;
+    for (let i = 0; i < n; i++) {
+      const v = h[i][key];
+      if (v == null) continue;
+      g.beginPath(); g.arc(X(i), Y(v), 3, 0, 2 * Math.PI); g.fill();
+    }
+  }
+  g.lineWidth = 1;
+}
+// Hover: the size under the cursor, both errors and the phase in the tooltip
+$("obdc").addEventListener("mousemove", ev => {
+  const tip = $("obdtip");
+  if (!obdHistory || !obdHistory.length) { tip.style.display = "none"; return; }
+  const h = obdHistory, rect = $("obdc").getBoundingClientRect();
+  const px = (ev.clientX - rect.left) * ($("obdc").width / rect.width);
+  const L = 56, W = $("obdc").width - L - 12, n = h.length;
+  const frac = Math.min(1, Math.max(0, (px - L) / W));
+  const i = Math.min(n - 1, Math.max(0, Math.round(frac * (n - 1))));
+  tip.textContent = h[i].phase + " · " + h[i].hidden + " hidden · train "
+    + fmtE(h[i].trainErr) + " · test " + fmtE(h[i].testErr);
+  tip.style.display = "block";
+  tip.style.left = Math.min(ev.clientX - rect.left + 14, rect.width - 200) + "px";
+  tip.style.top = (ev.clientY - rect.top - 30) + "px";
+});
+$("obdc").addEventListener("mouseleave", () => { $("obdtip").style.display = "none"; });
 // The realtime chart: error (log scale) against iteration, training set plus
 // the wall-clock-sampled test error. Recessive decade gridlines; the series
 // carry the same colors they wear on the ROC plot (color follows the entity).
