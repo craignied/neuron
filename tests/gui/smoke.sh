@@ -224,6 +224,9 @@ curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=10&eta=5" \
     | grep -q '"ok":false' || fail "learning rate > 1 should be rejected"
 curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=10&weight_decay=1&decay=9" \
     | grep -q '"ok":false' || fail "weight decay lambda > 1 should be rejected"
+# Weight decay on with a blank lambda falls back to the engine default (5e-5)
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=10&weight_decay=1" \
+    | grep -q '"ok":true' || fail "weight decay with no lambda should default, not error"
 curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=10&errwindow=1" \
     | grep -q '"ok":false' || fail "error window <= 1 should be rejected"
 # A bare train (no parity fields) is unaffected -- the model keeps its defaults

@@ -184,8 +184,9 @@ table.coef th { background: #f4f6fb; } table.coef td.name { text-align: left; }
     id="batch_epoch" checked> Batch/epoch</label>
   <label title="L2 weight decay"><input type="checkbox" id="weight_decay">
     Weight decay</label>
-  <label>&lambda; <input class="num" type="number" id="decay" step="any" min="0"
-    max="1" placeholder="lambda"></label>
+  <label title="Regularization strength; the engine's default is 5e-5 (a prior weight std dev of 100)">&lambda;
+    <input class="num" type="number" id="decay" step="any" min="0" max="1"
+    value="5e-5"></label>
 </div>
 <div class="row">
   <span class="status">Stopping conditions &mdash; blank = off:</span>
