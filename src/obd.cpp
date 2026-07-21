@@ -147,6 +147,13 @@ Iterative::StopReason trainToValidationMin( SimpleProp& net, const obd::Config& 
 	net.setObserver( &obs );
 	net.setMaxIterations( budget );
 
+	// The three ways a size ends, whichever fires first: overtraining onset
+	//    (the observer above), a TRAIN-error plateau (a size that converges
+	//    flat never trips the test-error rise, so without this it would burn
+	//    the whole budget -- the engine's plateau detector ends it), or the
+	//    iteration budget as the backstop.
+	net.setAutoStop( true, cfg.plateauTol, cfg.plateauWindow );
+
 	ostream& screen = util::screen();
 	util::set_screen( discard );
 	net.train();

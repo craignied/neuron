@@ -1378,16 +1378,25 @@ string runObdJob( const obd::Config& cfg )
 {
 	Capture cap; // the driver's size table + final report
 
-	// Feed the realtime chart and the status poll's obd phase/hidden
-	obd::ProgressFn progress = []( const char* phase, unsigned hidden,
-		unsigned iteration, double trainErr, double testErr )
+	// Feed the realtime chart and the status poll's obd phase/hidden. Each
+	//    size trial's train() restarts its iteration counter at 0, so the raw
+	//    iteration is NON-monotonic across the search -- the chart's x axis
+	//    assumes monotonic growth, so plot cumulative iterations instead (a
+	//    reset marks a size boundary; lastIter/offset live for the whole
+	//    synchronous obd::run call below).
+	unsigned lastIter = 0, iterOffset = 0;
+	obd::ProgressFn progress = [ &lastIter, &iterOffset ]( const char* phase,
+		unsigned hidden, unsigned iteration, double trainErr, double testErr )
 	{
 		{
 			lock_guard< mutex > lock( job.progressMutex );
 			job.obdPhase = phase;
 			job.obdHidden = hidden;
 		}
-		job.pushSample( iteration, trainErr, testErr );
+		if ( iteration < lastIter ) // a new size's training began
+			iterOffset += lastIter;
+		lastIter = iteration;
+		job.pushSample( iterOffset + iteration, trainErr, testErr );
 	};
 
 	obd::Result r = obd::run( *dataPtr, cfg, progress, &job.cancel );
@@ -1480,6 +1489,11 @@ string handleObd( const httplib::Request& req )
 	fracParam( "early_stop_tol", cfg.earlyStopTol,
 		"early_stop_tol must be between 0 and 1", bad );
 	fracParam( "prune_tol", cfg.pruneTol, "prune_tol must be between 0 and 1", bad );
+	// The per-size train-plateau backstop, same names as /api/train's
+	fracParam( "autostop_tol", cfg.plateauTol,
+		"autostop_tol must be between 0 and 1", bad );
+	uintParam( "autostop_window", cfg.plateauWindow, 2,
+		"autostop_window must be at least 2", bad );
 	if ( !bad.empty() )
 		return jsonMsg( false, bad );
 	if ( cfg.hMax < cfg.hStart )
@@ -1706,6 +1720,17 @@ void openInBrowser( const string& url )
 int run_gui( bool openBrowser )
 {
 	httplib::Server svr;
+
+	// Bound how long an idle kept-alive connection may park a pool thread.
+	//    One second keeps browser keep-alive fully effective (the page polls
+	//    every 400 ms) while letting one-shot clients' leftover sockets reap
+	//    quickly. NOTE for curl callers (AGENTS.md documents this): a POST
+	//    with NO body and no Content-Length header (curl -X POST without -d)
+	//    makes the server wait its read timeout (~5 s) for a body that never
+	//    comes before dispatching -- always send -d "" on bodyless POSTs.
+	//    That stall, measured at exactly 5 s on /api/train/stop, is what broke
+	//    the OBD cancel smoke on CI.
+	svr.set_keep_alive_timeout( 1 );
 
 	svr.Get( "/", []( const httplib::Request&, httplib::Response& res )
 	{

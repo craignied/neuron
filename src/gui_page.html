@@ -825,10 +825,12 @@ function drawROC(roc) {
   for (const [name, series, color] of
        [["train", roc.train, "#2a78d6"], ["test", roc.test, "#008300"]]) {
     if (!series || !series.x.length) continue;
+    // The points run (0,0) -> (1,1) in ascending false-alarm rate (the exact
+    //    empirical curve getTrapROCarea integrates) -- plot them as they are,
+    //    no endpoint stitching
     g.strokeStyle = color; g.lineWidth = 1.8; g.beginPath();
-    g.moveTo(X(1), Y(1)); // curve counts backwards from (1,1)
-    for (let i = 0; i < series.x.length; i++) g.lineTo(X(series.x[i]), Y(series.y[i]));
-    g.lineTo(X(0), Y(0));
+    g.moveTo(X(series.x[0]), Y(series.y[0]));
+    for (let i = 1; i < series.x.length; i++) g.lineTo(X(series.x[i]), Y(series.y[i]));
     g.stroke(); g.lineWidth = 1;
     g.fillStyle = color;
     g.fillText(name + " ROC area = " + series.area.toFixed(4), X(0.42), Y(0) - ly);

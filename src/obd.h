@@ -57,6 +57,12 @@ struct Config {
 	unsigned growPatience = 2;  // sizes without a min-test improvement before growth stops
 	double pruneTol = 0.02;     // how much worse than best a pruned net may be and still be kept
 	int algorithm = 0;          // 0/1/2 = trainingType; -1 = auto (probe once, keep the choice)
+	// TRAIN-error plateau backstop (the engine's auto-stop, forced on for every
+	//    size): a size that converges flat never trips the test-error rise, so
+	//    without this it would burn the whole budget. Same semantics as
+	//    /api/train's autostop_tol / autostop_window.
+	double plateauTol = 1e-4;
+	unsigned plateauWindow = 100;
 };
 
 struct Result {

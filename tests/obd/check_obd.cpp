@@ -298,6 +298,32 @@ static void test_early_stop_fires()
 		"a size whose test error only rises is early-stopped, not run to budget" );
 }
 
+// The train-plateau backstop must be WIRED into each size's training: a size
+// that converges flat never trips the test-error rise, so the plateau detector
+// is what saves its remaining budget. Proven with a huge tolerance (0.5): any
+// window-over-window relative improvement under 50% strikes, so the plateau
+// must fire long before the generous budget -- unless the setAutoStop call is
+// missing, in which case every size runs to STOP_MAX_ITERATIONS and this fails.
+static void test_plateau_backstop_fires()
+{
+	util::set_seed( 11 );
+	DataSet d = makeData( 150, 45 );
+
+	obd::Config cfg;
+	cfg.hStart = 2; cfg.hMax = 3; cfg.iterBudget = 100000; cfg.sampleEvery = 50;
+	cfg.growPatience = 1;
+	cfg.plateauTol = 0.5; cfg.plateauWindow = 10; // strike on anything but a halving
+
+	obd::Result r = obd::run( d, cfg, nullptr, nullptr );
+
+	bool anyPlateau = false;
+	for ( const obd::SizeTrial& t : r.history )
+		if ( t.stop == Iterative::STOP_PLATEAU )
+			anyPlateau = true;
+	expect( r.ok && anyPlateau,
+		"the train-plateau backstop ends a flat size before the budget" );
+}
+
 int main()
 {
 	// The engine's training reports go to util::screen(); this test reads none
@@ -311,6 +337,7 @@ int main()
 	test_train_after_ops();
 	test_driver();
 	test_early_stop_fires();
+	test_plateau_backstop_fires();
 
 	util::set_screen( cout );
 
