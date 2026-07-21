@@ -434,7 +434,7 @@ grep -q '"iter":\[[0-9]' status.json || fail "no error series while training"
 grep -q '"train":\[' status.json || fail "no training-error series"
 
 # Stop: the run finishes normally (report and all) with stopReason cancelled
-curl -s -X POST "$URL/api/train/stop" | grep -q '"ok":true' || fail "stop endpoint"
+curl -s -X POST -d "" "$URL/api/train/stop" | grep -q '"ok":true' || fail "stop endpoint"
 for i in $(seq 1 120); do
     curl -s "$URL/api/train/status" > status.json
     grep -q '"running":false' status.json && break
@@ -444,7 +444,7 @@ grep -q '"running":false' status.json || fail "run never stopped after cancel"
 grep -q '"stopReason":"cancelled"' status.json || fail "cancelled run should say so"
 grep -q '"ok":true' status.json || fail "cancelled run should still be a completed run"
 # Stop with nothing running refuses cleanly
-curl -s -X POST "$URL/api/train/stop" | grep -q '"ok":false' \
+curl -s -X POST -d "" "$URL/api/train/stop" | grep -q '"ok":false' \
     || fail "stop should refuse when nothing is running"
 
 # An async run left to finish carries the same full result as blocking mode
@@ -517,14 +517,23 @@ for i in $(seq 1 120); do
 done
 grep -q '"obd":' pt_status.json && fail "a plain train must not report an obd status field"
 
-# 409 busy while a search runs, and Stop cancels it
+# 409 busy while a search runs, and Stop cancels it. TWO traps live here,
+#    both caught when CI's Release build ran 15x faster than a local -O0 dir:
+#    (1) a bodyless curl -X POST sends NO Content-Length, so the server waits
+#    its ~5 s read timeout for a body before dispatching -- every stop in this
+#    file therefore sends -d "" (without it, the stop was handled 5 s late,
+#    after the search had already finished); (2) the search itself must
+#    outlive the stop by a wide margin: sample_every=1 makes every iteration
+#    pay a test-set sweep, autostop_window=5000 keeps the plateau backstop
+#    from ending a size before iteration 10000, and 30 sizes keep the search
+#    alive many seconds against these two immediate curls.
 curl -s -X POST "$URL/api/obd" \
-    -d "hidden_start=2&hidden_max=8&iter_budget=200000&sample_every=50&seed=1" \
+    -d "hidden_start=2&hidden_max=30&iter_budget=200000&sample_every=1&autostop_window=5000&seed=1" \
     | grep -q '"ok":true' || fail "long OBD search did not start"
 obdbusy=$(curl -s -w '\n%{http_code}' -X POST "$URL/api/obd" -d "hidden_start=2&hidden_max=3")
 echo "$obdbusy" | grep -q '"busy":true' || fail "no busy flag while an OBD search runs"
 echo "$obdbusy" | tail -1 | grep -q '409' || fail "OBD busy refusal should be HTTP 409"
-curl -s -X POST "$URL/api/train/stop" | grep -q '"ok":true' || fail "stop did not accept during OBD"
+curl -s -X POST -d "" "$URL/api/train/stop" | grep -q '"ok":true' || fail "stop did not accept during OBD"
 for i in $(seq 1 120); do
     curl -s "$URL/api/train/status" > obd_cancel.json
     grep -q '"running":false' obd_cancel.json && break

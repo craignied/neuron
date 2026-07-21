@@ -1,6 +1,17 @@
 cmake_minimum_required(VERSION 3.16)
 project(neuron VERSION 3.0.0 LANGUAGES CXX)
 
+# Default to Release: a bare `cmake -B build` otherwise builds with NO
+# optimization at all, and the engine runs ~15x slower -- discovered 2026-07-21
+# when a locally reconfigured build dir had an empty CMAKE_BUILD_TYPE and every
+# timing measured against it was wrong. CI builds Release explicitly; asserts
+# vanish under -DNDEBUG by design (handlers validate; Matrix bounds checks are
+# unconditional throws, not asserts). Single-config generators only -- MSVC
+# picks its config at build time (--config Release, as CI does).
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

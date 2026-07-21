@@ -264,7 +264,12 @@ scripts and agents driving the HTTP API with curl, the same machinery is:
 `GET /api/train/status` (running flag, decimated iter/train/test error
 series, and — once finished — the same result JSON a blocking train returns,
 including a `stopReason` of max_iterations / grad_max / cancelled / …);
-`POST /api/train/stop` cancels. While a run is live every other
+`POST /api/train/stop` cancels — **send it as `curl -X POST -d "" …`, never a
+bare `-X POST`**: a POST with no body and no Content-Length makes the server
+wait its ~5 s read timeout for a body that never comes before dispatching, so
+a bare-POST stop arrives seconds late (late enough to miss a short run
+entirely; this bit on CI 2026-07-21). The same applies to any bodyless POST.
+While a run is live every other
 engine-touching endpoint returns **HTTP 409** with `"busy":true` — retry
 after the run. Without `async=1`, `POST /api/train` blocks exactly as
 before. `algorithm` accepts `1`–`3` or **`auto`** (since 2026-07-16): auto
@@ -338,8 +343,10 @@ prunes back by saliency. It needs a training/test split, and the winning sized,
 trained network REPLACES the current model. Params: `hidden_start` (2),
 `hidden_max` (30), `iter_budget` (per-size ceiling, 2000), `sample_every` (20),
 `early_stop_tol` (0.02), `early_stop_patience` (3), `grow_patience` (2),
-`prune_tol` (0.02), `algorithm` (1|2|3|auto — `auto` probes once and keeps the
-choice), `seed`. It is **async-only**: the call returns at once, and progress +
+`prune_tol` (0.02), `autostop_tol` (1e-4) and `autostop_window` (100) for the
+per-size train-plateau backstop (a size that converges flat never trips the
+test-error rise; the plateau detector saves its remaining budget), `algorithm`
+(1|2|3|auto — `auto` probes once and keeps the choice), `seed`. It is **async-only**: the call returns at once, and progress +
 completion arrive through the same `GET /api/train/status` (a running OBD adds an
 `obd:{phase,hidden}` field) and `POST /api/train/stop` doors as async training.
 **Cost:** an OBD run is many training runs — roughly `iter_budget` × (sizes grown
