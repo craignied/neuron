@@ -180,8 +180,8 @@ By statistical method, ROC area = 0.873922
 Chi-squared = 258.501854
 p = 1.000000e+00 (closer to 1 is better)
 Operating points fitted = 920
-By trapezoidal method, ROC area = 0.874627
-95% CI = 0.835128 - 0.914125 (SE = 0.020152, Hanley-McNeil)
+By trapezoidal method, ROC area = 0.874854
+95% CI = 0.835384 - 0.914323 (SE = 0.020138, Hanley-McNeil)
 ```
 
 Both ROC methods agree (0.874) and their confidence intervals overlap almost
@@ -238,20 +238,20 @@ That took 0000:00:04
 Training set:  Classification accuracy: 91.1%
 By statistical method, ROC area = 0.923369
 95% CI = 0.909801 - 0.934962 (SE = 0.006530, 2000 bootstrap resamples)
-By trapezoidal method, ROC area = 0.923744
-95% CI = 0.905337 - 0.942151 (SE = 0.009391, Hanley-McNeil)
+By trapezoidal method, ROC area = 0.924339
+95% CI = 0.905997 - 0.942682 (SE = 0.009359, Hanley-McNeil)
 
 Test set:      Classification accuracy: 89.4%
 By statistical method, ROC area = 0.871037
 95% CI = 0.838943 - 0.899129 (SE = 0.015410, 2000 bootstrap resamples)
-By trapezoidal method, ROC area = 0.870908
-95% CI = 0.830941 - 0.910874 (SE = 0.020391, Hanley-McNeil)
+By trapezoidal method, ROC area = 0.872377
+95% CI = 0.832594 - 0.912160 (SE = 0.020297, Hanley-McNeil)
 ```
 
 Two things worth noticing:
 
 - **Train vs test**: 0.923 vs 0.871. The network fits the training data
-  better than logistic regression did (0.908) but generalizes the same —
+  better than logistic regression did (0.907) but generalizes the same —
   the classic mild-overfit signature, caught because we held out a test set.
   The network's test CI (0.839–0.899) and logistic's (0.844–0.901) overlap
   almost completely: on this data the extra flexibility buys nothing, which

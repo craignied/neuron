@@ -118,7 +118,8 @@ have **no CLI equivalent by design** — that is not a parity gap.
 
 `POST /api/obd` params: `hidden_start`, `hidden_max`, `iter_budget`,
 `sample_every`, `early_stop_tol`, `early_stop_patience`, `grow_patience`,
-`prune_tol`, `algorithm` (1|2|3|auto), `seed`. It is async-only and shares the
+`prune_tol`, `autostop_tol`/`autostop_window` (the per-size train-plateau
+backstop), `algorithm` (1|2|3|auto), `seed`. It is async-only and shares the
 training job (status + stop reach it through the same doors); the winning sized
 network replaces the current model.
 

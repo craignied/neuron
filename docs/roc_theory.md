@@ -192,6 +192,19 @@ default 10), the engine reports the empirical **trapezoidal** area instead —
 that is the "Cannot calculate ROC statistically" message followed by
 "By trapezoidal method, ROC area = ...".
 
+**The trapezoidal area is exact, not a grid approximation** (since 2026-07-20).
+`getTrapROCarea()` integrates trapezoids over the *same* operating points as
+step 1 above — one per distinct score, cumulated in one sorted pass
+(`operatingPoints()`) — so it is the exact non-parametric AUC, equal to the
+Mann–Whitney U statistic divided by n₀·n₁ (ties contributing half-steps). That
+is precisely the quantity whose variance the Hanley–McNeil estimator describes,
+so the area and its interval now rest on the same object by construction.
+Before 2026-07-20 it swept a fixed count of evenly spaced thresholds
+(`nThresholds`, a user-settable parameter) and only approximated this area —
+the parameter, its "Number thresholds" report line, and its CLI/GUI controls
+are gone. The curve capture (`ROCx`/`ROCy`, the GUI's ROC plot) runs
+(0,0) → (1,1) in ascending false-alarm rate.
+
 ## Confidence intervals on the ROC area
 
 **Read this section before quoting an interval in print.** It records a 2026-07-15

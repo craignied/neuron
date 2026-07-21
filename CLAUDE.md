@@ -967,6 +967,74 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   wrong before? Only approximate — 100 thresholds was close on real data (~0.002 off)
   but the grid was an arbitrary choice the exact AUC removes. **Next: resume OBD.**
 
+- **2026-07-21 — three-part audit (ROC consistency / docs / bugs): CI was red, and
+  the trail led from a timing-flaky smoke through a mis-configured build to a
+  5-second HTTP stall that had been slowing every curl stop since Phase 1b.**
+  Craig asked for (1) ROC-method consistency after the trapezoid rewrite, (2) a
+  full doc pass, (3) a bug sweep. Findings, each measured before believed:
+  1. **ROC consistency — one real rendering bug**: the page's `drawROC` still
+     stitched endpoints for the OLD descending sweep (`moveTo(1,1) … lineTo(0,0)`),
+     which with the new ascending points drew a spurious chord from (1,1) to the
+     origin across the plot. curl/smoke can't see rendering; fixed to plot the
+     points as-is. Everything else was already consistent: statistical fit,
+     bootstrap, Hanley-McNeil, and trapezoid all rest on `operatingPoints()`;
+     every consumer enumerated (gui, check_az/wickens/capture — wickens updated
+     for direction on 07-20 already). `roc_theory.md` gains "the trapezoidal area
+     is exact, not a grid approximation"; `spin.html`'s stats block was THREE
+     rounds stale (bins warning removed 07-15, Pearson/H-L rewritten 07-16,
+     "Number thresholds" removed 07-20) — destaled from real current output.
+  2. **OBD sweep — the plateau backstop was documented but not wired.** obd.h and
+     the plan both promised each size ends by "overtraining onset, plateau, or
+     budget, whichever fires first"; the driver never called `setAutoStop`, so a
+     flat-converging size burned its whole budget (every probe size ended
+     "budget"). Wired via new `Config.plateauTol/plateauWindow` (API:
+     `autostop_tol`/`autostop_window`, same names as /api/train), proven by a new
+     huge-tolerance ctest case watched to fail with the call commented out
+     (rule 2 — the hardwired version was UNPROVABLE, which is why the params
+     exist). Also: the OBD realtime chart's x axis got non-monotonic samples
+     (each size's train() restarts iteration at 0) — the progress lambda now
+     plots cumulative iterations.
+  3. **The build-type discovery, and what it concealed.** The local build dir had
+     an EMPTY `CMAKE_BUILD_TYPE` — the engine had been building at -O0, ~15×
+     slower than CI's Release, on the same M2 Ultra the walkthrough timings came
+     from. Consequences unwound: (a) `CMakeLists.txt` now defaults to Release
+     (CI always was; README/AGENTS always said so; only a bare reconfigure fell
+     through); (b) the -O0/-O3 last-digit drift I'd chased in the walkthrough §5
+     dissolved — at Release the doc reproduces BYTE-FOR-BYTE except the trapezoid
+     lines (§4 test 0.874627→0.874854, §5 train 0.923744→0.924339, test
+     0.870908→0.872377, all re-run for real, statistical lines identical);
+     (c) **CI had been red since fe354ce**: the OBD cancel smoke, validated
+     against the slow local binary, raced at Release speed.
+  4. **The race's true mechanism was NOT timing jitter: a bodyless
+     `curl -X POST` sends no Content-Length, and cpp-httplib waits its full 5 s
+     read timeout for a body before dispatching.** Every `/api/train/stop` in
+     smoke was arriving 5 seconds late — always had been; the -O0 build's slow
+     searches masked it, and at Release the search finished first. Found by
+     measurement chain: server-side audit-log timestamps (stop handled +5.0 s) →
+     `sample` of the server mid-stall (a pool thread parked in
+     `routing → read_content → select_read`) → curl phase timing (connect 0.3 ms,
+     first byte 5.002 s) → decisive experiment (`-d ""` → 0.5 ms). Fixes: every
+     bodyless POST in smoke sends `-d ""`; AGENTS.md documents the trap for the
+     curl/LLM path; `set_keep_alive_timeout(1)` bounds idle-connection thread
+     parking; the cancel search hardened (`autostop_window=5000`, 30 sizes,
+     `sample_every=1`) so it outlives any handling latency by seconds. Two
+     wrong theories (keep-alive parking, search lifetime) were implemented,
+     measured, and REVERTED-or-demoted before the real one was found — the
+     comments record only the proven mechanism.
+  Also: README's GUI paragraph now names the ROADMAP 2 automation (it predated
+  all of it); `obd_plan.md` carries a LANDED banner; parity matrix + AGENTS.md
+  document the new OBD params; pre-existing gcc-only warnings on ubuntu CI noted
+  (a gcc-13 stringop-overflow false positive via Matrix copies in dfa.cpp, and
+  openInBrowser's unused system() result) and left. Gates at Release: zero
+  warnings, 7/7 ctest (obd_sizing now 14 assertions), goldens byte-identical
+  (Release-stable, as CI had been proving all along), smoke 9.5 s (was minutes:
+  -O0 plus hidden 5 s stalls), oracle identical.
+  **Lesson, the session's own instance of rule 3:** a timing-sensitive test was
+  validated on a binary 15× slower than the one CI runs, and the "obvious"
+  explanation (search too short) survived two fix attempts before the actual
+  mechanism (a missing Content-Length header) was pinned by sampling the stalled
+  process. Measure the failing thing itself, not the theory about it.
+
 - **2026-07-20 — ROADMAP 2 Phase 4 DONE: OBD hidden-layer sizing. Its central
   mechanism was redesigned mid-build after Craig asked the right question.** The
   plan (`docs/obd_plan.md`, written by Fable 2026-07-19 and verified against the

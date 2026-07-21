@@ -1,5 +1,11 @@
 # ROADMAP 2 Phase 4 — OBD hidden-layer sizing: implementation plan
 
+> **STATUS: LANDED 2026-07-20** (commits 3c054ab engine primitives, 070bd21
+> driver, fe354ce GUI, 4da6f48 per-size CA). This document is the design
+> record; where it and the code disagree, the code and CLAUDE.md's status
+> entries are authoritative. The validation-early-stopping redesign in §4 was
+> Craig's mid-build correction and IS what shipped.
+
 *Written by Fable 2026-07-19 as the handoff for the Opus session that builds this.
 Read CLAUDE.md's standing rules first; rules 2 (prove tests fail), 3 (measure
 before believing), 4 (class layer), 5 (GUI/CLI parity matrix), and 1 (AGENTS.md

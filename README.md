@@ -55,7 +55,11 @@ Usage: neuron [--seed N] [--gui [--no-browser]] [--version]
 menus: the binary embeds a small HTTP server (cpp-httplib, vendored in
 `third_party/`), binds 127.0.0.1 on an **OS-assigned free port** — it can
 never collide with anything else you run — prints the URL, and opens your
-browser. Pick a data file, pick a model, train, read the full statistics
+browser. Pick a data file, pick a model, train — watching a realtime
+error-vs-iteration chart, with a Stop button, automatic algorithm selection
+(`auto` probes all three optimizers and adopts the best), plateau auto-stop,
+and **OBD hidden-layer sizing** (grow-then-prune with validation early
+stopping picks the hidden-unit count for you) — then read the full statistics
 beside a live ROC plot — classification and confusion counts, trapezoidal
 and binormal areas with their intervals, goodness of fit, and (for logistic
 models) the coefficient table with Wald p values and the condition number —
