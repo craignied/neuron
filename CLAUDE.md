@@ -1226,8 +1226,23 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   generic procedure evaluation → predictions/metrics/metadata) with an evaluation-POLICY layer
   above it, governed by one universal invariant — *no operation that can influence a fitted
   procedure may access its final-evaluation observations.* Full rewritten plan in ROADMAP 4
-  Phase 4 below. **Next: 4c (three-way split — fixes the OBD-on-test leak) FIRST, then the
-  coordinator/runner/adapters; verify the clone→setDataSet(fold) rebind before building on it.**
+  Phase 4 below.
+  **4c engine plumbing landed 2026-07-22 (the leak fix), behavior-preserving.** DataSet gains
+  an optional **validation set** (`ValSetData` + `valLoadedFlag` + accessors; `makeFold` gains
+  an optional `valRows`), Model gains a `Validation` input submatrix (extracted in
+  `extractInputMatrices`), and **`Network::sampleTestError` — the held-out monitor OBD's
+  early-stopping and the GUI chart both use — now samples the VALIDATION set when one is
+  loaded, else the test set.** So OBD's architecture selection stops touching the test set the
+  moment a validation set exists; with none, every existing run is byte-identical (goldens/
+  oracle/OBD ctest unchanged — verified). New `check_obd` case `test_validation_monitor` proves
+  the reroute (two DataSets sharing train/test, one with a disjoint validation set, trained
+  same-seed → the monitor reads different sets) and was **watched to fail** against a
+  force-always-Test sabotage (rule 2). **Report spec written** (`docs/evaluation_report_spec.md`,
+  commit `7778c80`): layered — one-screen Tier-1 headline table, Tier-2 detail, Tier-3
+  machine-readable files never printed; two audiences (human = Tier 1, LLM = full report).
+  **Next in 4c: the three-way split PRODUCER** (`randomize3` / a val fraction) + UI so the
+  single-split primary-analysis workflow can make train/val/test; then the coordinator/runner/
+  adapters (verify the clone→`setDataSet(fold)` rebind first).
 
 ## ROADMAP 4 (agreed with Craig 2026-07-22) — a general representative test-set splitter
 

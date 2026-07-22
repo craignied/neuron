@@ -13,6 +13,7 @@ DataSet::DataSet() : nInput ( 1 ), nOutput ( 1 ), strataBins ( 4 ),
 	threshold ( 0.5 ), inUpperLimit ( 0.9 ), inLowerLimit ( -0.9 ),
 	outUpperLimit ( 0.9 ), outLowerLimit ( 0.1 ), discreteFlag ( true ),
 	rawLoadedFlag ( false ), trainLoadedFlag ( false ), testLoadedFlag ( false ),
+	valLoadedFlag ( false ),
 	trainTwoSetFlag ( false ), testTwoSetFlag ( false ), minimaxFlag( false ),
 	historyFlag ( true ), historyFilename ( "neuron.log" ) { }
 
@@ -40,6 +41,7 @@ void DataSet::copy( const DataSet& rhs )
 	Raw = rhs.Raw;
 	TrainSetData = rhs.TrainSetData;
 	TestSetData = rhs.TestSetData;
+	ValSetData = rhs.ValSetData;
 
 	TrainTwoSet = rhs.TrainTwoSet;
 	TestTwoSet = rhs.TestTwoSet;
@@ -64,6 +66,7 @@ void DataSet::copy( const DataSet& rhs )
 	rawLoadedFlag = rhs.rawLoadedFlag;
 	trainLoadedFlag = rhs.trainLoadedFlag;
 	testLoadedFlag = rhs.testLoadedFlag;
+	valLoadedFlag = rhs.valLoadedFlag;
 	trainTwoSetFlag = rhs.trainTwoSetFlag;
 	testTwoSetFlag = rhs.testTwoSetFlag;
 	minimaxFlag = rhs.minimaxFlag;
@@ -909,7 +912,8 @@ bool DataSet::randomizeD( const double ratio )
 //    nTest-1). It does NOT decide which model to train -- that is not DataSet's
 //    business (rule 6).
 void DataSet::makeFold( const vector< unsigned >& trainRows,
-	const vector< unsigned >& testRows )
+	const vector< unsigned >& testRows,
+	const vector< unsigned >& valRows )
 {
 	TestSetData = Raw.includerows( testRows );
 	TrainSetData = Raw.includerows( trainRows );
@@ -920,6 +924,11 @@ void DataSet::makeFold( const vector< unsigned >& trainRows,
 
 	normalize( TestSetData );  // test normalized with the training scale
 	testLoadedFlag = ( TestSetData.rows() > 0 );
+
+	// Optional validation set (Phase 4c), also scaled from the training set.
+	ValSetData = Raw.includerows( valRows );
+	if ( ValSetData.rows() > 0 ) normalize( ValSetData );
+	valLoadedFlag = ( ValSetData.rows() > 0 );
 }
 
 // Build a per-row stratum id from the outcome and the named stratum columns
@@ -1143,6 +1152,9 @@ void DataSet::clear()
 
 	TestSetData.clear(); // clear the test set Matrix
 	testLoadedFlag = false; // and reset its flag
+
+	ValSetData.clear(); // clear the validation set Matrix (Phase 4c)
+	valLoadedFlag = false; // and reset its flag
 }
 
 // Method to append ostringstream to history file, takes ostringstream as argument

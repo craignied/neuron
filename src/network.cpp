@@ -301,7 +301,14 @@ void Network::reportAccuracy( ostream& outputStream )
 //    must never invalidate cached statistics or masquerade as a final pass.
 double Network::sampleTestError( unsigned stride )
 {
-	if ( !theData.testLoaded() || theData.getOutput() != 1 )
+	// The held-out MONITOR (OBD's architecture-selection early-stopping and the
+	//    GUI's realtime chart). Phase 4c: sample the VALIDATION set when one is
+	//    loaded, so model/architecture selection never touches the test set (the
+	//    no-leakage invariant); with no validation set it falls back to the test
+	//    set -- the pre-4c behavior, so every existing run is unchanged.
+	bool useVal = theData.valLoaded();
+
+	if ( ( useVal ? false : !theData.testLoaded() ) || theData.getOutput() != 1 )
 		return -1; // nothing to sample
 
 	if ( stride < 1 )
@@ -310,12 +317,15 @@ double Network::sampleTestError( unsigned stride )
 	unsigned nInput = theData.getInput(), count = 0;
 	double setError = 0;
 
-	for ( unsigned r = 0; r < Test.rows(); r += stride )
+	Matrix< double >& X = useVal ? Validation : Test;
+	Matrix< double >& M = useVal ? theData.getValMatrix() : theData.getTestMatrix();
+
+	for ( unsigned r = 0; r < X.rows(); r += stride )
 	{
-		forward( Test, r ); // forward propagate the test exemplar
+		forward( X, r ); // forward propagate the held-out exemplar
 
 		// Same error the final report uses, averaged over the sample
-		errorFunction E( theData.getTestMatrix()( r, nInput ), o, x, errorType );
+		errorFunction E( M( r, nInput ), o, x, errorType );
 		setError += E.value();
 		count++;
 	}

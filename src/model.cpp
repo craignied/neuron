@@ -135,6 +135,25 @@ void Model::extractInputMatrices()
 			Test = theData.getTestMatrix().submatrix( 0, ( nTest - 1 ),
 				0, ( nInput - 1 ) );
 	}
+
+	// If a validation set is loaded, extract its input submatrix (Phase 4c) --
+	//    the same shape as Test; it is what OBD's early-stopping monitors so the
+	//    test set stays untouched during architecture selection.
+	if ( theData.valLoaded() )
+	{
+		unsigned nVal = theData.getNumVal();
+
+		if ( nInput == 0 )
+			Validation.resize( nVal, 0 );
+		else if ( nInput == 1 )
+		{
+			Validation.resize( nVal, 0 );
+			Validation = Validation.addcol( theData.getValMatrix().col( 0 ) );
+		}
+		else
+			Validation = theData.getValMatrix().submatrix( 0, ( nVal - 1 ),
+				0, ( nInput - 1 ) );
+	}
 }
 
 // Utility function to extract outputs submatrices from DataSet Matrices

@@ -61,6 +61,7 @@ protected:
 
 	Matrix< double > Train, // to hold DataSet training set inputs submatrix
 		Test,               // to hold DataSet test set inputs submatrix
+		Validation, // to hold DataSet validation set inputs submatrix (Phase 4c)
 		TrainOutput, // to hold DataSet training set outputs submatrix
 		TestOutput; // to hold DataSet test set outputs submatrix
 

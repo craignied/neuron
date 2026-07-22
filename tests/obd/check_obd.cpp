@@ -324,6 +324,56 @@ static void test_plateau_backstop_fires()
 		"the train-plateau backstop ends a flat size before the budget" );
 }
 
+// Phase 4c: the held-out MONITOR (sampleTestError, which OBD's early-stopping
+// uses to select an architecture) must sample the VALIDATION set when one is
+// present, so selection never touches the test set (the no-leakage invariant).
+// Two DataSets share the same train and test rows; one also carries a DISJOINT
+// validation set. Trained identically (same seed -> same weights, since training
+// uses only the train set), the monitor reads the validation set in one and the
+// test set in the other, so its value differs. With no validation set it falls
+// back to the test set (pre-4c). Sabotage -- forcing sampleTestError to always
+// read Test -- makes the two identical and this fails.
+static void test_validation_monitor()
+{
+	Matrix< double > raw( 120, 3 ); // a learnable 2-input problem
+	for ( unsigned i = 0; i < 120; i++ )
+	{
+		double x0 = -1.0 + 2.0 * ( ( i * 37 ) % 100 ) / 99.0;
+		double x1 = -1.0 + 2.0 * ( ( i * 53 ) % 100 ) / 99.0;
+		raw( i, 0 ) = x0; raw( i, 1 ) = x1;
+		raw( i, 2 ) = ( x0 + x1 > 0 ) ? 1 : 0;
+	}
+
+	vector< unsigned > trainRows, testRows, valRows, none;
+	for ( unsigned i = 0; i < 80; i++ )   trainRows.push_back( i );
+	for ( unsigned i = 80; i < 100; i++ ) testRows.push_back( i );
+	for ( unsigned i = 100; i < 120; i++ ) valRows.push_back( i ); // disjoint from test
+
+	DataSet dsVal; // train + test + a distinct validation set
+	dsVal.setInput( 2 ); dsVal.setOutput( 1 ); dsVal.setDiscrete( true );
+	dsVal.setHistory( false ); dsVal.setRawMatrix( raw );
+	dsVal.makeFold( trainRows, testRows, valRows );
+
+	DataSet dsNoVal; // same train + test, no validation set (pre-4c)
+	dsNoVal.setInput( 2 ); dsNoVal.setOutput( 1 ); dsNoVal.setDiscrete( true );
+	dsNoVal.setHistory( false ); dsNoVal.setRawMatrix( raw );
+	dsNoVal.makeFold( trainRows, testRows, none );
+
+	expect( dsVal.valLoaded() && !dsNoVal.valLoaded(),
+		"makeFold builds a validation set only when valRows is non-empty" );
+
+	util::set_seed( 42 );
+	ProbeProp sp1; trainProbe( sp1, dsVal, 4, 300 );
+	double eVal = sp1.sampleTestError( 1 ); // must sample the VALIDATION set
+
+	util::set_seed( 42 );
+	ProbeProp sp2; trainProbe( sp2, dsNoVal, 4, 300 ); // same train, same seed
+	double eTest = sp2.sampleTestError( 1 ); // no validation -> samples the TEST set
+
+	expect( fabs( eVal - eTest ) > 1e-9,
+		"the held-out monitor reads the validation set when present, not the test set" );
+}
+
 int main()
 {
 	// The engine's training reports go to util::screen(); this test reads none
@@ -338,6 +388,7 @@ int main()
 	test_driver();
 	test_early_stop_fires();
 	test_plateau_backstop_fires();
+	test_validation_monitor();
 
 	util::set_screen( cout );
 

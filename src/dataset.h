@@ -64,6 +64,16 @@ public:
 	// Save the TwoSet object to a file
 	bool saveTestTwoSet( string& );
 
+	// Validation set accessors (ROADMAP 4 Phase 4c). A validation set is the
+	//    held-out set model/architecture selection (OBD) monitors, so the TEST
+	//    set stays untouched until final evaluation -- the no-leakage invariant.
+	//    It is optional: when none is loaded, the held-out monitor falls back to
+	//    the test set (the pre-4c behavior). No TwoSet -- the monitor reads error
+	//    directly, it never classifies the validation set.
+	bool valLoaded() { return valLoadedFlag; }
+	Matrix< double >& getValMatrix() { return ValSetData; }
+	unsigned getNumVal() { return ValSetData.rows(); }
+
 	// Accessors for number input, output nodes
 	void setInput( const unsigned ); // set the number of input nodes
 	void setOutput( const unsigned ); // set the number of output nodes
@@ -101,12 +111,14 @@ public:
 	bool randomize( const unsigned, const unsigned );
 	bool randomizeD( const double );
 
-	// Materialize a train/test partition from explicit Raw row indices, scaling
-	//    both sets from the training set (ROADMAP 4 Phase 4). randomize() and
-	//    cross-validation share this one path; DataSet owns fold materialization
-	//    but not the choice of model (rule 6).
+	// Materialize a train/test (and optionally validation) partition from
+	//    explicit Raw row indices, scaling every set from the TRAINING set
+	//    (ROADMAP 4 Phase 4). randomize() and cross-validation share this one
+	//    path; DataSet owns fold materialization but not the choice of model
+	//    (rule 6). An empty valRows leaves no validation set (the pre-4c default).
 	void makeFold( const vector< unsigned >& trainRows,
-		const vector< unsigned >& testRows );
+		const vector< unsigned >& testRows,
+		const vector< unsigned >& valRows = vector< unsigned >() );
 
 	// Stratification accessors (ROADMAP 4 Phase 2). By default the split is
 	//    stratified on the outcome only. Naming input data columns here also
@@ -149,7 +161,8 @@ public:
 private:
 	Matrix< double > Raw, // the raw dataset
 		TrainSetData, // the training set
-		TestSetData; // the test set
+		TestSetData, // the test set
+		ValSetData; // the validation set (optional; Phase 4c)
 
 	TwoSet TrainTwoSet, // the TwoSet object for the training set
 		TestTwoSet; // the TwoSet object for the test set
@@ -175,6 +188,7 @@ private:
 		rawLoadedFlag, // flag to indicate if raw dataset loaded
 		trainLoadedFlag, // flag to indicate if training set loaded
 		testLoadedFlag, // flag to indicate if test set loaded
+		valLoadedFlag, // flag to indicate if validation set loaded (Phase 4c)
 		trainTwoSetFlag, // flag to indicate if training set TwoSet object loaded
 		testTwoSetFlag, // flag to indicate if test set TwoSet object loaded
 		minimaxFlag, // flag to indicate if minima and maxima vectors are set 
