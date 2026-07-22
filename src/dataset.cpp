@@ -52,6 +52,7 @@ void DataSet::copy( const DataSet& rhs )
 
 	strataBins = rhs.strataBins;
 	strataColumns = rhs.strataColumns;
+	groupColumns = rhs.groupColumns;
 
 	threshold = rhs.threshold;
 	inUpperLimit = rhs.inUpperLimit;
@@ -747,9 +748,25 @@ bool DataSet::randomize( const unsigned nTest )
 		//    and per-row addrow accumulation.
 		vector< unsigned > testRows, trainRows;
 		unsigned n0 = 0, n1 = 0, n0Test = 0, n1Test = 0;
-		vector< unsigned > cellTotal, cellTest; // per-stratum (general path)
+		vector< unsigned > cellTotal, cellTest; // per-stratum (Phase 2 path)
+		unsigned nGroups = 0, groupsInTest = 0; // group partition (Phase 3 path)
 
-		if ( strataColumns.empty() ) // default: stratify on the outcome only
+		if ( !groupColumns.empty() ) // Phase 3: keep clusters intact (harder test)
+		{
+			vector< unsigned > group = buildGroupKey();
+			nsplit::GroupHoldout h = nsplit::groupHoldout( label, group, nTest );
+			testRows = h.test;
+			trainRows = h.train;
+			nGroups = h.nGroups;
+			groupsInTest = h.groupsInTest;
+
+			// Outcome-level counts from the chosen rows (test size only
+			//    approximates nTest -- groups are indivisible).
+			for ( r = 0; r < label.size(); r++ ) ( label[ r ] == 0 ? n0 : n1 )++;
+			for ( r = 0; r < testRows.size(); r++ )
+				( label[ testRows[ r ] ] == 0 ? n0Test : n1Test )++;
+		}
+		else if ( strataColumns.empty() ) // default: stratify on the outcome only
 		{
 			nsplit::Holdout h = nsplit::stratifiedHoldout( label, nTest );
 			testRows = h.test;
@@ -836,9 +853,13 @@ bool DataSet::randomize( const unsigned nTest )
 		if ( historyFlag ) // make sure flag for history is set
 			addHistory( fileStream ); // append to history file
 
-		// Phase 2: the representativeness diagnostic, when covariate strata are
-		//    in play (outcome-only splits print the frequencies above already).
-		if ( !strataColumns.empty() )
+		// The representativeness diagnostic: the group version when clusters are
+		//    kept intact (Phase 3), the stratum version when covariate strata are
+		//    in play (Phase 2); an outcome-only split prints the frequencies
+		//    above already.
+		if ( !groupColumns.empty() )
+			groupDiagnostic( testRows, trainRows, nGroups, groupsInTest, nTest );
+		else if ( !strataColumns.empty() )
 			splitDiagnostic( testRows, trainRows, cellTotal, cellTest );
 
 		success = true; // operation was a success
@@ -1020,6 +1041,82 @@ void DataSet::splitDiagnostic( const vector< unsigned >& testRows,
 			<< "." << endl;
 	}
 	d << endl;
+
+	util::screen() << d.str(); // report to user
+
+	if ( historyFlag ) // log to history file
+		addHistory( d );
+}
+
+// Build a per-row group id from EXACT values on the named group columns
+//    (ROADMAP 4 Phase 3). Rows sharing identical values on ALL groupColumns get
+//    the same id (no binning -- a cluster is an exact match, e.g. the area-SES
+//    tuple that identifies a county). Ids are densified in first-appearance
+//    order.
+vector< unsigned > DataSet::buildGroupKey() const
+{
+	unsigned n = Raw.rows();
+
+	map< vector< double >, unsigned > id;
+	vector< unsigned > group( n );
+
+	for ( unsigned r = 0; r < n; r++ )
+	{
+		vector< double > key( groupColumns.size() );
+		for ( unsigned k = 0; k < groupColumns.size(); k++ )
+			key[ k ] = Raw( r, groupColumns[ k ] );
+
+		map< vector< double >, unsigned >::iterator it = id.find( key );
+		if ( it == id.end() )
+		{
+			unsigned newId = ( unsigned ) id.size();
+			id[ key ] = newId;
+			group[ r ] = newId;
+		}
+		else
+			group[ r ] = it->second;
+	}
+
+	return group;
+}
+
+// Print the diagnostic for a group-aware split (ROADMAP 4 Phase 3): what it
+//    grouped on, how the groups divided, the zero-leakage guarantee, how close
+//    the achieved test size is to the request (groups are indivisible), and the
+//    outcome balance. Emitted through util::screen() so the GUI captures it.
+void DataSet::groupDiagnostic( const vector< unsigned >& testRows,
+	const vector< unsigned >& trainRows,
+	unsigned nGroups, unsigned groupsInTest, unsigned nTestRequested )
+{
+	unsigned outCol = Raw.cols() - 1;
+
+	ostringstream d;
+	d << "Representativeness diagnostic (group-aware split)" << endl;
+
+	d << "   Grouped on: input column";
+	if ( groupColumns.size() > 1 ) d << "s";
+	for ( unsigned k = 0; k < groupColumns.size(); k++ )
+		d << " " << ( groupColumns[ k ] + 1 );
+	d << " (rows sharing these values stay together)." << endl;
+
+	d << "   Groups: " << nGroups << " total -- " << groupsInTest << " in test, "
+		<< ( nGroups - groupsInTest ) << " in train; no group is in both "
+		<< "(leakage = 0 by construction)." << endl;
+
+	d << "   Test set: " << testRows.size() << " exemplars (requested "
+		<< nTestRequested << "; groups are indivisible, so this only "
+		<< "approximates the target)." << endl;
+
+	unsigned trPos = 0, tePos = 0;
+	for ( unsigned i = 0; i < trainRows.size(); i++ )
+		if ( Raw( trainRows[ i ], outCol ) != 0 ) trPos++;
+	for ( unsigned i = 0; i < testRows.size(); i++ )
+		if ( Raw( testRows[ i ], outCol ) != 0 ) tePos++;
+	d << "   Outcome-1 rate   train "
+		<< ( trainRows.empty() ? 0.0 : ( double ) trPos / trainRows.size() )
+		<< "   test "
+		<< ( testRows.empty() ? 0.0 : ( double ) tePos / testRows.size() )
+		<< "." << endl << endl;
 
 	util::screen() << d.str(); // report to user
 

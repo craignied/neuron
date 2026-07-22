@@ -58,6 +58,30 @@ struct StratHoldout {
 //    the dedicated function above so its byte-for-byte behavior never moves.
 StratHoldout holdoutByStrata( const vector< unsigned >& stratum, unsigned nTest );
 
+// The result of a group-aware (outcome-stratified group) holdout. test and
+//    train partition the rows with the guarantee that no group straddles them.
+//    nGroups / groupsInTest describe the group partition for the diagnostic.
+struct GroupHoldout {
+	vector< unsigned > test, train;
+	unsigned nGroups, groupsInTest;
+};
+
+// Group-aware holdout: every row of a group lands in the SAME set, so a cluster
+//    (a hospital, a county) is never split across train and test. label[ r ] is
+//    the binary outcome and group[ r ] the group id ( 0 .. G-1 ) for row r; the
+//    caller keeps groups intact by giving rows that must stay together the same
+//    id. Groups are visited in a seeded-random order and each whole group is
+//    placed in the test set while that keeps the test class counts at or below
+//    their outcome-proportional targets ( round( nTest * n_c / n ) ), otherwise
+//    in training -- a greedy stratified-group assignment. Because groups are
+//    indivisible the achieved test size only approximates nTest (a group larger
+//    than the whole test target can never be tested); the split diagnostic
+//    reports the achieved balance. This is the ROADMAP 4 Phase 3 tool for a
+//    HARDER test -- generalization to groups the model never trained on --
+//    whereas stratification makes the test resemble the sample.
+GroupHoldout groupHoldout( const vector< unsigned >& label,
+	const vector< unsigned >& group, unsigned nTest );
+
 }
 
 #endif

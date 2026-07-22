@@ -368,6 +368,17 @@ curl -s -X POST "$URL/api/load" -d "mode=raw&path=lowbwt2-2train.txt&fraction=0.
 curl -s -X POST "$URL/api/load" -d "mode=raw&path=lowbwt2-2train.txt&fraction=0.25&strata=1&strata_bins=1" \
     | grep -q '"ok":false' || fail "strata_bins < 2 must be rejected"
 
+# --- Group-aware split (ROADMAP 4 Phase 3, a GUI-beyond-CLI feature) ---------
+# Grouping on an input column keeps every cluster (rows with identical values)
+# intact across the split, and the diagnostic states the zero-leakage guarantee.
+curl -s -X POST "$URL/api/load" \
+    -d "mode=raw&path=lowbwt2-2train.txt&fraction=0.25&seed=1&group=3" > group.json
+grep -q '"ok":true' group.json || fail "group load"
+grep -q 'group-aware split' group.json || fail "group diagnostic missing"
+grep -q 'leakage = 0 by construction' group.json || fail "group zero-leakage guarantee missing"
+curl -s -X POST "$URL/api/load" -d "mode=raw&path=lowbwt2-2train.txt&fraction=0.25&group=999" \
+    | grep -q '"ok":false' || fail "an out-of-range group column must be rejected"
+
 # --- Multi-output (the CLI supports it; the GUI must too) -------------------
 # A 2-output one-hot pair: loads with outputs=2, models as a BackProp, trains,
 # and DFA reports per-set accuracy -- all accuracy-only, as in the CLI. The
@@ -567,4 +578,4 @@ grep -qE '^[0-9-]+T[0-9:]+ train ' neuron_actions.log || fail "train not audited
 grep -q 'algorithm=' neuron_actions.log || fail "train parameters not recorded in the audit log"
 grep -qE '^[0-9-]+T[0-9:]+ dfa '   neuron_actions.log || fail "dfa not audited"
 
-echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, binormal fits + null when impossible, logistic Wald/condition number, regress, saves, plateau auto-stop + control + validation, train-panel parity controls (learning rate/weight decay/batch-epoch/stopping conditions/print counter) + behavioral proof + validation, model-panel parity (bias->BareProp/multi-layer->BackProp/error function/load-network), no-bias BackProp save/load round trip, multipart log toggles, logistic batch/epoch guard, DFA (linear/quadratic + report/stats + guesses saves), dataset characteristics + ROC reporting load params, test_n exact split, covariate stratification + diagnostic, multi-output load/BackProp/train/DFA + logistic refusal, async train/status/stop + 409 busy + cancel, algorithm=auto blocking + async, OBD sizing (refusal/async grow-then-prune/obd status phase/plain-train has none/409 busy/cancel), per-action audit log)"
+echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, binormal fits + null when impossible, logistic Wald/condition number, regress, saves, plateau auto-stop + control + validation, train-panel parity controls (learning rate/weight decay/batch-epoch/stopping conditions/print counter) + behavioral proof + validation, model-panel parity (bias->BareProp/multi-layer->BackProp/error function/load-network), no-bias BackProp save/load round trip, multipart log toggles, logistic batch/epoch guard, DFA (linear/quadratic + report/stats + guesses saves), dataset characteristics + ROC reporting load params, test_n exact split, covariate stratification + diagnostic, group-aware split + zero-leakage diagnostic, multi-output load/BackProp/train/DFA + logistic refusal, async train/status/stop + 409 busy + cancel, algorithm=auto blocking + async, OBD sizing (refusal/async grow-then-prune/obd status phase/plain-train has none/409 busy/cancel), per-action audit log)"

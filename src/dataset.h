@@ -114,6 +114,16 @@ public:
 	void setStrataBins( const unsigned b ) { strataBins = b; }
 	unsigned getStrataBins() const { return strataBins; }
 
+	// Group-aware splitting accessors (ROADMAP 4 Phase 3). Naming input data
+	//    columns here keeps every cluster of rows that share identical values on
+	//    ALL those columns together on one side of the split -- so a hospital or
+	//    a county is never split across train and test, giving a harder test of
+	//    generalization to unseen groups. Exact-match (no binning), 0-based
+	//    input-node positions. Empty is the default (no grouping). When set,
+	//    randomize() uses the group-aware path in preference to covariate strata.
+	void setGroupColumns( const vector< unsigned >& c ) { groupColumns = c; }
+	const vector< unsigned >& getGroupColumns() const { return groupColumns; }
+
 	// Logging to history file accessors
 	void setHistory( const bool flag ) { historyFlag = flag; } // set history logging
 	bool getHistory() { return historyFlag; } // get history logging
@@ -145,7 +155,8 @@ private:
 		ROCthresholds, // number of ROC thresholds
 		strataBins; // quantile bins for a continuous stratum column (Phase 2)
 
-	vector< unsigned > strataColumns; // input columns to stratify on (Phase 2)
+	vector< unsigned > strataColumns, // input columns to stratify on (Phase 2)
+		groupColumns; // input columns whose identical-value rows form a group (Phase 3)
 
 	double threshold, // threshold for discrete output
 		inUpperLimit, // upper limit for a normalized input variate
@@ -184,6 +195,14 @@ private:
 		const vector< unsigned >& trainRows,
 		const vector< unsigned >& cellTotal,
 		const vector< unsigned >& cellTest );
+
+	// Build a per-row group id from exact values on groupColumns (Phase 3)
+	vector< unsigned > buildGroupKey() const;
+
+	// Print the diagnostic for a group-aware split (Phase 3)
+	void groupDiagnostic( const vector< unsigned >& testRows,
+		const vector< unsigned >& trainRows,
+		unsigned nGroups, unsigned groupsInTest, unsigned nTestRequested );
 
 	// Utility method to clear dataset Matrix members and flags
 	void clear();

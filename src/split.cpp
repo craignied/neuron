@@ -142,3 +142,61 @@ nsplit::StratHoldout nsplit::holdoutByStrata( const vector< unsigned >& stratum,
 
 	return h;
 }
+
+nsplit::GroupHoldout nsplit::groupHoldout( const vector< unsigned >& label,
+	const vector< unsigned >& group, unsigned nTest )
+{
+	unsigned n = ( unsigned ) label.size();
+
+	assert( nTest <= n && group.size() == n ); // caller bounds-checks first
+
+	// Outcome-proportional test targets (round-half-up on the 0 class, as the
+	//    other splitters do), so the group split preserves the base rate as far
+	//    as indivisible groups allow.
+	unsigned n0 = 0;
+	for ( unsigned r = 0; r < n; r++ ) if ( label[ r ] == 0 ) n0++;
+	unsigned n1 = n - n0;
+	unsigned targetNeg = ( unsigned ) ( ( double ) nTest * ( double ) n0
+		/ ( double ) n + 0.5 );
+	unsigned targetPos = nTest - targetNeg;
+
+	// Number of groups and their per-class counts.
+	unsigned G = 0;
+	for ( unsigned r = 0; r < n; r++ ) if ( group[ r ] + 1 > G ) G = group[ r ] + 1;
+
+	vector< unsigned > gPos( G, 0 ), gNeg( G, 0 );
+	for ( unsigned r = 0; r < n; r++ )
+		( label[ r ] == 0 ? gNeg : gPos )[ group[ r ] ]++;
+
+	// Visit the groups in a seeded-random order (a full Fisher-Yates of the id
+	//    list) so the group partition is random yet reproducible.
+	vector< unsigned > order( G );
+	for ( unsigned g = 0; g < G; g++ ) order[ g ] = g;
+	selectFront( order, G );
+
+	// Greedy stratified-group assignment: take a whole group into test while
+	//    that keeps both class counts at or below their targets, else train.
+	vector< char > inTest( G, 0 );
+	unsigned tp = 0, tn = 0;
+	for ( unsigned i = 0; i < G; i++ )
+	{
+		unsigned g = order[ i ];
+		if ( tp + gPos[ g ] <= targetPos && tn + gNeg[ g ] <= targetNeg )
+		{
+			inTest[ g ] = 1;
+			tp += gPos[ g ];
+			tn += gNeg[ g ];
+		}
+	}
+
+	// Assemble, keeping every group's rows together on one side.
+	GroupHoldout h;
+	h.nGroups = G;
+	h.groupsInTest = 0;
+	for ( unsigned g = 0; g < G; g++ ) if ( inTest[ g ] ) h.groupsInTest++;
+
+	for ( unsigned r = 0; r < n; r++ )
+		( inTest[ group[ r ] ] ? h.test : h.train ).push_back( r );
+
+	return h;
+}

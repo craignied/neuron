@@ -663,6 +663,29 @@ string handleLoad( const httplib::Request& req )
 					ds->setStrataBins( ( unsigned ) atol( binsStr.c_str() ) );
 				}
 
+				// Phase 3: optional group-aware split. group = comma-separated
+				//    1-based input columns; rows sharing identical values on all
+				//    of them stay together (a harder, unseen-group test). Takes
+				//    precedence over covariate strata in the engine.
+				string groupStr = param( req, "group" );
+				if ( !groupStr.empty() )
+				{
+					vector< unsigned > cols;
+					stringstream gs( groupStr );
+					string tok;
+					while ( getline( gs, tok, ',' ) )
+					{
+						size_t a = tok.find_first_not_of( " \t" );
+						if ( a == string::npos ) continue; // skip a blank token
+						long v = atol( tok.c_str() + a );
+						if ( v < 1 || ( unsigned ) v > ds->getInput() )
+							return jsonMsg( false, "group column out of range "
+								"(1.." + to_string( ds->getInput() ) + ")" );
+						cols.push_back( ( unsigned ) ( v - 1 ) ); // 1-based -> node
+					}
+					ds->setGroupColumns( cols );
+				}
+
 				if ( !testNStr.empty() )
 					ok = ds->randomize( ( unsigned ) atol( testNStr.c_str() ) );
 				else
@@ -737,9 +760,9 @@ string handleLoad( const httplib::Request& req )
 		msg << ")";
 	}
 
-	// Phase 2: when the split was stratified on covariates, return the
-	//    representativeness diagnostic (captured above) so the page can show it.
-	if ( !ds->getStrataColumns().empty() )
+	// Phase 2/3: when the split was stratified on covariates or grouped, return
+	//    the representativeness diagnostic (captured above) so the page shows it.
+	if ( !ds->getStrataColumns().empty() || !ds->getGroupColumns().empty() )
 	{
 		string rpt = cap.text.str();
 		size_t at = rpt.find( "Representativeness diagnostic" );

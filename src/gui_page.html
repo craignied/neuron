@@ -176,6 +176,31 @@ table.coef th { background: #f4f6fb; } table.coef td.name { text-align: left; }
   </span>
 </div>
 <div class="row">
+  <span class="status" title="Keep clusters intact: rows sharing identical values on these columns never split across train and test. A HARDER test (generalization to unseen groups), the opposite of stratifying. Comma-separated 1-based input columns.">Group on (keep clusters intact) &mdash; blank = none:</span>
+  <label>columns <input class="num" type="text" id="group" placeholder="e.g. 19,20,21,22"
+    style="width:8em"></label>
+  <span class="help">
+    <button type="button" class="helpbtn" onclick="toggleGroupHelp()"
+      title="What grouping does">?</button>
+    <div class="helpbox" id="groupHelp">
+      <button type="button" class="close" onclick="toggleGroupHelp()"
+        title="close">&times;</button>
+      <h4>Group-aware split &mdash; a <em>harder</em> test</h4>
+      <p>Rows that share identical values on the named columns form a cluster
+        (patients in a hospital, a county) that is kept <b>entirely on one side</b>
+        of the split &mdash; no cluster straddles train and test.</p>
+      <p>This answers a different question from stratification: not &ldquo;how does
+        the model do on new patients from <i>known</i> sites?&rdquo; but &ldquo;how
+        does it do on patients from sites it <b>never trained on</b>?&rdquo; &mdash;
+        usually a lower, more honest number when records cluster.</p>
+      <p class="aside">Because clusters are indivisible the achieved test size only
+        approximates your target, and the outcome balance is preserved only as far
+        as whole clusters allow &mdash; the diagnostic reports what was achieved.
+        Grouping takes precedence over covariate stratification.</p>
+    </div>
+  </span>
+</div>
+<div class="row">
   <button onclick="loadData()">Load dataset</button><span class="status" id="dstatus"></span>
 </div>
 </fieldset>
@@ -394,6 +419,7 @@ this page shows the statistics. The command-line interface remains available.</p
 "use strict";
 function $(id) { return document.getElementById(id); }
 function toggleHelp() { $("strataHelp").classList.toggle("show"); }
+function toggleGroupHelp() { $("groupHelp").classList.toggle("show"); }
 function setStatus(id, ok, text) {
   const el = $(id);
   el.textContent = text;
@@ -430,7 +456,8 @@ async function loadData() {
   fd.append("history", $("ds_history").checked ? 1 : 0);
   // Optional characteristics / ROC settings: sent only when filled in
   for (const id of ["test_n", "threshold", "in_lower", "in_upper", "out_lower",
-                    "out_upper", "roc_report", "roc_min", "strata", "strata_bins"])
+                    "out_upper", "roc_report", "roc_min", "strata", "strata_bins",
+                    "group"])
     if ($(id).value !== "") fd.append(id, $(id).value);
   const r = await fetch("/api/load", { method: "POST", body: fd });
   const j = await r.json();

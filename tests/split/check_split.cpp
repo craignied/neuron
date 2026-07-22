@@ -111,6 +111,44 @@ void checkStrata( const vector< unsigned >& stratum, unsigned nTest,
 		tag + ": strata partition every row with no leakage" );
 }
 
+// Assert the group-aware split's core guarantee -- no group straddles the two
+// sets (zero leakage) -- plus a valid partition and approximate outcome balance.
+void checkGroups( const vector< unsigned >& label, const vector< unsigned >& group,
+	unsigned nTest, const string& tag )
+{
+	unsigned n = ( unsigned ) label.size();
+	nsplit::GroupHoldout h = nsplit::groupHoldout( label, group, nTest );
+
+	// ZERO LEAKAGE: a group id never appears on both sides.
+	set< unsigned > inTest, inTrain;
+	for ( unsigned i = 0; i < h.test.size(); i++ ) inTest.insert( group[ h.test[ i ] ] );
+	for ( unsigned i = 0; i < h.train.size(); i++ ) inTrain.insert( group[ h.train[ i ] ] );
+	bool straddle = false;
+	for ( set< unsigned >::iterator it = inTest.begin(); it != inTest.end(); ++it )
+		if ( inTrain.count( *it ) ) straddle = true;
+	expect( !straddle, tag + ": no group straddles train and test (zero leakage)" );
+
+	// Valid partition: every row exactly once.
+	set< unsigned > seen;
+	bool dup = false;
+	for ( unsigned i = 0; i < h.test.size(); i++ )
+		if ( !seen.insert( h.test[ i ] ).second ) dup = true;
+	for ( unsigned i = 0; i < h.train.size(); i++ )
+		if ( !seen.insert( h.train[ i ] ).second ) dup = true;
+	expect( !dup && seen.size() == n,
+		tag + ": groups partition every row with no leakage" );
+
+	// Outcome balance approximately preserved (groups are indivisible, so the
+	// tolerance is loose -- this only guards a gross imbalance).
+	unsigned nPos = 0, tePos = 0;
+	for ( unsigned r = 0; r < n; r++ ) if ( label[ r ] ) nPos++;
+	for ( unsigned i = 0; i < h.test.size(); i++ ) if ( label[ h.test[ i ] ] ) tePos++;
+	double popRate = ( double ) nPos / n;
+	double teRate = h.test.empty() ? 0.0 : ( double ) tePos / h.test.size();
+	expect( teRate > popRate - 0.1 && teRate < popRate + 0.1,
+		tag + ": test outcome rate near the population rate" );
+}
+
 // Assert the invariants that must hold for ANY stratified holdout of `label`.
 void checkHoldout( const vector< unsigned >& label, unsigned nTest,
 	const string& tag )
@@ -388,6 +426,77 @@ int main()
 			dg.find( "Stratified on: outcome, input column 1" ) != string::npos &&
 			dg.find( "Outcome-1 rate" ) != string::npos,
 			"strata: the representativeness diagnostic is printed" );
+	}
+
+	// ---- Phase 3: group-aware (outcome-stratified group) holdout ------------
+	util::set_seed( 21 );
+	{
+		// 20 groups of 5 rows; ~30% positives spread across groups. A 30% split
+		// must keep every group intact and roughly preserve the outcome rate.
+		vector< unsigned > lab( 100 ), grp( 100 );
+		for ( unsigned r = 0; r < 100; r++ )
+		{
+			grp[ r ] = r / 5;                 // 20 groups of 5
+			lab[ r ] = ( r % 10 < 3 ) ? 1 : 0; // 30 positives
+		}
+		checkGroups( lab, grp, 30, "groups" );
+	}
+
+	// Reproducibility of the group split under a fixed seed
+	{
+		vector< unsigned > lab( 120 ), grp( 120 );
+		for ( unsigned r = 0; r < 120; r++ ) { grp[ r ] = r / 4; lab[ r ] = ( r % 5 == 0 ); }
+		util::set_seed( 55 );
+		nsplit::GroupHoldout g1 = nsplit::groupHoldout( lab, grp, 30 );
+		util::set_seed( 55 );
+		nsplit::GroupHoldout g2 = nsplit::groupHoldout( lab, grp, 30 );
+		expect( sameVec( g1.test, g2.test ) && sameVec( g1.train, g2.train ),
+			"groups: same seed reproduces the identical group split" );
+	}
+
+	// ---- Phase 3: DataSet group-aware split keeps clusters intact -----------
+	// Input col 0 is a group key with 10 distinct values (20 rows each). After a
+	// group-aware split no group value may appear in BOTH sets.
+	{
+		Matrix< double > graw( 200, 3 );
+		for ( unsigned r = 0; r < 200; r++ )
+		{
+			graw( r, 0 ) = ( double ) ( r / 20 ); // 10 groups of 20
+			graw( r, 1 ) = 0.0;
+			graw( r, 2 ) = ( r % 4 == 0 ) ? 1.0 : 0.0; // 25% positives
+		}
+
+		DataSet gds;
+		gds.setInput( 2 ); gds.setOutput( 1 ); gds.setDiscrete( true );
+		gds.setHistory( false );
+		gds.setRawMatrix( graw );
+		gds.setGroupColumns( vector< unsigned >{ 0 } ); // group on col 0
+
+		util::set_seed( 9 );
+		ostringstream gdiag;
+		util::set_screen( gdiag );
+		bool gok = gds.randomize( ( unsigned ) 60 );
+		util::set_screen( cout );
+
+		expect( gok, "groups: DataSet group-aware split succeeds" );
+
+		// col 0 is a group key; normalization is monotone, so its distinct
+		// values are preserved. No group value may be in both sets.
+		Matrix< double >& gtr = gds.getTrainMatrix();
+		Matrix< double >& gte = gds.getTestMatrix();
+		set< double > trVals, teVals;
+		for ( unsigned r = 0; r < gtr.rows(); r++ ) trVals.insert( gtr( r, 0 ) );
+		for ( unsigned r = 0; r < gte.rows(); r++ ) teVals.insert( gte( r, 0 ) );
+		bool overlap = false;
+		for ( set< double >::iterator it = teVals.begin(); it != teVals.end(); ++it )
+			if ( trVals.count( *it ) ) overlap = true;
+		expect( !overlap,
+			"groups: no group value appears in both train and test (DataSet path)" );
+
+		string gd = gdiag.str();
+		expect( gd.find( "group-aware split" ) != string::npos &&
+			gd.find( "leakage = 0 by construction" ) != string::npos,
+			"groups: the group-aware diagnostic is printed" );
 	}
 
 	if ( failures == 0 )

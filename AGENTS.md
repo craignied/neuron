@@ -361,9 +361,23 @@ Do NOT add `strata=` when:
 Rule of thumb: **outcome stratification ≈ always; covariate stratification = a
 deliberate choice for subgroup coverage on smaller data, not something to sprinkle
 on by reflex.** If unsure, leave `strata=` off and read the outcome-1 rate in the
-report — on a large set it is already balanced. (Stratification balances the test
-set TOWARD the sample; when you instead want a HARDER test — new patients from
-unseen sites — that is group-aware splitting, a different tool.)
+report — on a large set it is already balanced.
+
+**Group-aware split (`group=`) — the opposite tool.** Where stratification makes
+the test set RESEMBLE the sample, grouping makes it HARDER. Pass `group=` a
+comma-separated list of 1-based input columns; rows sharing identical values on
+ALL of them form a cluster (a hospital, a county) that is kept **entirely on one
+side** of the split — no cluster straddles train and test. Use it when records
+cluster and you want to estimate generalization to groups the model **never
+trained on** (e.g. new counties), which is a more honest, usually lower number.
+For the SEER cohort the four area-SES columns identify the county, so
+`group=19,20,21,22` keeps each county intact (612 counties, none split, base rate
+still balanced to five decimals). Because clusters are indivisible the achieved
+test size only approximates the target and the outcome balance is preserved only
+as far as whole clusters allow — the diagnostic (also `group=`-triggered) reports
+what was achieved and states the zero-leakage guarantee. `group=` takes precedence
+over `strata=`. Do NOT use grouping when you actually want performance on new
+patients from KNOWN sites — that is the plain (optionally stratified) split.
 
 Every GUI/API user action is also appended — timestamped, with its exact
 parameter values — to **`neuron_actions.log`** in the run directory beside the

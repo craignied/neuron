@@ -1151,8 +1151,20 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   controls, the diagnostic returned in the load response. ctest `split_stratified`
   gained Hamilton (even/remainder/tie) + a covariate-balanced-to-the-row DataSet
   case, both watched to fail against sabotage. SEER `strata=10`: M1 (2% of the
-  cohort, 40% of deaths) matched train-vs-test to four decimals. Next: Phase 3
-  (group-aware / stratified-group splitting).
+  cohort, 40% of deaths) matched train-vs-test to four decimals. Committed `44b48a1`;
+  the "when NOT to stratify on covariates" judgment went into AGENTS.md + README + a GUI
+  "?" popup (`e2f142e`, `d1cc65d`).
+  **Phase 3 (group-aware splitting) DONE 2026-07-22.** `nsplit::groupHoldout` (greedy
+  stratified-group: whole clusters kept on one side, seeded order, outcome-proportional
+  targets) + `DataSet::buildGroupKey` (group id = exact-match tuple of named columns) +
+  `groupDiagnostic`. The FIPS-supply question dissolved: the group key is a tuple of named
+  columns, so SEER's area-SES columns (`group=19,20,21,22`) identify the county — no new
+  plumbing. GUI-beyond-CLI (`/api/load group=` + Dataset-panel "Group on" + a second "?"
+  popup explaining harder-vs-resemble). ctest gains zero-leakage (proven to fail against a
+  per-row assembly sabotage, both splitter and DataSet levels), valid partition, balance,
+  reproducibility. SEER `group=19,20,21,22`: 612 counties, none split, base rate balanced
+  to five decimals. Goldens/oracle untouched. Next: Phase 4 (cross-validation estimators —
+  three-way split, stratified k-fold, repeated k-fold).
 
 ## ROADMAP 4 (agreed with Craig 2026-07-22) — a general representative test-set splitter
 
@@ -1298,15 +1310,24 @@ re-bless — it is the scale/representativeness proof.
   rate train 0.0295806 / test 0.0295753 and M1 mean train 0.0217164 / test 0.0217226 (the
   subgroup carrying 40% of deaths, matched to four decimals).
 
-- **Phase 3 — group-aware splitting.** Optional **group key**: none → unchanged; with a
-  key → **greedy stratified-group** assignment (whole group to the set most under-quota
-  for its outcome mass) with a **zero-leakage guarantee**. Degeneracy: a group larger than
-  the target set goes wholesale + a warning; document the ladder. Needs a group column
-  carried alongside the model matrix (the SEER modeling CSV dropped FIPS, so this phase
-  also settles how the area key is supplied). CLI + GUI + `/api/load` gain `group=`; parity
-  + AGENTS.md updated. New ctests: **zero group leakage** (proven to fail if any group
-  straddles) + outcome balance within tolerance under grouping. SEER: grouped-by-area
-  split as the unseen-counties sensitivity analysis; diagnostic shows leakage = 0.
+- **Phase 3 — group-aware splitting (DONE 2026-07-22).** Optional **group key**: none →
+  unchanged; with a key → **greedy stratified-group** assignment (`nsplit::groupHoldout`:
+  visit groups in seeded-random order, take a whole group into test while that keeps both
+  class counts ≤ their outcome-proportional targets, else train) with a **zero-leakage
+  guarantee**. A group too large to fit the test target simply goes to train (test size
+  then only approximates the request — inherent to indivisible groups; the diagnostic says
+  so). **The group-key-supply question resolved without new plumbing:** the group id is the
+  tuple of named columns (exact match, no binning), so for SEER the four area-SES columns
+  identify the county and `group=19,20,21,22` keeps each county intact — no FIPS column
+  needed (add one only if exact FIPS grouping ever matters). GUI-beyond-CLI (same frozen-menu
+  reasoning as Phase 2, and precedence over `strata=` in the engine): `/api/load` `group=` +
+  a Dataset-panel "Group on" control with its own "?" popup. ctest `split_stratified` gains
+  group cases — **zero leakage** at both the splitter and DataSet levels (proven to fail
+  against a per-row assembly sabotage), valid partition, approximate outcome balance, and
+  reproducibility. SEER acceptance (`group=19,20,21,22`): **612 counties, 226 test / 386
+  train, none split, base rate train 0.0295796 / test 0.0295784** — the unseen-county test,
+  balanced. Goldens byte-identical, oracle numerically identical (outcome-only default
+  untouched).
 
 - **Phase 4 — cross-validation estimators.** The estimator axis. (a) **Three-way split**
   (train/validation/test): new `ValSetData` + flags in `DataSet`, threaded through model
