@@ -153,6 +153,27 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
    primary interface from now on"), had no way to reach half the engine. A rule left as
    advice decays (cf. rule 2); this one already did.
 
+6. **Engine refactors conform to the layer-ownership constitution in
+   `docs/cv_refactoring_architecture.md`** (adopted 2026-07-22; written for the Phase 4 CV
+   refactor but permanent and repo-wide). The manifest (`docs/manifest.pdf`) is the
+   architectural constitution; the ownership doc is its operating interpretation of DRY.
+   The core: **one authoritative implementation of each mechanism, in the class that
+   conceptually owns it** — not the fewest lines, and never a generic god object that
+   collapses distinct responsibilities. Dependencies point downward (GUI/API → CV/OBD
+   orchestration → Model/DataSet interfaces → Iterative/Network/concrete models → Matrix);
+   a lower layer never learns about a higher concern (`Matrix` gathers rows but must not
+   know what a fold is; `DataSet` materializes a fold but must not decide which model to
+   train; a model fits itself but must not run the CV loop). Extract duplicated code to the
+   **lowest class-layer boundary that naturally owns it** (the GUI may call it; CV/OBD may
+   call it; none may copy it), preserve the manifest's construction order (`setDataSet`
+   before architecture-dependent sizing), and distinguish genuine duplication from
+   intentional polymorphism (per-class model math is NOT a consolidation target). **Refactor
+   before adding behavior:** a behavior-preserving extraction, *proven* to leave seeded
+   outputs / reports / model files / tests unchanged, comes first; new behavior goes through
+   the extracted interfaces after. The Phase 4 ownership rule — *CV owns repetition not
+   training; OBD owns selection not evaluation; models own fitting not fold management;
+   DataSet owns fold materialization not modeling policy* — is the governing interpretation.
+
 ## Housekeeping
 
 - **GitHub:** https://github.com/craignied/neuron (HTTPS remote per the locker's
@@ -1343,21 +1364,49 @@ re-bless — it is the scale/representativeness proof.
     count within 1 of n1/k, reproducibility) — the stratification and reproducibility
     assertions watched to fail against a deal-by-row-order sabotage. Pure/foundational; not
     yet user-visible.
-  - **4b — the CV driver (NEXT).** (a) **Stratified k-fold** and (b) **repeated k-fold**:
-    for each fold materialize its train/held-out DataSet (a new `DataSet::makeFold`
-    factored from `randomize`'s gather+normalize+flags tail) and train the configured model,
-    then **aggregate held-out ROC/stats as mean ± sd across folds** (the honest,
-    single-draw-free estimate — the literal answer to "most representative"). Cleanest
-    orchestration: factor `buildModel`/`trainConfigured` out of the GUI handlers so the CV
-    loop reuses them per fold (no duplicated factory); `/api/cv` async like `/api/obd`, GUI
-    panel + `dataviz` per-fold chart. Composes with Phases 2–3 (stratified-group k-fold).
-  - **4c — three-way split (train/validation/test):** new `ValSetData` + flags in `DataSet`,
-    threaded through the early-stopping observers and the GUI so tuning never touches the
-    locked test set (`MODELING_OUTCOMES.md` requirement). The invasive part is rewiring
-    `sampleTestError`'s consumers (OBD, plateau) to a validation set when present.
+  - **4b-refactor — the behavior-preserving extraction (NEXT; do this FIRST, per rule 6).**
+    The CLI (`neuron.cpp specify_model` + its train flow) and the GUI (`handleModel` /
+    `handleTrain`) each build a model by type and apply the training settings inline — genuine
+    duplication. Extract, to the **lowest class-layer boundary that owns each** (rule 6, NOT
+    a GUI helper, NOT a god switch): a **model factory** (creation-by-type — legitimately a
+    creation switch, distinct from a forbidden god *training* switch — preserving the manifest
+    order `setBias` → `setDataSet` → `setHidden`) and a **`TrainingConfig`** applied through
+    `Iterative`/`Network`'s existing public setters, then the already-virtual `train()`. Both
+    the CLI and the GUI then CALL these; neither copies. **Gate before any CV code:** goldens
+    byte-identical, oracle numerically identical, saved model/scale files unchanged, ctest
+    green — a pure refactor. Independently valuable (kills the CLI↔GUI model-build duplication,
+    a rule-1/rule-5 smell since the GUI landed).
+  - **4b-CV — the driver, through the extracted interfaces.** (a) **Stratified k-fold** and
+    (b) **repeated k-fold**. `DataSet::makeFold(trainRows, testRows)` (DataSet owns fold
+    materialization — gather+normalize+flags, factored from `randomize`'s tail; it does NOT
+    choose the model). A CV orchestrator that **owns only repetition**: per fold, makeFold →
+    factory → `TrainingConfig`+`train()` → read the held-out `TwoSet`'s AUC/stats, then
+    **aggregate mean ± sd across folds**. A **procedure callback** (blessed by rule 6) is the
+    per-fold unit and is *either* fixed-model train *or* the OBD driver (**nested CV** — CV
+    grades the whole select-then-train procedure; each fold may pick its own size; OBD's inner
+    validation is DataSet's validation matrix, distinct from the outer test fold — see 4c).
+    `/api/cv` async like `/api/obd`, GUI panel + `dataviz` per-fold chart. Composes with
+    Phases 2–3 (stratified-group k-fold). **Ownership (rule 6): CV owns repetition not
+    training; OBD owns selection not evaluation; models own fitting; DataSet owns fold
+    materialization.**
+  - **4c — three-way split (train/validation/test):** DataSet owns the third matrix
+    (`ValSetData` + flags — the manifest already frames train/val/test as DataSet's
+    responsibility). Thread it through the early-stopping observers so tuning uses the
+    validation set and the locked test set stays untouched (`MODELING_OUTCOMES.md`
+    requirement). The invasive part is rewiring `sampleTestError`'s consumers (OBD, plateau)
+    to a validation set when present — and it is exactly the machinery nested OBD-CV needs.
+  - **OBD metric decision (folds into OBD's selection ownership): stop on loss, select on
+    AUC.** Verified 2026-07-22 that OBD already stops AND scores on held-out *error* (loss via
+    `sampleTestError` — accuracy is display-only). At 3% prevalence both accuracy and loss are
+    majority-dominated; **AUC is the prevalence-robust metric and the one reported**, so OBD
+    should keep loss as the (sensitive, cheap, smooth) early-stop trigger but **score the size
+    by held-out AUC** computed once at each size's stopping point (OBD *calls* `TwoSet::
+    getStatROCarea`, never recomputes — rule 6). Caveat: AUC is not a proper scoring rule
+    (blind to calibration, which the SEER risk model needs), so surface loss + AUC + a
+    calibration number together in the size-vs-error table. Additive, conformant.
   SEER target: 5- and 10-fold stratified CV, aggregate AUC ± sd, affordable now the split
-  is O(n). ctests: fold-level stratification/partition (4a done); driver aggregation and the
-  validation rewire proven to fail when built.
+  is O(n). ctests: fold-level stratification/partition (4a done); the refactor proven
+  behavior-preserving; driver aggregation and the validation rewire proven to fail when built.
 
 ### Verification (end of every phase)
 Zero-warning Release build → `tests/golden/run_golden.sh` (byte-identical except the
