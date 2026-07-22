@@ -23,6 +23,13 @@ The report is **three tiers**, and a reader who reads only the first tier still 
 Two hard rules: **never print Tier 3** (a quarter-million predictions × several procedures buries
 everything), and **never let Tier 1 exceed one screen.**
 
+**The report has two audiences, by design.** Tier 1 is for a human at a glance. Tiers 2 and 3
+are for an **LLM fed the full report** to answer any deeper question ("how did fold 7 differ?",
+"which counties drove the neural net's edge?"). That is *why* Tier 2/3 must stay complete and
+self-describing rather than pre-summarized: the machine reader needs the raw material, and
+pre-digesting it would throw away exactly what it came for. Do not "helpfully" trim or
+LLM-summarize Tier 2/3 — a human never has to read them, and a machine wants them whole.
+
 ## Tier 1 — the headline summary table (the part to get exactly right)
 
 One row per procedure. A column appears only when it is meaningful:
