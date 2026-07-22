@@ -1210,8 +1210,24 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   `TrainingConfig` would be a *second* config-application path, against DRY. So the plan is
   now: CV orchestrator clones the user's configured model per fold, `setDataSet(foldData)`,
   reset weights, `train()`, evaluate — no `TrainingConfig` extraction unless clone-carries-
-  config proves insufficient. **Next: the CV orchestrator (`src/crossval.{h,cpp}`) + `/api/cv`**,
-  then 4c (three-way split). Awaiting Craig's nod on the clone-based approach.
+  config proves insufficient.
+  **Phase 4 design settled 2026-07-22 over two rounds of a ChatGPT statistical review (Craig
+  relaying), which corrected me twice — both conceded (rule 3: I over-claimed each time).**
+  (1) A "fixed-architecture CV" whose architecture OBD chose on the full cohort is LEAKAGE,
+  not "mild optimism" (Varma & Simon 2006) — and this already indicts the CURRENT workflow,
+  since OBD early-stops on the *test* set (a bug 4c fixes). (2) Classical DeLong is valid only
+  on one untouched test sample, NOT on pooled out-of-fold predictions; and I wrongly declared
+  AUC "rules out Nadeau-Bengio / commits us to leave-pair-out" — both too absolute (a corrected
+  resampled test isn't logically excluded for AUC; LPO is ~1.5e9 pairs at SEER scale and its
+  efficient forms are learner-specific). **Resolution: Phase 4 OMITS formal CV inference**
+  (secondary CV is descriptive; DeLong stays on the locked test only; a CV-aware method is a
+  separate future feature). **And the whole design was GENERALIZED** (Craig: "SEER as a natural
+  case contained within, not the governing special case") into a general mechanism (fold plan →
+  generic procedure evaluation → predictions/metrics/metadata) with an evaluation-POLICY layer
+  above it, governed by one universal invariant — *no operation that can influence a fitted
+  procedure may access its final-evaluation observations.* Full rewritten plan in ROADMAP 4
+  Phase 4 below. **Next: 4c (three-way split — fixes the OBD-on-test leak) FIRST, then the
+  coordinator/runner/adapters; verify the clone→setDataSet(fold) rebind before building on it.**
 
 ## ROADMAP 4 (agreed with Craig 2026-07-22) — a general representative test-set splitter
 
@@ -1376,57 +1392,102 @@ re-bless — it is the scale/representativeness proof.
   balanced. Goldens byte-identical, oracle numerically identical (outcome-only default
   untouched).
 
-- **Phase 4 — cross-validation estimators.** The estimator axis, being built in slices.
-  - **4a — the stratified k-fold index primitive (DONE 2026-07-22).** `nsplit::kFold(label,
-    k)` → fold id per row: each class shuffled (seeded) then dealt round-robin through one
-    shared counter, so every fold holds ~n/k rows AND ~the population outcome rate. ctest
-    `split_stratified` gains fold cases (valid partition, near-equal sizes, per-fold outcome
-    count within 1 of n1/k, reproducibility) — the stratification and reproducibility
-    assertions watched to fail against a deal-by-row-order sabotage. Pure/foundational; not
-    yet user-visible.
-  - **4b-refactor — the behavior-preserving extraction (NEXT; do this FIRST, per rule 6).**
-    The CLI (`neuron.cpp specify_model` + its train flow) and the GUI (`handleModel` /
-    `handleTrain`) each build a model by type and apply the training settings inline — genuine
-    duplication. Extract, to the **lowest class-layer boundary that owns each** (rule 6, NOT
-    a GUI helper, NOT a god switch): a **model factory** (creation-by-type — legitimately a
-    creation switch, distinct from a forbidden god *training* switch — preserving the manifest
-    order `setBias` → `setDataSet` → `setHidden`) and a **`TrainingConfig`** applied through
-    `Iterative`/`Network`'s existing public setters, then the already-virtual `train()`. Both
-    the CLI and the GUI then CALL these; neither copies. **Gate before any CV code:** goldens
-    byte-identical, oracle numerically identical, saved model/scale files unchanged, ctest
-    green — a pure refactor. Independently valuable (kills the CLI↔GUI model-build duplication,
-    a rule-1/rule-5 smell since the GUI landed).
-  - **4b-CV — the driver, through the extracted interfaces.** (a) **Stratified k-fold** and
-    (b) **repeated k-fold**. `DataSet::makeFold(trainRows, testRows)` (DataSet owns fold
-    materialization — gather+normalize+flags, factored from `randomize`'s tail; it does NOT
-    choose the model). A CV orchestrator that **owns only repetition**: per fold, makeFold →
-    factory → `TrainingConfig`+`train()` → read the held-out `TwoSet`'s AUC/stats, then
-    **aggregate mean ± sd across folds**. A **procedure callback** (blessed by rule 6) is the
-    per-fold unit and is *either* fixed-model train *or* the OBD driver (**nested CV** — CV
-    grades the whole select-then-train procedure; each fold may pick its own size; OBD's inner
-    validation is DataSet's validation matrix, distinct from the outer test fold — see 4c).
-    `/api/cv` async like `/api/obd`, GUI panel + `dataviz` per-fold chart. Composes with
-    Phases 2–3 (stratified-group k-fold). **Ownership (rule 6): CV owns repetition not
-    training; OBD owns selection not evaluation; models own fitting; DataSet owns fold
-    materialization.**
-  - **4c — three-way split (train/validation/test):** DataSet owns the third matrix
-    (`ValSetData` + flags — the manifest already frames train/val/test as DataSet's
-    responsibility). Thread it through the early-stopping observers so tuning uses the
-    validation set and the locked test set stays untouched (`MODELING_OUTCOMES.md`
-    requirement). The invasive part is rewiring `sampleTestError`'s consumers (OBD, plateau)
-    to a validation set when present — and it is exactly the machinery nested OBD-CV needs.
-  - **OBD metric decision (folds into OBD's selection ownership): stop on loss, select on
-    AUC.** Verified 2026-07-22 that OBD already stops AND scores on held-out *error* (loss via
-    `sampleTestError` — accuracy is display-only). At 3% prevalence both accuracy and loss are
-    majority-dominated; **AUC is the prevalence-robust metric and the one reported**, so OBD
-    should keep loss as the (sensitive, cheap, smooth) early-stop trigger but **score the size
-    by held-out AUC** computed once at each size's stopping point (OBD *calls* `TwoSet::
-    getStatROCarea`, never recomputes — rule 6). Caveat: AUC is not a proper scoring rule
-    (blind to calibration, which the SEER risk model needs), so surface loss + AUC + a
-    calibration number together in the size-vs-error table. Additive, conformant.
-  SEER target: 5- and 10-fold stratified CV, aggregate AUC ± sd, affordable now the split
-  is O(n). ctests: fold-level stratification/partition (4a done); the refactor proven
-  behavior-preserving; driver aggregation and the validation rewire proven to fail when built.
+- **Phase 4 — cross-validation & honest multi-model comparison (dataset/model-GENERAL, SEER
+  as the acceptance test).** The estimator axis, reshaped 2026-07-22 across two rounds of a
+  ChatGPT statistical review Craig relayed (conceptual companion `docs/cross_validation.md`).
+  **The founding discipline is the same as the rest of ROADMAP 4: SEER is a demanding
+  acceptance case, never a source of hard-coded policy.** Phase 4 assumes NONE of — a locked
+  test set always, AUC always, a p-value always, one universal resampling test. It builds a
+  general MECHANISM that produces the *materials* for valid comparison, and puts the
+  evaluation POLICY in a layer above it.
+
+  **The one universal invariant** (the hard rule; everything else is policy): *no operation
+  that can influence a fitted procedure may access the observations used for its final
+  evaluation.* Two consequences of it that corrected earlier claims of mine:
+  1. **An architecture OBD selected on data later used to score it is LEAKAGE, not "mild
+     optimism"** (Varma & Simon 2006). This already indicts the CURRENT single-split
+     workflow: today's OBD early-stops/selects on the *test* set (`ValidationObserver` →
+     `sampleTestError` forward-props `Test`), so the net's reported AUC is tuned on the very
+     rows it is scored on while logistic/DFA are not. **A methodological bug to fix in 4c.**
+  2. **Classical DeLong (1988) is valid ONLY on one untouched test sample** (independent
+     subjects, fixed models). It does NOT apply to concatenated out-of-fold CV predictions (k
+     overlapping fitted models inject dependence its variance ignores; pooled-CV AUC also has
+     ranking-scale bias). **Phase 4 omits formal CV inference entirely** — the secondary CV
+     analysis is DESCRIPTIVE; fold mean ± sd is a description, never a CI (folds are
+     dependent). *(Do NOT declare a future CV-aware method here: AUC does not rule out a
+     corrected resampled test (Nadeau & Bengio — applicable to fold-level differences of
+     non-decomposable metrics, if imperfect), and it does not commit us to leave-pair-out
+     (LPO is ~1.5×10⁹ pairs at SEER scale, and the efficient published LPO is learner-specific
+     — RLS shortcuts neuron lacks). A CV-aware inferential method is a SEPARATE future feature,
+     chosen per metric/design/sample/grouping/claim with documented applicability.)*
+
+  **The architecture — general mechanism, policy above it:**
+  ```
+  Split & fold mechanisms        (Phases 1-3: stratified / covariate / group-aware)
+        ↓
+  Generic procedure evaluation   (runs ONE procedure over a plan; ENTIRE fit+selection
+        ↓                          reruns inside each outer training fold; zero model switches)
+  Predictions, metrics, metadata (per-fold metrics, per-exemplar OOF predictions, procedure
+        ↓                          metadata e.g. OBD architectures, failures, timing; machine-readable)
+  Evaluation policy              (dataset/question-driven, sits ABOVE the mechanism)
+    ├── locked-test comparison   (when sample size permits: DeLong on the untouched test)
+    ├── descriptive nested CV    (stability + architecture-selection frequencies)
+    └── applicable inferential method (FUTURE, optional, per design)
+  ```
+  A **comparison coordinator** hands one immutable shared fold plan to the generic runner and
+  several **procedure adapters** (logistic | LDFA | QDFA | neural + optional inner OBD),
+  joining results by patient and fold so procedures stay paired. **Ownership (rule 6): CV owns
+  repetition; OBD owns selection; models own fitting; DataSet owns fold materialization.**
+
+  **The reporting contract distinguishes three tiers** (so no SEER-specific statistical policy
+  is embedded): **universally useful outputs** (fold membership, outcomes, per-exemplar OOF
+  predictions, per-fold metrics, procedure metadata, failures, timing); **descriptive
+  summaries** (aggregate + fold-wise performance and stability, architecture-selection
+  frequencies); **optional inferential modules** (DeLong for predictions from one untouched
+  test sample; future CV-aware methods with documented applicability). The *policy* neuron/SEER
+  will choose is a locked-test primary comparison + descriptive nested CV — but another user
+  could choose nested-CV-alone, simple CV, group-aware CV, or eventually LPO **without changing
+  the engine.**
+
+  - **4a — the stratified k-fold index primitive (DONE 2026-07-22).** `nsplit::kFold(label, k)`
+    → fold id per row (each class shuffled then dealt round-robin through one shared counter →
+    ~n/k rows and ~the population outcome rate per fold). ctest cases, stratification +
+    reproducibility watched to fail against a deal-by-row sabotage.
+  - **4b-refactor — behavior-preserving extraction (DONE 2026-07-22).** `src/modelfactory.
+    {h,cpp}` (`527336e`) and `DataSet::makeFold` (`9436679`), both proven byte-identical/
+    oracle-identical. **`TrainingConfig` is NOT being built:** `Network::copy`/`Iterative::copy`
+    already carry the training config (autoalgo depends on it), so the CV loop clones a
+    configured model per fold — a second config path would be against DRY. (Verify the
+    clone→`setDataSet(fold)`→train rebind first, per rule 3.)
+  - **4c — three-way split (train/validation/test), DO FIRST.** DataSet owns a third matrix
+    (`ValSetData` + flags). Rewire the early-stopping consumers (`sampleTestError` → OBD,
+    plateau) to a VALIDATION set when present, so OBD tunes on validation and the test set is
+    untouched — **fixes the invariant-violation in consequence 1** and is the inner-validation
+    machinery nested CV reuses. This makes the honest **locked-test primary comparison** (a
+    policy) possible: OBD on dev's internal validation → freeze → fit logistic + *prespecified*
+    LDFA/QDFA + the frozen net on dev → score all once on the untouched test → paired DeLong,
+    with a **prespecified** primary contrast (neural pipeline vs logistic; others exploratory
+    or multiplicity-corrected).
+  - **4b-CV — the coordinator/runner/adapters (general).** Generic runner: per fold `makeFold`
+    → clone the configured model → `setDataSet(fold)` → reset weights → `train()` → held-out
+    metrics; the neural adapter's per-fold procedure is nested OBD on the fold's own dev split.
+    Coordinator runs the requested procedures over the SAME plan, retaining per-exemplar OOF
+    predictions + per-fold metrics + procedure metadata (OBD sizes) + failures/timing, and
+    emits descriptive summaries. `/api/cv` async like `/api/obd`; GUI panel + `dataviz`;
+    composes with Phases 2–3 folds.
+  - **OBD metric: stop on loss, select on AUC.** OBD already stops/scores on held-out *error*
+    (accuracy is display-only). At low prevalence both accuracy and loss are majority-dominated;
+    **AUC is prevalence-robust**, so keep loss as the (cheap, smooth) early-stop trigger but
+    **score the size by held-out AUC** at the stopping point (OBD *calls* `TwoSet::
+    getStatROCarea`). Under 4c that held-out set is the VALIDATION set. Caveat: AUC ignores
+    calibration, so surface loss + AUC + a calibration number together.
+
+  **SEER acceptance (demonstrates generality, does not govern it):** logistic, DFA, and nested
+  OBD use the SAME outer folds; no outer-test information enters any selection; every patient
+  gets an OOF prediction from every requested procedure; group-aware and ordinary folds both
+  work; feasible at 226,679 rows; the results expose enough for an appropriate comparison
+  method without embedding SEER-specific policy. ctests: 4a done; 4c validation-rewire and the
+  runner/coordinator proven to fail when built.
 
 ### Verification (end of every phase)
 Zero-warning Release build → `tests/golden/run_golden.sh` (byte-identical except the
