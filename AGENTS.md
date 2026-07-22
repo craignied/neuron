@@ -334,9 +334,40 @@ quantile bins (default 4). The load response then carries a **representativeness
 diagnostic** (strata count, train-vs-test outcome rate and per-column means) so
 the balance is inspectable. This is the tool for a large, imbalanced, clumped
 cohort (the SEER prostate-cancer set: `strata=10` matches M-stage prevalence
-train-vs-test to four decimals). Every GUI/API user action is also appended —
-timestamped, with its exact parameter values — to **`neuron_actions.log`** in
-the run directory beside the data.
+train-vs-test to four decimals).
+
+**When to use `strata=` (and when NOT to).** The outcome is ALWAYS balanced —
+that part is free and you should never turn it off. Covariate stratification
+(`strata=`) is a deliberate choice, not a default. Reach for it only when:
+- you will **report performance within a subgroup** (e.g. metastatic patients)
+  and need that subgroup adequately populated in the held-out set; or
+- the dataset is **small** and a random draw could imbalance a strong predictor; or
+- you are doing **k-fold** and each fold is small enough that stratifying cuts
+  fold-to-fold variance.
+
+Do NOT add `strata=` when:
+- you want the holdout to **detect covariate drift** — matching the test set to
+  the training mix hides the very shift a held-out set exists to catch;
+- you want an **independent** estimate rather than a balanced one (matching makes
+  train and test more alike than two fresh samples, narrowing apparent variance);
+- **n is large** — with tens of thousands of rows the outcome-only split already
+  reproduces covariate marginals to a few parts per thousand, so covariate strata
+  buy a rounding-level guarantee, not a real precision gain;
+- it would **fragment the data**: every extra column (and every quantile bin)
+  multiplies the cells, and thin cells round to zero test rows. Watch the
+  diagnostic's "stratum(s) too small to place any test exemplar" line — if it
+  fires, use fewer columns or fewer `strata_bins`.
+
+Rule of thumb: **outcome stratification ≈ always; covariate stratification = a
+deliberate choice for subgroup coverage on smaller data, not something to sprinkle
+on by reflex.** If unsure, leave `strata=` off and read the outcome-1 rate in the
+report — on a large set it is already balanced. (Stratification balances the test
+set TOWARD the sample; when you instead want a HARDER test — new patients from
+unseen sites — that is group-aware splitting, a different tool.)
+
+Every GUI/API user action is also appended — timestamped, with its exact
+parameter values — to **`neuron_actions.log`** in the run directory beside the
+data.
 
 The GUI also runs **stepwise regression** on a trained network (the
 "Stepwise regression" panel): give it the input-variable structure — the

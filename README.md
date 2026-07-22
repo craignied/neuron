@@ -225,6 +225,19 @@ across datasets, with a 226k-row, 3%-prevalence SEER prostate-cancer cohort as t
 case it must handle. It also replaces an O(n²) legacy split that does not scale to data
 that size.
 
+**On covariate stratification — a word of caution.** Balancing the split on the *outcome*
+is on by default and is almost always what you want (it keeps the event rate from drifting
+between train and test). Balancing on *covariates* as well is optional and a genuine
+judgment call, not a free upgrade. It guarantees a rare-but-important subgroup lands in the
+test set — but it also makes the test set look more like the training data, which can hide
+the very covariate drift a held-out set exists to detect, and on a large dataset the
+outcome-only split already reproduces the covariate mix to a few parts per thousand, so it
+adds little. Use it when you will report performance *within* a subgroup, or when the data
+are small enough that a random draw could imbalance a strong predictor; otherwise leave it
+off. (Balancing makes the test *resemble* your sample; when you want a *harder* test —
+new patients from sites the model never trained on — that is the group-aware split, a
+different tool.)
+
 ## Layout
 
 - `src/` — the C++ engine (carried forward from neUROn2++, modernized incrementally
