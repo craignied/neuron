@@ -1447,7 +1447,13 @@ re-bless — it is the scale/representativeness proof.
   test sample; future CV-aware methods with documented applicability). The *policy* neuron/SEER
   will choose is a locked-test primary comparison + descriptive nested CV — but another user
   could choose nested-CV-alone, simple CV, group-aware CV, or eventually LPO **without changing
-  the engine.**
+  the engine.** **The report layout is fully specified in `docs/evaluation_report_spec.md`** —
+  the load-bearing idea, because automated runs generate a lot: it is LAYERED so no one reads a
+  wall of numbers — **Tier 1 is a one-screen headline table + a prespecified-contrast verdict**
+  (printed LAST to a log, pinned at the TOP in the GUI, sd labelled descriptive-spread-not-a-CI);
+  Tier 2 is the per-fold/architecture/timing detail; **Tier 3 is machine-readable files
+  (`cv_predictions.csv` etc.), NEVER printed.** The coordinator owns the summary; the renderer has
+  no model-family switches. Read that spec before building the CV report.
 
   - **4a — the stratified k-fold index primitive (DONE 2026-07-22).** `nsplit::kFold(label, k)`
     → fold id per row (each class shuffled then dealt round-robin through one shared counter →
