@@ -200,3 +200,31 @@ nsplit::GroupHoldout nsplit::groupHoldout( const vector< unsigned >& label,
 
 	return h;
 }
+
+vector< unsigned > nsplit::kFold( const vector< unsigned >& label, unsigned k )
+{
+	unsigned n = ( unsigned ) label.size();
+
+	assert( k >= 2 && k <= n ); // caller validates the fold count
+
+	// Partition row indices by outcome, preserving order within each class.
+	vector< unsigned > zeros, ones;
+	for ( unsigned r = 0; r < n; r++ )
+		( label[ r ] == 0 ? zeros : ones ).push_back( r );
+
+	// Shuffle each class (a full Fisher-Yates) so the deal is random.
+	selectFront( zeros, ( unsigned ) zeros.size() );
+	selectFront( ones, ( unsigned ) ones.size() );
+
+	// Deal both classes round-robin through ONE shared counter: each fold then
+	//    receives ~n0/k zeros and ~n1/k ones -- balanced size and outcome rate.
+	vector< unsigned > fold( n );
+	unsigned counter = 0;
+
+	for ( unsigned i = 0; i < zeros.size(); i++ )
+		fold[ zeros[ i ] ] = ( counter++ ) % k;
+	for ( unsigned i = 0; i < ones.size(); i++ )
+		fold[ ones[ i ] ] = ( counter++ ) % k;
+
+	return fold;
+}

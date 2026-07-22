@@ -1163,8 +1163,14 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   popup explaining harder-vs-resemble). ctest gains zero-leakage (proven to fail against a
   per-row assembly sabotage, both splitter and DataSet levels), valid partition, balance,
   reproducibility. SEER `group=19,20,21,22`: 612 counties, none split, base rate balanced
-  to five decimals. Goldens/oracle untouched. Next: Phase 4 (cross-validation estimators —
-  three-way split, stratified k-fold, repeated k-fold).
+  to five decimals. Goldens/oracle untouched. Committed/pushed through `2ceaec8`.
+  **Phase 4 STARTED — 4a (stratified k-fold index primitive) DONE 2026-07-22.**
+  `nsplit::kFold` (per-class seeded shuffle → round-robin deal) + ctest fold cases
+  (partition, near-equal sizes, per-fold outcome count within 1 of n1/k, reproducibility),
+  the stratification + reproducibility assertions watched to fail against a deal-by-row
+  sabotage. Foundational, not yet user-visible. **Next: 4b, the CV driver** — factor
+  `buildModel`/`trainConfigured` out of the GUI handlers, `DataSet::makeFold`, per-fold
+  train + mean±sd aggregation, `/api/cv` async + panel; then 4c three-way split.
 
 ## ROADMAP 4 (agreed with Craig 2026-07-22) — a general representative test-set splitter
 
@@ -1329,17 +1335,29 @@ re-bless — it is the scale/representativeness proof.
   balanced. Goldens byte-identical, oracle numerically identical (outcome-only default
   untouched).
 
-- **Phase 4 — cross-validation estimators.** The estimator axis. (a) **Three-way split**
-  (train/validation/test): new `ValSetData` + flags in `DataSet`, threaded through model
-  eval and the GUI so tuning never touches the locked test set (`MODELING_OUTCOMES.md`
-  requirement). (b) **Stratified k-fold** and (c) **repeated stratified k-fold**: iterate
-  the shuffled per-stratum indices into k folds, train/evaluate across folds, **aggregate
-  held-out ROC/stats as mean ± sd across folds** (the honest, single-draw-free estimate —
-  the literal answer to "most representative"). Composes with Phases 2–3 (stratified-group
-  k-fold). CLI (frozen-menu-permitting, else GUI-beyond-CLI) + GUI panel + API; `dataviz`
-  before any per-fold chart. New ctests: fold partition exact and exhaustive (every row in
-  exactly one test fold), reproducibility, stratification held per fold — proven to fail.
-  SEER: 5- and 10-fold stratified CV, aggregate AUC ± sd, affordable now the split is O(n).
+- **Phase 4 — cross-validation estimators.** The estimator axis, being built in slices.
+  - **4a — the stratified k-fold index primitive (DONE 2026-07-22).** `nsplit::kFold(label,
+    k)` → fold id per row: each class shuffled (seeded) then dealt round-robin through one
+    shared counter, so every fold holds ~n/k rows AND ~the population outcome rate. ctest
+    `split_stratified` gains fold cases (valid partition, near-equal sizes, per-fold outcome
+    count within 1 of n1/k, reproducibility) — the stratification and reproducibility
+    assertions watched to fail against a deal-by-row-order sabotage. Pure/foundational; not
+    yet user-visible.
+  - **4b — the CV driver (NEXT).** (a) **Stratified k-fold** and (b) **repeated k-fold**:
+    for each fold materialize its train/held-out DataSet (a new `DataSet::makeFold`
+    factored from `randomize`'s gather+normalize+flags tail) and train the configured model,
+    then **aggregate held-out ROC/stats as mean ± sd across folds** (the honest,
+    single-draw-free estimate — the literal answer to "most representative"). Cleanest
+    orchestration: factor `buildModel`/`trainConfigured` out of the GUI handlers so the CV
+    loop reuses them per fold (no duplicated factory); `/api/cv` async like `/api/obd`, GUI
+    panel + `dataviz` per-fold chart. Composes with Phases 2–3 (stratified-group k-fold).
+  - **4c — three-way split (train/validation/test):** new `ValSetData` + flags in `DataSet`,
+    threaded through the early-stopping observers and the GUI so tuning never touches the
+    locked test set (`MODELING_OUTCOMES.md` requirement). The invasive part is rewiring
+    `sampleTestError`'s consumers (OBD, plateau) to a validation set when present.
+  SEER target: 5- and 10-fold stratified CV, aggregate AUC ± sd, affordable now the split
+  is O(n). ctests: fold-level stratification/partition (4a done); driver aggregation and the
+  validation rewire proven to fail when built.
 
 ### Verification (end of every phase)
 Zero-warning Release build → `tests/golden/run_golden.sh` (byte-identical except the

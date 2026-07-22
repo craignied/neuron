@@ -82,6 +82,14 @@ struct GroupHoldout {
 GroupHoldout groupHoldout( const vector< unsigned >& label,
 	const vector< unsigned >& group, unsigned nTest );
 
+// Stratified k-fold assignment (ROADMAP 4 Phase 4). label[ r ] is the binary
+//    outcome; returns fold[ r ] in 0 .. k-1 with every row in exactly one fold.
+//    Within each class the rows are shuffled (seeded) and dealt round-robin to
+//    the folds through one shared counter, so every fold holds ~n/k rows AND
+//    ~the population outcome rate -- the stratification that makes each fold a
+//    fair held-out set. Reproducible under util::set_seed; 2 <= k <= n.
+vector< unsigned > kFold( const vector< unsigned >& label, unsigned k );
+
 }
 
 #endif

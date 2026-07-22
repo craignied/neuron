@@ -149,6 +149,49 @@ void checkGroups( const vector< unsigned >& label, const vector< unsigned >& gro
 		tag + ": test outcome rate near the population rate" );
 }
 
+// Assert a stratified k-fold assignment: every row in exactly one fold, folds
+// of near-equal size, and -- the point -- each fold's outcome count within 1 of
+// the population's per-fold share (the stratification a random deal would miss).
+void checkKFold( const vector< unsigned >& label, unsigned k, const string& tag )
+{
+	unsigned n = ( unsigned ) label.size();
+	unsigned n1 = 0;
+	for ( unsigned r = 0; r < n; r++ ) if ( label[ r ] ) n1++;
+
+	vector< unsigned > fold = nsplit::kFold( label, k );
+
+	vector< unsigned > size( k, 0 ), pos( k, 0 );
+	bool inRange = true;
+	for ( unsigned r = 0; r < n; r++ )
+	{
+		if ( fold[ r ] >= k ) inRange = false;
+		else { size[ fold[ r ] ]++; if ( label[ r ] ) pos[ fold[ r ] ]++; }
+	}
+	expect( inRange, tag + ": every row lands in a valid fold" );
+
+	// Fold sizes within 1 of n/k (a balanced partition)
+	bool balanced = true;
+	for ( unsigned f = 0; f < k; f++ )
+		if ( size[ f ] + 1 < n / k || size[ f ] > n / k + 1 ) balanced = false;
+	expect( balanced, tag + ": folds are near-equal in size" );
+
+	// Stratification: each fold's positive count within 1 of n1/k
+	bool strat = true;
+	for ( unsigned f = 0; f < k; f++ )
+	{
+		unsigned lo = ( n1 / k > 0 ) ? n1 / k - 0 : 0; // base share
+		long diff = ( long ) pos[ f ] - ( long ) ( n1 / k );
+		if ( diff < -1 || diff > 1 ) strat = false;
+		(void) lo;
+	}
+	expect( strat, tag + ": each fold's outcome count is within 1 of n1/k" );
+
+	// Partition sums to n
+	unsigned tot = 0;
+	for ( unsigned f = 0; f < k; f++ ) tot += size[ f ];
+	expect( tot == n, tag + ": the folds partition every row" );
+}
+
 // Assert the invariants that must hold for ANY stratified holdout of `label`.
 void checkHoldout( const vector< unsigned >& label, unsigned nTest,
 	const string& tag )
@@ -497,6 +540,36 @@ int main()
 		expect( gd.find( "group-aware split" ) != string::npos &&
 			gd.find( "leakage = 0 by construction" ) != string::npos,
 			"groups: the group-aware diagnostic is printed" );
+	}
+
+	// ---- Phase 4: stratified k-fold assignment ------------------------------
+	util::set_seed( 31 );
+	{
+		// 300 rows, 60 positives (20%), 5 folds -> each fold ~60 rows, 12 positives
+		vector< unsigned > lab( 300 );
+		for ( unsigned r = 0; r < 300; r++ ) lab[ r ] = ( r % 5 == 0 ) ? 1 : 0;
+		checkKFold( lab, 5, "kfold-5" );
+		checkKFold( lab, 10, "kfold-10" );
+	}
+	{
+		// Rare-event scale model (SEER-like 3%): stratification must still hold
+		vector< unsigned > lab( 1000, 0 );
+		for ( unsigned i = 0; i < 30; i++ ) lab[ i * 33 ] = 1; // 30 positives
+		checkKFold( lab, 5, "kfold-rare" );
+	}
+
+	// Reproducibility + divergence
+	{
+		vector< unsigned > lab( 200 );
+		for ( unsigned r = 0; r < 200; r++ ) lab[ r ] = ( r % 4 == 0 );
+		util::set_seed( 77 );
+		vector< unsigned > f1 = nsplit::kFold( lab, 5 );
+		util::set_seed( 77 );
+		vector< unsigned > f2 = nsplit::kFold( lab, 5 );
+		expect( sameVec( f1, f2 ), "kfold: same seed reproduces the fold assignment" );
+		util::set_seed( 78 );
+		vector< unsigned > f3 = nsplit::kFold( lab, 5 );
+		expect( !sameVec( f1, f3 ), "kfold: a different seed reassigns the folds" );
 	}
 
 	if ( failures == 0 )
