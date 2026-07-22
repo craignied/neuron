@@ -4,6 +4,7 @@
 #include "split.h"
 #include "utility.h"
 
+#include <algorithm>
 #include <cassert>
 
 // Partial Fisher-Yates: move k randomly-chosen elements of idx to its front,
@@ -71,6 +72,73 @@ nsplit::Holdout nsplit::stratifiedHoldout( const vector< unsigned >& label,
 	for ( unsigned i = 0; i < h.n1Test; i++ ) h.test.push_back( ones[ i ] );
 	for ( unsigned i = h.n0Test; i < h.n0; i++ ) h.train.push_back( zeros[ i ] );
 	for ( unsigned i = h.n1Test; i < h.n1; i++ ) h.train.push_back( ones[ i ] );
+
+	return h;
+}
+
+nsplit::StratHoldout nsplit::holdoutByStrata( const vector< unsigned >& stratum,
+	unsigned nTest )
+{
+	unsigned n = ( unsigned ) stratum.size();
+
+	assert( nTest <= n ); // caller bounds-checks first
+
+	// Number of strata = one past the largest id.
+	unsigned S = 0;
+	for ( unsigned r = 0; r < n; r++ )
+		if ( stratum[ r ] + 1 > S ) S = stratum[ r ] + 1;
+
+	// Group row indices by stratum, preserving original order within each.
+	vector< vector< unsigned > > cell( S );
+	for ( unsigned r = 0; r < n; r++ )
+		cell[ stratum[ r ] ].push_back( r );
+
+	// Largest-remainder (Hamilton) apportionment of nTest across strata: the
+	//    floor of each proportional quota, then the leftover slots handed to the
+	//    strata with the largest fractional quotas (ties to the lower id, via a
+	//    stable sort of the ascending id list).
+	vector< unsigned > t( S );
+	vector< double > frac( S );
+	unsigned assigned = 0;
+
+	for ( unsigned s = 0; s < S; s++ )
+	{
+		double q = ( double ) nTest * ( double ) cell[ s ].size() / ( double ) n;
+		t[ s ] = ( unsigned ) q; // floor
+		frac[ s ] = q - ( double ) t[ s ];
+		assigned += t[ s ];
+	}
+
+	unsigned remainder = nTest - assigned; // in [ 0, S )
+
+	vector< unsigned > order( S );
+	for ( unsigned s = 0; s < S; s++ ) order[ s ] = s;
+	stable_sort( order.begin(), order.end(),
+		[ &frac ]( unsigned a, unsigned b ) { return frac[ a ] > frac[ b ]; } );
+
+	for ( unsigned i = 0; i < remainder; i++ ) t[ order[ i ] ]++;
+
+	// Draw each stratum's test rows to its front and assemble. (Clamp t to the
+	//    stratum size for safety -- with nTest < n the Hamilton floor is always
+	//    below the size, so this never binds on the reachable path.)
+	StratHoldout h;
+	h.cellTotal.resize( S );
+	h.cellTest.resize( S );
+	h.test.reserve( nTest );
+	h.train.reserve( n - nTest );
+
+	for ( unsigned s = 0; s < S; s++ )
+	{
+		if ( t[ s ] > cell[ s ].size() ) t[ s ] = ( unsigned ) cell[ s ].size();
+		h.cellTotal[ s ] = ( unsigned ) cell[ s ].size();
+		h.cellTest[ s ] = t[ s ];
+
+		selectFront( cell[ s ], t[ s ] );
+
+		for ( unsigned i = 0; i < t[ s ]; i++ ) h.test.push_back( cell[ s ][ i ] );
+		for ( unsigned i = t[ s ]; i < cell[ s ].size(); i++ )
+			h.train.push_back( cell[ s ][ i ] );
+	}
 
 	return h;
 }

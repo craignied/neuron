@@ -115,6 +115,7 @@ have **no CLI equivalent by design** — that is not a parity gap.
 | Realtime error-vs-iteration chart | Training-error chart | `GET /api/train/status` series | — n/a (menus frozen) |
 | DFA graded ROC AUC | DFA ROC/stats panels | `POST /api/dfa` (ROC in the response) | — n/a (menus frozen) |
 | OBD hidden-layer sizing (grow-then-prune, validation early stopping) | OBD panel + size-vs-error chart | `POST /api/obd` (async; `GET /api/train/status` `obd{phase,hidden}`) | — n/a (menus frozen) |
+| Covariate stratification of the raw split + representativeness diagnostic (ROADMAP 4 Phase 2) | Dataset panel "Stratify on" columns + bins | `POST /api/load` `strata=` (1-based cols) `strata_bins=` | — n/a (the CLI already stratifies on the outcome; covariate strata are new, menus frozen) |
 
 `POST /api/obd` params: `hidden_start`, `hidden_max`, `iter_budget`,
 `sample_every`, `early_stop_tol`, `early_stop_patience`, `grow_patience`,

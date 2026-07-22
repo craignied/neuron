@@ -124,6 +124,13 @@ table.coef th { background: #f4f6fb; } table.coef td.name { text-align: left; }
     <input class="num" type="number" id="roc_min" placeholder="default"></label>
 </div>
 <div class="row">
+  <span class="status" title="Stratify the train/test split on these covariates in addition to the outcome (which is always balanced). Comma-separated 1-based input column numbers; a continuous column is cut into quantile bins.">Stratify on (raw split) &mdash; blank = outcome only:</span>
+  <label>columns <input class="num" type="text" id="strata" placeholder="e.g. 10"
+    style="width:6em"></label>
+  <label title="Quantile bins for a continuous stratum column">bins
+    <input class="num" type="number" id="strata_bins" min="2" placeholder="4"></label>
+</div>
+<div class="row">
   <button onclick="loadData()">Load dataset</button><span class="status" id="dstatus"></span>
 </div>
 </fieldset>
@@ -377,7 +384,7 @@ async function loadData() {
   fd.append("history", $("ds_history").checked ? 1 : 0);
   // Optional characteristics / ROC settings: sent only when filled in
   for (const id of ["test_n", "threshold", "in_lower", "in_upper", "out_lower",
-                    "out_upper", "roc_report", "roc_min"])
+                    "out_upper", "roc_report", "roc_min", "strata", "strata_bins"])
     if ($(id).value !== "") fd.append(id, $(id).value);
   const r = await fetch("/api/load", { method: "POST", body: fd });
   const j = await r.json();

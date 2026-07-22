@@ -5,8 +5,11 @@
 #include "dataset.h"
 #include "split.h" // ROADMAP 4: the stratified index-level splitter
 
+#include <algorithm>
+#include <map>
+
 // Default constructor
-DataSet::DataSet() : nInput ( 1 ), nOutput ( 1 ),
+DataSet::DataSet() : nInput ( 1 ), nOutput ( 1 ), strataBins ( 4 ),
 	threshold ( 0.5 ), inUpperLimit ( 0.9 ), inLowerLimit ( -0.9 ),
 	outUpperLimit ( 0.9 ), outLowerLimit ( 0.1 ), discreteFlag ( true ),
 	rawLoadedFlag ( false ), trainLoadedFlag ( false ), testLoadedFlag ( false ),
@@ -46,6 +49,9 @@ void DataSet::copy( const DataSet& rhs )
 
 	nInput = rhs.nInput;
 	nOutput = rhs.nOutput;
+
+	strataBins = rhs.strataBins;
+	strataColumns = rhs.strataColumns;
 
 	threshold = rhs.threshold;
 	inUpperLimit = rhs.inUpperLimit;
@@ -730,29 +736,53 @@ bool DataSet::randomize( const unsigned nTest )
 		unsigned r; // row index
 
 		// Build the binary outcome-label vector from Raw's last column (the
-		//    same "outcome == 0" test the legacy partition used) and hand it to
-		//    the stratified splitter, which returns the row indices for each
-		//    set. This is the ROADMAP 4 index-shuffle-then-gather foundation:
-		//    the split is O(n) instead of the old O(n^2) rejection shuffle and
-		//    per-row addrow accumulation, which do not scale past ~10^4 rows.
+		//    same "outcome == 0" test the legacy partition used).
 		vector< unsigned > label( Raw.rows() );
 		for ( r = 0; r < Raw.rows(); r++ )
 			label[ r ] = ( Raw( r, ( Raw.cols() - 1 ) ) == 0 ) ? 0u : 1u;
 
-		nsplit::Holdout h = nsplit::stratifiedHoldout( label, nTest );
+		// The chosen row indices for each set, and the class counts the report
+		//    below needs. The index-shuffle-then-gather foundation (ROADMAP 4)
+		//    makes the split O(n) rather than the old O(n^2) rejection shuffle
+		//    and per-row addrow accumulation.
+		vector< unsigned > testRows, trainRows;
+		unsigned n0 = 0, n1 = 0, n0Test = 0, n1Test = 0;
+		vector< unsigned > cellTotal, cellTest; // per-stratum (general path)
 
-		// Preserve the legacy report's names for the class counts.
-		unsigned nZerosTest = h.n0Test, nOnesTest = h.n1Test;
+		if ( strataColumns.empty() ) // default: stratify on the outcome only
+		{
+			nsplit::Holdout h = nsplit::stratifiedHoldout( label, nTest );
+			testRows = h.test;
+			trainRows = h.train;
+			n0 = h.n0; n1 = h.n1; n0Test = h.n0Test; n1Test = h.n1Test;
+		}
+		else // Phase 2: stratify on the outcome x named covariate cells
+		{
+			vector< unsigned > stratum = buildStrata();
+			nsplit::StratHoldout h = nsplit::holdoutByStrata( stratum, nTest );
+			testRows = h.test;
+			trainRows = h.train;
+			cellTotal = h.cellTotal;
+			cellTest = h.cellTest;
+
+			// Recover the outcome-level counts from the chosen rows so the
+			//    familiar report below is unchanged in shape.
+			for ( r = 0; r < label.size(); r++ ) ( label[ r ] == 0 ? n0 : n1 )++;
+			for ( r = 0; r < testRows.size(); r++ )
+				( label[ testRows[ r ] ] == 0 ? n0Test : n1Test )++;
+		}
+
+		unsigned nZerosTest = n0Test, nOnesTest = n1Test; // legacy report names
 
 		// Gather the chosen rows in a single sized allocation each (the
 		//    bounds-checked class-layer primitive, rule 4).
-		TestSetData = Raw.includerows( h.test );
-		TrainSetData = Raw.includerows( h.train );
+		TestSetData = Raw.includerows( testRows );
+		TrainSetData = Raw.includerows( trainRows );
 
 		minimax( TrainSetData ); // compute the minima and maxima vectors
-		
+
 		normalize( TrainSetData ); // normalize the training set
-		
+
 		trainLoadedFlag = true; // set the train data loaded flag
 
 		// Normalize the test set with minima and maxima vectors derived from
@@ -769,26 +799,26 @@ bool DataSet::randomize( const unsigned nTest )
 
 		// Construct the message to the user and the history file
 		ostringstream fileStream;
-		
+
 		fileStream << "I've randomized a raw dataset into training and test sets."
 			<< endl << "The raw dataset had " << Raw.rows() << " exemplars."
 			<< endl << "   The number of 0s in the raw dataset was "
-			<< h.n0 << "."
+			<< n0 << "."
 			<< endl << "   The frequency of 0s in the raw dataset was "
-			<< ( ( double ) h.n0 / ( double ) Raw.rows() )
+			<< ( ( double ) n0 / ( double ) Raw.rows() )
 			<< "." << endl << "   The number of 1s in the raw dataset was "
-			<< h.n1 << "."
+			<< n1 << "."
 			<< endl << "   The frequency of 1s in the raw dataset was "
-			<< ( ( double ) h.n1 / ( double ) Raw.rows() ) << "."
+			<< ( ( double ) n1 / ( double ) Raw.rows() ) << "."
 			<< endl << "The training set has " << nTrain << " exemplars."
 			<< endl << "   The number of 0s in the training set is "
-			<< ( h.n0 - nZerosTest ) << "."
+			<< ( n0 - nZerosTest ) << "."
 			<< endl << "   The frequency of 0s in the training set is "
-			<< ( ( double ) ( h.n0 - nZerosTest ) / ( double ) nTrain )
+			<< ( ( double ) ( n0 - nZerosTest ) / ( double ) nTrain )
 			<< "." << endl << "   The number of 1s in the training set is "
-			<< ( h.n1 - nOnesTest ) << "."
+			<< ( n1 - nOnesTest ) << "."
 			<< endl << "   The frequency of 1s in the training set is "
-			<< ( ( double ) ( h.n1 - nOnesTest ) / ( double ) nTrain ) << "."
+			<< ( ( double ) ( n1 - nOnesTest ) / ( double ) nTrain ) << "."
 			<< endl << "The test set has " << nTest << " exemplars."
 			<< endl << "   The number of 0s in the test set is " << nZerosTest << "."
 			<< endl << "   The frequency of 0s in the test set is "
@@ -805,6 +835,11 @@ bool DataSet::randomize( const unsigned nTest )
 		// Log to history file
 		if ( historyFlag ) // make sure flag for history is set
 			addHistory( fileStream ); // append to history file
+
+		// Phase 2: the representativeness diagnostic, when covariate strata are
+		//    in play (outcome-only splits print the frequencies above already).
+		if ( !strataColumns.empty() )
+			splitDiagnostic( testRows, trainRows, cellTotal, cellTest );
 
 		success = true; // operation was a success
 	}
@@ -856,6 +891,140 @@ bool DataSet::randomizeD( const double ratio )
 	}
 
 	return success; // return if operation successful
+}
+
+// Build a per-row stratum id from the outcome and the named stratum columns
+//    (ROADMAP 4 Phase 2). Each named input column contributes a level: a column
+//    with at most strataBins distinct values contributes one level per value
+//    (categorical -- e.g. a 0/1 indicator becomes two levels); a column with
+//    more distinct values is cut into strataBins equal-count quantile bins by
+//    rank. The binary outcome is always a factor. The (outcome, level, ...)
+//    tuples are densified into ids 0 .. S-1 in order of first appearance.
+vector< unsigned > DataSet::buildStrata() const
+{
+	unsigned n = Raw.rows();
+	unsigned outCol = Raw.cols() - 1;
+
+	// Every row's key starts with its outcome level (0 or 1).
+	vector< vector< unsigned > > key( n, vector< unsigned >( 1 ) );
+	for ( unsigned r = 0; r < n; r++ )
+		key[ r ][ 0 ] = ( Raw( r, outCol ) == 0 ) ? 0u : 1u;
+
+	// Append a level for each named stratum column.
+	for ( unsigned k = 0; k < strataColumns.size(); k++ )
+	{
+		unsigned c = strataColumns[ k ];
+
+		vector< double > val( n );
+		for ( unsigned r = 0; r < n; r++ ) val[ r ] = Raw( r, c );
+
+		vector< double > distinct = val;
+		sort( distinct.begin(), distinct.end() );
+		distinct.erase( unique( distinct.begin(), distinct.end() ), distinct.end() );
+
+		vector< unsigned > level( n );
+
+		if ( distinct.size() <= strataBins ) // categorical: one level per value
+		{
+			for ( unsigned r = 0; r < n; r++ )
+				level[ r ] = ( unsigned ) ( lower_bound( distinct.begin(),
+					distinct.end(), val[ r ] ) - distinct.begin() );
+		}
+		else // continuous: strataBins equal-count quantile bins, by rank
+		{
+			vector< unsigned > ord( n );
+			for ( unsigned r = 0; r < n; r++ ) ord[ r ] = r;
+			stable_sort( ord.begin(), ord.end(),
+				[ &val ]( unsigned a, unsigned b ) { return val[ a ] < val[ b ]; } );
+			for ( unsigned rank = 0; rank < n; rank++ )
+				level[ ord[ rank ] ] =
+					( unsigned ) ( ( ( unsigned long ) rank * strataBins ) / n );
+		}
+
+		for ( unsigned r = 0; r < n; r++ ) key[ r ].push_back( level[ r ] );
+	}
+
+	// Densify the tuple keys into stratum ids (first-appearance order).
+	map< vector< unsigned >, unsigned > id;
+	vector< unsigned > stratum( n );
+	for ( unsigned r = 0; r < n; r++ )
+	{
+		map< vector< unsigned >, unsigned >::iterator it = id.find( key[ r ] );
+		if ( it == id.end() )
+		{
+			unsigned newId = ( unsigned ) id.size();
+			id[ key[ r ] ] = newId;
+			stratum[ r ] = newId;
+		}
+		else
+			stratum[ r ] = it->second;
+	}
+
+	return stratum;
+}
+
+// Print the ROADMAP 4 Phase 2 representativeness diagnostic: what the split was
+//    stratified on, how many strata, the outcome balance in each set, and each
+//    named column's train-vs-test mean (in natural units, read from the
+//    un-normalized Raw matrix) so the balance is inspectable rather than
+//    assumed. Emitted through util::screen() so the GUI captures it like every
+//    other report.
+void DataSet::splitDiagnostic( const vector< unsigned >& testRows,
+	const vector< unsigned >& trainRows,
+	const vector< unsigned >& cellTotal,
+	const vector< unsigned >& cellTest )
+{
+	unsigned outCol = Raw.cols() - 1;
+
+	ostringstream d;
+	d << "Representativeness diagnostic" << endl;
+
+	d << "   Stratified on: outcome";
+	for ( unsigned k = 0; k < strataColumns.size(); k++ )
+		d << ", input column " << ( strataColumns[ k ] + 1 );
+	d << "." << endl;
+
+	d << "   Strata (outcome x covariate cells): " << cellTotal.size() << "." << endl;
+
+	// A stratum too small to receive any test exemplar is unrepresented there.
+	unsigned thin = 0;
+	for ( unsigned s = 0; s < cellTest.size(); s++ )
+		if ( cellTotal[ s ] > 0 && cellTest[ s ] == 0 ) thin++;
+	if ( thin )
+		d << "   " << thin
+			<< " stratum(s) too small to place any test exemplar." << endl;
+
+	// Outcome-1 rate in each set (the base rate the split must preserve).
+	unsigned trPos = 0, tePos = 0;
+	for ( unsigned i = 0; i < trainRows.size(); i++ )
+		if ( Raw( trainRows[ i ], outCol ) != 0 ) trPos++;
+	for ( unsigned i = 0; i < testRows.size(); i++ )
+		if ( Raw( testRows[ i ], outCol ) != 0 ) tePos++;
+	d << "   Outcome-1 rate   train "
+		<< ( trainRows.empty() ? 0.0 : ( double ) trPos / trainRows.size() )
+		<< "   test "
+		<< ( testRows.empty() ? 0.0 : ( double ) tePos / testRows.size() )
+		<< "." << endl;
+
+	// Each named column's train-vs-test mean, so any imbalance is visible.
+	for ( unsigned k = 0; k < strataColumns.size(); k++ )
+	{
+		unsigned c = strataColumns[ k ];
+		double trSum = 0, teSum = 0;
+		for ( unsigned i = 0; i < trainRows.size(); i++ ) trSum += Raw( trainRows[ i ], c );
+		for ( unsigned i = 0; i < testRows.size(); i++ ) teSum += Raw( testRows[ i ], c );
+		d << "   Column " << ( c + 1 ) << " mean    train "
+			<< ( trainRows.empty() ? 0.0 : trSum / trainRows.size() )
+			<< "   test "
+			<< ( testRows.empty() ? 0.0 : teSum / testRows.size() )
+			<< "." << endl;
+	}
+	d << endl;
+
+	util::screen() << d.str(); // report to user
+
+	if ( historyFlag ) // log to history file
+		addHistory( d );
 }
 
 // Utility function clears DataSet Matrix objects and flags

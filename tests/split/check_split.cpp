@@ -68,6 +68,49 @@ unsigned countLabel( const vector< unsigned >& idx, const vector< unsigned >& la
 	return c;
 }
 
+// Assert Hamilton apportionment + a leakage-free, stratum-honoring partition
+// for the general splitter. expectCellTest, when non-empty, pins the exact
+// per-stratum test counts (the apportionment); otherwise only the invariants
+// are checked.
+void checkStrata( const vector< unsigned >& stratum, unsigned nTest,
+	const vector< unsigned >& expectCellTest, const string& tag )
+{
+	unsigned n = ( unsigned ) stratum.size();
+	nsplit::StratHoldout h = nsplit::holdoutByStrata( stratum, nTest );
+
+	// Apportionment sums to nTest and never exceeds a stratum's size
+	unsigned sum = 0;
+	bool overCap = false;
+	for ( unsigned s = 0; s < h.cellTest.size(); s++ )
+	{
+		sum += h.cellTest[ s ];
+		if ( h.cellTest[ s ] > h.cellTotal[ s ] ) overCap = true;
+	}
+	expect( sum == nTest && !overCap,
+		tag + ": test slots sum to nTest, none over a stratum's size" );
+
+	if ( !expectCellTest.empty() )
+		expect( sameVec( h.cellTest, expectCellTest ),
+			tag + ": largest-remainder apportionment is exact" );
+
+	// Every test row belongs to the stratum its slot was counted against, and
+	// the per-stratum test tally matches cellTest (stratification honored).
+	vector< unsigned > tally( h.cellTest.size(), 0 );
+	for ( unsigned i = 0; i < h.test.size(); i++ ) tally[ stratum[ h.test[ i ] ] ]++;
+	expect( sameVec( tally, h.cellTest ),
+		tag + ": each stratum contributes exactly its apportioned test rows" );
+
+	// Valid partition: every row exactly once across test and train
+	set< unsigned > seen;
+	bool dup = false;
+	for ( unsigned i = 0; i < h.test.size(); i++ )
+		if ( !seen.insert( h.test[ i ] ).second ) dup = true;
+	for ( unsigned i = 0; i < h.train.size(); i++ )
+		if ( !seen.insert( h.train[ i ] ).second ) dup = true;
+	expect( !dup && seen.size() == n,
+		tag + ": strata partition every row with no leakage" );
+}
+
 // Assert the invariants that must hold for ANY stratified holdout of `label`.
 void checkHoldout( const vector< unsigned >& label, unsigned nTest,
 	const string& tag )
@@ -265,6 +308,87 @@ int main()
 		"integration: a zero-test split loads all rows as training, no test set" );
 	expect( rpt.find( "nan" ) == string::npos && rpt.find( "inf" ) == string::npos,
 		"integration: the empty-test report has no nan/inf frequency" );
+
+	// ---- Phase 2: general multi-stratum holdout (Hamilton apportionment) ----
+	util::set_seed( 3 );
+	{
+		// Three strata sized 50/30/20; nTest 10 divides evenly -> {5,3,2}
+		vector< unsigned > st;
+		for ( unsigned i = 0; i < 50; i++ ) st.push_back( 0 );
+		for ( unsigned i = 0; i < 30; i++ ) st.push_back( 1 );
+		for ( unsigned i = 0; i < 20; i++ ) st.push_back( 2 );
+		checkStrata( st, 10, { 5, 3, 2 }, "hamilton-even" );
+	}
+	{
+		// Sizes 33/33/34, nTest 10: quotas 3.3/3.3/3.4 -> floors 3/3/3, the one
+		// leftover goes to the largest fraction (stratum 2) -> {3,3,4}
+		vector< unsigned > st;
+		for ( unsigned i = 0; i < 33; i++ ) st.push_back( 0 );
+		for ( unsigned i = 0; i < 33; i++ ) st.push_back( 1 );
+		for ( unsigned i = 0; i < 34; i++ ) st.push_back( 2 );
+		checkStrata( st, 10, { 3, 3, 4 }, "hamilton-remainder" );
+	}
+	{
+		// Two equal strata, nTest 5: quotas 2.5/2.5, the leftover breaks the
+		// fractional tie to the LOWER stratum id -> {3,2}
+		vector< unsigned > st;
+		for ( unsigned i = 0; i < 50; i++ ) st.push_back( 0 );
+		for ( unsigned i = 0; i < 50; i++ ) st.push_back( 1 );
+		checkStrata( st, 5, { 3, 2 }, "hamilton-tie" );
+	}
+
+	// ---- Phase 2: DataSet stratification on a covariate ---------------------
+	// A covariate (input col 0) is imbalanced with the outcome. Cell sizes are
+	// chosen so a 20% split apportions to EXACTLY 8 test rows with col0 == 1 and
+	// EXACTLY 4 positives -- outcome AND covariate balance held to the row.
+	//   (out0,col0=0)=144  (out1,col0=0)=16  (out0,col0=1)=36  (out1,col0=1)=4
+	{
+		Matrix< double > sraw( 200, 3 );
+		for ( unsigned r = 0; r < 200; r++ ) sraw( r, 1 ) = 0.0;
+		for ( unsigned r = 0; r < 200; r++ )
+		{
+			bool col0one = ( r >= 160 );          // last 40 rows have col0 == 1
+			bool pos = ( r >= 144 && r < 160 ) || ( r >= 196 ); // 16 + 4 positives
+			sraw( r, 0 ) = col0one ? 1.0 : 0.0;
+			sraw( r, 2 ) = pos ? 1.0 : 0.0;
+		}
+
+		DataSet sds;
+		sds.setInput( 2 ); sds.setOutput( 1 ); sds.setDiscrete( true );
+		sds.setHistory( false );
+		sds.setRawMatrix( sraw );
+		sds.setStrataColumns( vector< unsigned >{ 0 } ); // stratify on col 0 too
+
+		util::set_seed( 11 );
+		ostringstream diag;
+		util::set_screen( diag );
+		bool sok = sds.randomize( ( unsigned ) 40 );
+		util::set_screen( cout );
+
+		expect( sok && sds.getNumTest() == 40 && sds.getNumTrain() == 160,
+			"strata: 40/160 split on outcome x covariate" );
+
+		// Count col0 == 1 rows in the (normalized) test set: col0 is categorical
+		// {0,1}, train spans both, so 1 maps to the upper band (> 0).
+		Matrix< double >& ste = sds.getTestMatrix();
+		unsigned col0one = 0, pos = 0;
+		for ( unsigned r = 0; r < ste.rows(); r++ )
+		{
+			if ( ste( r, 0 ) > 0.0 ) col0one++;
+			if ( ste( r, 2 ) == 1.0 ) pos++;
+		}
+		expect( col0one == 8,
+			"strata: covariate balanced to the row (8 of 40 test rows have col0 == 1)" );
+		expect( pos == 4,
+			"strata: outcome balanced to the row (4 of 40 test rows are positive)" );
+
+		// The diagnostic names what it stratified on and reports both sets
+		string dg = diag.str();
+		expect( dg.find( "Representativeness diagnostic" ) != string::npos &&
+			dg.find( "Stratified on: outcome, input column 1" ) != string::npos &&
+			dg.find( "Outcome-1 rate" ) != string::npos,
+			"strata: the representativeness diagnostic is printed" );
+	}
 
 	if ( failures == 0 )
 	{

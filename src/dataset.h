@@ -101,6 +101,19 @@ public:
 	bool randomize( const unsigned, const unsigned );
 	bool randomizeD( const double );
 
+	// Stratification accessors (ROADMAP 4 Phase 2). By default the split is
+	//    stratified on the outcome only. Naming input data columns here also
+	//    stratifies on those covariates: a column with few distinct values
+	//    (<= strataBins) contributes one level per value, a continuous column
+	//    is cut into strataBins quantile bins. Column indices are 0-based
+	//    input-node positions (0 .. nInput-1). An empty list is the default,
+	//    outcome-only, behavior. randomize() then apportions the test set across
+	//    the outcome x covariate cells and prints a representativeness diagnostic.
+	void setStrataColumns( const vector< unsigned >& c ) { strataColumns = c; }
+	const vector< unsigned >& getStrataColumns() const { return strataColumns; }
+	void setStrataBins( const unsigned b ) { strataBins = b; }
+	unsigned getStrataBins() const { return strataBins; }
+
 	// Logging to history file accessors
 	void setHistory( const bool flag ) { historyFlag = flag; } // set history logging
 	bool getHistory() { return historyFlag; } // get history logging
@@ -129,7 +142,10 @@ private:
 	
 	unsigned nInput, // number of input nodes
 		nOutput, // number of output nodes
-		ROCthresholds; // number of ROC thresholds
+		ROCthresholds, // number of ROC thresholds
+		strataBins; // quantile bins for a continuous stratum column (Phase 2)
+
+	vector< unsigned > strataColumns; // input columns to stratify on (Phase 2)
 
 	double threshold, // threshold for discrete output
 		inUpperLimit, // upper limit for a normalized input variate
@@ -158,6 +174,16 @@ private:
 
 	// Utility method to normalize a dataset Matrix
 	void normalize( Matrix< double >& );
+
+	// Build a per-row stratum id from the outcome and strataColumns (Phase 2)
+	vector< unsigned > buildStrata() const;
+
+	// Print the representativeness diagnostic for a stratified split, given the
+	//    test/train row-index sets and the per-stratum counts (Phase 2)
+	void splitDiagnostic( const vector< unsigned >& testRows,
+		const vector< unsigned >& trainRows,
+		const vector< unsigned >& cellTotal,
+		const vector< unsigned >& cellTest );
 
 	// Utility method to clear dataset Matrix members and flags
 	void clear();

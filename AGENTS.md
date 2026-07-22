@@ -322,9 +322,21 @@ BackProp with accuracy-only reports, exactly the CLI's behavior), `test_n=`
 `history=0` (dataset-operations logging off), and the ROC reporting settings
 `roc_report=both|either`, `roc_min=`. (There is no `trap_thresholds` any more:
 the trapezoidal ROC area is now the exact non-parametric AUC over every
-operating point, so there is no threshold count to set.) Every GUI/API user
-action is also appended — timestamped, with its exact parameter values — to
-**`neuron_actions.log`** in the run directory beside the data.
+operating point, so there is no threshold count to set.)
+
+For a raw split the outcome is always balanced; to also balance covariates
+(ROADMAP 4 Phase 2, a GUI-beyond-CLI feature) pass `strata=` a comma-separated
+list of **1-based input column numbers** — e.g. `strata=10` stratifies on the
+outcome × that column's cells, so a rare high-risk subgroup lands in the test
+set proportionally rather than by luck. A column with few distinct values
+becomes one level per value; a continuous column is cut into `strata_bins=`
+quantile bins (default 4). The load response then carries a **representativeness
+diagnostic** (strata count, train-vs-test outcome rate and per-column means) so
+the balance is inspectable. This is the tool for a large, imbalanced, clumped
+cohort (the SEER prostate-cancer set: `strata=10` matches M-stage prevalence
+train-vs-test to four decimals). Every GUI/API user action is also appended —
+timestamped, with its exact parameter values — to **`neuron_actions.log`** in
+the run directory beside the data.
 
 The GUI also runs **stepwise regression** on a trained network (the
 "Stepwise regression" panel): give it the input-variable structure — the

@@ -631,10 +631,43 @@ string handleLoad( const httplib::Request& req )
 						"with a testfile" );
 				ok = ds->raw2train();
 			}
-			else if ( !testNStr.empty() )
-				ok = ds->randomize( ( unsigned ) atol( testNStr.c_str() ) );
 			else
-				ok = ds->randomizeD( fraction );
+			{
+				// Phase 2: optional covariate stratification. The outcome is
+				//    always a factor; strata = comma-separated 1-based input
+				//    column numbers to also stratify on, strata_bins = the
+				//    quantile-bin count for a continuous stratum column.
+				string strataStr = param( req, "strata" );
+				if ( !strataStr.empty() )
+				{
+					vector< unsigned > cols;
+					stringstream ss( strataStr );
+					string tok;
+					while ( getline( ss, tok, ',' ) )
+					{
+						size_t a = tok.find_first_not_of( " \t" );
+						if ( a == string::npos ) continue; // skip a blank token
+						long v = atol( tok.c_str() + a );
+						if ( v < 1 || ( unsigned ) v > ds->getInput() )
+							return jsonMsg( false, "strata column out of range "
+								"(1.." + to_string( ds->getInput() ) + ")" );
+						cols.push_back( ( unsigned ) ( v - 1 ) ); // 1-based -> node
+					}
+					ds->setStrataColumns( cols );
+				}
+				string binsStr = param( req, "strata_bins" );
+				if ( !binsStr.empty() )
+				{
+					if ( atol( binsStr.c_str() ) < 2 )
+						return jsonMsg( false, "strata_bins must be at least 2" );
+					ds->setStrataBins( ( unsigned ) atol( binsStr.c_str() ) );
+				}
+
+				if ( !testNStr.empty() )
+					ok = ds->randomize( ( unsigned ) atol( testNStr.c_str() ) );
+				else
+					ok = ds->randomizeD( fraction );
+			}
 		}
 	}
 	else // the file already is a training set
@@ -702,6 +735,16 @@ string handleLoad( const httplib::Request& req )
 		if ( !savedTrain.empty() ) msg << " " << savedTrain;
 		if ( !savedTest.empty() ) msg << " " << savedTest;
 		msg << ")";
+	}
+
+	// Phase 2: when the split was stratified on covariates, return the
+	//    representativeness diagnostic (captured above) so the page can show it.
+	if ( !ds->getStrataColumns().empty() )
+	{
+		string rpt = cap.text.str();
+		size_t at = rpt.find( "Representativeness diagnostic" );
+		if ( at != string::npos )
+			msg << "\n\n" << rpt.substr( at );
 	}
 
 	dataPtr = std::move( ds );

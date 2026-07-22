@@ -1137,7 +1137,22 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   guarded, reads 0 not nan); the "exact uniform" wording ignored `i_random`'s modulo bias
   (softened — `i_random` deliberately NOT rewritten, as the bias is a fraction of a part
   in 2³² and rewriting re-blesses every seeded stream); and the complexity was mislabeled
-  O(n log n) (it is O(n), no sort). Next: Phase 2 (generalized stratification + diagnostic).
+  O(n log n) (it is O(n), no sort). Committed as `59388bc`.
+  **Phase 2 (generalized stratification + diagnostic) DONE 2026-07-22.**
+  `nsplit::holdoutByStrata` (Hamilton largest-remainder apportionment across
+  outcome × covariate cells, ties to the lower id) + `DataSet::buildStrata`
+  (each named column → one level per value if ≤ `strataBins` distinct, else
+  `strataBins` quantile bins) + `DataSet::splitDiagnostic` (strata count,
+  train-vs-test outcome rate and per-column means, printed/capturable). Opt-in
+  via `setStrataColumns`/`setStrataBins`; the outcome-only default is the
+  untouched Phase 1 path, so goldens/oracle are byte-identical/numerically
+  identical. GUI-beyond-CLI (NOT a CLI menu — frozen-menu policy; see the Phase 2
+  plan correction below): `/api/load` `strata=`/`strata_bins=` + Dataset-panel
+  controls, the diagnostic returned in the load response. ctest `split_stratified`
+  gained Hamilton (even/remainder/tie) + a covariate-balanced-to-the-row DataSet
+  case, both watched to fail against sabotage. SEER `strata=10`: M1 (2% of the
+  cohort, 40% of deaths) matched train-vs-test to four decimals. Next: Phase 3
+  (group-aware / stratified-group splitting).
 
 ## ROADMAP 4 (agreed with Craig 2026-07-22) — a general representative test-set splitter
 
@@ -1265,16 +1280,23 @@ re-bless — it is the scale/representativeness proof.
   **numerically identical**. The ctest, not the re-blessed golden, is Phase 1's guard.
   Measure SEER: full 226k stratified holdout in well under a second.
 
-- **Phase 2 — generalized stratification + the diagnostic report.** Extend the splitter to
-  **outcome × named strata**, continuous columns **quantile-binned** (nbins configurable),
-  exact per-stratum allocation by **largest-remainder (Hamilton) apportionment**. Add the
-  **split-diagnostic report** (printed, capturable). Default (outcome-only) stays
-  behaviorally identical to Phase 1 → no further golden move. CLI dataset submenu gains a
-  strata-columns option; GUI + `/api/load` gain `strata=` (+ `strata_bins=`); parity
-  matrix + AGENTS.md updated. New ctests: allocation exactness (counts sum to request,
-  per-stratum proportions within rounding), quantile-bin correctness — proven to fail.
-  SEER: stratify outcome × M-stage; the diagnostic confirms M1 positives proportional in
-  train and test.
+- **Phase 2 — generalized stratification + the diagnostic report (DONE 2026-07-22).**
+  Extend the splitter to **outcome × named strata**, continuous columns **quantile-binned**
+  (nbins configurable), exact per-stratum allocation by **largest-remainder (Hamilton)
+  apportionment**. Add the **split-diagnostic report** (printed, capturable). Default
+  (outcome-only) stays behaviorally identical to Phase 1 → no further golden move.
+  **Correction to this plan line as originally written:** it said "CLI dataset submenu gains
+  a strata-columns option" — that contradicts the frozen-menu policy (rule 5: the CLI is the
+  frozen authoritative list, new features go to the GUI, per the OBD precedent), and a new
+  CLI prompt would also desync `binormal_seed42`'s scripted session. So covariate
+  stratification is **GUI-beyond-CLI**: GUI Dataset-panel "Stratify on" columns/bins +
+  `/api/load` `strata=` (1-based cols) `strata_bins=`; parity matrix + AGENTS.md updated.
+  ctests: Hamilton apportionment (even/remainder/tie, exact counts), a leakage-free
+  stratum-honoring partition, and a DataSet integration case where outcome AND covariate
+  are balanced to the row — the apportionment and covariate-balance assertions each watched
+  to fail against a sabotage. SEER acceptance: `strata=10` (outcome × M-stage) → outcome-1
+  rate train 0.0295806 / test 0.0295753 and M1 mean train 0.0217164 / test 0.0217226 (the
+  subgroup carrying 40% of deaths, matched to four decimals).
 
 - **Phase 3 — group-aware splitting.** Optional **group key**: none → unchanged; with a
   key → **greedy stratified-group** assignment (whole group to the set most under-quota

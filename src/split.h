@@ -39,6 +39,25 @@ struct Holdout {
 //    output vector; reproducible under a fixed seed.
 Holdout stratifiedHoldout( const vector< unsigned >& label, unsigned nTest );
 
+// The result of a general multi-cell stratified holdout. test and train
+//    partition the rows as above; cellTotal[ s ] and cellTest[ s ] give each
+//    stratum's size and test count, for the representativeness diagnostic.
+struct StratHoldout {
+	vector< unsigned > test, train;
+	vector< unsigned > cellTotal, cellTest; // indexed by stratum id
+};
+
+// General stratified holdout. stratum[ r ] is the stratum id ( 0 .. S-1 ) for
+//    row r -- a cell of the outcome x named-covariate cross-classification.
+//    The nTest test slots are apportioned across strata in proportion to each
+//    stratum's size by largest-remainder (Hamilton) apportionment -- the whole
+//    remainder goes to the strata with the largest fractional quotas, ties to
+//    the lower stratum id -- then drawn per stratum by partial Fisher-Yates.
+//    This is the ROADMAP 4 Phase 2 generalization of stratifiedHoldout above;
+//    the two-class outcome-only case ( strata = the outcome itself ) is left on
+//    the dedicated function above so its byte-for-byte behavior never moves.
+StratHoldout holdoutByStrata( const vector< unsigned >& stratum, unsigned nTest );
+
 }
 
 #endif
