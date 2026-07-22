@@ -1189,9 +1189,19 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   `nsplit::kFold` (per-class seeded shuffle → round-robin deal) + ctest fold cases
   (partition, near-equal sizes, per-fold outcome count within 1 of n1/k, reproducibility),
   the stratification + reproducibility assertions watched to fail against a deal-by-row
-  sabotage. Foundational, not yet user-visible. **Next: 4b, the CV driver** — factor
-  `buildModel`/`trainConfigured` out of the GUI handlers, `DataSet::makeFold`, per-fold
-  train + mean±sd aggregation, `/api/cv` async + panel; then 4c three-way split.
+  sabotage. Foundational, not yet user-visible. Committed/pushed `daaa8b0`.
+  **Rule 6 adopted** (`docs/cv_refactoring_architecture.md`, the layer-ownership
+  constitution; commit `ff2d335`), which reshaped the 4b plan: refactor-before-behavior,
+  extract to the lowest natural class-layer owner, no god object.
+  **4b-refactor STARTED — the model factory landed 2026-07-22 (behavior-preserving).**
+  `src/modelfactory.{h,cpp}` (`build(Spec, DataSet&)` + `createByTypeName` for the load
+  path) now owns model creation-by-type + the manifest construction order; the CLI
+  (`specify_model`) AND the GUI (`handleModel`) both call it — neither copies (a real
+  CLI↔GUI DRY win independent of CV). Proven behavior-preserving: goldens byte-identical
+  (they drive CLI creation of SimpleProp/BackProp/Logistic), oracle numerically identical,
+  8/8 ctest, smoke green. **Next in 4b-refactor:** extract the training-config application
+  (the ~15 `handleTrain` setters + the CLI `use_model` flow) into a `TrainingConfig`; then
+  4b-CV (`DataSet::makeFold` + the CV orchestrator + `/api/cv`) and 4c (three-way split).
 
 ## ROADMAP 4 (agreed with Craig 2026-07-22) — a general representative test-set splitter
 

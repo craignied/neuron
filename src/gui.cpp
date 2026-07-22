@@ -35,6 +35,7 @@
 #include "bareprop.h"
 #include "backprop.h"
 #include "network.h"
+#include "modelfactory.h"
 #include "ldfa.h"
 #include "qdfa.h"
 #include "iterative.h"
@@ -851,15 +852,9 @@ string handleModel( const httplib::Request& req )
 				f >> backpropBias;
 		}
 
-		if ( line == "Binary logistic" ) modelPtr = make_unique< Logistic >();
-		else if ( line == "SimpleProp" ) modelPtr = make_unique< SimpleProp >();
-		else if ( line == "BareProp" )   modelPtr = make_unique< BareProp >();
-		else if ( line == "BackProp" )
-		{
-			modelPtr = make_unique< BackProp >();
-			dynamic_cast< Network* >( modelPtr.get() )->setBias( backpropBias );
-		}
-		else return jsonMsg( false, "unrecognized network type on line 1: '" + line + "'" );
+		modelPtr = modelfactory::createByTypeName( line, backpropBias );
+		if ( !modelPtr )
+			return jsonMsg( false, "unrecognized network type on line 1: '" + line + "'" );
 
 		modelPtr->setDataSet( *dataPtr );
 		modelPtr->setLastop( logLastop );
@@ -879,47 +874,38 @@ string handleModel( const httplib::Request& req )
 
 	if ( type == "logistic" )
 	{
-		// The CLI's own check: only 1 output, and it must be discrete
-		if ( dataPtr->getOutput() != 1 || !dataPtr->getDiscrete() )
-			return jsonMsg( false, "for logistic regression, there can be only "
-				"1 output, and it must be discrete" );
-		modelPtr = make_unique< Logistic >();
-		modelPtr->setDataSet( *dataPtr );
-		modelPtr->setLastop( logLastop );
-		modelPtr->setHistory( logHistory );
+		modelfactory::Spec spec;
+		spec.logistic = true;
+		spec.logLastop = logLastop;
+		spec.logHistory = logHistory;
+		string err;
+		modelPtr = modelfactory::build( spec, *dataPtr, err );
+		if ( !modelPtr ) return jsonMsg( false, err );
 		return jsonMsg( true, "binary logistic regression ready" );
 	}
 
 	if ( type == "simpleprop" )
 	{
-		// hidden = comma-separated layer sizes. The CLI factory's rule: one
-		//    layer AND one output -> SimpleProp (bias) or BareProp (no bias);
-		//    several layers OR several outputs -> BackProp.
+		// hidden = comma-separated layer sizes; the factory (rule 6) turns the
+		//    spec into the right concrete type (SimpleProp / BareProp / BackProp).
 		vector< unsigned > layers = parseLayers( param( req, "hidden" ) );
 		if ( layers.empty() )
 			return jsonMsg( false, "hidden nodes must be one or more positive integers (e.g. 5 or 5,3)" );
 		bool bias = !( hasParam( req, "bias" ) && param( req, "bias" ) == "0" );
 
-		string kind;
-		if ( dataPtr->getOutput() == 1 && layers.size() == 1 )
-		{
-			if ( bias ) { modelPtr = make_unique< SimpleProp >(); kind = "SimpleProp"; }
-			else        { modelPtr = make_unique< BareProp >();   kind = "BareProp"; }
-			modelPtr->setDataSet( *dataPtr ); // dataset BEFORE architecture
-			xe ? modelPtr->setXEerror() : modelPtr->setLMSerror();
-			if ( bias ) dynamic_cast< SimpleProp* >( modelPtr.get() )->setHidden( layers[ 0 ] );
-			else        dynamic_cast< BareProp* >( modelPtr.get() )->setHidden( layers[ 0 ] );
-		}
-		else // several layers or several outputs -> general backpropagation network
-		{
-			modelPtr = make_unique< BackProp >(); kind = "BackProp";
-			dynamic_cast< Network* >( modelPtr.get() )->setBias( bias ); // before setDataSet
-			modelPtr->setDataSet( *dataPtr );
-			xe ? modelPtr->setXEerror() : modelPtr->setLMSerror();
-			dynamic_cast< BackProp* >( modelPtr.get() )->setHidden( layers );
-		}
-		modelPtr->setLastop( logLastop );
-		modelPtr->setHistory( logHistory );
+		modelfactory::Spec spec;
+		spec.bias = bias;
+		spec.hidden = layers;
+		spec.xentropy = xe;
+		spec.logLastop = logLastop;
+		spec.logHistory = logHistory;
+		string err;
+		modelPtr = modelfactory::build( spec, *dataPtr, err );
+		if ( !modelPtr ) return jsonMsg( false, err );
+
+		// The concrete class the factory chose, for the readback message.
+		string kind = dynamic_cast< SimpleProp* >( modelPtr.get() ) ? "SimpleProp"
+			: dynamic_cast< BareProp* >( modelPtr.get() ) ? "BareProp" : "BackProp";
 
 		ostringstream msg;
 		msg << kind << " " << dataPtr->getInput() << "-";

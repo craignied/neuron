@@ -28,6 +28,7 @@
 #include "ldfa.h"       // concrete LDFA class
 #include "qdfa.h"       // concrete QDFA class
 #include "logistic.h"	// binary logistic regression
+#include "modelfactory.h" // rule-6 model construction service (shared with the GUI)
 #include "dataset.h"    // DataSet for compound objects
 #include "utility.h"    // utility methods
 #include "regressnet.h" // network stepwise regression class
@@ -760,24 +761,14 @@ unique_ptr< Model > specify_model( DataSet* dataPtr ) // returns a Model if corr
 
 			util::chopEndl( lineString ); // remove <cr> from end of string if exists
 
-			// Make a new Model to load the file into
-			if ( lineString == "Binary logistic" ) // it's a Logistic object
-				modelPtr = make_unique< Logistic >();
-			else if ( lineString == "SimpleProp" ) // it's a SimpleProp object
-				modelPtr = make_unique< SimpleProp >();
-			else if ( lineString == "BareProp" ) // it's a BareProp object
-				modelPtr = make_unique< BareProp >();
-			else if ( lineString == "BackProp" ) // it's a BackProp object
-			{
-				modelPtr = make_unique< BackProp >();
-
-				// Determine if network has biases from next line in file
-				bool biasFlag;
+			// Make a new Model of the type named on line 1 (the rule-6 factory).
+			//    A BackProp carries its bias flag on line 2; read it first. This
+			//    ifstream is only for the type -- Network::load re-opens the file.
+			bool biasFlag = true;
+			if ( lineString == "BackProp" )
 				loadfile >> biasFlag;
-
-				dynamic_cast< Network* >( modelPtr.get() )->setBias( biasFlag );
-			}
-			else
+			modelPtr = modelfactory::createByTypeName( lineString, biasFlag );
+			if ( !modelPtr )
 				validModel = false; // no valid object type was found
 
 			loadfile.close(); // and close the input file
@@ -816,16 +807,14 @@ unique_ptr< Model > specify_model( DataSet* dataPtr ) // returns a Model if corr
 				cout << "For logistic regression, there can be only 1 output, and it must be discrete."
 					<< endl;
 
-			else // check's OK, so make object
+			else // check's OK, so make object via the rule-6 factory
 			{
-				modelPtr = make_unique< Logistic >();
-
-				// And load its dataset: this must happen BEFORE architecture is specified
-				modelPtr->setDataSet( *dataPtr );
-
-				// Specify logging flags
-				modelPtr->setLastop( logLastOp );
-				modelPtr->setHistory( logHistory );
+				modelfactory::Spec spec;
+				spec.logistic = true;
+				spec.logLastop = logLastOp;
+				spec.logHistory = logHistory;
+				string err;
+				modelPtr = modelfactory::build( spec, *dataPtr, err );
 
 				// Return directly to main menu to avoid redefining model
 				return modelPtr; // return a pointer to the Model
@@ -851,52 +840,17 @@ unique_ptr< Model > specify_model( DataSet* dataPtr ) // returns a Model if corr
 		}
 	}
 
-	// The Model factory
-#ifdef GAURAV // general backpropagation network
-	modelPtr = make_unique< BackProp >();
-	dynamic_cast< Network* >( modelPtr.get() )->setBias( biases );
-#else // Determine the type of Model object
-	if ( dataPtr->getOutput() == 1 && nLayer.size() == 1 )
-	{
-		if ( biases )
-			modelPtr = make_unique< SimpleProp >(); // biases makes it SimpleProp
-		else
-			modelPtr = make_unique< BareProp >(); // no biases makes it BareProp
-	}
-	else
-	{
-		modelPtr = make_unique< BackProp >(); // general backpropagation network
-		dynamic_cast< Network* >( modelPtr.get() )->setBias( biases );
-	}
-#endif
-
-	// Specify logging flags
-	modelPtr->setLastop( logLastOp );
-	modelPtr->setHistory( logHistory );
-
-	// And load its dataset: this must happen BEFORE architecture is specified
-	modelPtr->setDataSet( *dataPtr );
-
-	// Set output error function in Model object
-	if ( errorChoice == 1 ) // LMS error
-		modelPtr->setLMSerror();
-	else if ( errorChoice == 2 ) // X-entropy error
-		modelPtr->setXEerror();
-
-	// Set the number of hidden nodes to specify the network architecture
-#ifdef GAURAV // general backpropagation network
-	dynamic_cast< BackProp* >( modelPtr.get() )->setHidden( nLayer );
-#else
-	if ( ( dataPtr->getOutput() == 1 ) && ( nLayer.size() == 1 ) )
-	{
-		if ( biases )
-			dynamic_cast< SimpleProp* >( modelPtr.get() )->setHidden( nLayer[ 0 ] );
-		else
-			dynamic_cast< BareProp* >( modelPtr.get() )->setHidden( nLayer[ 0 ] );
-	}
-	else
-		dynamic_cast< BackProp* >( modelPtr.get() )->setHidden( nLayer );
-#endif
+	// The Model factory (rule 6): the interactive menu above gathered the spec;
+	//    building the concrete type, the construction order, and the error/hidden
+	//    wiring now live in one place that the GUI shares.
+	modelfactory::Spec spec;
+	spec.bias = biases;
+	spec.hidden = nLayer;
+	spec.xentropy = ( errorChoice == 2 ); // 1 = LMS, 2 = X-entropy
+	spec.logLastop = logLastOp;
+	spec.logHistory = logHistory;
+	string err;
+	modelPtr = modelfactory::build( spec, *dataPtr, err );
 
 	return modelPtr; // return pointer to new Model object
 }
