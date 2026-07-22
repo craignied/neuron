@@ -3,6 +3,7 @@
 #include "stdafx.h" // For MSVC, must be first!
 
 #include "dataset.h"
+#include "split.h" // ROADMAP 4: the stratified index-level splitter
 
 // Default constructor
 DataSet::DataSet() : nInput ( 1 ), nOutput ( 1 ),
@@ -704,7 +705,13 @@ bool DataSet::randomize( const unsigned nTest )
 		util::screen() << "I'm sorry, but I can't convert the raw dataset into a training set:"
 			<< endl << "the method is only coded for 1 output." << endl;
 
-	else if ( nTest > Raw.rows() ) // bounds check number to place in test set
+	// nTest must leave at least one training exemplar: nTest == Raw.rows()
+	//    empties the training set, and minimax() would then dereference
+	//    min_element() on an empty column (undefined). The legacy test was
+	//    ">", which permitted exactly that; the message always said "less
+	//    than". ( This also rejects a zero-row raw set -- nTest >= 0 is always
+	//    true -- so the splitter never divides by n = 0. )
+	else if ( nTest >= Raw.rows() ) // bounds check number to place in test set
 		util::screen() << "I'm sorry, but I can't convert the raw dataset into a training set:"
 			<< endl << "the number to be placed in the test set must be less than"
 			<< endl << "the number of examplars in the raw dataset." << endl;
@@ -722,54 +729,25 @@ bool DataSet::randomize( const unsigned nTest )
 	{
 		unsigned r; // row index
 
-		// Matrices to hold exemplars with only outcome 1, and only outcome 0
-		//    note the initial sizes of 0 rows, and number of columns from Raw
-		Matrix< double > zeros( 0, Raw.cols() ), ones( 0, Raw.cols() );
+		// Build the binary outcome-label vector from Raw's last column (the
+		//    same "outcome == 0" test the legacy partition used) and hand it to
+		//    the stratified splitter, which returns the row indices for each
+		//    set. This is the ROADMAP 4 index-shuffle-then-gather foundation:
+		//    the split is O(n) instead of the old O(n^2) rejection shuffle and
+		//    per-row addrow accumulation, which do not scale past ~10^4 rows.
+		vector< unsigned > label( Raw.rows() );
+		for ( r = 0; r < Raw.rows(); r++ )
+			label[ r ] = ( Raw( r, ( Raw.cols() - 1 ) ) == 0 ) ? 0u : 1u;
 
-		for ( r = 0; r < Raw.rows(); r++ ) // iterate through Raw rows
-		{
-			if ( Raw( r, ( Raw.cols() - 1 ) ) == 0 ) // if the outcome in Raw is 0
-				zeros = zeros.addrow( Raw.row( r ) ); // append the exemplar to zeros
-			else // if the outcome in Raw is 1
-				ones = ones.addrow( Raw.row( r ) ); // append the exemplar to ones
-		}
+		nsplit::Holdout h = nsplit::stratifiedHoldout( label, nTest );
 
-		// Calculate the number of zeros to be placed in the test set,
-		//    round up if necessary
-		unsigned nZerosTest = ( unsigned ) ( ( double ) nTest
-			* ( ( ( double ) zeros.rows() / ( double ) Raw.rows() ) ) + 0.5 );
+		// Preserve the legacy report's names for the class counts.
+		unsigned nZerosTest = h.n0Test, nOnesTest = h.n1Test;
 
-		// Calculate the number of ones to be placed in the test set
-		unsigned nOnesTest = nTest - nZerosTest;
-
-		vector< unsigned > zerosPos( zeros.rows() ), // random zeros positions vector
-			onesPos( ones.rows() ); // random ones positions vector
-
-		// Randomize the positions in the zeros and ones positions vectors
-		nvec::random_positions( zerosPos );
-		nvec::random_positions( onesPos );
-
-		// Reset the test and training set matrices
-		TestSetData.resize( 0, Raw.cols() );
-		TrainSetData.resize( 0, Raw.cols() );
-
-		unsigned i; // vector position index
-
-		// Add the random rows from the zeros Matrix to the test set
-		for ( i = 0; i < nZerosTest; i++ )
-			TestSetData = TestSetData.addrow( zeros.row( zerosPos[ i ] ) );
-
-		// Add the random rows from the zeros Matrix to the training set
-		for ( i = nZerosTest; i < zeros.rows(); i++ )
-			TrainSetData = TrainSetData.addrow( zeros.row( zerosPos[ i ] ) );
-
-		// Add the random rows from the ones Matrix to the test set
-		for ( i = 0; i < nOnesTest; i++ )
-			TestSetData = TestSetData.addrow( ones.row( onesPos[ i ] ) );
-
-		// Add the random rows from the ones Matrix to the training set
-		for ( i = nOnesTest; i < ones.rows(); i++ )
-			TrainSetData = TrainSetData.addrow( ones.row( onesPos[ i ] ) );
+		// Gather the chosen rows in a single sized allocation each (the
+		//    bounds-checked class-layer primitive, rule 4).
+		TestSetData = Raw.includerows( h.test );
+		TrainSetData = Raw.includerows( h.train );
 
 		minimax( TrainSetData ); // compute the minima and maxima vectors
 		
@@ -795,29 +773,31 @@ bool DataSet::randomize( const unsigned nTest )
 		fileStream << "I've randomized a raw dataset into training and test sets."
 			<< endl << "The raw dataset had " << Raw.rows() << " exemplars."
 			<< endl << "   The number of 0s in the raw dataset was "
-			<< zeros.rows() << "."
+			<< h.n0 << "."
 			<< endl << "   The frequency of 0s in the raw dataset was "
-			<< ( ( double ) zeros.rows() / ( double ) Raw.rows() )
+			<< ( ( double ) h.n0 / ( double ) Raw.rows() )
 			<< "." << endl << "   The number of 1s in the raw dataset was "
-			<< ones.rows() << "."
+			<< h.n1 << "."
 			<< endl << "   The frequency of 1s in the raw dataset was "
-			<< ( ( double ) ones.rows() / ( double ) Raw.rows() ) << "."
+			<< ( ( double ) h.n1 / ( double ) Raw.rows() ) << "."
 			<< endl << "The training set has " << nTrain << " exemplars."
 			<< endl << "   The number of 0s in the training set is "
-			<< ( zeros.rows() - nZerosTest ) << "."
+			<< ( h.n0 - nZerosTest ) << "."
 			<< endl << "   The frequency of 0s in the training set is "
-			<< ( ( double ) ( zeros.rows() - nZerosTest ) / ( double ) nTrain )
+			<< ( ( double ) ( h.n0 - nZerosTest ) / ( double ) nTrain )
 			<< "." << endl << "   The number of 1s in the training set is "
-			<< ( ones.rows() - nOnesTest ) << "."
+			<< ( h.n1 - nOnesTest ) << "."
 			<< endl << "   The frequency of 1s in the training set is "
-			<< ( ( double ) ( ones.rows() - nOnesTest ) / ( double ) nTrain ) << "."
+			<< ( ( double ) ( h.n1 - nOnesTest ) / ( double ) nTrain ) << "."
 			<< endl << "The test set has " << nTest << " exemplars."
 			<< endl << "   The number of 0s in the test set is " << nZerosTest << "."
 			<< endl << "   The frequency of 0s in the test set is "
-			<< ( ( double ) nZerosTest / ( double ) nTest ) << "."
+			// A fraction of 0 is a legitimate all-training request: guard the
+			//    empty-test denominator so the report reads 0, not nan.
+			<< ( nTest > 0 ? ( double ) nZerosTest / ( double ) nTest : 0.0 ) << "."
 			<< endl << "   The number of 1s in the test set is " << nOnesTest << "."
 			<< endl << "   The frequency of 1s in the test set is "
-			<< ( ( double ) nOnesTest / ( double ) nTest )
+			<< ( nTest > 0 ? ( double ) nOnesTest / ( double ) nTest : 0.0 )
 			<< "." << endl << endl;
 
 		util::screen() << fileStream.str(); // report to user

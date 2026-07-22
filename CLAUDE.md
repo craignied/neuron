@@ -1106,6 +1106,206 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   inspection-only — the standing browser-verification debt). ROADMAP 2 is now
   **complete through Phase 4**; Phase 5 (new optimizers) remains backlog.
 
+- **2026-07-22 — ROADMAP 4 agreed: a general representative test-set splitter, with
+  SEER as the acceptance test.** Craig is bringing a 226,679-row SEER prostate-cancer
+  5-year-mortality cohort (`~/documents/work/research/SEER PCa/`, 2.96% prevalence,
+  positives clumped — M1 disease is 2.2% of the cohort but 40% of all deaths — ~612
+  area clusters, 7 continuous + 15 binary inputs). Today's `DataSet::randomize` is an
+  outcome-stratified single holdout with two independent O(n²) hot spots (the
+  `random_positions` rejection shuffle + the `addrow` accumulation) — fine at the repo's
+  historical scale, catastrophic at 226k. Decision (his): rebuild it as a *general*
+  splitter — the stratify × group × estimator cube — with **SEER as the standing
+  acceptance test, not the design target** (it stresses every axis at once). Foundation
+  is an index-shuffle → `Matrix::includerows` gather (rule 4), O(n) (no sort). Full rationale
+  + the 4-phase plan are in **ROADMAP 4** below; README carries the brief why.
+  **Phase 1 (the efficient rewrite) DONE 2026-07-22.** `src/split.{h,cpp}`
+  (`nsplit::stratifiedHoldout`, partial Fisher-Yates on per-class row indices,
+  prevalence apportionment unchanged from legacy); `DataSet::randomize` rewired onto it
+  with one `includerows` gather per set; `nvec::random_positions` retired. Measured: the
+  full 226,679-row SEER raw load **plus** stratified 25% holdout runs in **0.82 s** (the
+  old O(n²) rejection-shuffle + per-row `addrow` would have taken minutes). ctest
+  `split_stratified` pins the index split (apportionment, stratification, leakage-free
+  partition, reproducibility) AND a `DataSet::randomize` integration pass (correct gather,
+  both sets normalized with TRAINING limits, flags, all-test/zero-test boundaries) — the
+  stratification, randomization, normalization, and boundary assertions each watched to
+  fail against a targeted sabotage (rule 2). `binormal_seed42` re-blessed (split membership
+  moved; the split REPORT is byte-identical — same 142/47, 98/44, 32/15); `xor`/`regress`
+  byte-identical, oracle numerically identical. **A ChatGPT review (relayed by Craig)
+  caught four real defects before the commit**, all fixed: an all-test split was permitted
+  (legacy `nTest > Raw.rows()` → `>=`, which also blocks the 0-row divide) and would have
+  had `minimax` dereference an empty column; the empty-test report divided by zero (now
+  guarded, reads 0 not nan); the "exact uniform" wording ignored `i_random`'s modulo bias
+  (softened — `i_random` deliberately NOT rewritten, as the bias is a fraction of a part
+  in 2³² and rewriting re-blesses every seeded stream); and the complexity was mislabeled
+  O(n log n) (it is O(n), no sort). Next: Phase 2 (generalized stratification + diagnostic).
+
+## ROADMAP 4 (agreed with Craig 2026-07-22) — a general representative test-set splitter
+
+### Why (rationale)
+
+**The problem.** `DataSet::randomize` (`dataset.cpp:690`) is the engine's only train/test
+splitter. It does one thing — an **outcome-stratified single holdout** — with two
+independent O(n²) hot spots:
+1. `nvec::random_positions` (`vector_ops.cpp:32`) is a *rejection* shuffle that rescans
+   from index 0 on every collision; on a class of m rows it is O(m²), dominated by the
+   tail (the last elements collide against a nearly-full set).
+2. The zeros/ones partition and the train/test sets are built by repeated
+   `Matrix::addrow` (`dataset.cpp:732–734`, `760–772`), each append reallocating and
+   copying a growing matrix — O(n²) total (~10^10 element copies at SEER scale).
+
+Neither bit at the repo's historical sizes (hundreds to a few thousand rows). **The next
+dataset is 226,679 rows** (SEER prostate-cancer 5-year mortality), where both are
+catastrophic. The splitter must be rebuilt.
+
+**Why *general*, not a SEER fix.** Craig's call (2026-07-22): the rebuild targets a
+splitter general over prevalence, feature types, and data structure, **with SEER as the
+acceptance test.** SEER earns that role by stressing every axis at once:
+- **Rare events** — 2.96% prevalence (6,705 / 226,679). Accuracy is useless (always-negative
+  = 97%); the split must protect the positives.
+- **Clumped positives** — events are not spread across covariate space: **M1 (metastatic)
+  disease is 2.2% of the cohort but 40% of all deaths** (54% event rate); Gleason 8–10 is
+  14.5% of the cohort but 68% of deaths. Outcome-stratification alone does not *guarantee*
+  a rare decisive subgroup is proportionally represented.
+- **Clustering** — the four socioeconomic inputs are *area-level* (shared within a county):
+  ~612 distinct areas, mean 370 patients, one with 20,364. Patients within an area are not
+  independent, which raises whether the same area may appear in both train and test.
+- **Scale** — 226k rows (the O(n²) killer above).
+- **Mixed types** — 7 continuous inputs + 15 binary indicators; a stratum built from a
+  continuous column must be quantile-binned.
+
+**If the general splitter handles SEER, it handles almost anything** — that is the design
+discipline; SEER is the standing acceptance test at every phase.
+
+**What "representative" means, precisely.** A test set is representative when the held-out
+estimate is a low-bias, low-variance estimate of population performance. The binding
+constraint here is NOT row count — with 6,705 positives even a 10% holdout gives a
+Hanley-McNeil AUC SE ≈ 0.013, and 25% gives ≈ 0.006–0.009, so the headline AUC is precise
+at any sensible fraction. The real questions are (a) do rare decisive subgroups land
+proportionally, (b) can a single draw be trusted, (c) which population — new patients from
+*known* areas (standard split) or *unseen* areas (grouped split). Those three map exactly
+onto the three design axes below.
+
+**The design — a small principled family, not one method** (sklearn's `model_selection`
+is the reference taxonomy; we own the useful subset in the class layer, zero
+dependencies). The mechanism is **parameterized; the policy is the user's** — we do NOT
+bake in "stratify on M-stage"; M-stage is one instance of "stratify on outcome × a named
+covariate," and area is one instance of "a group key." Three axes:
+- **Stratify axis:** none → outcome → outcome × named strata (continuous columns quantile-binned).
+- **Group axis:** none → group-aware (a cluster key that may not straddle the split).
+- **Estimator axis:** single holdout → three-way (train/val/test) → k-fold → repeated k-fold.
+
+**The two places generality is actually won or lost** (both forced by SEER):
+1. **Stratify × group do not compose exactly.** Once a whole county lands in test its
+   outcome mix is fixed — you cannot both keep groups intact and perfectly balance
+   outcome. This is **stratified-group k-fold**, a greedy bin-packing approximation
+   (assign each group to the fold currently most under-quota for its outcome mass;
+   Sechidis, Tsoumakas & Vlahavas 2011). It is the one approximate part, and SEER (rare
+   events *and* clustering) is exactly the case that needs it.
+2. **Degeneracy is first-class.** A general tool routinely meets a class smaller than k,
+   an empty outcome×stratum cell, a group larger than a fold, a requested test count
+   above a class size. SEER produces these the moment you cross outcome × M1 × a rare
+   race category. One documented ladder — refuse / warn-and-collapse-the-stratum / clamp —
+   applied uniformly, replacing the scattered ad-hoc refusals in today's `randomize`.
+
+**The common foundation** (identical for every cell of the cube, and the fix for the
+O(n²) code): per-stratum **index vectors → partial Fisher-Yates on indices via
+`util::i_random`** (the same `rng` stream splits already ride — NOT the reserved
+`i_resample` bootstrap stream; uniform up to `i_random`'s negligible modulo bias;
+O(m)) **→ one `Matrix::includerows` gather**
+(already in the class layer, rule 4; O(n), one allocation per output set). k-fold folds
+fall out of the same shuffled indices for free.
+
+**One deliverable elevated to first-class: a split-diagnostic report** — per output set /
+fold: n, outcome counts + rate; per named stratum: counts; group-leakage count (must be 0
+when grouping); continuous-covariate means train-vs-test. Printed via `util::screen()`
+(capturable → GUI). This is how representativeness becomes *verifiable* on any dataset
+rather than trusted — on SEER it is how you confirm the M1 positives actually landed
+proportionally.
+
+**Scope boundary.** neuron is a discrete-outcome engine, so "general" means general over
+datasets with a discrete (or quantile-binnable) outcome and arbitrary inputs — not over
+arbitrary ML tasks. SEER sits comfortably inside that scope. Bonus: the continuous-column
+binning that strata need also yields continuous-*outcome* stratification for the
+regression path, a corner today's splitter refuses outright.
+
+### What (the plan)
+
+New module **`src/split.{h,cpp}`** owns the cube at the *index* level: inputs are the
+outcome labels, optional stratum keys, optional group keys, and a config
+(fractions/k/mode); output is index sets (or per-row fold ids). No Matrix dependency →
+unit-testable in isolation and reusable. `DataSet` builds the label/stratum/group vectors
+from `Raw` columns, calls the splitter, gathers via `includerows`, runs
+`minimax`/`normalize` (train-derived, applied to the rest — unchanged), sets flags, and
+emits the diagnostic. Work the phases in order; each lands independently with all
+invariants green.
+
+**Standing constraints** (as every prior roadmap): engine features UI-agnostic (engine →
+HTTP API → page); zero new dependencies; goldens/oracle/smoke/ctest green each phase;
+**rule 5 parity** (every new split capability gets a CLI-menu equivalent *and* a GUI
+control *and* an API param, `docs/gui_cli_parity.md` updated same commit) — the CLI menus
+are frozen, so genuinely new estimator modes (k-fold) may be **GUI-beyond-CLI** features
+(the OBD precedent), documented as such; **rule 1** AGENTS.md same-commit; **rule 2** every
+new test proven to fail; **rule 4** the class layer, extended not bypassed; the `dataviz`
+skill before any new chart. **SEER is the standing acceptance test at every phase** (timed
++ diagnostic-inspected); it is in neither the goldens nor the oracle, so it needs no
+re-bless — it is the scale/representativeness proof.
+
+- **Phase 1 — index-gather foundation (the efficient rewrite).** New `src/split.{h,cpp}`
+  with the simplest cell of the cube: **outcome-stratified single holdout**, via partial
+  Fisher-Yates on per-class index vectors + a single `includerows` gather. Rewire
+  `DataSet::randomize` onto it; retire `nvec::random_positions` (only caller is
+  `dataset.cpp`). Same statistical behavior, O(n) (no sort) not O(n²). New ctest
+  `tests/split/check_split.cpp` (`split_basic`) **pins the exact split for a fixed seed**:
+  exact per-class test/train counts, base-rate preservation, zero index leakage/dup,
+  reproducibility under one seed, divergence under another — each **proven to fail**
+  against a targeted sabotage (rule 2). **`binormal_seed42` re-blesses** (its `5→3→0.25`
+  split changes with the algorithm — read the whole downstream diff; confirm still 142/47,
+  same class balance, a sane fit); `xor_seed42`/`regress_seed42` load a training set
+  directly (no split) → **byte-identical**; the oracle loads fixed weights (no split) →
+  **numerically identical**. The ctest, not the re-blessed golden, is Phase 1's guard.
+  Measure SEER: full 226k stratified holdout in well under a second.
+
+- **Phase 2 — generalized stratification + the diagnostic report.** Extend the splitter to
+  **outcome × named strata**, continuous columns **quantile-binned** (nbins configurable),
+  exact per-stratum allocation by **largest-remainder (Hamilton) apportionment**. Add the
+  **split-diagnostic report** (printed, capturable). Default (outcome-only) stays
+  behaviorally identical to Phase 1 → no further golden move. CLI dataset submenu gains a
+  strata-columns option; GUI + `/api/load` gain `strata=` (+ `strata_bins=`); parity
+  matrix + AGENTS.md updated. New ctests: allocation exactness (counts sum to request,
+  per-stratum proportions within rounding), quantile-bin correctness — proven to fail.
+  SEER: stratify outcome × M-stage; the diagnostic confirms M1 positives proportional in
+  train and test.
+
+- **Phase 3 — group-aware splitting.** Optional **group key**: none → unchanged; with a
+  key → **greedy stratified-group** assignment (whole group to the set most under-quota
+  for its outcome mass) with a **zero-leakage guarantee**. Degeneracy: a group larger than
+  the target set goes wholesale + a warning; document the ladder. Needs a group column
+  carried alongside the model matrix (the SEER modeling CSV dropped FIPS, so this phase
+  also settles how the area key is supplied). CLI + GUI + `/api/load` gain `group=`; parity
+  + AGENTS.md updated. New ctests: **zero group leakage** (proven to fail if any group
+  straddles) + outcome balance within tolerance under grouping. SEER: grouped-by-area
+  split as the unseen-counties sensitivity analysis; diagnostic shows leakage = 0.
+
+- **Phase 4 — cross-validation estimators.** The estimator axis. (a) **Three-way split**
+  (train/validation/test): new `ValSetData` + flags in `DataSet`, threaded through model
+  eval and the GUI so tuning never touches the locked test set (`MODELING_OUTCOMES.md`
+  requirement). (b) **Stratified k-fold** and (c) **repeated stratified k-fold**: iterate
+  the shuffled per-stratum indices into k folds, train/evaluate across folds, **aggregate
+  held-out ROC/stats as mean ± sd across folds** (the honest, single-draw-free estimate —
+  the literal answer to "most representative"). Composes with Phases 2–3 (stratified-group
+  k-fold). CLI (frozen-menu-permitting, else GUI-beyond-CLI) + GUI panel + API; `dataviz`
+  before any per-fold chart. New ctests: fold partition exact and exhaustive (every row in
+  exactly one test fold), reproducibility, stratification held per fold — proven to fail.
+  SEER: 5- and 10-fold stratified CV, aggregate AUC ± sd, affordable now the split is O(n).
+
+### Verification (end of every phase)
+Zero-warning Release build → `tests/golden/run_golden.sh` (byte-identical except the
+deliberate Phase-1 `binormal_seed42` re-bless, diff read) → `tests/gui/smoke.sh` (extended
+per phase) → `ctest` (new `split_*` cases) → `tests/oracle/verify_oracle.sh` (numerically
+identical — the splitter path is not on the oracle) → **the SEER acceptance run** (timed +
+diagnostic inspected) → live `neuron --gui` click-through for any phase that adds a
+control. AGENTS.md, `docs/gui_cli_parity.md`, and this file updated in the same commits.
+
 ## ROADMAP 3 (agreed with Craig 2026-07-15) — ROC inference
 
 Rationale, citations, and Methods language: **`docs/roc_theory.md`**. Work in order.

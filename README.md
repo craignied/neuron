@@ -211,6 +211,20 @@ measured bin width rather than sampling error. On Wickens' data that was worth 0
 A_z — as much as the whole confidence interval — with the arbitrary bin count deciding
 the answer. It is gone.
 
+## Representative test sets
+
+A held-out test set is only trustworthy if it *represents* the population the model will
+face. For an imbalanced problem — where a rare outcome is concentrated in a small, high-risk
+part of the covariate space, and records may cluster (patients within a hospital, an area)
+— a naive random split can quietly misrepresent it, and a single split is only one draw.
+neuron is being rebuilt (ROADMAP 4 in `CLAUDE.md`) around a general splitter: stratified on
+the outcome (and, optionally, on named covariates), optionally keeping clusters intact, and
+optionally cross-validated so the estimate does not hinge on one draw — with a diagnostic
+report that makes the split's balance visible rather than assumed. The design is general
+across datasets, with a 226k-row, 3%-prevalence SEER prostate-cancer cohort as the hardest
+case it must handle. It also replaces an O(n²) legacy split that does not scale to data
+that size.
+
 ## Layout
 
 - `src/` — the C++ engine (carried forward from neUROn2++, modernized incrementally

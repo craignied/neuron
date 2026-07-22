@@ -37,6 +37,9 @@ Ground rules:
   3,391-row bank walkthrough, ~3 s at 12,000 rows — and scales gently
   (nothing in the report is quadratic any more). A short pause after
   "Total iterations" is the report working, not a hang.
+- The train/test split (menu 5 / `/api/load` with a fraction) is stratified on
+  the outcome and scales to large data — a 226,000-row raw load plus split is
+  sub-second (it was O(n²) and would have taken minutes until ROADMAP 4).
 
 ## 0. Build the engine (once)
 

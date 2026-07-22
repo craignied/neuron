@@ -22,8 +22,9 @@ namespace nvec {
 	// To make a vector of random doubles
 	vector< double >& random( vector< double >&, const double );
 
-	// To make a vector of random unsigned positions
-	vector< unsigned >& random_positions( vector< unsigned >& );
+	// (random_positions -- a rejection-sampling permutation shuffle, O(n^2) --
+	//    was retired 2026-07-22 when the stratified splitter moved to a partial
+	//    Fisher-Yates on row indices; see src/split.cpp and ROADMAP 4.)
 }
 
 // Overloaded unary mathematical operators...

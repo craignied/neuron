@@ -192,106 +192,106 @@ Maximum number of iterations: 20000
 Stop if maximum absolute gradient decreases below 1e-06
 
     Iteration: X-entropy error:  Max abs grad:  CA Train %   CA Test %
-             1     6.980772e-01   1.382235e-01        61.3        51.1
-             2     6.790562e-01   1.201581e-01        63.4        57.4
-             3     6.661219e-01   1.050991e-01        66.2        59.6
-             4     6.569549e-01   9.248602e-02        66.2        59.6
-             5     6.501891e-01   8.182202e-02        66.9        59.6
-             6     6.450078e-01   7.271169e-02        68.3        63.8
-             7     6.409109e-01   6.485216e-02        68.3        63.8
-             8     6.375829e-01   5.801353e-02        68.3        63.8
-             9     6.348181e-01   5.202050e-02        68.3        63.8
-            10     6.324779e-01   4.673771e-02        68.3        63.8
-            20     6.197764e-01   2.413686e-02        69.0        66.0
-            30     6.137767e-01   2.030119e-02        69.0        66.0
-            40     6.098955e-01   1.750301e-02        69.0        66.0
-            50     6.071662e-01   1.531776e-02        69.0        66.0
-            60     6.051849e-01   1.352581e-02        69.0        68.1
-            70     6.037163e-01   1.201755e-02        69.0        68.1
-            80     6.026091e-01   1.072811e-02        69.7        68.1
-            90     6.017622e-01   9.613661e-03        69.7        68.1
-           100     6.011065e-01   8.642282e-03        69.7        68.1
-           200     5.988131e-01   3.285066e-03        70.4        68.1
-           300     5.985019e-01   1.346082e-03        70.4        68.1
-           400     5.984499e-01   5.652419e-04        70.4        68.1
-           500     5.984407e-01   2.397222e-04        70.4        68.1
-           600     5.984390e-01   1.021176e-04        70.4        68.1
-           700     5.984387e-01   4.358969e-05        70.4        68.1
-           800     5.984386e-01   1.862473e-05        70.4        68.1
-           900     5.984386e-01   7.961601e-06        70.4        68.1
-          1000     5.984386e-01   3.404165e-06        70.4        68.1
-          2000     5.984386e-01   6.966292e-10        70.4        68.1
+             1     6.331859e-01   5.814835e-02        64.8        72.3
+             2     6.297179e-01   5.219133e-02        65.5        72.3
+             3     6.270597e-01   4.685156e-02        65.5        72.3
+             4     6.249710e-01   4.206204e-02        65.5        74.5
+             5     6.232939e-01   3.776188e-02        66.2        72.3
+             6     6.219223e-01   3.389750e-02        66.2        68.1
+             7     6.207825e-01   3.042218e-02        66.2        68.1
+             8     6.198221e-01   2.729516e-02        67.6        70.2
+             9     6.190026e-01   2.448072e-02        69.0        70.2
+            10     6.182956e-01   2.194733e-02        69.0        70.2
+            20     6.142957e-01   1.420099e-02        68.3        68.1
+            30     6.122707e-01   1.320719e-02        69.0        68.1
+            40     6.108433e-01   1.207939e-02        69.0        68.1
+            50     6.097463e-01   1.101070e-02        69.0        68.1
+            60     6.088795e-01   1.004112e-02        69.0        68.1
+            70     6.081844e-01   9.171929e-03        69.0        68.1
+            80     6.076205e-01   8.393774e-03        69.0        68.1
+            90     6.071589e-01   7.695445e-03        69.0        68.1
+           100     6.067781e-01   7.066574e-03        69.0        68.1
+           200     6.051384e-01   3.179663e-03        69.0        68.1
+           300     6.048092e-01   1.494784e-03        69.0        68.1
+           400     6.047365e-01   7.132578e-04        69.0        68.1
+           500     6.047199e-01   3.424050e-04        69.0        66.0
+           600     6.047161e-01   1.648111e-04        69.0        66.0
+           700     6.047152e-01   7.942485e-05        69.0        66.0
+           800     6.047150e-01   3.829727e-05        69.0        66.0
+           900     6.047149e-01   1.847104e-05        69.0        66.0
+          1000     6.047149e-01   8.909789e-06        69.0        66.0
+          2000     6.047149e-01   6.082011e-09        69.0        66.0
 The maximum absolute gradient became lower than 1.0e-06.
 
 Total iterations = 2000
 
-Final X-entropy error in the training set = 5.984386e-01.
-Log likelihood = -8.497828e+01
-Final X-entropy error in the test set = 5.815851e-01.
-Log likelihood = -2.733450e+01
+Final X-entropy error in the training set = 6.047149e-01.
+Log likelihood = -8.586952e+01
+Final X-entropy error in the test set = 5.677562e-01.
+Log likelihood = -2.668454e+01
 
 Training set:
 -------------
-Classification accuracy: 70.4%
-Sensitivity: 4.5%
+Classification accuracy: 69.0%
+Sensitivity: 0.0%
 Specificity: 100.0%
-Predictive value positive: 100.0%
-Predictive value negative: 70.0%
+Predictive value positive: division by zero
+Predictive value negative: 69.0%
 Classification table for training set:
 ----------------------------------
          Predicted T   Predicted F
          -----------   -----------
-Known T:           2            42
+Known T:           0            44
 Known F:           0            98
 ----------------------------------
-By statistical method, ROC area = 0.620527
-95% CI = 0.515316 - 0.720378 (SE = 0.050920, 2000 bootstrap resamples)
-Chi-squared = 15.092772
+By statistical method, ROC area = 0.604450
+95% CI = 0.499846 - 0.702164 (SE = 0.052756, 2000 bootstrap resamples)
+Chi-squared = 43.954238
 p = 1.000000e+00 (closer to 1 is better)
-Operating points fitted = 127
-By trapezoidal method, ROC area = 0.621173
-95% CI = 0.518810 - 0.723537 (SE = 0.052226, Hanley-McNeil)
-Kolmogorov-Smirnov goodness of fit D = 0.204082, p = 0.139907
-Pearson X2 = 142.643 (n = 142; no valid p at the individual level - see Hosmer-Lemeshow)
-Hosmer-Lemeshow goodness of fit p = 0.746803
+Operating points fitted = 128
+By trapezoidal method, ROC area = 0.604940
+95% CI = 0.502031 - 0.707848 (SE = 0.052504, Hanley-McNeil)
+Kolmogorov-Smirnov goodness of fit D = 0.258349, p = 0.0281866
+Pearson X2 = 142.494 (n = 142; no valid p at the individual level - see Hosmer-Lemeshow)
+Hosmer-Lemeshow goodness of fit p = 0.0759705
 
 Test set:
 ---------
-Classification accuracy: 68.1%
+Classification accuracy: 66.0%
 Sensitivity: 0.0%
-Specificity: 100.0%
-Predictive value positive: division by zero
-Predictive value negative: 68.1%
+Specificity: 96.9%
+Predictive value positive: 0.0%
+Predictive value negative: 67.4%
 Classification table for test set:
 ----------------------------------
          Predicted T   Predicted F
          -----------   -----------
 Known T:           0            15
-Known F:           0            32
+Known F:           1            31
 ----------------------------------
-By statistical method, ROC area = 0.669981
-95% CI = 0.486106 - 0.814210 (SE = 0.085369, 2000 bootstrap resamples)
-Chi-squared = 3.741584
-p = 1.000000e+00 (closer to 1 is better)
-Operating points fitted = 37
-By trapezoidal method, ROC area = 0.678125
-95% CI = 0.506121 - 0.850129 (SE = 0.087757, Hanley-McNeil)
-Kolmogorov-Smirnov goodness of fit D = 0.310417, p = 0.229615
-Pearson X2 = 45.4687 (n = 47; no valid p at the individual level - see Hosmer-Lemeshow)
-Hosmer-Lemeshow goodness of fit p = 0.733198
+By statistical method, ROC area = 0.755750
+95% CI = 0.605090 - 0.878771 (SE = 0.069478, 2000 bootstrap resamples)
+Chi-squared = 6.321586
+p = 9.999972e-01 (closer to 1 is better)
+Operating points fitted = 31
+By trapezoidal method, ROC area = 0.760417
+95% CI = 0.602531 - 0.918302 (SE = 0.080554, Hanley-McNeil)
+Kolmogorov-Smirnov goodness of fit D = 0.554167, p = 0.00202862
+Pearson X2 = 40.9182 (n = 47; no valid p at the individual level - see Hosmer-Lemeshow)
+Hosmer-Lemeshow goodness of fit p = 0.196283
 
    Input:       Beta weight:     Std Err:    Wald p(W!=0):
 -----------    -------------   ------------  -------------
-          0        -0.294871       0.481895           0.54
-          1        -0.853205       0.612047           0.16
-          2        -0.262444       0.236300           0.27
-          3        0.0929009       0.327097           0.78
-          4         0.267006       0.427679           0.53
-y-intercept        -0.985722       0.371225         0.0079
+          0        -0.300760       0.477510           0.53
+          1         -1.04926       0.658765           0.11
+          2       -0.0511790       0.229057           0.82
+          3         0.156844       0.351178           0.66
+          4        0.0778022       0.433775           0.86
+y-intercept         -1.08258       0.397513         0.0065
 
-B matrix maximum eigenvalue = 0.42
-         minimum eigenvalue = 0.017
-Condition number = 25.
+B matrix maximum eigenvalue = 0.43
+         minimum eigenvalue = 0.014
+Condition number = 30.
 
 Would you like to save this model (yes/no)? 
 ( 1 ) Randomize weights

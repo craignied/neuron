@@ -77,10 +77,22 @@ add_test(NAME plateau_detector COMMAND check_plateau)
 # GUI/server contract). No GSL needed.
 add_executable(check_capture
     tests/capture/check_capture.cpp
-    src/dataset.cpp src/twoset.cpp src/stats.cpp src/matrix.cpp
+    src/dataset.cpp src/split.cpp src/twoset.cpp src/stats.cpp src/matrix.cpp
     src/vector_ops.cpp src/utility.cpp)
 target_include_directories(check_capture PRIVATE src)
 add_test(NAME screen_capture COMMAND check_capture)
+
+# Unit test: the stratified test-set splitter (ROADMAP 4 Phase 1). Pins exact
+# apportionment, stratification, a leakage-free partition, and seed
+# reproducibility at the index level, PLUS a DataSet::randomize integration
+# pass (correct row gather, training-set-limit normalization of both sets,
+# loaded-state flags, and the all-test / zero-test boundaries). No GSL.
+add_executable(check_split
+    tests/split/check_split.cpp
+    src/split.cpp src/dataset.cpp src/twoset.cpp src/stats.cpp
+    src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
+target_include_directories(check_split PRIVATE src)
+add_test(NAME split_stratified COMMAND check_split)
 
 # Unit test: the OBD hidden-layer resizing primitives AND the grow-then-prune
 # sizing driver (ROADMAP 2 Phase 4). Trains real SimpleProp networks and runs
@@ -90,7 +102,7 @@ add_executable(check_obd
     tests/obd/check_obd.cpp
     src/obd.cpp src/netclone.cpp src/autoalgo.cpp
     src/simpleprop.cpp src/bareprop.cpp src/backprop.cpp src/logistic.cpp
-    src/network.cpp src/iterative.cpp src/model.cpp src/dataset.cpp
+    src/network.cpp src/iterative.cpp src/model.cpp src/dataset.cpp src/split.cpp
     src/twoset.cpp src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
 target_include_directories(check_obd PRIVATE src)
 target_link_libraries(check_obd PRIVATE GSL::gsl GSL::gslcblas)

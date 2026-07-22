@@ -26,42 +26,8 @@ vector< double >& nvec::random( vector< double >& v, const double n )
 	return v; // enables use in vector formulae
 }
 
-// Takes a vector and fills it with unique random integers from 0 to
-//    size of vector - 1
-// Example: random_positions( v );
-vector< unsigned >& nvec::random_positions( vector< unsigned >& v )
-{
-	// Seed the random number generator
-	util::d_random();
-
-	unsigned n = v.size(), // number of elements in vector
-		random; // a random integer
-
-	assert( n > 0 ); // vector must have at least 1 element
-
-	v[ 0 ] = util::i_random( n ); // make random 1st element
-
-	// Loop through vector, referencing each element with index i
-	for ( unsigned i = 1; i < n; i++ )
-	{ 
-		random = util::i_random( n ); // make a new random number
-		unsigned j = 0; // reset index j for elements prior to index i
-		
-		// Scan through the vector elements prior to index i to see if
-		//    the number is unique, change it until it is 
-		while ( j < i )
-		{
-			if ( v[ j ] == random ) // found previous instance of random number
-			{
-				random = util::i_random( n ); // make a new random number
-				j = 0; // and reset index j for elements prior to index i
-			}
-			else
-				j++; // did not find match, so advance to next instance
-		}
-		
-		v[ i ] = random; // no previous matches, so set element to new random number
-	}
-
-	return v; // enables use in vector formulae
-}
+// (nvec::random_positions was retired 2026-07-22 -- it drew a full permutation
+//    by rejection sampling, rescanning from 0 on every collision, which is
+//    O(n^2) and catastrophic on the 220k-row SEER negatives. The stratified
+//    splitter now uses a partial Fisher-Yates on row indices; see src/split.cpp
+//    and ROADMAP 4 in CLAUDE.md.)
