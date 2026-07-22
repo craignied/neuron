@@ -32,9 +32,11 @@ in urology and reproductive medicine.
 ## Design
 
 - **Hybrid stack** — a C++ engine for speed, Python for data preparation and tooling
-- **Simple, portable interface** — plain CLI, no heavy frameworks, easy to port
+- **Simple, portable interface** — a plain CLI plus an embedded local web GUI (a single
+  vendored header, no heavy frameworks), easy to port
 - **Full engine scope** — the neural networks and all of the statistical machinery
-  (the novel and useful core) are carried forward; the legacy model exporters are not
+  (the novel and useful core) are carried forward. Of the legacy exporters, the web
+  HTML calculator is reborn as `tools/neuron2web.py`; the Palm OS and iPhone ones are not
 
 ## Building
 
@@ -192,8 +194,10 @@ instead of zero. Fixing that widened the interval to its honest width.)
 negatively biased — it connects operating points by straight lines where real
 isosensitivity contours are bowed — and the bias grows when points are few or bunched
 (Wickens 2002, pp. 70–71). Unless there is specific reason to doubt the Gaussian model,
-A_z is preferable (p. 72). The trapezoidal area is retained because its variance
-estimator rests on different assumptions, making agreement between the two meaningful.
+A_z is preferable (p. 72). The trapezoidal area is the exact non-parametric AUC — the
+Mann–Whitney *U* statistic over every operating point — and is retained because its
+Hanley–McNeil variance estimator rests on different assumptions than the bootstrap,
+making agreement between the two meaningful.
 
 **Validated against the literature.** Wickens' own worked example (Table 5.1, p. 84 —
 rating data he analyses by hand through chapter 5, publishing A_z = 0.784 on p. 90) is a
@@ -233,7 +237,15 @@ the answer. It is gone.
 
 ## Status
 
-The full neUROn2++ engine builds as `neuron 3.0.0-dev` — C++17-clean, zero warnings,
-verified numerically identical to the legacy binary on a saved-network forward pass
-and equivalent on endpoint statistics for XOR training. Modernization proceeds from
-this verified base. See `CLAUDE.md` for current project state.
+The full neUROn2++ engine is ported and modernized in place as `neuron 3.0.0-dev` —
+C++17-clean, zero warnings, and cross-verified numerically identical to the legacy 2.6.4
+binary (the "oracle") on every shared code path. On that base: the embedded web GUI
+(`neuron --gui`) is now the primary interface — async training with a realtime error
+chart, automatic algorithm selection, plateau auto-stop, and OBD hidden-layer sizing —
+while the frozen CLI menus remain fully functional; the ROC statistics were rebuilt on a
+documented signal-detection-theory basis (above, and `docs/roc_theory.md`); Python tooling
+grooms data (`mkdataset.py`) and deploys trained models as standalone HTML calculators
+(`neuron2web.py`); and nine long-standing bugs in the 1992–2016 code — several in the ROC
+and goodness-of-fit routines — have been found and fixed, each pinned by a test proven to
+catch it. Every push is green on the
+macOS/Linux/Windows CI matrix. See `CLAUDE.md` for the detailed running state and roadmap.
