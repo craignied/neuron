@@ -101,6 +101,13 @@ public:
 	bool randomize( const unsigned, const unsigned );
 	bool randomizeD( const double );
 
+	// Materialize a train/test partition from explicit Raw row indices, scaling
+	//    both sets from the training set (ROADMAP 4 Phase 4). randomize() and
+	//    cross-validation share this one path; DataSet owns fold materialization
+	//    but not the choice of model (rule 6).
+	void makeFold( const vector< unsigned >& trainRows,
+		const vector< unsigned >& testRows );
+
 	// Stratification accessors (ROADMAP 4 Phase 2). By default the split is
 	//    stratified on the outcome only. Naming input data columns here also
 	//    stratifies on those covariates: a column with few distinct values

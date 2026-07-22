@@ -1199,9 +1199,19 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   (`specify_model`) AND the GUI (`handleModel`) both call it — neither copies (a real
   CLI↔GUI DRY win independent of CV). Proven behavior-preserving: goldens byte-identical
   (they drive CLI creation of SimpleProp/BackProp/Logistic), oracle numerically identical,
-  8/8 ctest, smoke green. **Next in 4b-refactor:** extract the training-config application
-  (the ~15 `handleTrain` setters + the CLI `use_model` flow) into a `TrainingConfig`; then
-  4b-CV (`DataSet::makeFold` + the CV orchestrator + `/api/cv`) and 4c (three-way split).
+  8/8 ctest, smoke green.
+  **`DataSet::makeFold` landed 2026-07-22 (behavior-preserving).** Factored `randomize`'s
+  gather+normalize+flags tail into `makeFold(trainRows, testRows)` — DataSet owns fold
+  materialization (rule 6), the one trusted path randomize() and CV both use. Goldens
+  byte-identical, oracle identical, 8/8 ctest. **Design fork surfaced on `TrainingConfig`:**
+  since `Network::copy`/`Iterative::copy` already carry the full training config (that is how
+  autoalgo's probe clones work), the CV loop should **clone a configured model per fold**
+  (netclone + copy, existing machinery) rather than re-apply settings — a separate
+  `TrainingConfig` would be a *second* config-application path, against DRY. So the plan is
+  now: CV orchestrator clones the user's configured model per fold, `setDataSet(foldData)`,
+  reset weights, `train()`, evaluate — no `TrainingConfig` extraction unless clone-carries-
+  config proves insufficient. **Next: the CV orchestrator (`src/crossval.{h,cpp}`) + `/api/cv`**,
+  then 4c (three-way split). Awaiting Craig's nod on the clone-based approach.
 
 ## ROADMAP 4 (agreed with Craig 2026-07-22) — a general representative test-set splitter
 

@@ -791,24 +791,10 @@ bool DataSet::randomize( const unsigned nTest )
 
 		unsigned nZerosTest = n0Test, nOnesTest = n1Test; // legacy report names
 
-		// Gather the chosen rows in a single sized allocation each (the
-		//    bounds-checked class-layer primitive, rule 4).
-		TestSetData = Raw.includerows( testRows );
-		TrainSetData = Raw.includerows( trainRows );
-
-		minimax( TrainSetData ); // compute the minima and maxima vectors
-
-		normalize( TrainSetData ); // normalize the training set
-
-		trainLoadedFlag = true; // set the train data loaded flag
-
-		// Normalize the test set with minima and maxima vectors derived from
-		//    the training set
-		normalize( TestSetData );
-
-		// A test set only exists if it received rows: flagging an empty one
-		//    as loaded made later training underflow on ( nTest - 1 )
-		testLoadedFlag = ( TestSetData.rows() > 0 );
+		// Gather the chosen rows and normalize both sets from the training
+		//    scale -- the one trusted materialization path (also used per fold
+		//    by cross-validation, ROADMAP 4 Phase 4).
+		makeFold( trainRows, testRows );
 
 		// Easier on the eyes
 		unsigned nTrain = TrainSetData.rows(), // number of examples in training set
@@ -912,6 +898,28 @@ bool DataSet::randomizeD( const double ratio )
 	}
 
 	return success; // return if operation successful
+}
+
+// Materialize a train/test partition from explicit Raw row indices (ROADMAP 4
+//    Phase 4): gather each set with the bounds-checked class-layer primitive
+//    (rule 4), derive the scaling from the TRAINING set only, and normalize both
+//    with it. This is the single trusted path that randomize() and
+//    cross-validation both use to build a fold's sets; it sets the loaded flags
+//    (an empty test set is flagged not-loaded, so training never underflows on
+//    nTest-1). It does NOT decide which model to train -- that is not DataSet's
+//    business (rule 6).
+void DataSet::makeFold( const vector< unsigned >& trainRows,
+	const vector< unsigned >& testRows )
+{
+	TestSetData = Raw.includerows( testRows );
+	TrainSetData = Raw.includerows( trainRows );
+
+	minimax( TrainSetData );   // scaling from the training set
+	normalize( TrainSetData );
+	trainLoadedFlag = true;
+
+	normalize( TestSetData );  // test normalized with the training scale
+	testLoadedFlag = ( TestSetData.rows() > 0 );
 }
 
 // Build a per-row stratum id from the outcome and the named stratum columns
