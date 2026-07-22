@@ -69,6 +69,23 @@ table.coef th, table.coef td { border: 1px solid #ddd; padding: .2rem .5rem; tex
 table.coef th { background: #f4f6fb; } table.coef td.name { text-align: left; }
 .row { margin: .45rem 0; }
 .foot { margin-top: 1.2rem; font-size: .75rem; color: #777; }
+/* Inline "why not?" help popup (e.g. next to covariate stratification) */
+.help { position: relative; display: inline-block; }
+.helpbtn { border: 1px solid #bbb; background: #f4f6fb; color: #2563eb;
+          border-radius: 50%; width: 1.4em; height: 1.4em; font-size: .8rem;
+          line-height: 1; padding: 0; cursor: pointer; font-weight: 600; }
+.helpbox { display: none; position: absolute; z-index: 10; top: 1.8em; left: 0;
+          width: 28rem; max-width: 82vw; background: #fff; border: 1px solid #ddd;
+          border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,.16);
+          padding: .8rem 1rem; font-size: .82rem; color: #333; white-space: normal; }
+.helpbox.show { display: block; }
+.helpbox h4 { margin: 0 0 .4rem; font-size: .9rem; }
+.helpbox p { margin: .4rem 0; }
+.helpbox ul { margin: .3rem 0; padding-left: 1.1rem; }
+.helpbox li { margin: .28rem 0; }
+.helpbox .close { float: right; cursor: pointer; color: #999; border: none;
+          background: none; font-size: 1.1rem; line-height: 1; padding: 0; }
+.helpbox .aside { color: #777; }
 </style>
 </head>
 <body>
@@ -129,6 +146,34 @@ table.coef th { background: #f4f6fb; } table.coef td.name { text-align: left; }
     style="width:6em"></label>
   <label title="Quantile bins for a continuous stratum column">bins
     <input class="num" type="number" id="strata_bins" min="2" placeholder="4"></label>
+  <span class="help">
+    <button type="button" class="helpbtn" onclick="toggleHelp()"
+      title="When not to use covariate stratification">?</button>
+    <div class="helpbox" id="strataHelp">
+      <button type="button" class="close" onclick="toggleHelp()"
+        title="close">&times;</button>
+      <h4>Covariate stratification &mdash; when <em>not</em> to</h4>
+      <p>The <b>outcome</b> is always balanced &mdash; that part is free. Balancing on
+        <b>covariates</b> too is a judgment call, not a free upgrade. Leave it off when:</p>
+      <ul>
+        <li>you want the holdout to <b>detect covariate drift</b> &mdash; matching the
+          test set to the training mix hides the very shift a held-out set exists to catch;</li>
+        <li>you want an <b>independent</b> estimate, not a balanced one (matching makes
+          train and test more alike than two fresh samples, narrowing apparent variance);</li>
+        <li><b>n is large</b> &mdash; the outcome-only split already reproduces the covariate
+          mix to a few parts per thousand, so this buys a rounding-level guarantee, not
+          real precision;</li>
+        <li>it would <b>fragment the data</b> &mdash; too many columns or bins make thin
+          cells that round to zero test rows (watch the diagnostic's &ldquo;too small to
+          place any test exemplar&rdquo; line).</li>
+      </ul>
+      <p><b>Use it</b> when you will report performance <em>within</em> a subgroup, or the
+        data are small enough that a random draw could imbalance a strong predictor.</p>
+      <p class="aside">Balancing makes the test <i>resemble</i> your sample; for a
+        <i>harder</i> test &mdash; new patients from sites the model never trained on
+        &mdash; use a group-aware split instead.</p>
+    </div>
+  </span>
 </div>
 <div class="row">
   <button onclick="loadData()">Load dataset</button><span class="status" id="dstatus"></span>
@@ -348,6 +393,7 @@ this page shows the statistics. The command-line interface remains available.</p
 <script>
 "use strict";
 function $(id) { return document.getElementById(id); }
+function toggleHelp() { $("strataHelp").classList.toggle("show"); }
 function setStatus(id, ok, text) {
   const el = $(id);
   el.textContent = text;
