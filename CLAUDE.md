@@ -1035,6 +1035,23 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   mechanism (a missing Content-Length header) was pinned by sampling the stalled
   process. Measure the failing thing itself, not the theory about it.
 
+- **2026-07-21 (later) — the standing browser-verification debt is CLEARED.**
+  Drove `neuron --gui` in Chrome (extension connected) on the lowbwt set through
+  the OBD panel and the ROC plot — the two things every prior entry deferred.
+  Verified in a real browser: (1) the OBD panel renders with every control
+  (start/max hidden, iteration budget, algorithm, overtrain tol, grow patience);
+  (2) a Run OBD search completes and its **size-vs-error chart renders correctly**
+  — grow-then-prune x axis (2→5 then 5→1), train/test lines in the two entity
+  colors, dots, the dashed "selected" annotation, and a working hover tooltip
+  showing `grow · 4 hidden · train … · test … · CA 68.4%/69.6%` (the per-size CA
+  from Craig's 4da6f48 flows through); (3) the **drawROC fix is correct at pixel
+  level** — zoomed, both curves are clean step functions from (0,0) to (1,1) with
+  NO spurious chord (the old descending-sweep stitching would have drawn a line
+  from the top-right corner back to the origin); (4) the weight-decay λ field is
+  pre-filled `5e-5`; (5) the realtime training-error chart streams during the
+  search. **Zero page JS errors** (the only console messages were Chrome-extension
+  connection noise, not page code). Verification only — no code changed.
+
 - **2026-07-20 — ROADMAP 2 Phase 4 DONE: OBD hidden-layer sizing. Its central
   mechanism was redesigned mid-build after Craig asked the right question.** The
   plan (`docs/obd_plan.md`, written by Fable 2026-07-19 and verified against the
