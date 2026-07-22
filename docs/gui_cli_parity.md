@@ -117,6 +117,7 @@ have **no CLI equivalent by design** — that is not a parity gap.
 | OBD hidden-layer sizing (grow-then-prune, validation early stopping) | OBD panel + size-vs-error chart | `POST /api/obd` (async; `GET /api/train/status` `obd{phase,hidden}`) | — n/a (menus frozen) |
 | Covariate stratification of the raw split + representativeness diagnostic (ROADMAP 4 Phase 2) | Dataset panel "Stratify on" columns + bins | `POST /api/load` `strata=` (1-based cols) `strata_bins=` | — n/a (the CLI already stratifies on the outcome; covariate strata are new, menus frozen) |
 | Group-aware split — keep clusters intact for a harder unseen-group test (ROADMAP 4 Phase 3) | Dataset panel "Group on" columns | `POST /api/load` `group=` (1-based cols; rows with identical values stay together) | — n/a (new capability, menus frozen) |
+| Three-way split — train/validation/test so selection (OBD) monitors validation and the test set stays untouched (ROADMAP 4 Phase 4c) | Dataset panel "Validation fraction" | `POST /api/load` `val_fraction=` (or `val_n=` with `test_n=`) | — n/a (new capability, menus frozen) |
 
 `POST /api/obd` params: `hidden_start`, `hidden_max`, `iter_budget`,
 `sample_every`, `early_stop_tol`, `early_stop_patience`, `grow_patience`,

@@ -687,7 +687,39 @@ string handleLoad( const httplib::Request& req )
 					ds->setGroupColumns( cols );
 				}
 
-				if ( !testNStr.empty() )
+				// Phase 4c: a validation fraction/count triggers a THREE-WAY
+				//    (train/validation/test) split -- outcome-stratified, so
+				//    selection (OBD) monitors the validation set and the test
+				//    set stays untouched. Does not compose with covariate strata
+				//    / grouping yet.
+				string valFracStr = param( req, "val_fraction" );
+				string valNStr = param( req, "val_n" );
+				if ( !valFracStr.empty() || !valNStr.empty() )
+				{
+					if ( !ds->getStrataColumns().empty()
+						|| !ds->getGroupColumns().empty() )
+						return jsonMsg( false, "a validation (three-way) split is "
+							"outcome-stratified only; remove strata=/group= or the "
+							"validation fraction" );
+
+					if ( !valNStr.empty() ) // exact-count form (paired with test_n)
+					{
+						if ( testNStr.empty() )
+							return jsonMsg( false, "val_n needs test_n (the count form)" );
+						if ( atol( valNStr.c_str() ) < 1 )
+							return jsonMsg( false, "val_n must be at least 1" );
+						ok = ds->randomize3( ( unsigned ) atol( testNStr.c_str() ),
+							( unsigned ) atol( valNStr.c_str() ) );
+					}
+					else // fraction form (paired with fraction)
+					{
+						double vf = atof( valFracStr.c_str() );
+						if ( !( vf > 0 && vf < 1 ) )
+							return jsonMsg( false, "val_fraction must be between 0 and 1" );
+						ok = ds->randomize3D( fraction, vf );
+					}
+				}
+				else if ( !testNStr.empty() )
 					ok = ds->randomize( ( unsigned ) atol( testNStr.c_str() ) );
 				else
 					ok = ds->randomizeD( fraction );
@@ -750,6 +782,8 @@ string handleLoad( const httplib::Request& req )
 	msg << ds->getInput() << " inputs, " << ds->getOutput() << " output"
 		<< ( ds->getOutput() == 1 ? "; " : "s; " )
 		<< ds->getNumTrain() << " training exemplars";
+	if ( ds->valLoaded() )
+		msg << ", " << ds->getNumVal() << " validation exemplars";
 	if ( ds->testLoaded() )
 		msg << ", " << ds->getNumTest() << " test exemplars";
 	msg << " loaded";

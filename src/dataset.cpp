@@ -903,6 +903,123 @@ bool DataSet::randomizeD( const double ratio )
 	return success; // return if operation successful
 }
 
+// Three-way split into training / validation / test (ROADMAP 4 Phase 4c), each
+//    stratified on the outcome. The validation set is what model/architecture
+//    selection (OBD) monitors, so the test set is untouched until final
+//    evaluation. Implemented as two nested stratified holdouts: peel off the
+//    test set, then peel the validation set off the remainder.
+bool DataSet::randomize3( const unsigned nTest, const unsigned nVal )
+{
+	bool success = false;
+
+	if ( !rawLoadedFlag )
+		util::screen() << "I'm sorry, but I can't make a three-way split:"
+			<< endl << "No raw dataset has been loaded." << endl;
+
+	else if ( Raw.cols() != ( nInput + nOutput ) )
+		util::screen() << "I'm sorry, but I can't make a three-way split:"
+			<< endl << "The number of columns in the raw dataset doesn't match"
+			<< endl << "the number of inputs and outputs." << endl;
+
+	else if ( nOutput != 1 )
+		util::screen() << "I'm sorry, but I can't make a three-way split:"
+			<< endl << "the method is only coded for 1 output." << endl;
+
+	else if ( ( nTest + nVal ) >= Raw.rows() )
+		util::screen() << "I'm sorry, but I can't make a three-way split:"
+			<< endl << "the test and validation sets together must leave at least"
+			<< endl << "one training exemplar." << endl;
+
+	else if ( !discreteFlag )
+		util::screen() << "I'm sorry, but I can't make a three-way split:"
+			<< endl << "the output must be discrete." << endl;
+
+	else if ( !checkDiscrete( Raw ) )
+		util::screen() << "I'm sorry, but I can't make a three-way split:"
+			<< endl << "Discrete output is specified, but there were outputs that"
+			<< endl << "were neither 0 nor 1 in the raw dataset." << endl;
+
+	else // everything checks out
+	{
+		unsigned r;
+		vector< unsigned > label( Raw.rows() );
+		for ( r = 0; r < Raw.rows(); r++ )
+			label[ r ] = ( Raw( r, ( Raw.cols() - 1 ) ) == 0 ) ? 0u : 1u;
+
+		// Peel off the test set, then the validation set from the remainder.
+		nsplit::Holdout hTest = nsplit::stratifiedHoldout( label, nTest );
+
+		vector< unsigned > restLabel( hTest.train.size() );
+		for ( r = 0; r < hTest.train.size(); r++ )
+			restLabel[ r ] = label[ hTest.train[ r ] ];
+		nsplit::Holdout hVal = nsplit::stratifiedHoldout( restLabel, nVal );
+
+		// Map the validation/train indices (into the remainder) back to Raw rows.
+		vector< unsigned > valRows, trainRows;
+		valRows.reserve( hVal.test.size() );
+		trainRows.reserve( hVal.train.size() );
+		for ( r = 0; r < hVal.test.size(); r++ )
+			valRows.push_back( hTest.train[ hVal.test[ r ] ] );
+		for ( r = 0; r < hVal.train.size(); r++ )
+			trainRows.push_back( hTest.train[ hVal.train[ r ] ] );
+
+		makeFold( trainRows, hTest.test, valRows );
+
+		// Event counts per set for the report.
+		unsigned nAll = Raw.rows(), n1All = 0, n1Train = 0, n1Val = 0, n1Test = 0;
+		for ( r = 0; r < nAll; r++ ) n1All += label[ r ];
+		for ( r = 0; r < trainRows.size(); r++ ) n1Train += label[ trainRows[ r ] ];
+		for ( r = 0; r < valRows.size(); r++ ) n1Val += label[ valRows[ r ] ];
+		for ( r = 0; r < hTest.test.size(); r++ ) n1Test += label[ hTest.test[ r ] ];
+
+		unsigned nTr = TrainSetData.rows(), nVa = ValSetData.rows(),
+			nTe = TestSetData.rows();
+
+		ostringstream fileStream;
+		fileStream << "I've split a raw dataset into training, validation, and "
+			<< "test sets," << endl
+			<< "each stratified on the outcome. Selection (e.g. OBD) monitors the"
+			<< endl << "validation set; the test set is held out for final "
+			<< "evaluation." << endl
+			<< "The raw dataset had " << nAll << " exemplars (" << n1All
+			<< " events, rate " << ( ( double ) n1All / nAll ) << ")." << endl
+			<< "   Training set:   " << nTr << " exemplars (" << n1Train
+			<< " events, rate " << ( nTr ? ( double ) n1Train / nTr : 0.0 ) << ")." << endl
+			<< "   Validation set: " << nVa << " exemplars (" << n1Val
+			<< " events, rate " << ( nVa ? ( double ) n1Val / nVa : 0.0 ) << ")." << endl
+			<< "   Test set:       " << nTe << " exemplars (" << n1Test
+			<< " events, rate " << ( nTe ? ( double ) n1Test / nTe : 0.0 ) << ")."
+			<< endl << endl;
+
+		util::screen() << fileStream.str();
+
+		if ( historyFlag )
+			addHistory( fileStream );
+
+		success = true;
+	}
+
+	return success;
+}
+
+// Three-way split by decimal fractions of the raw dataset (Phase 4c).
+bool DataSet::randomize3D( const double testRatio, const double valRatio )
+{
+	assert( testRatio >= 0 && valRatio >= 0 && ( testRatio + valRatio ) <= 1 );
+
+	if ( !rawLoadedFlag )
+	{
+		util::screen() << "I'm sorry, but I can't make a three-way split:"
+			<< endl << "No raw dataset has been loaded." << endl;
+		return false;
+	}
+
+	unsigned nTest = ( unsigned ) ( testRatio * ( double ) Raw.rows() );
+	unsigned nVal = ( unsigned ) ( valRatio * ( double ) Raw.rows() );
+
+	return randomize3( nTest, nVal );
+}
+
 // Materialize a train/test partition from explicit Raw row indices (ROADMAP 4
 //    Phase 4): gather each set with the bounds-checked class-layer primitive
 //    (rule 4), derive the scaling from the TRAINING set only, and normalize both

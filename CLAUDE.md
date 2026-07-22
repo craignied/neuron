@@ -1240,9 +1240,18 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   force-always-Test sabotage (rule 2). **Report spec written** (`docs/evaluation_report_spec.md`,
   commit `7778c80`): layered — one-screen Tier-1 headline table, Tier-2 detail, Tier-3
   machine-readable files never printed; two audiences (human = Tier 1, LLM = full report).
-  **Next in 4c: the three-way split PRODUCER** (`randomize3` / a val fraction) + UI so the
-  single-split primary-analysis workflow can make train/val/test; then the coordinator/runner/
-  adapters (verify the clone→`setDataSet(fold)` rebind first).
+  **4c three-way split producer + UI landed 2026-07-22 — 4c DONE.** `DataSet::randomize3(nTest,
+  nVal)` / `randomize3D(testRatio, valRatio)`: two nested outcome-stratified holdouts (peel off
+  test, then validation from the remainder), materialized through `makeFold`; a per-set report
+  (train/val/test counts + event rates). GUI-beyond-CLI: `/api/load` `val_fraction=` (or `val_n=`
+  with `test_n=`) → a three-way split; Dataset-panel "Validation fraction" field; the load message
+  reports the validation set. Outcome-stratified only for now — a request combining `val_fraction`
+  with `strata=`/`group=` is refused (they don't compose yet). ctest `split_stratified` pins the
+  producer (120/30/50 partition + val loaded + the leave-no-training refusal); smoke asserts the
+  three-way load + the strata refusal. Gates green (goldens byte-identical, oracle identical, 8/8
+  ctest, smoke). Verified end-to-end: lowbwt 189 → 114 train / 28 val / 47 test. **4c is complete:
+  the OBD-on-test leak is fixed AND reachable from the single-split workflow.** **Next: the CV
+  coordinator/runner/adapters** — verify the clone→`setDataSet(fold)` rebind first (rule 3).
 
 ## ROADMAP 4 (agreed with Craig 2026-07-22) — a general representative test-set splitter
 

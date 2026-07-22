@@ -572,6 +572,40 @@ int main()
 		expect( !sameVec( f1, f3 ), "kfold: a different seed reassigns the folds" );
 	}
 
+	// ---- Phase 4c: three-way split producer (train/validation/test) ---------
+	{
+		Matrix< double > traw( 200, 3 );
+		for ( unsigned r = 0; r < 200; r++ )
+		{
+			traw( r, 0 ) = ( double ) ( r % 50 );
+			traw( r, 1 ) = 0.0;
+			traw( r, 2 ) = ( r % 4 == 0 ) ? 1.0 : 0.0; // 25% positives
+		}
+		DataSet tds;
+		tds.setInput( 2 ); tds.setOutput( 1 ); tds.setDiscrete( true );
+		tds.setHistory( false );
+		tds.setRawMatrix( traw );
+
+		util::set_seed( 3 );
+		ostringstream sink;
+		util::set_screen( sink );
+		bool ok = tds.randomize3( 50, 30 ); // 50 test, 30 validation, 120 train
+		util::set_screen( cout );
+
+		// Sizes summing to n imply a clean partition; a validation set exists.
+		expect( ok && tds.getNumTest() == 50 && tds.getNumVal() == 30 &&
+			tds.getNumTrain() == 120 &&
+			tds.getNumTrain() + tds.getNumVal() + tds.getNumTest() == 200 &&
+			tds.valLoaded(),
+			"randomize3: 120/30/50 train/val/test partition with a validation set" );
+
+		// Refuse a split that leaves no training exemplar.
+		util::set_screen( sink );
+		bool tooBig = tds.randomize3( 150, 60 ); // 150 + 60 >= 200
+		util::set_screen( cout );
+		expect( !tooBig, "randomize3 refuses a split that leaves no training data" );
+	}
+
 	if ( failures == 0 )
 	{
 		cout << "check_split: stratified holdout is exact, balanced, and reproducible"

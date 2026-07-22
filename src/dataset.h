@@ -111,6 +111,14 @@ public:
 	bool randomize( const unsigned, const unsigned );
 	bool randomizeD( const double );
 
+	// Three-way split into training / validation / test, each stratified on the
+	//    outcome (ROADMAP 4 Phase 4c). The validation set is what model/
+	//    architecture selection (OBD) monitors, so the test set stays untouched
+	//    until final evaluation -- the no-leakage invariant. nTest + nVal must
+	//    leave at least one training exemplar.
+	bool randomize3( const unsigned nTest, const unsigned nVal );
+	bool randomize3D( const double testRatio, const double valRatio );
+
 	// Materialize a train/test (and optionally validation) partition from
 	//    explicit Raw row indices, scaling every set from the TRAINING set
 	//    (ROADMAP 4 Phase 4). randomize() and cross-validation share this one

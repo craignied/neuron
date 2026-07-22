@@ -379,6 +379,18 @@ what was achieved and states the zero-leakage guarantee. `group=` takes preceden
 over `strata=`. Do NOT use grouping when you actually want performance on new
 patients from KNOWN sites — that is the plain (optionally stratified) split.
 
+**Three-way split (`val_fraction=`) — hold out a validation set (ROADMAP 4
+Phase 4c).** By default the split is two-way (train/test) and automatic model
+selection (OBD hidden-layer sizing) early-stops on the TEST set — which means the
+net's reported test performance was tuned on the very rows it is scored on, an
+optimistic **leak** when you compare it against logistic/DFA that did not tune
+there. To avoid that, pass `val_fraction=` (a decimal, or `val_n=` with `test_n=`
+for exact counts): the split becomes **train / validation / test**, all
+outcome-stratified; OBD then monitors the **validation** set and the **test set
+stays untouched** until final evaluation. Use this whenever you run OBD and intend
+to report a fair comparison. It is outcome-stratified only — it does not compose
+with `strata=`/`group=` yet (the request is refused if you combine them).
+
 Every GUI/API user action is also appended — timestamped, with its exact
 parameter values — to **`neuron_actions.log`** in the run directory beside the
 data.

@@ -105,6 +105,9 @@ table.coef th { background: #f4f6fb; } table.coef td.name { text-align: left; }
     value="0.25" min="0" max="0.9" step="0.05">
     or exact n <input class="num" type="number" id="test_n" min="0"
     placeholder="fraction"></label>
+  <label id="valbox" title="Optional: also hold out a validation set. Selection (OBD) monitors it, so the test set stays untouched. Makes a three-way outcome-stratified split.">Validation fraction
+    <input class="num" type="number" id="val_fraction" min="0" max="0.9" step="0.05"
+    placeholder="none"></label>
   <span class="status">inputs are read from the file (its columns minus the outputs)</span>
 </div>
 <div class="row" id="testbox" style="display:none">
@@ -434,6 +437,7 @@ async function api(path, params) {
 $("mode").onchange = () => {
   const raw = $("mode").value === "raw";
   $("fracbox").style.display = raw ? "" : "none";
+  $("valbox").style.display = raw ? "" : "none";
   $("testbox").style.display = raw ? "none" : "";
 };
 $("mtype").onchange = () => {
@@ -457,7 +461,7 @@ async function loadData() {
   // Optional characteristics / ROC settings: sent only when filled in
   for (const id of ["test_n", "threshold", "in_lower", "in_upper", "out_lower",
                     "out_upper", "roc_report", "roc_min", "strata", "strata_bins",
-                    "group"])
+                    "group", "val_fraction"])
     if ($(id).value !== "") fd.append(id, $(id).value);
   const r = await fetch("/api/load", { method: "POST", body: fd });
   const j = await r.json();
