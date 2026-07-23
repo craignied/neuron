@@ -8,10 +8,21 @@
 #include "qdfa.h"
 #include "obd.h"
 #include "split.h"
+#include "iterative.h"
 #include "utility.h"
 
+#include <atomic>
 #include <memory>
 #include <sstream>
+
+using crossval::ProcResult;
+
+// A value no sigmoidal guess in (0,1) can take -- used to detect whether a fit
+//    actually WROTE the held-out guesses. A singular LDFA/QDFA catches the
+//    exception and returns WITHOUT calling reportAccuracy, leaving the guess
+//    column untouched; poisoning it first turns that silent non-write into a
+//    detectable failure instead of reading unwritten storage (bug B3).
+static const double GUESS_SENTINEL = 4.2424242e18;
 
 // Read a fitted model's held-out predictions -- the guesses reportAccuracy (run
 //    in the train epilogue) wrote into the test TwoSet, in test-row order.
@@ -24,45 +35,94 @@ static vector< double > heldoutPredictions( Model& m )
 	return preds;
 }
 
-// Run a model's fit with its report discarded, restoring the caller's stream.
-static void fitQuietly( Model& m )
+// Fit a model with its report discarded; return true only if the fit actually
+//    produced held-out guesses. The guess column is poisoned first, so a fit
+//    that never writes it (a singular DFA) is caught rather than read as garbage.
+static bool fitQuietly( Model& m )
 {
-	m.getDataSet().getTestTwoSet().setBootstrapResamples( 0 ); // point predictions
+	TwoSet& te = m.getDataSet().getTestTwoSet();
+	te.setBootstrapResamples( 0 ); // point predictions
+	unsigned n = te.getNumElements();
+	for ( unsigned i = 0; i < n; i++ ) te.test( i ) = GUESS_SENTINEL;
+
 	ostream& saved = util::screen();
 	ostringstream discard;
 	util::set_screen( discard );
-	m.train(); // epilogue writes the held-out guesses
+	m.train(); // epilogue writes the held-out guesses -- unless the fit failed
 	util::set_screen( saved );
+
+	if ( n == 0 ) return false;
+	for ( unsigned i = 0; i < n; i++ )
+		if ( te.test( i ) != GUESS_SENTINEL ) return true; // a guess was written
+	return false; // nothing written -- the fit produced no predictions
+}
+
+// An observer that stops a training run the moment the Stop flag fires.
+namespace {
+struct CancelObserver : Iterative::Observer
+{
+	const atomic< bool >* cancel = nullptr;
+	bool onIteration( unsigned, double ) override
+	{
+		return !( cancel && cancel->load() );
+	}
+};
 }
 
 crossval::Procedure cvadapters::trainProcedure( const Network& templateNet,
 	unsigned maxIter )
 {
 	return [ &templateNet, maxIter ]( DataSet& foldData,
-		const vector< unsigned >&, const vector< unsigned >& ) -> vector< double >
+		const vector< unsigned >&, const vector< unsigned >&,
+		const atomic< bool >* cancel ) -> ProcResult
 	{
+		ProcResult pr;
 		unique_ptr< Network > clone = cloneNetwork( templateNet );
 		clone->setDataSet( foldData ); // retarget to this fold (weights survive)
 		clone->randomize();            // fresh weights for an honest fit
 		clone->setMaxIterations( maxIter );
-		fitQuietly( *clone );
-		return heldoutPredictions( *clone );
+
+		CancelObserver obs; obs.cancel = cancel;
+		clone->setObserver( &obs );
+		bool produced = fitQuietly( *clone );
+		clone->setObserver( nullptr );
+
+		if ( cancel && cancel->load() ) { pr.cancelled = true; return pr; }
+		if ( !produced ) { pr.reason = "training produced no predictions"; return pr; }
+
+		pr.ok = true;
+		pr.pred = heldoutPredictions( *clone );
+		return pr;
 	};
 }
 
 crossval::Procedure cvadapters::dfaProcedure( bool quadratic )
 {
 	return [ quadratic ]( DataSet& foldData,
-		const vector< unsigned >&, const vector< unsigned >& ) -> vector< double >
+		const vector< unsigned >&, const vector< unsigned >&,
+		const atomic< bool >* ) -> ProcResult
 	{
+		ProcResult pr;
 		unique_ptr< Model > dfa = quadratic
 			? unique_ptr< Model >( make_unique< QDFA >() )
 			: unique_ptr< Model >( make_unique< LDFA >() );
 		dfa->setDataSet( foldData );
 		dfa->setHistory( false );
 		dfa->setLastop( false );
-		fitQuietly( *dfa ); // DFA::train computes the discriminant + writes guesses
-		return heldoutPredictions( *dfa );
+
+		// DFA::train computes the discriminant + writes guesses -- but on a
+		//    singular within-class covariance it catches the exception and writes
+		//    nothing. fitQuietly reports that as a failed fold (bug B3).
+		if ( !fitQuietly( *dfa ) )
+		{
+			pr.reason = quadratic
+				? "QDFA is singular on this fold (a class covariance is not invertible)"
+				: "LDFA is singular on this fold (the pooled covariance is not invertible)";
+			return pr;
+		}
+		pr.ok = true;
+		pr.pred = heldoutPredictions( *dfa );
+		return pr;
 	};
 }
 
@@ -71,8 +131,11 @@ crossval::Procedure cvadapters::nestedObdProcedure( const obd::Config& cfg,
 {
 	return [ cfg, innerValFraction, selectedHidden ]( DataSet& foldData,
 		const vector< unsigned >& trainRows,
-		const vector< unsigned >& testRows ) -> vector< double >
+		const vector< unsigned >& testRows,
+		const atomic< bool >* cancel ) -> ProcResult
 	{
+		ProcResult pr;
+
 		// Inner validation split of the fold's TRAINING rows ONLY, stratified on
 		//    the outcome. This is where leak-freeness is won: the held-out testRows
 		//    are never among the rows OBD's early stopping watches.
@@ -107,21 +170,32 @@ crossval::Procedure cvadapters::nestedObdProcedure( const obd::Config& cfg,
 		foldData.getTrainTwoSet().setBootstrapResamples( 0 );
 		foldData.getTestTwoSet().setBootstrapResamples( 0 );
 
-		// Run the OBD architecture search on THIS fold, its whole report discarded.
+		// Run the OBD architecture search on THIS fold, its whole report discarded;
+		//    cancel stops it promptly.
 		ostream& saved = util::screen();
 		ostringstream discard;
 		util::set_screen( discard );
-		obd::Result r = obd::run( foldData, cfg, nullptr, nullptr );
+		obd::Result r = obd::run( foldData, cfg, nullptr, cancel );
 		util::set_screen( saved );
 
-		if ( selectedHidden )
-			selectedHidden->push_back( r.ok ? r.selectedHidden : 0u );
+		if ( r.cancelled ) { pr.cancelled = true; return pr; }
+		if ( !r.ok || !r.winner )
+		{
+			// A failed fold is reported as such -- NEVER a fabricated 0.5 (bug B2).
+			pr.reason = r.message.empty()
+				? "OBD produced no model for this fold" : r.message;
+			return pr;
+		}
 
-		if ( !r.ok || !r.winner ) // a degenerate fold: a neutral 0.5 per held-out row
-			return vector< double >( testRows.size(), 0.5 );
+		// The selected size is recorded only for a fold that actually produced a
+		//    model -- a failed fold contributes no architecture metadata (no fake 0).
+		if ( selectedHidden )
+			selectedHidden->push_back( r.selectedHidden );
 
 		// OBD ran reportAccuracy on the winner over the outer held-out test set (in
 		//    test-row order); read those predictions from the winner's own DataSet.
-		return heldoutPredictions( *r.winner );
+		pr.ok = true;
+		pr.pred = heldoutPredictions( *r.winner );
+		return pr;
 	};
 }

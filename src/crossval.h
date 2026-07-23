@@ -12,6 +12,7 @@
 #ifndef CROSSVAL_H
 #define CROSSVAL_H
 
+#include <atomic>
 #include <functional>
 #include <string>
 #include <vector>
@@ -40,23 +41,42 @@ struct Metrics {
 Metrics metricsFor( const vector< unsigned >& outcome,
 	const vector< double >& pred, const vector< unsigned >& rows );
 
-// One fold's held-out result. az/trap are -1 when the fold is too small or
-//    degenerate for that estimator.
+// One fold's held-out result. ok is false when the procedure could not fit this
+//    fold (a singular DFA, an OBD refusal, a divergence the adapter rejected) --
+//    then reason explains it and az/trap are -1 and NO prediction was scattered
+//    for the fold's rows. A failed fold is retained as MISSING and reported, never
+//    silently averaged (the reporting contract). az/trap are also -1 on a fold
+//    that fitted but is degenerate for that estimator (one held-out class).
 struct FoldResult {
 	unsigned fold;
 	unsigned nHeldout;
-	double az;   // held-out binormal ROC area
-	double trap; // held-out trapezoidal (exact Mann-Whitney) ROC area
+	bool ok = true;     // did the procedure produce predictions for this fold?
+	string reason;      // why not, when !ok
+	double az = -1;     // held-out binormal ROC area
+	double trap = -1;   // held-out trapezoidal (exact Mann-Whitney) ROC area
 };
 
 struct RunResult {
 	bool ok = false;
+	bool cancelled = false;         // the run was stopped before completing
 	string message;                 // refusal text when !ok
 	vector< FoldResult > folds;
 	vector< double > oofPrediction; // per raw row: its out-of-fold predicted prob
+	                                //    ( -1 for a row whose fold FAILED -- absent )
 	vector< unsigned > outcome;     // per raw row: its true 0/1 outcome
+	unsigned validFolds = 0;        // folds that produced predictions
 	double oofAz = -1;              // pooled out-of-fold binormal ROC area
 	double oofTrap = -1;           // pooled out-of-fold trapezoidal ROC area
+};
+
+// What a procedure returns for one fold: predictions in test-row order when ok;
+//    a reason and (optionally) the cancelled flag when not. A procedure NEVER
+//    fabricates predictions -- it says it failed and the runner records that.
+struct ProcResult {
+	bool ok = false;
+	bool cancelled = false;
+	vector< double > pred; // held-out predictions (test-row order) when ok
+	string reason;         // failure text when !ok
 };
 
 // A procedure fits a model on the fold's TRAINING rows -- its ENTIRE fit and
@@ -66,15 +86,21 @@ struct RunResult {
 //    are the raw row indices, passed so an adapter that needs an INNER split of
 //    the training rows -- nested OBD carves its own validation set from them --
 //    can re-materialize the fold three ways without ever touching the held-out
-//    rows. The plain adapters ignore the index arguments.
-using Procedure = function< vector< double >( DataSet& foldData,
-	const vector< unsigned >& trainRows, const vector< unsigned >& testRows ) >;
+//    rows. cancel (may be null) lets a long fit stop promptly; the adapter should
+//    return { cancelled = true } when it fires. The plain adapters ignore the
+//    index arguments.
+using Procedure = function< ProcResult( DataSet& foldData,
+	const vector< unsigned >& trainRows, const vector< unsigned >& testRows,
+	const atomic< bool >* cancel ) >;
 
 // Run ONE procedure over a fold plan. data must be a rawLoaded, discrete,
 //    1-output DataSet; foldId[ r ] is raw row r's fold ( 0 .. k-1 ), e.g. from
-//    nsplit::kFold. Every row is held out exactly once, so every row receives an
-//    out-of-fold prediction.
-RunResult run( DataSet& data, const vector< unsigned >& foldId, Procedure proc );
+//    nsplit::kFold. Every row is held out exactly once. cancel (may be null) is
+//    checked between folds and passed to the procedure, so Stop ends the run
+//    promptly with cancelled = true. A fold the procedure cannot fit is recorded
+//    as a failed FoldResult and its rows get no out-of-fold prediction.
+RunResult run( DataSet& data, const vector< unsigned >& foldId, Procedure proc,
+	const atomic< bool >* cancel = nullptr );
 
 // A named procedure, for the comparison coordinator.
 struct ProcedureSpec {
@@ -94,6 +120,7 @@ struct ProcedureSpec {
 //    need (join by patient and fold).
 struct Comparison {
 	bool ok = false;
+	bool cancelled = false;        // a procedure's run was stopped
 	string message;                // refusal text when !ok
 	vector< unsigned > outcome;    // shared, per raw row
 	vector< unsigned > foldId;     // the shared fold plan (per raw row) -- the
@@ -112,7 +139,7 @@ struct Comparison {
 //    collect the results, so the procedures stay paired. It owns coordination
 //    only -- it does not train, select, or know any model family (rule 6).
 Comparison compare( DataSet& data, const vector< unsigned >& foldId,
-	const vector< ProcedureSpec >& procs );
+	const vector< ProcedureSpec >& procs, const atomic< bool >* cancel = nullptr );
 
 } // namespace crossval
 

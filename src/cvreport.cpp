@@ -153,12 +153,37 @@ string csv( const string& s )
 	return q + "\"";
 }
 
-string num( double x ) // a metric or -1 for "not computable"
+string num( double x ) // a metric or -1 / non-finite for "not computable"
 {
-	if ( x < 0 ) return "";
+	if ( !( x >= 0 ) || !isfinite( x ) ) return ""; // NaN/inf/negative -> empty (never "nan")
 	ostringstream os;
 	os << setiosflags( ios::fixed ) << setprecision( 6 ) << x;
 	return os.str();
+}
+
+// JSON string escaping -- PlanInfo/procedure names are general class-layer
+//    inputs, so quotes/backslashes/control chars must not break cv_run.json (B13).
+string jsonStr( const string& s )
+{
+	string out = "\"";
+	for ( unsigned i = 0; i < s.size(); i++ )
+	{
+		unsigned char c = ( unsigned char ) s[ i ];
+		if ( c == '"' ) out += "\\\"";
+		else if ( c == '\\' ) out += "\\\\";
+		else if ( c == '\n' ) out += "\\n";
+		else if ( c == '\r' ) out += "\\r";
+		else if ( c == '\t' ) out += "\\t";
+		else if ( c < 0x20 ) { char b[ 8 ]; snprintf( b, sizeof b, "\\u%04x", c ); out += b; }
+		else out += ( char ) c;
+	}
+	return out + "\"";
+}
+
+string jnumOrNull( double x ) // a finite non-negative number, or JSON null
+{
+	string s = num( x );
+	return s.empty() ? "null" : s;
 }
 
 } // namespace
@@ -261,8 +286,25 @@ string cvreport::tier2( const crossval::Comparison& cmp, const PlanInfo& info )
 		os << "  fold      n      AUC      sens      spec\n";
 
 		unsigned degenerate = 0;
+		vector< string > failed; // fold-failure reasons (a fit that did not run)
 		for ( unsigned f = 0; f < cmp.k; f++ )
 		{
+			// The runner already recorded per-fold status; a FAILED fold has no
+			//    predictions, so its metrics must NOT be recomputed from absent data.
+			const crossval::FoldResult* fr = nullptr;
+			for ( unsigned i = 0; i < e.result.folds.size(); i++ )
+				if ( e.result.folds[ i ].fold == f ) { fr = &e.result.folds[ i ]; break; }
+
+			if ( fr && !fr->ok )
+			{
+				os << "  " << setw( 4 ) << f << setw( 8 ) << fr->nHeldout
+					<< "   " << padRight( "failed", 8 ) << " " << padRight( "-", 9 )
+					<< "-\n";
+				ostringstream fr_s; fr_s << "fold " << f << ": " << fr->reason;
+				failed.push_back( fr_s.str() );
+				continue;
+			}
+
 			vector< unsigned > rows = rowsInFold( cmp.foldId, f );
 			crossval::Metrics m = crossval::metricsFor(
 				e.result.outcome, e.result.oofPrediction, rows );
@@ -275,10 +317,13 @@ string cvreport::tier2( const crossval::Comparison& cmp, const PlanInfo& info )
 		os << "  pooled OOF AUC (exact) = "
 			<< ( e.result.oofTrap < 0 ? "n/a" : fixed3( e.result.oofTrap ) )
 			<< ", binormal = "
-			<< ( e.result.oofAz < 0 ? "n/a" : fixed3( e.result.oofAz ) ) << "\n";
+			<< ( e.result.oofAz < 0 ? "n/a" : fixed3( e.result.oofAz ) )
+			<< "   (" << e.result.validFolds << "/" << cmp.k << " folds fitted)\n";
+		for ( unsigned i = 0; i < failed.size(); i++ )
+			os << "  FAILED " << failed[ i ] << "\n";
 		if ( degenerate )
-			os << "  failures: " << degenerate << " fold(s) had a degenerate "
-				"held-out set (one class or empty)\n";
+			os << "  note: " << degenerate << " fitted fold(s) had a degenerate "
+				"held-out set (one class), so no AUC\n";
 
 		ArchInfo a = archInfo( e.archHidden );
 		if ( a.has )
@@ -336,20 +381,31 @@ vector< string > cvreport::writeArtifacts( const crossval::Comparison& cmp,
 		ofstream f( path.c_str() );
 		if ( f )
 		{
-			f << "fold,procedure,n,auc_trap,auc_binormal,sens,spec\n";
+			f << "fold,procedure,status,n,auc_trap,auc_binormal,sens,spec\n";
 			for ( unsigned p = 0; p < cmp.entries.size(); p++ )
 			{
 				const crossval::Comparison::Entry& e = cmp.entries[ p ];
 				for ( unsigned fold = 0; fold < cmp.k; fold++ )
 				{
+					const crossval::FoldResult* fr = nullptr;
+					for ( unsigned i = 0; i < e.result.folds.size(); i++ )
+						if ( e.result.folds[ i ].fold == fold )
+							{ fr = &e.result.folds[ i ]; break; }
+
+					if ( fr && !fr->ok ) // a failed fold: reason, no metrics
+					{
+						f << fold << "," << csv( e.name ) << "," << csv( fr->reason )
+							<< "," << fr->nHeldout << ",,,,\n";
+						continue;
+					}
 					vector< unsigned > rows = rowsInFold( cmp.foldId, fold );
 					crossval::Metrics m = crossval::metricsFor(
 						e.result.outcome, e.result.oofPrediction, rows );
-					f << fold << "," << csv( e.name ) << "," << m.n << ","
+					f << fold << "," << csv( e.name ) << ",ok," << m.n << ","
 						<< num( m.trap ) << "," << num( m.az ) << ","
 						<< num( m.sens ) << "," << num( m.spec ) << "\n";
 				}
-				f << "pooled," << csv( e.name ) << "," << n << ","
+				f << "pooled," << csv( e.name ) << ",ok," << n << ","
 					<< num( e.result.oofTrap ) << "," << num( e.result.oofAz )
 					<< ",,\n";
 			}
@@ -364,21 +420,32 @@ vector< string > cvreport::writeArtifacts( const crossval::Comparison& cmp,
 		if ( f )
 		{
 			f << "{\n";
-			f << "  \"software\": \"" << NEURON_PACKAGE_STRING << "\",\n";
+			f << "  \"software\": " << jsonStr( NEURON_PACKAGE_STRING ) << ",\n";
 			f << "  \"n\": " << n << ",\n";
 			f << "  \"events\": " << info.events << ",\n";
 			f << "  \"k\": " << cmp.k << ",\n";
-			f << "  \"foldPlan\": \"" << info.foldPlan << "\",\n";
+			f << "  \"foldPlan\": " << jsonStr( info.foldPlan ) << ",\n";
 			f << "  \"procedures\": [\n";
 			for ( unsigned p = 0; p < cmp.entries.size(); p++ )
 			{
 				const crossval::Comparison::Entry& e = cmp.entries[ p ];
-				f << "    { \"name\": \"" << e.name << "\", \"seconds\": "
-					<< fixed3( e.seconds ) << ", \"pooledAUC\": "
-					<< ( e.result.oofTrap < 0 ? string( "null" ) : num( e.result.oofTrap ) )
+				f << "    { \"name\": " << jsonStr( e.name )
+					<< ", \"seconds\": " << fixed3( e.seconds )
+					<< ", \"validFolds\": " << e.result.validFolds
+					<< ", \"pooledAUC\": " << jnumOrNull( e.result.oofTrap )
 					<< ", \"arch\": [";
 				for ( unsigned i = 0; i < e.archHidden.size(); i++ )
 					f << ( i ? ", " : "" ) << e.archHidden[ i ];
+				f << "], \"failures\": [";
+				bool firstFail = true;
+				for ( unsigned i = 0; i < e.result.folds.size(); i++ )
+					if ( !e.result.folds[ i ].ok )
+					{
+						f << ( firstFail ? "" : ", " ) << "{ \"fold\": "
+							<< e.result.folds[ i ].fold << ", \"reason\": "
+							<< jsonStr( e.result.folds[ i ].reason ) << " }";
+						firstFail = false;
+					}
 				f << "] }" << ( p + 1 < cmp.entries.size() ? "," : "" ) << "\n";
 			}
 			f << "  ]\n}\n";

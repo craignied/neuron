@@ -1723,9 +1723,12 @@ string runCvJob( CvConfig c )
 	}
 
 	util::set_seed( c.seed );
-	crossval::Comparison cmp = crossval::compare( data, foldId, procs );
-	if ( job.cancel.load() )
-		return jsonMsg( false, "cancelled" );
+	// Stop propagates INTO the run now: the token reaches each procedure's folds
+	//    (the network observer, obd::run) so a long CV cancels promptly (bug B1).
+	crossval::Comparison cmp = crossval::compare( data, foldId, procs, &job.cancel );
+	if ( cmp.cancelled )
+		return string( "{\"ok\":false,\"cancelled\":true,\"message\":\"" )
+			+ jsonEscape( cmp.message.empty() ? "cancelled" : cmp.message ) + "\"}";
 	if ( !cmp.ok )
 		return jsonMsg( false, cmp.message.empty() ? "cross-validation failed" : cmp.message );
 
@@ -1771,6 +1774,10 @@ string handleCv( const httplib::Request& req )
 
 	if ( !dataPtr )
 		return jsonMsg( false, "load a dataset first" );
+	// CV folds the RAW dataset; a pre-split (mode=train) dataset has no Raw (B8)
+	if ( !dataPtr->rawLoaded() )
+		return jsonMsg( false, "cross-validation needs a raw dataset (load with "
+			"'raw data' mode, not a pre-split training set)" );
 	if ( !( dataPtr->getDiscrete() && dataPtr->getOutput() == 1 ) )
 		return jsonMsg( false, "cross-validation needs a discrete, single-output dataset" );
 
@@ -1791,6 +1798,10 @@ string handleCv( const httplib::Request& req )
 	uintParam( "hidden_max", c.obd.hMax, 1, "hidden_max must be at least 1" );
 	uintParam( "iter_budget", c.obd.iterBudget, 1, "iter_budget must be at least 1" );
 	if ( !bad.empty() ) return jsonMsg( false, bad );
+	// The nested-OBD search grows from hStart (2); hidden_max below it is an empty
+	//    range that would refuse every fold, so reject it up front (bug B2)
+	if ( c.neural && c.neuralObd && c.obd.hMax < c.obd.hStart )
+		return jsonMsg( false, "hidden_max must be at least the OBD start size (2)" );
 
 	// Procedure selection: present = the field decides; absent = the default set.
 	auto boolParam = [ & ]( const char* name, bool& dst )

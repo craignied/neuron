@@ -135,7 +135,17 @@ void DataSet::setRawMatrix( Matrix< double >& inMatrix )
 			TestSetData.clear(); // clear the test set Matrix
 			testLoadedFlag = false; // and unset its flag
 		}
-		
+
+		// Loading a raw dataset must clear the validation set too (Phase 4c) --
+		//    else a class-layer user could observe a validation set belonging to
+		//    the previous raw dataset (bug B12; the GUI builds a fresh DataSet, so
+		//    the happy path masked it)
+		if ( valLoadedFlag )
+		{
+			ValSetData.clear();
+			valLoadedFlag = false;
+		}
+
 		// Log to history file
 		if ( historyFlag ) // make sure flag for history is set
 		{
@@ -270,7 +280,9 @@ bool DataSet::saveScales( string& filename )
 		unsigned i;
 		for ( i = 0; i < nInput; i++ )
 		{
-			double S = ( inUpperLimit - inLowerLimit ) / ( maxima[ i ] - minima[ i ] );
+			double range = maxima[ i ] - minima[ i ];
+			// A constant column has S = 0 so x_norm = lbound, matching normalize (B4)
+			double S = ( range == 0 ) ? 0.0 : ( inUpperLimit - inLowerLimit ) / range;
 			savefile << S << " ";
 		}
 		
@@ -683,16 +695,28 @@ void DataSet::normalize( Matrix< double >& dataMatrix )
 	
 	unsigned r, c; // row & column indices
 	
+	// A column that is CONSTANT (max == min) has zero range: the fraction is
+	//    undefined (0/0). It carries no information, so map it to the lower bound
+	//    (fraction 0). Without this guard a column constant within a CV training
+	//    fold -- a rare indicator whose nonzero rows all land in the held-out fold
+	//    -- normalizes to +/-inf/NaN (bug B4). saveScales stores S = 0 to match, so
+	//    a deployed model agrees. Non-constant columns are byte-identical.
 	for ( r = 0; r < dataMatrix.rows(); r++ ) // iterate through data rows
 	{
 		for ( c = 0; c < nInput; c++ ) // normalize input variate columns
-			dataMatrix( r, c ) = inLowerLimit + ( ( dataMatrix( r, c ) - minima[ c ] )
-			/ ( maxima[ c ] - minima[ c ] ) * ( inUpperLimit - inLowerLimit ) );
-		
+		{
+			double range = maxima[ c ] - minima[ c ];
+			double frac = ( range == 0 ) ? 0.0 : ( dataMatrix( r, c ) - minima[ c ] ) / range;
+			dataMatrix( r, c ) = inLowerLimit + frac * ( inUpperLimit - inLowerLimit );
+		}
+
 		if ( !discreteFlag ) // if outputs are specified as nondiscrete
 			for ( c = nInput; c < ( nInput + nOutput ); c++ ) // compute output columns
-				dataMatrix( r, c ) = outLowerLimit + ( ( dataMatrix( r, c ) - minima[ c ] )
-				/ ( maxima[ c ] - minima[ c ] ) * ( outUpperLimit - outLowerLimit ) );
+			{
+				double range = maxima[ c ] - minima[ c ];
+				double frac = ( range == 0 ) ? 0.0 : ( dataMatrix( r, c ) - minima[ c ] ) / range;
+				dataMatrix( r, c ) = outLowerLimit + frac * ( outUpperLimit - outLowerLimit );
+			}
 	}
 }
 
@@ -929,6 +953,15 @@ bool DataSet::randomize3( const unsigned nTest, const unsigned nVal )
 		util::screen() << "I'm sorry, but I can't make a three-way split:"
 			<< endl << "the test and validation sets together must leave at least"
 			<< endl << "one training exemplar." << endl;
+
+	// A three-way split must actually PRODUCE a validation set -- else selection
+	//    (OBD) silently falls back to monitoring the test set, restoring the
+	//    Phase-4c leak. A fraction too small for the dataset rounds nVal to 0 (B5).
+	else if ( nVal < 1 || nTest < 1 )
+		util::screen() << "I'm sorry, but I can't make a three-way split:"
+			<< endl << "the requested validation or test fraction is too small for "
+			<< "this dataset" << endl << "(it rounds to zero rows); use a larger "
+			<< "fraction or the val_n/test_n counts." << endl;
 
 	else if ( !discreteFlag )
 		util::screen() << "I'm sorry, but I can't make a three-way split:"

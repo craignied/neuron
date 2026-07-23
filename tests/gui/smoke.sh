@@ -583,6 +583,18 @@ grep -q '"cancelled":true' obd_cancel.json || fail "a stopped OBD result must sa
 curl -s -X POST "$URL/api/load" -d "mode=raw&path=lowbwt2-2train.txt&fraction=0.25&seed=1" >/dev/null
 curl -s -X POST "$URL/api/cv" -d "logistic=0&ldfa=0&qdfa=0&neural=0" \
     | grep -q '"ok":false' || fail "CV must refuse when no procedure is selected"
+# Refusal (B2): nested OBD with hidden_max below the start size (2) is an empty range
+curl -s -X POST "$URL/api/cv" -d "neural=1&neural_obd=1&hidden_max=1" \
+    | grep -q '"ok":false' || fail "CV must refuse hidden_max below the OBD start size"
+# Refusal (B5): a validation fraction too small to yield a row must be rejected,
+#    NOT silently produce a two-way split that reopens the OBD-on-test leak
+curl -s -X POST "$URL/api/load" -d "mode=raw&path=lowbwt2-2train.txt&fraction=0.25&val_fraction=0.001" \
+    | grep -q '"ok":false' || fail "a val_fraction that rounds to zero rows must be refused"
+# Refusal (B8): CV needs a RAW dataset; a pre-split training set has no Raw
+curl -s -X POST "$URL/api/load" -d "mode=train&path=lowbwt2-2train.txt" >/dev/null
+curl -s -X POST "$URL/api/cv" -d "logistic=1" \
+    | grep -q '"ok":false' || fail "CV must refuse a pre-split (mode=train) dataset"
+curl -s -X POST "$URL/api/load" -d "mode=raw&path=lowbwt2-2train.txt&fraction=0.25&seed=1" >/dev/null
 
 # Happy path: an async comparison of two procedures over one shared 5-fold plan,
 #    returning the three-tier report (Tier 1 headline text, Tier 2 detail, Tier 3
@@ -617,16 +629,25 @@ lines=$(wc -l < cv_predictions.csv | tr -d ' ')
 head -1 cv_predictions.csv | grep -q "Logistic" || fail "cv_predictions.csv missing a procedure column"
 
 # 409 busy while a CV run owns the engine (shares the OBD/train job machinery)
-curl -s -X POST "$URL/api/cv" -d "folds=5&logistic=1&neural=1&neural_obd=1&hidden_max=4&iter_budget=200000&maxiter=200000" \
-    | grep -q '"ok":true' || fail "second CV run did not start"
+# AND Stop must PROPAGATE into the running work (B1): a plain-neural CV with a
+#    huge per-fold iteration cap and NO early stopping runs for many seconds if
+#    uncancelled, so a prompt stop proves the cancel token reaches the fold's
+#    training loop (the observer) rather than merely relabelling a finished run.
+curl -s -X POST "$URL/api/cv" -d "folds=10&logistic=0&neural=1&neural_obd=0&neural_hidden=5&maxiter=2000000" \
+    | grep -q '"ok":true' || fail "long CV run did not start"
 cvbusy=$(curl -s -w '\n%{http_code}' -X POST "$URL/api/cv" -d "logistic=1")
 echo "$cvbusy" | grep -q '"busy":true' || fail "no busy flag while a CV run runs"
 echo "$cvbusy" | tail -1 | grep -q '409' || fail "CV busy refusal should be HTTP 409"
-curl -s -X POST -d "" "$URL/api/train/stop" >/dev/null
-for i in $(seq 1 120); do
-    curl -s "$URL/api/train/status" | grep -q '"running":false' && break
+sleep 1
+curl -s -X POST -d "" "$URL/api/train/stop" | grep -q '"ok":true' || fail "stop did not accept during CV"
+cvStopped=0
+for i in $(seq 1 40); do   # must finish well within ~12 s if Stop truly propagates
+    curl -s "$URL/api/train/status" > cv_cancel.json
+    grep -q '"running":false' cv_cancel.json && { cvStopped=1; break; }
     sleep 0.3
 done
+[ "$cvStopped" = 1 ] || fail "a long CV did not stop promptly after Stop (cancellation not propagated)"
+grep -q '"cancelled":true' cv_cancel.json || fail "a stopped CV result must say cancelled"
 
 # --- Per-action audit log (every user action logged, 2026-07-19) -----------
 # Every GUI action lands in neuron_actions.log beside the data, timestamped,

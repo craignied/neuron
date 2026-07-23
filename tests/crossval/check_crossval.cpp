@@ -190,6 +190,83 @@ int main()
 	expect( ro.oofPrediction == ro2.oofPrediction && pickedHidden == pickedHidden2,
 		"the same seed reproduces the nested-OBD out-of-fold predictions and sizes" );
 
+	// B2: a fold OBD cannot fit is recorded as FAILED, never fabricated. hidden_max
+	// below hStart (2) makes OBD refuse every fold; the runner must mark them failed
+	// (no prediction, no fake 0.5), leave those rows absent, and pool nothing.
+	obd::Config badCfg; badCfg.hStart = 2; badCfg.hMax = 1; // empty range
+	vector< unsigned > badArch;
+	crossval::RunResult rf = crossval::run( data, foldId,
+		cvadapters::nestedObdProcedure( badCfg, 0.25, &badArch ) );
+	bool allFoldsFailed = ( rf.ok && rf.validFolds == 0 && rf.folds.size() == 5 );
+	for ( unsigned i = 0; i < rf.folds.size(); i++ )
+		if ( rf.folds[ i ].ok ) allFoldsFailed = false;
+	bool noFabrication = true;
+	for ( unsigned i = 0; i < n; i++ )
+		if ( rf.oofPrediction[ i ] != -1.0 ) noFabrication = false; // -1 = absent
+	expect( allFoldsFailed && noFabrication && badArch.empty() && rf.oofTrap < 0,
+		"a fold OBD cannot fit is failed, not fabricated (no 0.5, no fake size, absent from the pool)" );
+
+	// B3: a singular DFA fold is recorded as failed, not read from unwritten guess
+	// storage. Perfectly collinear inputs ( x1 = 2*x0 ) give a rank-deficient,
+	// non-invertible covariance, so every LDFA/QDFA fold is singular.
+	Matrix< double > craw( 120, 3 );
+	for ( unsigned i = 0; i < 120; i++ )
+	{
+		double x = -1.0 + 2.0 * ( ( i * 41 ) % 100 ) / 99.0;
+		craw( i, 0 ) = x;
+		craw( i, 1 ) = 2.0 * x; // collinear with input 0 -> singular covariance
+		craw( i, 2 ) = ( i % 2 ) ? 1 : 0;
+	}
+	DataSet cdata; cdata.setInput( 2 ); cdata.setOutput( 1 ); cdata.setDiscrete( true );
+	cdata.setHistory( false ); cdata.setRawMatrix( craw );
+	vector< unsigned > clabel( 120 );
+	for ( unsigned r = 0; r < 120; r++ ) clabel[ r ] = ( craw( r, 2 ) == 0 ) ? 0u : 1u;
+	util::set_seed( 5 );
+	vector< unsigned > cfold = nsplit::kFold( clabel, 4 );
+	crossval::RunResult rq = crossval::run( cdata, cfold, cvadapters::dfaProcedure( true ) );
+	bool dfaFailed = ( rq.ok && rq.validFolds == 0 );
+	for ( unsigned r = 0; r < 120; r++ )
+		if ( rq.oofPrediction[ r ] != -1.0 ) dfaFailed = false;
+	bool dfaReasoned = !rq.folds.empty() && !rq.folds[ 0 ].ok
+		&& rq.folds[ 0 ].reason.find( "singular" ) != string::npos;
+	expect( dfaFailed && dfaReasoned,
+		"a singular DFA fold is failed with a reason, not read from unwritten storage" );
+
+	// B4: a column CONSTANT within the TRAINING fold must normalize to a finite
+	// value, not inf/NaN from a zero-range (0/0) division. Input 0 is constant in
+	// the training rows here (all 5) but differs in the held-out rows (9).
+	Matrix< double > kraw( 20, 2 );
+	for ( unsigned i = 0; i < 20; i++ )
+	{
+		kraw( i, 0 ) = ( i < 15 ) ? 5.0 : 9.0; // constant in train, differs in test
+		kraw( i, 1 ) = ( i % 2 ) ? 1 : 0;
+	}
+	DataSet kdata; kdata.setInput( 1 ); kdata.setOutput( 1 ); kdata.setDiscrete( true );
+	kdata.setHistory( false ); kdata.setRawMatrix( kraw );
+	vector< unsigned > kTrain, kTest;
+	for ( unsigned i = 0; i < 15; i++ ) kTrain.push_back( i );
+	for ( unsigned i = 15; i < 20; i++ ) kTest.push_back( i );
+	kdata.makeFold( kTrain, kTest );
+	bool allFinite = true;
+	Matrix< double >& ktr = kdata.getTrainMatrix();
+	Matrix< double >& kte = kdata.getTestMatrix();
+	for ( unsigned r = 0; r < ktr.rows(); r++ ) if ( !isfinite( ktr( r, 0 ) ) ) allFinite = false;
+	for ( unsigned r = 0; r < kte.rows(); r++ ) if ( !isfinite( kte( r, 0 ) ) ) allFinite = false;
+	expect( allFinite,
+		"a training-fold-constant input normalizes to a finite value (no 0/0 division)" );
+
+	// B10: the class-layer runner defends its fold-plan contract.
+	crossval::RunResult re1 = crossval::run( data, foldId, crossval::Procedure() );
+	expect( !re1.ok && re1.oofPrediction.empty(), "run refuses an empty procedure" );
+	vector< unsigned > oneFold( n, 0 ); // all rows in fold 0 -> only one fold
+	crossval::RunResult re2 = crossval::run( data, oneFold,
+		cvadapters::trainProcedure( tmpl, 50 ) );
+	expect( !re2.ok, "run refuses a single-fold plan" );
+	vector< unsigned > gap( n, 0 ); gap[ 0 ] = 2; // ids {0,2}, fold 1 empty
+	crossval::RunResult re3 = crossval::run( data, gap,
+		cvadapters::trainProcedure( tmpl, 50 ) );
+	expect( !re3.ok, "run refuses a non-contiguous fold plan (an empty fold)" );
+
 	// The three-tier report (docs/evaluation_report_spec.md). Build a Comparison
 	// of three procedures over the shared plan -- LDFA, plain neural, nested OBD
 	// (with its architecture-metadata sink wired) -- and render it.
