@@ -105,6 +105,28 @@ int main()
 	expect( rl.ok && ldfaAll && rl.oofTrap > 0.6,
 		"the LDFA adapter cross-validates: every row predicted, pooled AUC beats chance" );
 
+	// The comparison coordinator: two model families over ONE shared fold plan,
+	// so every patient carries a prediction from BOTH -- the paired substrate.
+	vector< crossval::ProcedureSpec > procs;
+	procs.push_back( { "Neural", cvadapters::trainProcedure( tmpl, 400 ) } );
+	procs.push_back( { "LDFA", cvadapters::dfaProcedure( false ) } );
+
+	util::set_seed( 7 );
+	crossval::Comparison cmp = crossval::compare( data, foldId, procs );
+
+	expect( cmp.ok && cmp.entries.size() == 2 &&
+		cmp.entries[ 0 ].name == "Neural" && cmp.entries[ 1 ].name == "LDFA",
+		"the coordinator runs both procedures over the shared fold plan" );
+
+	bool paired = ( cmp.entries[ 0 ].result.oofPrediction.size() == n &&
+		cmp.entries[ 1 ].result.oofPrediction.size() == n );
+	for ( unsigned i = 0; i < n; i++ )
+		if ( cmp.entries[ 0 ].result.oofPrediction[ i ] < 0.0 ||
+			cmp.entries[ 1 ].result.oofPrediction[ i ] < 0.0 ) paired = false;
+	expect( paired && cmp.entries[ 0 ].result.oofTrap > 0.6 &&
+		cmp.entries[ 1 ].result.oofTrap > 0.6,
+		"every patient has a paired out-of-fold prediction from each procedure" );
+
 	if ( failures == 0 )
 	{
 		cout << "check_crossval: the CV runner holds every row out once and fits honestly"

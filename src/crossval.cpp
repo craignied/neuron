@@ -93,3 +93,33 @@ crossval::RunResult crossval::run( DataSet& data,
 	res.ok = true;
 	return res;
 }
+
+crossval::Comparison crossval::compare( DataSet& data,
+	const vector< unsigned >& foldId, const vector< ProcedureSpec >& procs )
+{
+	Comparison c;
+
+	if ( procs.empty() )
+	{
+		c.message = "no procedures to compare";
+		return c;
+	}
+
+	for ( unsigned i = 0; i < procs.size(); i++ )
+	{
+		RunResult rr = run( data, foldId, procs[ i ].proc );
+		if ( !rr.ok )
+		{
+			c.message = "procedure '" + procs[ i ].name + "': " + rr.message;
+			return c;
+		}
+		if ( c.outcome.empty() ) c.outcome = rr.outcome; // same across all procs
+		Comparison::Entry e;
+		e.name = procs[ i ].name;
+		e.result = rr;
+		c.entries.push_back( e );
+	}
+
+	c.ok = true;
+	return c;
+}

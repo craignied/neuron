@@ -52,6 +52,33 @@ using Procedure = function< vector< double >( DataSet& ) >;
 //    out-of-fold prediction.
 RunResult run( DataSet& data, const vector< unsigned >& foldId, Procedure proc );
 
+// A named procedure, for the comparison coordinator.
+struct ProcedureSpec {
+	string name;      // "Logistic", "LDFA", "Neural (OBD)", ...
+	Procedure proc;
+};
+
+// Several procedures' results over ONE shared fold plan. Because every entry
+//    used the same folds, their per-exemplar out-of-fold predictions are paired
+//    row for row -- the substrate the report and any future paired comparison
+//    need (join by patient and fold).
+struct Comparison {
+	bool ok = false;
+	string message;                // refusal text when !ok
+	vector< unsigned > outcome;    // shared, per raw row
+	struct Entry {
+		string name;
+		RunResult result;
+	};
+	vector< Entry > entries;
+};
+
+// The comparison coordinator: run each procedure over the SAME fold plan and
+//    collect the results, so the procedures stay paired. It owns coordination
+//    only -- it does not train, select, or know any model family (rule 6).
+Comparison compare( DataSet& data, const vector< unsigned >& foldId,
+	const vector< ProcedureSpec >& procs );
+
 } // namespace crossval
 
 #endif
