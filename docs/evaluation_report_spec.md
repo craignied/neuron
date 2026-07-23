@@ -6,7 +6,10 @@
 > + verdict block + the standing caveat; Tier-2 per-fold AUC/sens/spec, per-procedure
 > failures (with reasons) and validFolds, and OBD architecture-selection frequency; Tier-3
 > `cv_predictions.csv` / `cv_metrics.csv` (now with a per-fold `status` column) / `cv_run.json`
-> (with per-procedure `validFolds` + `failures`). **NOT yet implemented (aspirational below):**
+> (with per-procedure `validFolds` + `failures`). A Tier-3 file that cannot be written (unwritable
+> directory, full disk) is reported as a run WARNING naming the file + reason — never silently
+> dropped, and never counted as written unless it opened/wrote/flushed/closed cleanly.
+> **NOT yet implemented (aspirational below):**
 > a locked-test AUC/DeLong column and frozen-architecture result; Tier-2 calibration; per-fold
 > timing; Tier-3 download buttons; a fully metric-agnostic Tier 1. **Format note:**
 > `cv_predictions.csv` ships as **one row per exemplar with one prediction column per

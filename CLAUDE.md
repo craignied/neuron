@@ -1421,8 +1421,20 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   unchanged). The GUI enables it. `check_crossval` proves a procedure's predictions are identical
   whether it runs alone, after another stochastic procedure, or reordered among three — **watched
   to fail both against no-substreams AND against index-keying** (rule 2). Landed after the sweep.
-  **Still deferred (medium/low):** B7 structured artifact-write result, B9 strict numeric parsing
-  (a GUI-wide `atol`/`atof` pattern, not CV-specific). Docs corrected in a
+  **B7 — Tier-3 artifact-write failures are now visible (2026-07-23).** `writeArtifacts` returns a
+  `cvreport::ArtifactResult` per file (name/path/ok/error); `writeOne` reports ok ONLY after the
+  file opened, wrote, flushed, AND closed cleanly (`flush()` + `close()` + `good()`), and removes a
+  partial file. A failed artifact becomes a visible CV run WARNING that names the file and reason —
+  the response never lists a file as written unless it truly was — while the in-memory CV results
+  and `ok:true` are preserved (`/api/cv` gains `cv.warnings[]`; `files[]` holds only the successes).
+  `check_crossval` proves the open-failure path (unwritable dir) portably AND the POST-OPEN path via
+  a `/dev/full` symlink (Linux only; skipped on macOS) — **the post-open detection was watched to
+  fail on Linux (in Docker) when the `good()` gate is removed** (rule 2). **Still deferred:** B9 —
+  a GUI-WIDE strict-parsing pass (NOT CV-only; Craig's scope): shared strict integer, floating-point,
+  and boolean parsers with full-string consumption, range/overflow checks, and field-specific errors,
+  migrated across EVERY handler (`atol`/`atof` today accept `folds=5junk`→5 and any non-"1"/"true"
+  boolean→false). Do NOT broaden accepted boolean spellings unless that becomes explicit API policy.
+  Docs corrected in a
   follow-up (D1–D10): the two nondeterminism docs de-staled (the resolved `errorType` bug, the
   reverted Matrix red herring — no more "reopen the bug" instructions); the report spec + this
   Phase-4 plan annotated SHIPPED vs ASPIRATIONAL; the pure-CV Tier-1 caveat fixed ("no inferential

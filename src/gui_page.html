@@ -49,7 +49,7 @@ button { padding: .35rem .9rem; cursor: pointer; }
 #cvtier2 { background: #fbfbf9; border: 1px solid #eee; border-radius: 6px;
           padding: .5rem .7rem; margin: 0 0 .6rem; overflow: auto; max-height: 26em;
           font-size: .78rem; line-height: 1.25; white-space: pre; color: #33322f; }
-#cvfiles { font-size: .8rem; color: #52514e; }
+#cvfiles { font-size: .8rem; color: #52514e; white-space: pre-line; }
 #rocstats { flex: 1; min-width: 15rem; font-size: .9rem; }
 #rocstats h3 { font-size: .95rem; margin: .2rem 0 .6rem; }
 #rocstats .sblk { margin-bottom: 1rem; }
@@ -716,10 +716,11 @@ async function pollCv() {
     $("cvbox").style.display = "block";
     $("cvtier1").textContent = res.cv.tier1;
     $("cvtier2").textContent = res.cv.tier2;
-    const files = res.cv.files || [];
-    $("cvfiles").textContent = files.length
-      ? ("Machine-readable files written: " + files.join(", "))
-      : "";
+    const files = res.cv.files || [], warnings = res.cv.warnings || [];
+    let note = files.length ? ("Machine-readable files written: " + files.join(", ")) : "";
+    if (warnings.length) note += (note ? "\n" : "") + "⚠ " + warnings.join("\n⚠ ");
+    $("cvfiles").textContent = note;
+    $("cvfiles").style.color = warnings.length ? "#a05a00" : "#52514e";
   }
 }
 // The size search: training and held-out error at each size the search tried,

@@ -14,6 +14,9 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#ifndef _WIN32
+#include <unistd.h> // access/symlink for the POSIX post-open write-failure test
+#endif
 
 #include "crossval.h"
 #include "cvadapters.h"
@@ -354,8 +357,10 @@ int main()
 	// Tier 3: three machine-readable files, predictions one row per exemplar.
 	string dir = "/tmp/cvreport_check";
 	system( ( "mkdir -p " + dir ).c_str() );
-	vector< string > files = cvreport::writeArtifacts( rc, info, dir );
-	expect( files.size() == 3, "Tier 3 writes three machine-readable files" );
+	vector< cvreport::ArtifactResult > files = cvreport::writeArtifacts( rc, info, dir );
+	bool allWritten = ( files.size() == 3 );
+	for ( unsigned i = 0; i < files.size(); i++ ) if ( !files[ i ].ok ) allWritten = false;
+	expect( allWritten, "Tier 3 writes three machine-readable files, all reported ok" );
 
 	unsigned predLines = 0;
 	{
@@ -365,6 +370,41 @@ int main()
 	}
 	expect( predLines == n + 1,
 		"cv_predictions.csv has a header plus one row per exemplar" );
+
+	// B7: an artifact that cannot be written is reported as a failure with a
+	// reason -- never silently counted as written. (a) An unwritable directory
+	// fails at OPEN.
+	vector< cvreport::ArtifactResult > bad =
+		cvreport::writeArtifacts( rc, info, "/no_such_dir_xyzzy/deeper" );
+	bool allFailed = ( bad.size() == 3 );
+	for ( unsigned i = 0; i < bad.size(); i++ )
+		if ( bad[ i ].ok || bad[ i ].error.empty() ) allFailed = false;
+	expect( allFailed,
+		"an unwritable directory fails every artifact at open, each with a reason" );
+
+	// (b) A POST-OPEN failure: on systems with /dev/full, symlink a target file to
+	// it so open succeeds but writes fail (disk-full). Skipped where /dev/full is
+	// absent (e.g. macOS) or on Windows; the Linux CI job exercises this path.
+	bool didPostOpen = false;
+#ifndef _WIN32
+	if ( access( "/dev/full", F_OK ) == 0 )
+	{
+		string fdir = "/tmp/cvreport_full";
+		system( ( "rm -rf " + fdir + " && mkdir -p " + fdir ).c_str() );
+		if ( symlink( "/dev/full", ( fdir + "/cv_predictions.csv" ).c_str() ) == 0 )
+		{
+			vector< cvreport::ArtifactResult > pf = cvreport::writeArtifacts( rc, info, fdir );
+			const cvreport::ArtifactResult* pr = nullptr;
+			for ( unsigned i = 0; i < pf.size(); i++ )
+				if ( pf[ i ].name == "cv_predictions.csv" ) pr = &pf[ i ];
+			expect( pr && !pr->ok && !pr->error.empty(),
+				"a write that fails AFTER open (disk full) is caught, not reported ok" );
+			didPostOpen = true;
+		}
+	}
+#endif
+	if ( !didPostOpen )
+		expect( true, "post-open write-failure path skipped (no /dev/full here)" );
 
 	if ( failures == 0 )
 	{

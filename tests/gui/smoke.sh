@@ -620,7 +620,8 @@ assert "SUMMARY" in cv["tier1"] and "AUC (CV)" in cv["tier1"], cv["tier1"][:200]
 # the standing caveat must always be present (it is policy, not decoration)
 assert "descriptive spread across dependent folds" in cv["tier1"], cv["tier1"]
 assert "Cross-validation detail" in cv["tier2"], cv["tier2"][:200]
-assert len(cv["files"]) == 3, cv["files"]
+assert len(cv["files"]) == 3, cv["files"]           # all three Tier-3 files written
+assert cv.get("warnings", None) == [], cv.get("warnings")  # none failed (B7)
 PY
 # Tier 3 predictions: header + one row per exemplar (189 in lowbwt), one column
 #    per compared procedure -- the paired out-of-fold substrate

@@ -45,10 +45,21 @@ string tier1( const crossval::Comparison& cmp, const PlanInfo& info );
 // Tier 2: the descriptive per-fold detail as text.
 string tier2( const crossval::Comparison& cmp, const PlanInfo& info );
 
+// The outcome of writing one Tier-3 artifact. ok is true ONLY when the file was
+//    opened, fully written, flushed, and closed without error -- so a mid-write
+//    failure (a full disk, an I/O error) is reported, not silently dropped (B7).
+struct ArtifactResult {
+	string name;   // e.g. "cv_predictions.csv"
+	string path;   // the full path attempted
+	bool ok = false;
+	string error;  // the reason when !ok
+};
+
 // Tier 3: write cv_predictions.csv / cv_metrics.csv / cv_run.json into dir
-//    (a directory path; the files are dir + "/cv_*.{csv,json}"). Returns the
-//    paths written. NEVER printed -- these are the machine-readable substrate.
-vector< string > writeArtifacts( const crossval::Comparison& cmp,
+//    (a directory path; the files are dir + "/cv_*.{csv,json}"). Returns one
+//    ArtifactResult PER attempted file, so the caller can report exactly which
+//    failed and why. NEVER printed -- these are the machine-readable substrate.
+vector< ArtifactResult > writeArtifacts( const crossval::Comparison& cmp,
 	const PlanInfo& info, const string& dir );
 
 // Log ordering: stream Tier 2 then the Tier 1 summary LAST, and write the Tier 3

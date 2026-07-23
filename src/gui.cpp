@@ -1753,22 +1753,43 @@ string runCvJob( CvConfig c )
 	string dir = util::run_path( "" ); // the run directory (trailing slash, or "")
 	if ( dir.empty() ) dir = ".";
 	else if ( dir.back() == '/' || dir.back() == '\\' ) dir.pop_back();
-	vector< string > files = cvreport::writeArtifacts( cmp, info, dir );
+	vector< cvreport::ArtifactResult > arts = cvreport::writeArtifacts( cmp, info, dir );
 
-	ostringstream filesJson;
-	filesJson << "[";
-	for ( unsigned i = 0; i < files.size(); i++ )
-		filesJson << ( i ? "," : "" ) << "\"" << jsonEscape( files[ i ] ) << "\"";
-	filesJson << "]";
+	// files[] lists ONLY the artifacts that fully succeeded (opened, written,
+	//    flushed, closed); a failed one goes to warnings[] with its reason, so the
+	//    response never claims a file was written unless it truly was (B7). The
+	//    in-memory CV results (tier1/tier2) are complete regardless, so ok stays true.
+	ostringstream filesJson, warnJson;
+	filesJson << "["; warnJson << "[";
+	bool firstFile = true, firstWarn = true, anyFailed = false;
+	for ( unsigned i = 0; i < arts.size(); i++ )
+	{
+		if ( arts[ i ].ok )
+		{
+			filesJson << ( firstFile ? "" : "," ) << "\"" << jsonEscape( arts[ i ].path ) << "\"";
+			firstFile = false;
+		}
+		else
+		{
+			anyFailed = true;
+			warnJson << ( firstWarn ? "" : "," ) << "\"" << jsonEscape(
+				"could not write " + arts[ i ].name + ": " + arts[ i ].error ) << "\"";
+			firstWarn = false;
+		}
+	}
+	filesJson << "]"; warnJson << "]";
 
 	ostringstream msg;
 	msg << "cross-validation complete (" << cmp.entries.size() << " procedure"
 		<< ( cmp.entries.size() == 1 ? "" : "s" ) << ", " << c.k << " folds)";
+	if ( anyFailed )
+		msg << " -- WARNING: one or more machine-readable files could not be written";
 
 	return string( "{\"ok\":true,\"message\":\"" ) + jsonEscape( msg.str() )
 		+ "\",\"cv\":{\"tier1\":\"" + jsonEscape( tier1 ) + "\""
 		+ ",\"tier2\":\"" + jsonEscape( tier2 ) + "\""
-		+ ",\"files\":" + filesJson.str() + "}}";
+		+ ",\"files\":" + filesJson.str()
+		+ ",\"warnings\":" + warnJson.str() + "}}";
 }
 
 string handleCv( const httplib::Request& req )

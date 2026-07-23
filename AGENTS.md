@@ -447,7 +447,10 @@ across dependent folds, **not** a confidence interval — plus a prespecified
 descriptive contrast and the OBD architecture-selection frequency), `cv.tier2`
 (per-fold AUC/sens/spec detail), and `cv.files` (the paths of `cv_predictions.csv`
 / `cv_metrics.csv` / `cv_run.json`, written beside your data — the paired
-out-of-fold substrate, never printed). **Cost:** CV is k trainings per procedure,
+out-of-fold substrate, never printed). `cv.files` lists ONLY files that were fully
+written; if any could not be (unwritable dir, full disk) the run still succeeds with
+the in-memory results and names the failure in `cv.warnings[]` — it never claims a
+file was written unless it truly was. **Cost:** CV is k trainings per procedure,
 and the nested-OBD procedure is k full OBD searches, so it is the most expensive
 run in the GUI — start with small `folds`/`hidden_max`/`iter_budget` on large data.
 No formal cross-validation inference is reported (the fold results are dependent);

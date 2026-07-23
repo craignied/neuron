@@ -4,7 +4,9 @@
 #include "cvreport.h"
 
 #include <cmath>
+#include <cstdio>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <map>
 #include <sstream>
@@ -344,117 +346,127 @@ string cvreport::tier2( const crossval::Comparison& cmp, const PlanInfo& info )
 // ---------------------------------------------------------------------------
 // Tier 3 -- machine-readable artifacts (files, never printed)
 // ---------------------------------------------------------------------------
-vector< string > cvreport::writeArtifacts( const crossval::Comparison& cmp,
-	const PlanInfo& info, const string& dir )
+// Write one artifact through body(), reporting success ONLY if the file opened,
+//    wrote, flushed, and closed cleanly. Detects post-open failure (a full disk /
+//    I/O error surfaces as a stream failbit/badbit on flush or close), not merely
+//    an unwritable directory (B7). A stale/partial file from a failed write is
+//    removed so no half-written artifact is mistaken for a good one.
+static cvreport::ArtifactResult writeOne( const string& dir, const string& name,
+	const function< void( ostream& ) >& body )
 {
-	vector< string > written;
-	string base = dir.empty() ? string() : dir + "/";
+	cvreport::ArtifactResult r;
+	r.name = name;
+	r.path = ( dir.empty() ? string() : dir + "/" ) + name;
+
+	ofstream f( r.path.c_str() );
+	if ( !f.is_open() )
+	{
+		r.error = "could not open for writing";
+		return r;
+	}
+
+	body( f );
+	f.flush();   // force buffered data out so a disk-full error surfaces now
+	f.close();   // close can also fail (deferred write-back); it sets failbit
+
+	if ( f.good() ) { r.ok = true; return r; }
+
+	r.error = "write/flush/close failed (disk full or I/O error?)";
+	remove( r.path.c_str() ); // drop the partial file
+	return r;
+}
+
+vector< cvreport::ArtifactResult > cvreport::writeArtifacts(
+	const crossval::Comparison& cmp, const PlanInfo& info, const string& dir )
+{
 	unsigned n = ( unsigned ) cmp.outcome.size();
+	vector< ArtifactResult > results;
 
 	// cv_predictions.csv -- one row per exemplar, one column per procedure.
+	results.push_back( writeOne( dir, "cv_predictions.csv", [&]( ostream& f )
 	{
-		string path = base + "cv_predictions.csv";
-		ofstream f( path.c_str() );
-		if ( f )
+		f << "exemplar,outcome,fold";
+		for ( unsigned p = 0; p < cmp.entries.size(); p++ )
+			f << "," << csv( cmp.entries[ p ].name );
+		f << "\n";
+		for ( unsigned r = 0; r < n; r++ )
 		{
-			f << "exemplar,outcome,fold";
+			f << r << "," << cmp.outcome[ r ] << ","
+				<< ( r < cmp.foldId.size() ? cmp.foldId[ r ] : 0 );
 			for ( unsigned p = 0; p < cmp.entries.size(); p++ )
-				f << "," << csv( cmp.entries[ p ].name );
+				f << "," << num( cmp.entries[ p ].result.oofPrediction[ r ] );
 			f << "\n";
-			for ( unsigned r = 0; r < n; r++ )
-			{
-				f << r << "," << cmp.outcome[ r ] << ","
-					<< ( r < cmp.foldId.size() ? cmp.foldId[ r ] : 0 );
-				for ( unsigned p = 0; p < cmp.entries.size(); p++ )
-				{
-					double pr = cmp.entries[ p ].result.oofPrediction[ r ];
-					f << "," << num( pr );
-				}
-				f << "\n";
-			}
-			written.push_back( path );
 		}
-	}
+	} ) );
 
 	// cv_metrics.csv -- fold x procedure metrics, plus a pooled row per procedure.
+	results.push_back( writeOne( dir, "cv_metrics.csv", [&]( ostream& f )
 	{
-		string path = base + "cv_metrics.csv";
-		ofstream f( path.c_str() );
-		if ( f )
+		f << "fold,procedure,status,n,auc_trap,auc_binormal,sens,spec\n";
+		for ( unsigned p = 0; p < cmp.entries.size(); p++ )
 		{
-			f << "fold,procedure,status,n,auc_trap,auc_binormal,sens,spec\n";
-			for ( unsigned p = 0; p < cmp.entries.size(); p++ )
+			const crossval::Comparison::Entry& e = cmp.entries[ p ];
+			for ( unsigned fold = 0; fold < cmp.k; fold++ )
 			{
-				const crossval::Comparison::Entry& e = cmp.entries[ p ];
-				for ( unsigned fold = 0; fold < cmp.k; fold++ )
-				{
-					const crossval::FoldResult* fr = nullptr;
-					for ( unsigned i = 0; i < e.result.folds.size(); i++ )
-						if ( e.result.folds[ i ].fold == fold )
-							{ fr = &e.result.folds[ i ]; break; }
+				const crossval::FoldResult* fr = nullptr;
+				for ( unsigned i = 0; i < e.result.folds.size(); i++ )
+					if ( e.result.folds[ i ].fold == fold )
+						{ fr = &e.result.folds[ i ]; break; }
 
-					if ( fr && !fr->ok ) // a failed fold: reason, no metrics
-					{
-						f << fold << "," << csv( e.name ) << "," << csv( fr->reason )
-							<< "," << fr->nHeldout << ",,,,\n";
-						continue;
-					}
-					vector< unsigned > rows = rowsInFold( cmp.foldId, fold );
-					crossval::Metrics m = crossval::metricsFor(
-						e.result.outcome, e.result.oofPrediction, rows );
-					f << fold << "," << csv( e.name ) << ",ok," << m.n << ","
-						<< num( m.trap ) << "," << num( m.az ) << ","
-						<< num( m.sens ) << "," << num( m.spec ) << "\n";
+				if ( fr && !fr->ok ) // a failed fold: reason, no metrics
+				{
+					f << fold << "," << csv( e.name ) << "," << csv( fr->reason )
+						<< "," << fr->nHeldout << ",,,,\n";
+					continue;
 				}
-				f << "pooled," << csv( e.name ) << ",ok," << n << ","
-					<< num( e.result.oofTrap ) << "," << num( e.result.oofAz )
-					<< ",,\n";
+				vector< unsigned > rows = rowsInFold( cmp.foldId, fold );
+				crossval::Metrics m = crossval::metricsFor(
+					e.result.outcome, e.result.oofPrediction, rows );
+				f << fold << "," << csv( e.name ) << ",ok," << m.n << ","
+					<< num( m.trap ) << "," << num( m.az ) << ","
+					<< num( m.sens ) << "," << num( m.spec ) << "\n";
 			}
-			written.push_back( path );
+			f << "pooled," << csv( e.name ) << ",ok," << n << ","
+				<< num( e.result.oofTrap ) << "," << num( e.result.oofAz ) << ",,\n";
 		}
-	}
+	} ) );
 
 	// cv_run.json -- the fold plan, procedures, timings, arch, version.
+	results.push_back( writeOne( dir, "cv_run.json", [&]( ostream& f )
 	{
-		string path = base + "cv_run.json";
-		ofstream f( path.c_str() );
-		if ( f )
+		f << "{\n";
+		f << "  \"software\": " << jsonStr( NEURON_PACKAGE_STRING ) << ",\n";
+		f << "  \"n\": " << n << ",\n";
+		f << "  \"events\": " << info.events << ",\n";
+		f << "  \"k\": " << cmp.k << ",\n";
+		f << "  \"foldPlan\": " << jsonStr( info.foldPlan ) << ",\n";
+		f << "  \"procedures\": [\n";
+		for ( unsigned p = 0; p < cmp.entries.size(); p++ )
 		{
-			f << "{\n";
-			f << "  \"software\": " << jsonStr( NEURON_PACKAGE_STRING ) << ",\n";
-			f << "  \"n\": " << n << ",\n";
-			f << "  \"events\": " << info.events << ",\n";
-			f << "  \"k\": " << cmp.k << ",\n";
-			f << "  \"foldPlan\": " << jsonStr( info.foldPlan ) << ",\n";
-			f << "  \"procedures\": [\n";
-			for ( unsigned p = 0; p < cmp.entries.size(); p++ )
-			{
-				const crossval::Comparison::Entry& e = cmp.entries[ p ];
-				f << "    { \"name\": " << jsonStr( e.name )
-					<< ", \"seconds\": " << fixed3( e.seconds )
-					<< ", \"validFolds\": " << e.result.validFolds
-					<< ", \"pooledAUC\": " << jnumOrNull( e.result.oofTrap )
-					<< ", \"arch\": [";
-				for ( unsigned i = 0; i < e.archHidden.size(); i++ )
-					f << ( i ? ", " : "" ) << e.archHidden[ i ];
-				f << "], \"failures\": [";
-				bool firstFail = true;
-				for ( unsigned i = 0; i < e.result.folds.size(); i++ )
-					if ( !e.result.folds[ i ].ok )
-					{
-						f << ( firstFail ? "" : ", " ) << "{ \"fold\": "
-							<< e.result.folds[ i ].fold << ", \"reason\": "
-							<< jsonStr( e.result.folds[ i ].reason ) << " }";
-						firstFail = false;
-					}
-				f << "] }" << ( p + 1 < cmp.entries.size() ? "," : "" ) << "\n";
-			}
-			f << "  ]\n}\n";
-			written.push_back( path );
+			const crossval::Comparison::Entry& e = cmp.entries[ p ];
+			f << "    { \"name\": " << jsonStr( e.name )
+				<< ", \"seconds\": " << fixed3( e.seconds )
+				<< ", \"validFolds\": " << e.result.validFolds
+				<< ", \"pooledAUC\": " << jnumOrNull( e.result.oofTrap )
+				<< ", \"arch\": [";
+			for ( unsigned i = 0; i < e.archHidden.size(); i++ )
+				f << ( i ? ", " : "" ) << e.archHidden[ i ];
+			f << "], \"failures\": [";
+			bool firstFail = true;
+			for ( unsigned i = 0; i < e.result.folds.size(); i++ )
+				if ( !e.result.folds[ i ].ok )
+				{
+					f << ( firstFail ? "" : ", " ) << "{ \"fold\": "
+						<< e.result.folds[ i ].fold << ", \"reason\": "
+						<< jsonStr( e.result.folds[ i ].reason ) << " }";
+					firstFail = false;
+				}
+			f << "] }" << ( p + 1 < cmp.entries.size() ? "," : "" ) << "\n";
 		}
-	}
+		f << "  ]\n}\n";
+	} ) );
 
-	return written;
+	return results;
 }
 
 // ---------------------------------------------------------------------------
@@ -466,9 +478,16 @@ void cvreport::render( ostream& out, const crossval::Comparison& cmp,
 	out << tier2( cmp, info ) << "\n";
 	if ( !dir.empty() )
 	{
-		vector< string > files = writeArtifacts( cmp, info, dir );
-		out << "Wrote " << files.size() << " machine-readable file(s) to "
-			<< dir << "/ (cv_predictions.csv, cv_metrics.csv, cv_run.json).\n\n";
+		vector< ArtifactResult > files = writeArtifacts( cmp, info, dir );
+		unsigned okCount = 0;
+		for ( unsigned i = 0; i < files.size(); i++ ) if ( files[ i ].ok ) okCount++;
+		out << "Wrote " << okCount << " of " << files.size()
+			<< " machine-readable file(s) to " << dir << "/.\n";
+		for ( unsigned i = 0; i < files.size(); i++ )
+			if ( !files[ i ].ok )
+				out << "  WARNING: could not write " << files[ i ].name << " -- "
+					<< files[ i ].error << "\n";
+		out << "\n";
 	}
 	out << tier1( cmp, info ); // the answer, last
 }
