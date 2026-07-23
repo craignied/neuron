@@ -1,5 +1,12 @@
 # Cross-validation, model fitting, and nested OBD
 
+> **What this is:** Craig's personal conceptual reminder of the statistics behind
+> ROADMAP 4 Phase 4 — kept in its original discussion voice on purpose. It is NOT
+> the product contract and is not meant to track the shipped feature. For the
+> current `/api/cv` controls, report format, and behavior, see `AGENTS.md` (the CV
+> section) and `docs/evaluation_report_spec.md`. Please don't "de-stale" the prose
+> below or rewrite its voice.
+
 This note explains the conceptual distinction underlying ROADMAP 4 Phase 4.
 
 Almost—but the crucial distinction is that it does **not choose the test set by seeing which test set makes the model look best**.
