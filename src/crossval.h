@@ -22,6 +22,24 @@ using namespace std;
 
 namespace crossval {
 
+// Held-out metrics for a subset of exemplars, computed from a TwoSet built on
+//    their ( outcome, prediction ) pairs at a 0.5 threshold. Any metric not
+//    computable on a degenerate subset (one class present, or empty) is -1.
+//    ONE place builds a TwoSet from out-of-fold pairs and reads its metrics
+//    (rule 6); the runner and the report both call it.
+struct Metrics {
+	unsigned n = 0;
+	double az = -1;   // binormal ROC area
+	double trap = -1; // trapezoidal (exact Mann-Whitney) ROC area
+	double sens = -1; // sensitivity at 0.5
+	double spec = -1; // specificity at 0.5
+	double ca = -1;   // classification accuracy at 0.5
+};
+
+// Held-out metrics for rows (indices into outcome/pred) -- the shared helper.
+Metrics metricsFor( const vector< unsigned >& outcome,
+	const vector< double >& pred, const vector< unsigned >& rows );
+
 // One fold's held-out result. az/trap are -1 when the fold is too small or
 //    degenerate for that estimator.
 struct FoldResult {
@@ -62,6 +80,12 @@ RunResult run( DataSet& data, const vector< unsigned >& foldId, Procedure proc )
 struct ProcedureSpec {
 	string name;      // "Logistic", "LDFA", "Neural (OBD)", ...
 	Procedure proc;
+	// Optional architecture-metadata sink: for a nested-OBD procedure, wire the
+	//    SAME vector into cvadapters::nestedObdProcedure( ..., archHidden ) and
+	//    here. After the run the coordinator snapshots it into the entry (the
+	//    per-fold selected hidden size), so the report can summarize it. Leave
+	//    null for procedures without architecture metadata.
+	vector< unsigned >* archHidden = nullptr;
 };
 
 // Several procedures' results over ONE shared fold plan. Because every entry
@@ -72,9 +96,14 @@ struct Comparison {
 	bool ok = false;
 	string message;                // refusal text when !ok
 	vector< unsigned > outcome;    // shared, per raw row
+	vector< unsigned > foldId;     // the shared fold plan (per raw row) -- the
+	                               //    report needs it to write per-fold rows
+	unsigned k = 0;                // number of folds
 	struct Entry {
 		string name;
 		RunResult result;
+		double seconds = 0;            // wall-clock for this procedure
+		vector< unsigned > archHidden; // per-fold selected size; empty if none
 	};
 	vector< Entry > entries;
 };

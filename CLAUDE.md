@@ -1303,6 +1303,40 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   + Tier-2 detail + Tier-3 `cv_*.csv/json` from a `crossval::Comparison`, per
   `docs/evaluation_report_spec.md`), then `/api/cv` + the GUI panel.
 
+  **CV Step 3c (2026-07-23): the three-tier CV report — and a bug hunt it triggered, with ONE
+  residual still open. This is a CHECKPOINT COMMIT (Craig wants a revert point).**
+  `src/cvreport.{h,cpp}` renders a `crossval::Comparison` per `docs/evaluation_report_spec.md`:
+  Tier 1 (one-screen headline box table: Procedure · AUC(CV) mean±sd · Arch modal(freq) · Time +
+  verdict block with the standing "CV ± is descriptive spread across dependent folds, not a CI"
+  caveat; printed LAST for logs), Tier 2 (per-fold AUC/sens/spec, OBD architecture-selection
+  frequency, timing, failures, fold plan), Tier 3 (`cv_predictions.csv`/`cv_metrics.csv`/
+  `cv_run.json`, written beside the data, never printed). DRY (rule 6): one `crossval::metricsFor()`
+  builds a TwoSet from OOF pairs and both the runner (folds) and the report use it; the coordinator
+  now carries per-procedure timing + arch metadata + the shared fold plan. Column alignment uses a
+  UTF-8 display-width pad so ±/box-glyphs line up. `check_crossval` gained 7 report assertions; the
+  AUC-mean-equals-fold-mean one **watched to fail** against a sabotage.
+  **The bug hunt (the report's nested-OBD reproducibility assertion started flaking):** the flake was
+  cross-process ~20%, present since 3b (masked by too-few runs). Two real bugs found and fixed:
+  (1) **`Model::copy` never copied the `Validation` submatrix** — a clone's held-out monitor read an
+  EMPTY set, so **OBD's prune phase silently ignored validation early-stopping** (a correctness bug,
+  and it amplified the flake once the clone actually samples validation); guarded by a new `check_obd`
+  assertion **proven to fail** against the old code. (2) **`Matrix` allocations were left as garbage
+  (`new T[n]`)** — an uninitialized cell read on the grow→clone→validation path made architecture
+  selection nondeterministic across processes; fixed by value-initializing every `Matrix` allocation
+  (`new T[n]()`, rule 4 — the bounds-safe layer is now init-safe). Goldens byte-identical and oracle
+  numerically identical prove nothing correct depended on the garbage; reverting the value-init
+  reproduces the flake at 17/40, pinning causation. Confirmed uninitialized-memory two ways (zero-init
+  AND NaN-poison both restore determinism). **STILL OPEN — a residual ~2–4% cross-process flake on the
+  nested-OBD reproducibility assertion.** Traced to the same uninitialized-memory class (value-init
+  killed the bulk; the residual is non-Matrix — no raw `new[]`/arrays in the path) but NOT localized:
+  macOS clang has no MemorySanitizer, and instrumentation suppresses it (layout-sensitive). Full
+  cold-start briefing for whoever picks it up: **`docs/nested_obd_nondeterminism_handoff.md`** (repro
+  recipe, what's ruled out, prime suspect = audit every `copy()` in the SimpleProp→Network→Iterative→
+  Model chain for another omitted member like `Validation`, and the right tool = a Linux MSan/valgrind
+  `--track-origins` run via the ubuntu CI job). **Because of this residual the ctest is ~3% flaky, so
+  this commit is a deliberate checkpoint, not a clean green baseline** — resolve the residual (or make
+  the assertion reliable) before relying on CI. **Next after that: `/api/cv` + the GUI panel.**
+
 ## ROADMAP 4 (agreed with Craig 2026-07-22) — a general representative test-set splitter
 
 ### Why (rationale)

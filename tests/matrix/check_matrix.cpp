@@ -66,6 +66,15 @@ int main()
 	expect( C.rows() == 4 && C.cols() == 1 && C( 2, 0 ) == 21.0,
 		"includecols output is one column per included position" );
 
+	// NOTE: the Matrix ctors/resize now VALUE-INITIALIZE (zeros) rather than
+	// leaving garbage -- an uninitialized cell read made OBD's architecture
+	// selection nondeterministic across processes (2026-07-23; fixed in matrix.h).
+	// There is deliberately no unit assertion for it here: proving "was garbage"
+	// requires the allocator to hand back a poisoned freed block, which it does
+	// not do portably (macOS serves these sizes from freshly zeroed OS pages), so
+	// any such test passes vacuously. The fix is verified instead by cross-process
+	// determinism (tests/crossval, run repeatedly) and byte-identical goldens.
+
 	if ( failures == 0 )
 	{
 		cout << "check_matrix: row gather and column include behave as documented" << endl;

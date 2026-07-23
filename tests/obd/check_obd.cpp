@@ -376,6 +376,15 @@ static void test_validation_monitor()
 	ProbeProp sp; trainProbe( sp, dsFull, 4, 300 );
 	double eVal = sp.sampleTestError( 1 ); // monitors the VALIDATION set (valRows)
 
+	// (Model::copy) A COPY of a network must carry the validation submatrix too,
+	//    else a cloned net's held-out monitor reads an EMPTY set. OBD's prune
+	//    phase runs on clones, so without this the pruning silently ignored
+	//    validation early-stopping. spCopy exercises SimpleProp::copy -> Model::copy.
+	SimpleProp spCopy = sp; // base-slice copy: same code path a clone uses
+	double eValCopy = spCopy.sampleTestError( 1 );
+	expect( eVal > 0 && fabs( eValCopy - eVal ) < 1e-12,
+		"a copied network carries its validation set (Model::copy)" );
+
 	sp.setDataSet( dsTestT ); // rebind (weights preserved) -> test=testRows
 	double eTest = sp.sampleTestError( 1 );
 

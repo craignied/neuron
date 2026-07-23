@@ -2,32 +2,40 @@
 
 #include "crossval.h"
 
+#include <chrono>
+
 #include "twoset.h"
 
-// Compute the ROC areas for a set of (outcome, prediction) pairs by loading
+// Build the held-out metrics for a set of (outcome, prediction) pairs by loading
 //    them into a TwoSet -- its column 0 is the true outcome, column 1 the guess.
-//    Non-computable areas come back as -1 (a degenerate held-out set).
-static void rocFromPairs( const vector< unsigned >& outcome,
-	const vector< double >& pred, const vector< unsigned >& rows,
-	double& az, double& trap )
+//    Any metric not computable on a degenerate held-out set (one class, empty)
+//    comes back as -1. This is the ONE place out-of-fold pairs become metrics
+//    (rule 6): the runner scores each fold with it and the report reuses it.
+crossval::Metrics crossval::metricsFor( const vector< unsigned >& outcome,
+	const vector< double >& pred, const vector< unsigned >& rows )
 {
-	az = trap = -1;
-	if ( rows.empty() ) return;
+	Metrics m;
+	m.n = ( unsigned ) rows.size();
+	if ( rows.empty() ) return m;
 
-	Matrix< double > m( ( unsigned ) rows.size(), 2 );
+	Matrix< double > a( ( unsigned ) rows.size(), 2 );
 	for ( unsigned i = 0; i < rows.size(); i++ )
 	{
-		m( i, 0 ) = ( double ) outcome[ rows[ i ] ];
-		m( i, 1 ) = pred[ rows[ i ] ];
+		a( i, 0 ) = ( double ) outcome[ rows[ i ] ];
+		a( i, 1 ) = pred[ rows[ i ] ];
 	}
 
 	TwoSet ts;
-	ts.setMatrix( m );
+	ts.setMatrix( a );
 	ts.setThreshold( 0.5 );
 	ts.setBootstrapResamples( 0 ); // point areas only
 
-	try { trap = ts.getTrapROCarea(); } catch ( ... ) {}
-	try { az = ts.getStatROCarea(); } catch ( ... ) {}
+	try { m.trap = ts.getTrapROCarea(); } catch ( ... ) {}
+	try { m.az = ts.getStatROCarea(); } catch ( ... ) {}
+	try { m.sens = ts.getSens(); } catch ( ... ) {}
+	try { m.spec = ts.getSpec(); } catch ( ... ) {}
+	try { m.ca = ts.getClassAcc(); } catch ( ... ) {}
+	return m;
 }
 
 crossval::RunResult crossval::run( DataSet& data,
@@ -83,14 +91,16 @@ crossval::RunResult crossval::run( DataSet& data,
 		FoldResult fr;
 		fr.fold = f;
 		fr.nHeldout = ( unsigned ) testRows.size();
-		rocFromPairs( res.outcome, res.oofPrediction, testRows, fr.az, fr.trap );
+		Metrics fm = metricsFor( res.outcome, res.oofPrediction, testRows );
+		fr.az = fm.az; fr.trap = fm.trap;
 		res.folds.push_back( fr );
 	}
 
 	// Pooled out-of-fold ROC: every row's out-of-fold prediction, together.
 	vector< unsigned > allRows( n );
 	for ( unsigned r = 0; r < n; r++ ) allRows[ r ] = r;
-	rocFromPairs( res.outcome, res.oofPrediction, allRows, res.oofAz, res.oofTrap );
+	Metrics pooled = metricsFor( res.outcome, res.oofPrediction, allRows );
+	res.oofAz = pooled.az; res.oofTrap = pooled.trap;
 
 	res.ok = true;
 	return res;
@@ -109,7 +119,12 @@ crossval::Comparison crossval::compare( DataSet& data,
 
 	for ( unsigned i = 0; i < procs.size(); i++ )
 	{
+		// The coordinator owns coordination -- including timing each procedure
+		//    (rule 6). It does not train, select, or know the model family.
+		chrono::steady_clock::time_point t0 = chrono::steady_clock::now();
 		RunResult rr = run( data, foldId, procs[ i ].proc );
+		chrono::steady_clock::time_point t1 = chrono::steady_clock::now();
+
 		if ( !rr.ok )
 		{
 			c.message = "procedure '" + procs[ i ].name + "': " + rr.message;
@@ -119,8 +134,16 @@ crossval::Comparison crossval::compare( DataSet& data,
 		Comparison::Entry e;
 		e.name = procs[ i ].name;
 		e.result = rr;
+		e.seconds = chrono::duration< double >( t1 - t0 ).count();
+		if ( procs[ i ].archHidden ) // a procedure that carries architecture metadata
+			e.archHidden = *procs[ i ].archHidden;
 		c.entries.push_back( e );
 	}
+
+	c.foldId = foldId; // the shared plan, for per-fold report rows
+	c.k = 0;
+	for ( unsigned r = 0; r < foldId.size(); r++ )
+		if ( foldId[ r ] + 1 > c.k ) c.k = foldId[ r ] + 1;
 
 	c.ok = true;
 	return c;

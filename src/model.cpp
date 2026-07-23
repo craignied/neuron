@@ -33,6 +33,9 @@ void Model::copy( const Model& rhs )
 	theData = rhs.theData;
 	Train= rhs.Train;
 	Test = rhs.Test;
+	Validation = rhs.Validation; // Phase 4c: a clone must carry the validation
+	                             //    submatrix too, else a cloned net's held-out
+	                             //    monitor (sampleTestError) reads an empty set
 	TrainOutput = rhs.TrainOutput;
 	TestOutput = rhs.TestOutput;
 	builtFlag = rhs.builtFlag;

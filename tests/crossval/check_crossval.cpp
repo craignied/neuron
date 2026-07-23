@@ -8,12 +8,16 @@
 //     problem (watched to FAIL against a procedure that skips training);
 //   - the run is reproducible under a fixed seed.
 
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
 
 #include "crossval.h"
 #include "cvadapters.h"
+#include "cvreport.h"
 #include "obd.h"
 #include "simpleprop.h"
 #include "dataset.h"
@@ -165,6 +169,74 @@ int main()
 		cvadapters::nestedObdProcedure( ocfg, 0.25, &pickedHidden2 ) );
 	expect( ro.oofPrediction == ro2.oofPrediction && pickedHidden == pickedHidden2,
 		"the same seed reproduces the nested-OBD out-of-fold predictions and sizes" );
+
+	// The three-tier report (docs/evaluation_report_spec.md). Build a Comparison
+	// of three procedures over the shared plan -- LDFA, plain neural, nested OBD
+	// (with its architecture-metadata sink wired) -- and render it.
+	vector< unsigned > obdArch;
+	vector< crossval::ProcedureSpec > rprocs;
+	rprocs.push_back( { "LDFA", cvadapters::dfaProcedure( false ), nullptr } );
+	rprocs.push_back( { "Neural", cvadapters::trainProcedure( tmpl, 400 ), nullptr } );
+	rprocs.push_back( { "Neural (OBD)",
+		cvadapters::nestedObdProcedure( ocfg, 0.25, &obdArch ), &obdArch } );
+
+	util::set_seed( 7 );
+	crossval::Comparison rc = crossval::compare( data, foldId, rprocs );
+	expect( rc.ok && rc.entries.size() == 3 && rc.k == 5,
+		"the coordinator carries the fold plan and every procedure's results" );
+
+	cvreport::PlanInfo info;
+	info.n = n; info.foldPlan = "outcome-stratified, seed 7";
+	unsigned events = 0;
+	for ( unsigned r = 0; r < n; r++ ) if ( rc.outcome[ r ] ) events++;
+	info.events = events;
+	info.primary = "Neural (OBD)"; info.reference = "LDFA";
+
+	string t1 = cvreport::tier1( rc, info );
+	string t2 = cvreport::tier2( rc, info );
+
+	// Tier 1 is the headline: one row per procedure, the CV caveat, and -- because
+	// the nested-OBD entry carries architecture metadata -- an Arch footnote.
+	expect( t1.find( "SUMMARY" ) != string::npos &&
+		t1.find( "AUC (CV)" ) != string::npos &&
+		t1.find( "LDFA" ) != string::npos &&
+		t1.find( "Neural (OBD)" ) != string::npos,
+		"Tier 1 names every procedure under a headline table" );
+	expect( t1.find( "descriptive spread across dependent folds" ) != string::npos,
+		"Tier 1 always carries the standing CV caveat" );
+	expect( t1.find( "OBD selected" ) != string::npos,
+		"Tier 1 footnotes the OBD architecture selection" );
+
+	// The headline AUC must be the mean of the entry's per-fold exact AUCs -- the
+	// number a reader trusts. Compute it independently and require it printed.
+	double s = 0; unsigned v = 0;
+	const crossval::RunResult& lr = rc.entries[ 0 ].result; // LDFA
+	for ( unsigned i = 0; i < lr.folds.size(); i++ )
+		if ( lr.folds[ i ].trap >= 0 ) { s += lr.folds[ i ].trap; v++; }
+	char want[ 32 ];
+	snprintf( want, sizeof want, "%.3f", v ? s / v : -1.0 );
+	expect( v > 0 && t1.find( string( want ) ) != string::npos,
+		"Tier 1's AUC(CV) equals the mean of the procedure's per-fold exact AUCs" );
+
+	expect( t2.find( "Cross-validation detail" ) != string::npos &&
+		t2.find( "pooled OOF AUC" ) != string::npos &&
+		t2.find( "OBD architecture selection" ) != string::npos,
+		"Tier 2 gives per-fold detail and the OBD selection frequency" );
+
+	// Tier 3: three machine-readable files, predictions one row per exemplar.
+	string dir = "/tmp/cvreport_check";
+	system( ( "mkdir -p " + dir ).c_str() );
+	vector< string > files = cvreport::writeArtifacts( rc, info, dir );
+	expect( files.size() == 3, "Tier 3 writes three machine-readable files" );
+
+	unsigned predLines = 0;
+	{
+		ifstream pf( ( dir + "/cv_predictions.csv" ).c_str() );
+		string line;
+		while ( getline( pf, line ) ) predLines++;
+	}
+	expect( predLines == n + 1,
+		"cv_predictions.csv has a header plus one row per exemplar" );
 
 	if ( failures == 0 )
 	{
