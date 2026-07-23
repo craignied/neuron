@@ -107,3 +107,16 @@ add_executable(check_obd
 target_include_directories(check_obd PRIVATE src)
 target_link_libraries(check_obd PRIVATE GSL::gsl GSL::gslcblas)
 add_test(NAME obd_sizing COMMAND check_obd)
+
+# Unit test: the generic cross-validation runner (ROADMAP 4 Phase 4b-CV). Runs a
+# train procedure over a stratified fold plan and checks every row gets one
+# out-of-fold prediction, the pooled OOF AUC beats chance, and it is reproducible.
+add_executable(check_crossval
+    tests/crossval/check_crossval.cpp
+    src/crossval.cpp src/netclone.cpp
+    src/simpleprop.cpp src/bareprop.cpp src/backprop.cpp src/logistic.cpp
+    src/network.cpp src/iterative.cpp src/model.cpp src/dataset.cpp src/split.cpp
+    src/twoset.cpp src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
+target_include_directories(check_crossval PRIVATE src)
+target_link_libraries(check_crossval PRIVATE GSL::gsl GSL::gslcblas)
+add_test(NAME crossval_runner COMMAND check_crossval)

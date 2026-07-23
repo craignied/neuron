@@ -1260,9 +1260,19 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   `test_validation_monitor` test was rebuilt to catch it: ONE model trained, then rebound via
   `setDataSet` to evaluate the same held-out rows in the validation slot vs the test slot — they
   must match (proven to fail against the missing-bias sabotage), which also proves `setDataSet`
-  **preserves the trained weights** (the rebind the CV runner needs). **Next: the CV runner** (per
-  fold `makeFold` → clone → `setDataSet` → reset weights → `train()` → held-out metrics), then the
-  coordinator + adapters.
+  **preserves the trained weights** (the rebind the CV runner needs).
+  **CV Step 2 (2026-07-22): the generic CV runner landed.** `src/crossval.{h,cpp}` — `run(data,
+  foldId, Procedure)` owns REPETITION only (rule 6): per fold `makeFold` → `proc(foldData)` →
+  scatter the held-out predictions into a per-exemplar out-of-fold vector + per-fold ROC; pooled
+  OOF ROC at the end. No model switches — a `Procedure` callback is the adapter. `trainProcedure(
+  templateNet, maxIter)` is the plain-train adapter: clone → `setDataSet(fold)` → `randomize` →
+  `train` → read the clone's held-out `TwoSet` guesses (the clone carries the template's config via
+  copy; per-fold bootstrap off). ctest `crossval_runner` (5-fold on a learnable problem): every row
+  gets exactly one OOF prediction, pooled OOF AUC beats chance (watched to FAIL against a
+  skip-training sabotage), reproducible. Gates green (9/9 ctest, goldens/oracle/smoke).
+  **Next: CV Step 3 — the comparison coordinator + procedure adapters** (logistic / LDFA / QDFA /
+  neural+nested-OBD over one shared fold plan), then `/api/cv` + the Tier-1/2/3 report
+  (`docs/evaluation_report_spec.md`).
 
 ## ROADMAP 4 (agreed with Craig 2026-07-22) — a general representative test-set splitter
 
