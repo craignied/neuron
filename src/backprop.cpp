@@ -105,6 +105,14 @@ void BackProp::setDataSet( DataSet& dataObj )
 
 			Test = Test.addcol( test_bias ); // efficiency doesn't matter here either
 		}
+
+		// Validation set (Phase 4c): a bias column like the test set, so the
+		//    held-out monitor can forward-propagate it.
+		if ( theData.valLoaded() )
+		{
+			vector< double > val_bias( theData.getNumVal(), 1 );
+			Validation = Validation.addcol( val_bias );
+		}
 	}
 
 	else // no bias nodes

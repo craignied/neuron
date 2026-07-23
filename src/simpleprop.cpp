@@ -91,6 +91,15 @@ void SimpleProp::setDataSet( DataSet& dataObj )
 		if ( theData.getDiscrete() ) // TwoSet object makes sense only for discrete output
 			theData.setTestTwoSet(); // build the TwoSet object for the test set
 	}
+
+	// Validation set (Phase 4c): prepared exactly like the test set (a bias
+	//    column) so the held-out monitor can forward-propagate it. No TwoSet --
+	//    the monitor reads the error directly, it never classifies the set.
+	if ( theData.valLoaded() )
+	{
+		vector< double > val_bias( theData.getNumVal(), 1 );
+		Validation = Validation.addcol( val_bias );
+	}
 }
 
 // Set the number of hidden nodes, note that training set must have been loaded!

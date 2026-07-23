@@ -1250,8 +1250,19 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   producer (120/30/50 partition + val loaded + the leave-no-training refusal); smoke asserts the
   three-way load + the strata refusal. Gates green (goldens byte-identical, oracle identical, 8/8
   ctest, smoke). Verified end-to-end: lowbwt 189 → 114 train / 28 val / 47 test. **4c is complete:
-  the OBD-on-test leak is fixed AND reachable from the single-split workflow.** **Next: the CV
-  coordinator/runner/adapters** — verify the clone→`setDataSet(fold)` rebind first (rule 3).
+  the OBD-on-test leak is fixed AND reachable from the single-split workflow.**
+  **CV Step 1 (2026-07-22): the clone→`setDataSet(fold)` rebind is VERIFIED — and it caught a
+  bug in my own 4c work (rule 3 paid off before building on the assumption).** Reading
+  `setDataSet` first showed it appends the bias column to `Train`/`Test` but I never did so for
+  the new `Validation` matrix, so `sampleTestError(Validation)` read a STALE bias slot (benign
+  only because a prior `forward(Train)` usually left it at 1.0). Fixed in SimpleProp/BackProp/
+  Logistic `setDataSet` (mirror the Test-bias block; BareProp needs none). The
+  `test_validation_monitor` test was rebuilt to catch it: ONE model trained, then rebound via
+  `setDataSet` to evaluate the same held-out rows in the validation slot vs the test slot — they
+  must match (proven to fail against the missing-bias sabotage), which also proves `setDataSet`
+  **preserves the trained weights** (the rebind the CV runner needs). **Next: the CV runner** (per
+  fold `makeFold` → clone → `setDataSet` → reset weights → `train()` → held-out metrics), then the
+  coordinator + adapters.
 
 ## ROADMAP 4 (agreed with Craig 2026-07-22) — a general representative test-set splitter
 

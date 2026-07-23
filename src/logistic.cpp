@@ -101,6 +101,14 @@ void Logistic::setDataSet( DataSet& dataObj )
 
 			theData.setTestTwoSet(); // build the TwoSet object for the test set
 		}
+
+		// Validation set (Phase 4c): a bias column like the test set, so the
+		//    held-out monitor can forward-propagate it.
+		if ( theData.valLoaded() )
+		{
+			vector< double > val_bias( theData.getNumVal(), 1 );
+			Validation = Validation.addcol( val_bias );
+		}
 	}
 }
 

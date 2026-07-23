@@ -349,29 +349,51 @@ static void test_validation_monitor()
 	for ( unsigned i = 80; i < 100; i++ ) testRows.push_back( i );
 	for ( unsigned i = 100; i < 120; i++ ) valRows.push_back( i ); // disjoint from test
 
-	DataSet dsVal; // train + test + a distinct validation set
-	dsVal.setInput( 2 ); dsVal.setOutput( 1 ); dsVal.setDiscrete( true );
-	dsVal.setHistory( false ); dsVal.setRawMatrix( raw );
-	dsVal.makeFold( trainRows, testRows, valRows );
+	// Three configs that share the SAME train rows. We train ONE model on the
+	//    first, then REBIND it to the others via setDataSet -- which preserves
+	//    the weights -- so every measurement uses identical weights (no RNG
+	//    confound). That rebind is exactly what the CV loop needs, so this also
+	//    verifies it (Step 1: clone/rebind keeps the fit).
+	DataSet dsFull; // train + test=testRows + validation=valRows
+	dsFull.setInput( 2 ); dsFull.setOutput( 1 ); dsFull.setDiscrete( true );
+	dsFull.setHistory( false ); dsFull.setRawMatrix( raw );
+	dsFull.makeFold( trainRows, testRows, valRows );
 
-	DataSet dsNoVal; // same train + test, no validation set (pre-4c)
-	dsNoVal.setInput( 2 ); dsNoVal.setOutput( 1 ); dsNoVal.setDiscrete( true );
-	dsNoVal.setHistory( false ); dsNoVal.setRawMatrix( raw );
-	dsNoVal.makeFold( trainRows, testRows, none );
+	DataSet dsTestT; // train + test=testRows, no validation
+	dsTestT.setInput( 2 ); dsTestT.setOutput( 1 ); dsTestT.setDiscrete( true );
+	dsTestT.setHistory( false ); dsTestT.setRawMatrix( raw );
+	dsTestT.makeFold( trainRows, testRows, none );
 
-	expect( dsVal.valLoaded() && !dsNoVal.valLoaded(),
+	DataSet dsTestV; // train + test=valRows, no validation
+	dsTestV.setInput( 2 ); dsTestV.setOutput( 1 ); dsTestV.setDiscrete( true );
+	dsTestV.setHistory( false ); dsTestV.setRawMatrix( raw );
+	dsTestV.makeFold( trainRows, valRows, none );
+
+	expect( dsFull.valLoaded() && !dsTestT.valLoaded(),
 		"makeFold builds a validation set only when valRows is non-empty" );
 
 	util::set_seed( 42 );
-	ProbeProp sp1; trainProbe( sp1, dsVal, 4, 300 );
-	double eVal = sp1.sampleTestError( 1 ); // must sample the VALIDATION set
+	ProbeProp sp; trainProbe( sp, dsFull, 4, 300 );
+	double eVal = sp.sampleTestError( 1 ); // monitors the VALIDATION set (valRows)
 
-	util::set_seed( 42 );
-	ProbeProp sp2; trainProbe( sp2, dsNoVal, 4, 300 ); // same train, same seed
-	double eTest = sp2.sampleTestError( 1 ); // no validation -> samples the TEST set
+	sp.setDataSet( dsTestT ); // rebind (weights preserved) -> test=testRows
+	double eTest = sp.sampleTestError( 1 );
 
+	sp.setDataSet( dsTestV ); // rebind -> test=valRows (the validation data)
+	double eValAsTest = sp.sampleTestError( 1 );
+
+	// (a) the reroute: with a validation set, the monitor reads it, not the test
+	//     set -- and valRows differ from testRows, so the value differs.
 	expect( fabs( eVal - eTest ) > 1e-9,
 		"the held-out monitor reads the validation set when present, not the test set" );
+
+	// (b) correctness AND the rebind: the SAME held-out data (valRows) gives the
+	//     SAME monitor error whether it sits in the validation slot (before the
+	//     rebind) or the test slot (after) -- proving the validation matrix is
+	//     prepared (bias column) exactly like the test matrix, and that
+	//     setDataSet preserved the trained weights.
+	expect( fabs( eVal - eValAsTest ) < 1e-12,
+		"validation forwards exactly like test, and setDataSet preserves the fit" );
 }
 
 int main()
