@@ -113,8 +113,9 @@ add_test(NAME obd_sizing COMMAND check_obd)
 # out-of-fold prediction, the pooled OOF AUC beats chance, and it is reproducible.
 add_executable(check_crossval
     tests/crossval/check_crossval.cpp
-    src/crossval.cpp src/netclone.cpp
+    src/crossval.cpp src/cvadapters.cpp src/netclone.cpp
     src/simpleprop.cpp src/bareprop.cpp src/backprop.cpp src/logistic.cpp
+    src/ldfa.cpp src/qdfa.cpp src/dfa.cpp
     src/network.cpp src/iterative.cpp src/model.cpp src/dataset.cpp src/split.cpp
     src/twoset.cpp src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
 target_include_directories(check_crossval PRIVATE src)

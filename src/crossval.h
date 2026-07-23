@@ -17,7 +17,6 @@
 #include <vector>
 
 #include "dataset.h"
-#include "network.h"
 
 using namespace std;
 
@@ -52,12 +51,6 @@ using Procedure = function< vector< double >( DataSet& ) >;
 //    nsplit::kFold. Every row is held out exactly once, so every row receives an
 //    out-of-fold prediction.
 RunResult run( DataSet& data, const vector< unsigned >& foldId, Procedure proc );
-
-// A ready-made procedure: clone a configured template network, retrain it from
-//    fresh weights on the fold's training set (the clone carries the template's
-//    training configuration via copy), and return its held-out predictions. The
-//    per-fold ROC bootstrap is disabled (the runner needs point predictions).
-Procedure trainProcedure( const Network& templateNet, unsigned maxIter );
 
 } // namespace crossval
 

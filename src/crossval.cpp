@@ -3,11 +3,6 @@
 #include "crossval.h"
 
 #include "twoset.h"
-#include "netclone.h"
-#include "utility.h"
-
-#include <memory>
-#include <sstream>
 
 // Compute the ROC areas for a set of (outcome, prediction) pairs by loading
 //    them into a TwoSet -- its column 0 is the true outcome, column 1 the guess.
@@ -97,31 +92,4 @@ crossval::RunResult crossval::run( DataSet& data,
 
 	res.ok = true;
 	return res;
-}
-
-crossval::Procedure crossval::trainProcedure( const Network& templateNet,
-	unsigned maxIter )
-{
-	return [ &templateNet, maxIter ]( DataSet& foldData ) -> vector< double >
-	{
-		unique_ptr< Network > clone = cloneNetwork( templateNet );
-		clone->setDataSet( foldData );  // retarget to this fold (weights survive)
-		clone->randomize();             // fresh weights for an honest fit
-		clone->setMaxIterations( maxIter );
-		clone->getDataSet().getTestTwoSet().setBootstrapResamples( 0 );
-
-		// train() prints its report through util::screen(); discard it, then
-		//    restore whatever stream was current.
-		ostream& saved = util::screen();
-		ostringstream discard;
-		util::set_screen( discard );
-		clone->train();                 // epilogue writes the held-out guesses
-		util::set_screen( saved );
-
-		TwoSet& te = clone->getDataSet().getTestTwoSet();
-		unsigned m = te.getNumElements();
-		vector< double > preds( m );
-		for ( unsigned i = 0; i < m; i++ ) preds[ i ] = te.test( i );
-		return preds;
-	};
 }

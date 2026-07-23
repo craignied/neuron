@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "crossval.h"
+#include "cvadapters.h"
 #include "simpleprop.h"
 #include "dataset.h"
 #include "split.h"
@@ -73,7 +74,7 @@ int main()
 
 	util::set_seed( 7 );
 	crossval::RunResult r = crossval::run( data, foldId,
-		crossval::trainProcedure( tmpl, 400 ) );
+		cvadapters::trainProcedure( tmpl, 400 ) );
 
 	expect( r.ok, "the CV run completes" );
 	expect( r.folds.size() == 5, "one result per fold" );
@@ -89,9 +90,20 @@ int main()
 	// Reproducibility under a fixed seed.
 	util::set_seed( 7 );
 	crossval::RunResult r2 = crossval::run( data, foldId,
-		crossval::trainProcedure( tmpl, 400 ) );
+		cvadapters::trainProcedure( tmpl, 400 ) );
 	expect( r.oofPrediction == r2.oofPrediction,
 		"the same seed reproduces the out-of-fold predictions" );
+
+	// The DFA adapter (LDFA) over the SAME fold plan -- a different model family
+	// through the same generic runner. DFA is deterministic (no seed), and its
+	// held-out score is the graded discriminant probability.
+	crossval::RunResult rl = crossval::run( data, foldId,
+		cvadapters::dfaProcedure( false ) );
+	bool ldfaAll = true;
+	for ( unsigned i = 0; i < n; i++ )
+		if ( rl.oofPrediction[ i ] < 0.0 ) ldfaAll = false;
+	expect( rl.ok && ldfaAll && rl.oofTrap > 0.6,
+		"the LDFA adapter cross-validates: every row predicted, pooled AUC beats chance" );
 
 	if ( failures == 0 )
 	{
