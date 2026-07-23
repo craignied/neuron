@@ -20,6 +20,7 @@
 #include "cvreport.h"
 #include "obd.h"
 #include "simpleprop.h"
+#include "logistic.h"
 #include "dataset.h"
 #include "split.h"
 #include "utility.h"
@@ -109,6 +110,25 @@ int main()
 		if ( rl.oofPrediction[ i ] < 0.0 ) ldfaAll = false;
 	expect( rl.ok && ldfaAll && rl.oofTrap > 0.6,
 		"the LDFA adapter cross-validates: every row predicted, pooled AUC beats chance" );
+
+	// Logistic regression through the SAME generic runner + trainProcedure: a
+	// Logistic IS a Network (cloneNetwork handles it) and carries its own config
+	// (cross-entropy, batch, auto-step) through copy, so no bespoke adapter is
+	// needed -- trainProcedure fits and CV-scores it like any other network.
+	Logistic ltmpl;
+	ltmpl.setDataSet( tdata );
+	ltmpl.setHistory( false ); ltmpl.setLastop( false ); ltmpl.setLogPrint( false );
+	util::set_seed( 3 );
+	ltmpl.randomize();
+
+	util::set_seed( 7 );
+	crossval::RunResult rlog = crossval::run( data, foldId,
+		cvadapters::trainProcedure( ltmpl, 400 ) );
+	bool logAll = true;
+	for ( unsigned i = 0; i < n; i++ )
+		if ( rlog.oofPrediction[ i ] < 0.0 ) logAll = false;
+	expect( rlog.ok && logAll && rlog.oofTrap > 0.6,
+		"logistic regression cross-validates through trainProcedure (no bespoke adapter)" );
 
 	// The comparison coordinator: two model families over ONE shared fold plan,
 	// so every patient carries a prediction from BOTH -- the paired substrate.

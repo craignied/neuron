@@ -39,6 +39,17 @@ button { padding: .35rem .9rem; cursor: pointer; }
 #obdbox .sw { display: inline-block; width: .7em; height: .7em; border-radius: 2px;
           margin: 0 .3em 0 1em; vertical-align: baseline; }
 #obdbox .sw:first-child { margin-left: 0; }
+#cvbox { display: none; background: #fff; border: 1px solid #ddd; border-radius: 8px;
+          padding: 1rem; margin-bottom: 1rem; }
+#cvbox h3 { font-size: .95rem; margin: 0 0 .5rem; }
+/* Tier 1 headline: pinned at the top, prominent monospace box. */
+#cvtier1 { background: #f6f5f0; border: 1px solid #ddd; border-radius: 6px;
+          padding: .6rem .8rem; margin: 0 0 .8rem; overflow-x: auto;
+          font-size: .82rem; line-height: 1.3; white-space: pre; }
+#cvtier2 { background: #fbfbf9; border: 1px solid #eee; border-radius: 6px;
+          padding: .5rem .7rem; margin: 0 0 .6rem; overflow: auto; max-height: 26em;
+          font-size: .78rem; line-height: 1.25; white-space: pre; color: #33322f; }
+#cvfiles { font-size: .8rem; color: #52514e; }
 #rocstats { flex: 1; min-width: 15rem; font-size: .9rem; }
 #rocstats h3 { font-size: .95rem; margin: .2rem 0 .6rem; }
 #rocstats .sblk { margin-bottom: 1rem; }
@@ -376,6 +387,45 @@ network; the size-vs-error search appears in the chart below.</span></div>
 </fieldset>
 
 <fieldset>
+<legend>4d &mdash; Cross-validation model comparison</legend>
+<div class="row">
+  <label>Folds <input class="num" type="number" id="cv_folds" value="5" min="2"></label>
+  <label>Seed <input class="num" type="number" id="cv_seed" value="42"></label>
+  <label>Max iterations <input class="num" type="number" id="cv_maxiter" value="500"
+    min="1" title="Per-fold training cap for logistic / fixed-architecture neural"></label>
+  <button id="cvbtn" onclick="runCv()">Run cross-validation</button>
+  <span class="status" id="cvstatus"></span>
+</div>
+<div class="row">
+  <span class="status">Compare:</span>
+  <label><input type="checkbox" id="cv_logistic" checked> Logistic</label>
+  <label><input type="checkbox" id="cv_ldfa"> LDFA</label>
+  <label><input type="checkbox" id="cv_qdfa"> QDFA</label>
+  <label><input type="checkbox" id="cv_neural" checked> Neural network</label>
+  <label title="Run the OBD hidden-layer search inside each fold (nested); off = a fixed hidden count"><input type="checkbox" id="cv_neural_obd" checked> &mdash; with nested OBD</label>
+</div>
+<div class="row">
+  <label>Fixed hidden (when OBD off) <input class="num" type="number" id="cv_neural_hidden"
+    value="5" min="1"></label>
+  <label>OBD max hidden <input class="num" type="number" id="cv_hidden_max" value="8"
+    min="1"></label>
+  <label>OBD iteration budget <input class="num" type="number" id="cv_iter_budget"
+    value="500" min="1"></label>
+  <label title="Share of each fold's training rows held out as the inner validation set OBD monitors">Inner validation
+    <input class="num" type="number" id="cv_inner_val" value="0.25" step="0.05"
+    min="0.05" max="0.9"></label>
+</div>
+<div class="row"><span class="status">Every procedure is scored over ONE shared,
+outcome-stratified k-fold plan, so their out-of-fold predictions are paired row
+for row. The nested-OBD pipeline reruns the whole architecture search inside each
+fold (no leakage). A standalone analysis &mdash; it does not touch the trained
+model above. The headline table, per-fold detail, and machine-readable files
+(cv_predictions.csv / cv_metrics.csv / cv_run.json, written beside your data)
+appear below. The CV &plusmn; is descriptive spread across dependent folds, not a
+confidence interval.</span></div>
+</fieldset>
+
+<fieldset>
 <legend>5 &mdash; Session files</legend>
 <div class="row">
   <button onclick="saveFile('network')">Network</button>
@@ -407,6 +457,12 @@ deploy the model; training/test sets and guesses document the run.</span></div>
     <span id="obdnote"></span></div>
   <div id="obdwrap"><canvas id="obdc" width="880" height="240"></canvas>
     <div id="obdtip"></div></div>
+</div>
+<div id="cvbox">
+  <h3>Cross-validation comparison</h3>
+  <pre id="cvtier1"></pre>
+  <pre id="cvtier2"></pre>
+  <div id="cvfiles"></div>
 </div>
 <div id="rocbox">
   <canvas id="roc" width="440" height="440"></canvas>
@@ -623,6 +679,48 @@ async function pollObd() {
   }
   if (res.ok && res.roc) { drawROC(res.roc); renderStats(res.roc); }
   if (res.ok && res.stats) renderFullStats(res.stats);
+}
+
+// Cross-validation: async like OBD, results flow back through /api/train/status.
+let cving = false;
+async function runCv() {
+  if (cving) { const j = await api("/api/train/stop", {}); setStatus("cvstatus", j.ok, j.message); return; }
+  const cb = id => $(id).checked ? "1" : "0";
+  const p = { folds: $("cv_folds").value, seed: $("cv_seed").value,
+    maxiter: $("cv_maxiter").value, logistic: cb("cv_logistic"), ldfa: cb("cv_ldfa"),
+    qdfa: cb("cv_qdfa"), neural: cb("cv_neural"), neural_obd: cb("cv_neural_obd"),
+    neural_hidden: $("cv_neural_hidden").value, hidden_max: $("cv_hidden_max").value,
+    iter_budget: $("cv_iter_budget").value, inner_val: $("cv_inner_val").value };
+  const j = await api("/api/cv", p);
+  if (!j.ok) { setStatus("cvstatus", false, j.message); return; }
+  cving = true;
+  $("cvbtn").textContent = "Stop";
+  setStatus("cvstatus", true, "cross-validating…");
+  pollCv();
+}
+async function pollCv() {
+  let j;
+  try { j = await (await fetch("/api/train/status")).json(); }
+  catch (e) { setTimeout(pollCv, 1000); return; }
+  if (j.running) {
+    const ph = j.obd && j.obd.phase ? j.obd.phase : "starting up";
+    setStatus("cvstatus", true, "running… (" + ph + ")");
+    setTimeout(pollCv, 500); return;
+  }
+  cving = false;
+  $("cvbtn").textContent = "Run cross-validation";
+  const res = j.result;
+  if (!res) return;
+  setStatus("cvstatus", res.ok, res.message);
+  if (res.ok && res.cv) {
+    $("cvbox").style.display = "block";
+    $("cvtier1").textContent = res.cv.tier1;
+    $("cvtier2").textContent = res.cv.tier2;
+    const files = res.cv.files || [];
+    $("cvfiles").textContent = files.length
+      ? ("Machine-readable files written: " + files.join(", "))
+      : "";
+  }
 }
 // The size search: training and held-out error at each size the search tried,
 // in search order (grow then prune). Same two entity colors as the error and

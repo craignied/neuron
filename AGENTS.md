@@ -426,6 +426,34 @@ completion arrive through the same `GET /api/train/status` (a running OBD adds a
 budget; keep `iter_budget` modest (hundreds to low thousands) and `hidden_max`
 sane. See `docs/obd_plan.md`.
 
+The GUI also runs **honest cross-validation model comparison** (`POST /api/cv`,
+the "Cross-validation" panel). It scores several procedures — **logistic**, **LDFA**,
+**QDFA**, and a **neural network** (with **nested OBD**: the whole architecture search
+reruns inside each fold, so nothing leaks) — over ONE shared, outcome-stratified
+k-fold plan, so their out-of-fold predictions are paired patient-for-patient. This
+is the standard "I always run logistic + DFA alongside my chosen net" comparison,
+done without leakage. Params: `folds` (k, ≥2, default 5), `seed` (42), `maxiter`
+(per-fold cap for logistic / fixed-architecture neural, 500), the procedure flags
+`logistic`/`ldfa`/`qdfa`/`neural` (1/0; default logistic+neural), `neural_obd`
+(1 = nested OBD per fold, 0 = a fixed hidden count), `neural_hidden` (the fixed
+count when `neural_obd=0`), `hidden_max`/`iter_budget` (the per-fold OBD search),
+`inner_val` (share of each fold's training rows held out as the inner validation
+set OBD monitors, 0.25). It is **async-only** and a **standalone analysis** — it does
+NOT touch the current model — and reaches completion through the same
+`GET /api/train/status` (a running CV adds `obd:{phase:"cross-validating"}`) and
+`POST /api/train/stop` doors. The result carries a **three-tier report**: `cv.tier1`
+(a one-screen headline table — AUC-per-fold mean ± sd, which is DESCRIPTIVE spread
+across dependent folds, **not** a confidence interval — plus a prespecified
+descriptive contrast and the OBD architecture-selection frequency), `cv.tier2`
+(per-fold AUC/sens/spec detail), and `cv.files` (the paths of `cv_predictions.csv`
+/ `cv_metrics.csv` / `cv_run.json`, written beside your data — the paired
+out-of-fold substrate, never printed). **Cost:** CV is k trainings per procedure,
+and the nested-OBD procedure is k full OBD searches, so it is the most expensive
+run in the GUI — start with small `folds`/`hidden_max`/`iter_budget` on large data.
+No formal cross-validation inference is reported (the fold results are dependent);
+the only inferential comparison is a locked untouched test set, a separate step.
+See `docs/evaluation_report_spec.md` and `docs/cross_validation.md`.
+
 ## 4. Verifying the installation
 
 - Quick: `./tests/tools/run_tools.sh` (Python tools vs committed outputs,

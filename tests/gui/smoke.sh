@@ -578,6 +578,56 @@ done
 grep -q '"running":false' obd_cancel.json || fail "cancelled OBD never completed"
 grep -q '"cancelled":true' obd_cancel.json || fail "a stopped OBD result must say cancelled"
 
+# --- Cross-validation model comparison (ROADMAP 4 Phase 4b-CV) --------------
+# Refusal: no procedure selected is nothing to compare
+curl -s -X POST "$URL/api/load" -d "mode=raw&path=lowbwt2-2train.txt&fraction=0.25&seed=1" >/dev/null
+curl -s -X POST "$URL/api/cv" -d "logistic=0&ldfa=0&qdfa=0&neural=0" \
+    | grep -q '"ok":false' || fail "CV must refuse when no procedure is selected"
+
+# Happy path: an async comparison of two procedures over one shared 5-fold plan,
+#    returning the three-tier report (Tier 1 headline text, Tier 2 detail, Tier 3
+#    files) and writing the machine-readable CSVs beside the data
+curl -s -X POST "$URL/api/cv" \
+    -d "folds=5&seed=42&logistic=1&ldfa=0&qdfa=0&neural=1&neural_obd=1&hidden_max=4&iter_budget=200&inner_val=0.25" \
+    | grep -q '"ok":true' || fail "CV run did not start"
+sawCv=0
+for i in $(seq 1 120); do
+    curl -s "$URL/api/train/status" > cv_status.json
+    grep -q '"phase":"cross-validating"' cv_status.json && sawCv=1
+    grep -q '"running":false' cv_status.json && break
+    sleep 0.3
+done
+[ "$sawCv" = 1 ] || fail "status never reported a cross-validating phase"
+grep -q '"running":false' cv_status.json || fail "CV never completed"
+$PY - <<'PY' || fail "CV result malformed"
+import json
+d = json.load(open("cv_status.json"))["result"]
+assert d["ok"], d
+cv = d["cv"]
+assert "SUMMARY" in cv["tier1"] and "AUC (CV)" in cv["tier1"], cv["tier1"][:200]
+# the standing caveat must always be present (it is policy, not decoration)
+assert "descriptive spread across dependent folds" in cv["tier1"], cv["tier1"]
+assert "Cross-validation detail" in cv["tier2"], cv["tier2"][:200]
+assert len(cv["files"]) == 3, cv["files"]
+PY
+# Tier 3 predictions: header + one row per exemplar (189 in lowbwt), one column
+#    per compared procedure -- the paired out-of-fold substrate
+lines=$(wc -l < cv_predictions.csv | tr -d ' ')
+[ "$lines" -eq 190 ] || fail "cv_predictions.csv should have 190 lines (header + 189), got $lines"
+head -1 cv_predictions.csv | grep -q "Logistic" || fail "cv_predictions.csv missing a procedure column"
+
+# 409 busy while a CV run owns the engine (shares the OBD/train job machinery)
+curl -s -X POST "$URL/api/cv" -d "folds=5&logistic=1&neural=1&neural_obd=1&hidden_max=4&iter_budget=200000&maxiter=200000" \
+    | grep -q '"ok":true' || fail "second CV run did not start"
+cvbusy=$(curl -s -w '\n%{http_code}' -X POST "$URL/api/cv" -d "logistic=1")
+echo "$cvbusy" | grep -q '"busy":true' || fail "no busy flag while a CV run runs"
+echo "$cvbusy" | tail -1 | grep -q '409' || fail "CV busy refusal should be HTTP 409"
+curl -s -X POST -d "" "$URL/api/train/stop" >/dev/null
+for i in $(seq 1 120); do
+    curl -s "$URL/api/train/status" | grep -q '"running":false' && break
+    sleep 0.3
+done
+
 # --- Per-action audit log (every user action logged, 2026-07-19) -----------
 # Every GUI action lands in neuron_actions.log beside the data, timestamped,
 # with the exact parameter values it carried. The session above drove load,

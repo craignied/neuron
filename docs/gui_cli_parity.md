@@ -118,6 +118,7 @@ have **no CLI equivalent by design** — that is not a parity gap.
 | Covariate stratification of the raw split + representativeness diagnostic (ROADMAP 4 Phase 2) | Dataset panel "Stratify on" columns + bins | `POST /api/load` `strata=` (1-based cols) `strata_bins=` | — n/a (the CLI already stratifies on the outcome; covariate strata are new, menus frozen) |
 | Group-aware split — keep clusters intact for a harder unseen-group test (ROADMAP 4 Phase 3) | Dataset panel "Group on" columns | `POST /api/load` `group=` (1-based cols; rows with identical values stay together) | — n/a (new capability, menus frozen) |
 | Three-way split — train/validation/test so selection (OBD) monitors validation and the test set stays untouched (ROADMAP 4 Phase 4c) | Dataset panel "Validation fraction" | `POST /api/load` `val_fraction=` (or `val_n=` with `test_n=`) | — n/a (new capability, menus frozen) |
+| Cross-validation model comparison — logistic / LDFA / QDFA / neural (nested OBD) over ONE shared outcome-stratified k-fold plan, three-tier report (ROADMAP 4 Phase 4) | Dataset-independent "Cross-validation" panel + pinned Tier-1 headline table | `POST /api/cv` (async; three-tier report in the result) | — n/a (new capability, menus frozen) |
 
 `POST /api/obd` params: `hidden_start`, `hidden_max`, `iter_budget`,
 `sample_every`, `early_stop_tol`, `early_stop_patience`, `grow_patience`,
@@ -125,6 +126,18 @@ have **no CLI equivalent by design** — that is not a parity gap.
 backstop), `algorithm` (1|2|3|auto), `seed`. It is async-only and shares the
 training job (status + stop reach it through the same doors); the winning sized
 network replaces the current model.
+
+`POST /api/cv` params: `folds` (k, ≥2), `seed`, `maxiter` (per-fold cap for
+logistic / fixed-architecture neural), procedure flags `logistic`/`ldfa`/`qdfa`/
+`neural`, `neural_obd` (nested OBD per fold vs a fixed count), `neural_hidden`
+(the fixed count), `hidden_max`/`iter_budget` (the per-fold OBD search),
+`inner_val` (share of each fold's training rows held out as the inner validation
+set OBD monitors). Async-only, shares the training job (status + stop). It is a
+standalone analysis — it does NOT touch the current model. The result carries the
+report as text (`cv.tier1`/`cv.tier2`) and the paths of the Tier-3 files
+(`cv_predictions.csv` / `cv_metrics.csv` / `cv_run.json`, written beside the data).
+The fold plan is outcome-stratified k-fold; composing CV with the covariate-strata
+/ group-aware split modes is a later extension.
 
 ## Logging (cross-cutting)
 

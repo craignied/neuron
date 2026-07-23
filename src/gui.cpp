@@ -40,6 +40,10 @@
 #include "qdfa.h"
 #include "iterative.h"
 #include "regressnet.h"
+#include "crossval.h"
+#include "cvadapters.h"
+#include "cvreport.h"
+#include "split.h"
 #include "utility.h"
 #include "version.h"
 
@@ -1630,6 +1634,217 @@ string handleObd( const httplib::Request& req )
 	return jsonMsg( true, "OBD hidden-layer search started" );
 }
 
+// --- Cross-validation model comparison (ROADMAP 4 Phase 4b-CV) ---------------
+
+// Configuration a CV run needs, parsed from the request in handleCv and carried
+//    into the worker (so the worker touches only its own copy, not the request).
+struct CvConfig
+{
+	unsigned k = 5, seed = 42, maxIter = 500;
+	bool logistic = true, ldfa = false, qdfa = false, neural = true;
+	bool neuralObd = true;        // nested OBD per fold, else a fixed hidden count
+	unsigned neuralHidden = 5;    // fixed-architecture neural (when !neuralObd)
+	double innerVal = 0.25;       // inner validation fraction for nested OBD
+	obd::Config obd;              // per-fold OBD search (when neuralObd)
+};
+
+// The whole comparison on the worker thread: build an outcome-stratified k-fold
+//    plan over the loaded Raw, assemble the selected procedures, run them over
+//    the ONE shared plan (crossval::compare), render the three-tier report, and
+//    write the Tier-3 files beside the data. Does NOT touch modelPtr -- CV is a
+//    standalone analysis, like DFA. The caller must own the engine.
+string runCvJob( CvConfig c )
+{
+	DataSet& data = *dataPtr;
+
+	// Fold plan: outcome-stratified k-fold over the raw outcome column.
+	Matrix< double >& raw = data.getRawMatrix();
+	unsigned n = raw.rows(), outCol = raw.cols() - 1;
+	vector< unsigned > label( n );
+	unsigned events = 0;
+	for ( unsigned r = 0; r < n; r++ )
+	{
+		label[ r ] = ( raw( r, outCol ) != 0 ) ? 1u : 0u;
+		events += label[ r ];
+	}
+	util::set_seed( c.seed );
+	vector< unsigned > foldId = nsplit::kFold( label, c.k );
+
+	// Templates for the network procedures. They MUST outlive compare() --
+	//    trainProcedure captures the template by reference -- so they live here
+	//    for the whole synchronous run below. Sized on a train=all fold.
+	DataSet full = data;
+	vector< unsigned > allRows( n ), none;
+	for ( unsigned r = 0; r < n; r++ ) allRows[ r ] = r;
+	full.makeFold( allRows, none );
+
+	unique_ptr< Logistic > lg;
+	unique_ptr< SimpleProp > sp;
+	vector< unsigned > archSink; // per-fold OBD selection, for the report metadata
+
+	vector< crossval::ProcedureSpec > procs;
+	if ( c.logistic )
+	{
+		lg = make_unique< Logistic >();
+		lg->setDataSet( full );
+		lg->setHistory( false ); lg->setLastop( false ); lg->setLogPrint( false );
+		util::set_seed( c.seed ); lg->randomize();
+		procs.push_back( { "Logistic", cvadapters::trainProcedure( *lg, c.maxIter ), nullptr } );
+	}
+	if ( c.ldfa )
+		procs.push_back( { "LDFA", cvadapters::dfaProcedure( false ), nullptr } );
+	if ( c.qdfa )
+		procs.push_back( { "QDFA", cvadapters::dfaProcedure( true ), nullptr } );
+	if ( c.neural )
+	{
+		if ( c.neuralObd )
+			procs.push_back( { "Neural (OBD)",
+				cvadapters::nestedObdProcedure( c.obd, c.innerVal, &archSink ), &archSink } );
+		else
+		{
+			sp = make_unique< SimpleProp >();
+			sp->setDataSet( full );
+			sp->setHidden( c.neuralHidden );
+			sp->setHistory( false ); sp->setLastop( false ); sp->setLogPrint( false );
+			util::set_seed( c.seed ); sp->randomize();
+			procs.push_back( { "Neural", cvadapters::trainProcedure( *sp, c.maxIter ), nullptr } );
+		}
+	}
+
+	if ( procs.empty() )
+		return jsonMsg( false, "select at least one procedure to compare" );
+
+	// Feed the status poll a coarse phase (which procedure is running). compare()
+	//    has no per-fold hook, so this is procedure-granular, not fold-granular.
+	{
+		lock_guard< mutex > lock( job.progressMutex );
+		job.obdPhase = "cross-validating";
+		job.obdHidden = 0;
+	}
+
+	util::set_seed( c.seed );
+	crossval::Comparison cmp = crossval::compare( data, foldId, procs );
+	if ( job.cancel.load() )
+		return jsonMsg( false, "cancelled" );
+	if ( !cmp.ok )
+		return jsonMsg( false, cmp.message.empty() ? "cross-validation failed" : cmp.message );
+
+	// Report: Tier 1 + Tier 2 as text, Tier 3 written beside the data.
+	cvreport::PlanInfo info;
+	info.n = n;
+	info.events = events;
+	info.foldPlan = "outcome-stratified " + to_string( c.k ) + "-fold, seed "
+		+ to_string( c.seed );
+	if ( c.neural && c.logistic )
+	{
+		info.primary = c.neuralObd ? "Neural (OBD)" : "Neural";
+		info.reference = "Logistic";
+	}
+
+	string tier1 = cvreport::tier1( cmp, info );
+	string tier2 = cvreport::tier2( cmp, info );
+
+	string dir = util::run_path( "" ); // the run directory (trailing slash, or "")
+	if ( dir.empty() ) dir = ".";
+	else if ( dir.back() == '/' || dir.back() == '\\' ) dir.pop_back();
+	vector< string > files = cvreport::writeArtifacts( cmp, info, dir );
+
+	ostringstream filesJson;
+	filesJson << "[";
+	for ( unsigned i = 0; i < files.size(); i++ )
+		filesJson << ( i ? "," : "" ) << "\"" << jsonEscape( files[ i ] ) << "\"";
+	filesJson << "]";
+
+	ostringstream msg;
+	msg << "cross-validation complete (" << cmp.entries.size() << " procedure"
+		<< ( cmp.entries.size() == 1 ? "" : "s" ) << ", " << c.k << " folds)";
+
+	return string( "{\"ok\":true,\"message\":\"" ) + jsonEscape( msg.str() )
+		+ "\",\"cv\":{\"tier1\":\"" + jsonEscape( tier1 ) + "\""
+		+ ",\"tier2\":\"" + jsonEscape( tier2 ) + "\""
+		+ ",\"files\":" + filesJson.str() + "}}";
+}
+
+string handleCv( const httplib::Request& req )
+{
+	logAction( req, "cv" );
+
+	if ( !dataPtr )
+		return jsonMsg( false, "load a dataset first" );
+	if ( !( dataPtr->getDiscrete() && dataPtr->getOutput() == 1 ) )
+		return jsonMsg( false, "cross-validation needs a discrete, single-output dataset" );
+
+	CvConfig c;
+	string bad;
+	auto uintParam = [ & ]( const char* name, unsigned& dst, unsigned lo, const char* err )
+	{
+		string s = param( req, name );
+		if ( s.empty() ) return;
+		long v = atol( s.c_str() );
+		if ( v < ( long ) lo ) { bad = err; return; }
+		dst = ( unsigned ) v;
+	};
+	uintParam( "folds", c.k, 2, "folds must be at least 2" );
+	uintParam( "seed", c.seed, 0, "seed must be a whole number" );
+	uintParam( "maxiter", c.maxIter, 1, "maxiter must be at least 1" );
+	uintParam( "neural_hidden", c.neuralHidden, 1, "neural_hidden must be at least 1" );
+	uintParam( "hidden_max", c.obd.hMax, 1, "hidden_max must be at least 1" );
+	uintParam( "iter_budget", c.obd.iterBudget, 1, "iter_budget must be at least 1" );
+	if ( !bad.empty() ) return jsonMsg( false, bad );
+
+	// Procedure selection: present = the field decides; absent = the default set.
+	auto boolParam = [ & ]( const char* name, bool& dst )
+	{
+		string s = param( req, name );
+		if ( !s.empty() ) dst = ( s == "1" || s == "true" );
+	};
+	boolParam( "logistic", c.logistic );
+	boolParam( "ldfa", c.ldfa );
+	boolParam( "qdfa", c.qdfa );
+	boolParam( "neural", c.neural );
+	boolParam( "neural_obd", c.neuralObd );
+
+	{
+		string s = param( req, "inner_val" );
+		if ( !s.empty() )
+		{
+			double v = atof( s.c_str() );
+			if ( !( v > 0 && v < 1 ) )
+				return jsonMsg( false, "inner_val must be between 0 and 1" );
+			c.innerVal = v;
+		}
+	}
+
+	if ( c.k > dataPtr->getRawMatrix().rows() )
+		return jsonMsg( false, "folds cannot exceed the number of rows" );
+	if ( !( c.logistic || c.ldfa || c.qdfa || c.neural ) )
+		return jsonMsg( false, "select at least one procedure to compare" );
+
+	// Async-only, like OBD: many training runs on the worker thread.
+	if ( job.worker.joinable() )
+		job.worker.join();
+	{
+		lock_guard< mutex > lock( job.progressMutex );
+		job.iters.clear(); job.trainErr.clear(); job.testErr.clear();
+		job.keepEvery = 1; job.sampleCounter = 0;
+		job.result.clear(); job.obdPhase.clear(); job.obdHidden = 0;
+	}
+	job.cancel = false;
+	job.running = true;
+
+	job.worker = thread( [ c ]
+	{
+		string result = runCvJob( c );
+		{
+			lock_guard< mutex > lock( job.progressMutex );
+			job.result = result;
+		}
+		job.running = false;
+	} );
+
+	return jsonMsg( true, "cross-validation started" );
+}
+
 string handleRegress( const httplib::Request& req )
 {
 	logAction( req, "regress" );
@@ -1896,6 +2111,15 @@ int run_gui( bool openBrowser )
 		lock_guard< mutex > lock( engineMutex );
 		if ( busyGate( res ) ) return;
 		res.set_content( handleObd( req ), "application/json" );
+	} );
+
+	// Cross-validation model comparison: async-only, shares the train job
+	//    machinery (status + stop reach it through the same doors as OBD)
+	svr.Post( "/api/cv", []( const httplib::Request& req, httplib::Response& res )
+	{
+		lock_guard< mutex > lock( engineMutex );
+		if ( busyGate( res ) ) return;
+		res.set_content( handleCv( req ), "application/json" );
 	} );
 
 	// Session artifacts: written into the workspace by the engine's own

@@ -1363,6 +1363,35 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   so both groups landed in train and test came back empty, which the page states plainly. SEER's
   county columns are the intended shape.)
 
+  **CV Step 4 (2026-07-23): `/api/cv` + the GUI panel — the CV comparison is now reachable, and
+  ROADMAP 4 Phase 4 is feature-complete for the single-run policy.** The whole CV mechanism (runner,
+  adapters, coordinator, three-tier report) is surfaced in the GUI. First, the "logistic adapter"
+  gap dissolved on measurement (rule 3): `Logistic` IS a `Network`, `cloneNetwork` handles it, and
+  its ctor carries its config (cross-entropy/batch/auto-step) through copy — so `trainProcedure`
+  covers it with **no bespoke adapter**; `check_crossval` gained a logistic case proving it CVs
+  (every row predicted, AUC beats chance). `src/gui.cpp`: `POST /api/cv` (async-only, on the OBD/
+  train `TrainJob` machinery — status/stop reach it through the same doors), `runCvJob` builds an
+  outcome-stratified k-fold plan over the loaded Raw, assembles the selected procedures (logistic /
+  LDFA / QDFA / neural, the neural one nested-OBD or a fixed count), runs `crossval::compare` over the
+  ONE shared plan, renders `cvreport::tier1`/`tier2` + writes the Tier-3 files via `util::run_path`,
+  and returns them in the result. **It is a standalone analysis — it does NOT touch `modelPtr`** (like
+  DFA). Templates are held as locals through the synchronous `compare()` because `trainProcedure`
+  captures them by reference. `src/gui_page.html`: a "4d — Cross-validation" panel (folds/seed/maxiter,
+  procedure checkboxes, nested-OBD toggle + its params) and a results box with the **Tier-1 headline
+  table pinned at the top** (styled monospace box) and **Tier-2 detail scrollable below** + the Tier-3
+  file paths — the spec's ordering (`docs/evaluation_report_spec.md`). Verified: `check_crossval` +7
+  (logistic case); `smoke.sh` gains a CV section (refusal when no procedure selected, async run →
+  three-tier result with the standing caveat asserted present, `cv_predictions.csv` = 190 rows with a
+  procedure column, 409-busy + stop); **live in-browser click-through** on lowbwt — the panel renders,
+  Run cross-validation completes, the pinned Tier-1 box + scrollable Tier-2 render with box glyphs
+  intact, zero page JS errors (only Chrome-extension noise). Gates: zero-warning build, 9/9 ctest,
+  goldens byte-identical, oracle numerically identical, smoke green. Parity matrix + AGENTS.md document
+  `/api/cv` as GUI-beyond-CLI. **Deliberately deferred (noted, not gaps):** composing CV folds with the
+  covariate-strata / group-aware split modes (fold plan is outcome-stratified k-fold for now); a locked-
+  test DeLong primary comparison (the separate inferential-policy layer); Tier-3 download buttons (files
+  are written to disk, paths reported). **ROADMAP 4 Phase 4 is done for the single-run workflow; the
+  locked-test inference layer and group-aware CV folds are the remaining backlog.**
+
 ## ROADMAP 4 (agreed with Craig 2026-07-22) — a general representative test-set splitter
 
 ### Why (rationale)
