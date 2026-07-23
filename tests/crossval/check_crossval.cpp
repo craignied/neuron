@@ -355,8 +355,10 @@ int main()
 		"Tier 2 gives per-fold detail and the OBD selection frequency" );
 
 	// Tier 3: three machine-readable files, predictions one row per exemplar.
-	string dir = "/tmp/cvreport_check";
-	system( ( "mkdir -p " + dir ).c_str() );
+	// Write into the CURRENT directory (ctest's own build dir, always writable) --
+	//    a portable temp location, not a Unix-only "/tmp" + "mkdir -p" (which fails
+	//    on Windows CI: no /tmp, no mkdir -p).
+	string dir = ".";
 	vector< cvreport::ArtifactResult > files = cvreport::writeArtifacts( rc, info, dir );
 	bool allWritten = ( files.size() == 3 );
 	for ( unsigned i = 0; i < files.size(); i++ ) if ( !files[ i ].ok ) allWritten = false;
