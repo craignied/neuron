@@ -1337,6 +1337,22 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   this commit is a deliberate checkpoint, not a clean green baseline** — resolve the residual (or make
   the assertion reliable) before relying on CI. **Next after that: `/api/cv` + the GUI panel.**
 
+  **Browser-verified (2026-07-23): the ROADMAP 4 splitter GUI controls — standing debt cleared.**
+  The Phase 2/3/4c dataset-panel controls (added 2026-07-22) had been curl/smoke-verified only;
+  drove `neuron --gui` in Chrome on the lowbwt set and clicked through all of them, zero page JS
+  errors (only the Chrome-extension connection-noise message). Verified: both "?" help popups open
+  and close (`toggleHelp`/`strataHelp` "when *not* to stratify"; `toggleGroupHelp`/`groupHelp`
+  "harder vs resemble"); **Stratify on** col 1 → the representativeness diagnostic renders on the
+  PAGE (outcome-1 rate train 0.309859 / test 0.319149, col-1 mean −0.370 / −0.343, 8 strata);
+  **Validation fraction** 0.15 → three-way split renders (114 train / 28 validation / 47 test);
+  **Group on** col 3 → group diagnostic renders (2 indivisible groups, leakage = 0 by construction,
+  honest "only approximates the target" note). File upload, field→POST wiring, panel reflow, and
+  on-page diagnostic rendering all confirmed. Verification only, no code changed. The only GUI work
+  left in ROADMAP 4 is *building* the CV panel (`/api/cv`) — nothing to click until it exists.
+  (Not a bug, worth noting: a group key wants a column with many distinct values — col 3 is 2-valued,
+  so both groups landed in train and test came back empty, which the page states plainly. SEER's
+  county columns are the intended shape.)
+
 ## ROADMAP 4 (agreed with Craig 2026-07-22) — a general representative test-set splitter
 
 ### Why (rationale)
