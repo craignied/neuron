@@ -217,13 +217,15 @@ A held-out test set is only trustworthy if it *represents* the population the mo
 face. For an imbalanced problem — where a rare outcome is concentrated in a small, high-risk
 part of the covariate space, and records may cluster (patients within a hospital, an area)
 — a naive random split can quietly misrepresent it, and a single split is only one draw.
-neuron is being rebuilt (ROADMAP 4 in `CLAUDE.md`) around a general splitter: stratified on
-the outcome (and, optionally, on named covariates), optionally keeping clusters intact, and
-optionally cross-validated so the estimate does not hinge on one draw — with a diagnostic
-report that makes the split's balance visible rather than assumed. The design is general
-across datasets, with a 226k-row, 3%-prevalence SEER prostate-cancer cohort as the hardest
-case it must handle. It also replaces an O(n²) legacy split that does not scale to data
-that size.
+neuron has a general splitter (ROADMAP 4 in `CLAUDE.md`): a single holdout stratified on
+the outcome and, optionally, on named covariates, and optionally keeping clusters intact
+(a group-aware split) — each with a diagnostic report that makes the split's balance visible
+rather than assumed — plus a three-way train/validation/test split and a cross-validation
+model-comparison panel so the estimate does not hinge on one draw. Cross-validation currently
+uses outcome-stratified folds (composing CV with covariate-strata / group-aware folds is a
+planned extension). The design is general across datasets, with a 226k-row, 3%-prevalence
+SEER prostate-cancer cohort as the hardest case it must handle; it also replaces an O(n²)
+legacy split that does not scale to data that size.
 
 **On covariate stratification — a word of caution.** Balancing the split on the *outcome*
 is on by default and is almost always what you want (it keeps the event rate from drifting

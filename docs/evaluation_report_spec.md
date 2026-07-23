@@ -1,5 +1,19 @@
 # Evaluation report specification (ROADMAP 4 Phase 4)
 
+> **STATUS (2026-07-23): this is the ASPIRATIONAL spec; the shipped single-run CV report
+> (`src/cvreport.{h,cpp}`, reached via `/api/cv`) implements a subset.** SHIPPED: the
+> three-tier structure; Tier-1 headline table (Procedure · AUC(CV) mean ± sd · Arch · Time)
+> + verdict block + the standing caveat; Tier-2 per-fold AUC/sens/spec, per-procedure
+> failures (with reasons) and validFolds, and OBD architecture-selection frequency; Tier-3
+> `cv_predictions.csv` / `cv_metrics.csv` (now with a per-fold `status` column) / `cv_run.json`
+> (with per-procedure `validFolds` + `failures`). **NOT yet implemented (aspirational below):**
+> a locked-test AUC/DeLong column and frozen-architecture result; Tier-2 calibration; per-fold
+> timing; Tier-3 download buttons; a fully metric-agnostic Tier 1. **Format note:**
+> `cv_predictions.csv` ships as **one row per exemplar with one prediction column per
+> procedure** (a paired wide format), NOT the "one row per (exemplar, procedure)" the body
+> describes. And Tier-2 detail is returned only when the async CV job finishes; it does not
+> stream fold-by-fold. The locked-test inference layer is a separate future feature.
+
 An automated evaluation run — several procedures, k outer folds, nested OBD, a per-exemplar
 out-of-fold prediction for every patient — generates a great deal of output. Without a
 deliberate structure it becomes a wall of numbers no one reads. This spec fixes the structure.

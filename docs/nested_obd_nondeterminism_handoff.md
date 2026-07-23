@@ -21,6 +21,24 @@ reliably; the copy test seeds a known maximum gradient and requires the clone to
 carry it. Both assertions were run against the old code and failed before the
 fixes were restored.
 
+Full account: `docs/nested_obd_nondeterminism_resolution_report.md`. The bug is
+**closed** (commit `a8d7c7e`); the CV nested-OBD run is deterministic across
+processes.
+
+---
+
+> ## ⚠️ ARCHIVED PRE-RESOLUTION HANDOFF — do not act on anything below
+>
+> Everything from here down is the original cold-start handoff, written while the
+> bug was still open. It is kept only as investigation history. **Its conclusions
+> are superseded by the resolution above** and several are now known to be wrong:
+> the residual is NOT open ("a rare residual remains" — it was `errorType`); the
+> `Matrix` value-initialization it presents as the bulk fix was **reverted** as a
+> heap-layout red herring (current `src/matrix.h` allocates with `new T[n]`, and
+> `src/simpleprop.cpp` again describes the scratch structures as garbage-filled);
+> the "uncommitted working tree", the "expect failures" reproduction, and the
+> "next tool = MSan/valgrind" action are all obsolete. Do NOT reopen this bug.
+
 **Repo:** `/Users/craign/code/neUROn2++/neuron-3.0` (branch `main`)
 **Context doc:** `CLAUDE.md` → ROADMAP 4 Phase 4 (cross-validation). Read the standing rules
 at the top of `CLAUDE.md` first — especially **rule 2** (a test must be proven to fail for

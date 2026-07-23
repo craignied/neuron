@@ -7,12 +7,15 @@ predictions across separate process invocations despite using the same seed.
 The selected hidden-layer sizes remained identical, but some trained
 predictions differed.
 
-Earlier work had already fixed:
+Earlier work had already fixed `Model::copy()` failing to copy the validation
+matrix (a real correctness bug — kept). It had ALSO value-initialized `Matrix`
+allocations, believing that the fix; a residual ~2–4% failure remained.
 
-- `Model::copy()` failing to copy the validation matrix.
-- Uninitialized allocations in `Matrix`.
-
-A residual failure remained at roughly 2–4%.
+**That Matrix change was later REVERTED.** The decisive measurement (below): the
+`errorType` fix eliminates the flake with Matrix allocations back to `new T[n]`
+(garbage), so the Matrix value-init only perturbed the heap layout and never
+cured anything. Current `src/matrix.h` allocates with `new T[n]`, and
+`src/simpleprop.cpp` again describes the grow/prune scratch as garbage-filled.
 
 ## Root cause
 
@@ -77,9 +80,10 @@ The tests avoid relying on the original low-probability cross-process flake.
 section documenting the measured cause, the fixes, and the regression-test
 proof.
 
-An outdated `SimpleProp::growHidden()` comment was also changed from
-“garbage-fills” to “zero-initializes,” reflecting the existing Matrix
-initialization fix.
+(The `SimpleProp::growHidden()` comment was briefly changed to “zero-initializes”
+to match the Matrix value-init, then changed back to “garbage-fills” when that
+Matrix change was reverted — the scratch structures are again garbage on resize,
+which is fine because they are overwritten before use.)
 
 ## Required red-test proof
 
@@ -117,16 +121,22 @@ The first GUI smoke attempt failed because the sandbox could not bind a
 loopback port. Re-running with loopback binding permitted passed the complete
 GUI endpoint suite.
 
-## Files changed
+## What landed in the final commit (`a8d7c7e`)
 
-- `src/model.cpp`
-- `src/network.cpp`
-- `src/simpleprop.cpp`
-- `tests/obd/check_obd.cpp`
-- `docs/nested_obd_nondeterminism_handoff.md`
-- `docs/nested_obd_nondeterminism_resolution_report.md`
+The real fixes and the Matrix REVERT shipped together:
 
-`NOTES.md` was left untouched.
+- `src/model.cpp` — `errorType( false )` in the constructor (the fix).
+- `src/network.cpp` — `currGradMax` initialized in the constructor and copied in
+  `Network::copy` (the sibling fix).
+- `tests/obd/check_obd.cpp` — the two scalar guards (LMS default via placement
+  into poisoned storage; the copied-gradient check).
+- `src/matrix.h` — REVERTED to `new T[n]` (garbage allocation); the value-init was
+  a heap-layout red herring, not a cure.
+- `src/simpleprop.cpp`, `tests/matrix/check_matrix.cpp` — the value-init-tied
+  comment and the vacuous Matrix-init note removed with the revert.
+- `CLAUDE.md` — the CV-Step-3c entry corrected to credit `errorType` and record
+  the Matrix misdiagnosis (rule 3: a fix that only reduces a heap-sensitive flake
+  is a suspect, not a cure).
 
-No menus or GUI behavior changed, so `AGENTS.md` and
-`docs/gui_cli_parity.md` did not require updates.
+`NOTES.md` was left untouched. `AGENTS.md` and `docs/gui_cli_parity.md` needed no
+change (no menu/GUI behavior moved).

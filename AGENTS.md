@@ -458,7 +458,8 @@ See `docs/evaluation_report_spec.md` and `docs/cross_validation.md`.
 
 - Quick: `./tests/tools/run_tools.sh` (Python tools vs committed outputs,
   including the deployment forward-pass check against the engine) and
-  `./tests/golden/run_golden.sh` (two seeded engine sessions must match
+  `./tests/golden/run_golden.sh` (three seeded engine sessions -- `xor_seed42`,
+  `regress_seed42`, `binormal_seed42` -- must match
   committed transcripts byte-for-byte).
 - The low-birth-weight dataset is a self-verifying reference: follow
   `docs/datasets/low-birth-weight/README.md` and the engine should report

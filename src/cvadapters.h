@@ -2,8 +2,9 @@
    crossval::Procedure for one model family -- it knows how to fit that family on
    a fold's training set and return its held-out predictions. The generic runner
    (crossval::run) stays model-agnostic; the model knowledge lives here (rule 6:
-   the adapters are separate from the runner). A nested-OBD adapter joins them
-   in a later slice. */
+   the adapters are separate from the runner). trainProcedure (any Network,
+   including Logistic), dfaProcedure (LDFA/QDFA), and nestedObdProcedure are the
+   families. */
 
 #ifndef CVADAPTERS_H
 #define CVADAPTERS_H

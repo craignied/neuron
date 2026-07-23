@@ -146,5 +146,5 @@ Standing requirement (Craig, 2026-07-19): **every user action is logged.**
 | Behavior | Mechanism | Status |
 |---|---|---|
 | Engine operations (dataset split, randomize, each training run incl. stopped) | `neuron.log` via `addHistory` | ✅ (pre-existing) |
-| Per-action audit trail (load/model/dfa/train/obd/randomize/stop/save) with timestamp + values | `neuron_actions.log` via `logAction` | ✅ |
+| Per-action audit trail (load/model/dfa/train/obd/cv/regress/randomize/stop/save) with timestamp + values | `neuron_actions.log` via `logAction` | ✅ |
 | Each training run's header records ALL params in effect (η, decay, stopping conditions, plateau) | run header (self-describing) | ✅ (already: `Network::runHeader` + `Iterative::train`) |

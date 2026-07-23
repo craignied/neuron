@@ -261,7 +261,8 @@ string cvreport::tier1( const crossval::Comparison& cmp, const PlanInfo& info )
 
 	// The one standing caveat, always.
 	os << " CV \xC2\xB1 is descriptive spread across dependent folds, not a CI; "
-		"inference is on a locked test set.\n";
+		"this run performs no\n inferential comparison -- locked-test inference is "
+		"a separate policy.\n";
 	os << rule( COLS, "\xE2\x95\x90" ) << "\n";
 	return os.str();
 }

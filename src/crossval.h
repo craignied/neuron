@@ -5,7 +5,7 @@
    adapter that knows how to fit one model family (plain train, or nested OBD).
 
    The runner does not choose the model, does not train, and does not know about
-   HTTP, folds-as-policy, or SEER. The comparison coordinator (a later slice)
+   HTTP, folds-as-policy, or SEER. The comparison coordinator (crossval::compare)
    supplies one immutable fold plan to several procedures and joins their
    results; the runner is the shared engine underneath. */
 

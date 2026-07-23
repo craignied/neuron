@@ -1392,6 +1392,36 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   are written to disk, paths reported). **ROADMAP 4 Phase 4 is done for the single-run workflow; the
   locked-test inference layer and group-aware CV folds are the remaining backlog.**
 
+  **CV bug + doc sweep (2026-07-23): ChatGPT 5.6 ("Sol") audited the Phase-4 CV work
+  (`basic_rodmap4_bug_sweep.md`, `basic_rodmap4_doc_sweep.md`). Every finding was verified
+  against the source (rule 3) before acting; the findings were real (Sol's track record holds).**
+  Fixed in `7683a39` (each fix proven red first, rule 2): **B6** a structured fold/procedure
+  outcome (`ProcResult{ok,cancelled,pred,reason}` + `FoldResult.ok/reason` + `validFolds`) — a
+  fold a procedure cannot fit is retained as MISSING and reported, never averaged; **B2** nested
+  OBD stops fabricating 0.5 predictions + fake hidden size 0 on a failed fold (and `/api/cv`
+  rejects `hidden_max < hStart`); **B3** a singular LDFA/QDFA fold (catches `Singular`, skips
+  `reportAccuracy`) is caught by a guess-poison postcondition in `fitQuietly` instead of reading
+  unwritten storage; **B1** Stop now PROPAGATES — `crossval::run/compare` take a cancel token
+  (between folds + a `CancelObserver` on training + `obd::run`'s token), so a long CV cancels
+  promptly with `cancelled=true` (was: Stop only relabelled a finished run); **B4** normalize/
+  saveScales guard a zero-range constant column → the lower bound (S=0), no more inf/NaN on a
+  fold-constant input; **B5** `randomize3` refuses a validation/test fraction that rounds to zero
+  rows (had silently reopened the OBD-on-test leak); **B8** `/api/cv` requires a raw dataset;
+  **B10** the runner defends its fold-plan contract; **B12** `setRawMatrix` clears a stale
+  validation set; **B13** `cv_run.json` escapes strings + emits null (never textual nan),
+  `cv_metrics.csv` gains a per-fold `status` column. New tests (B2/B3/B4/B10 in `check_crossval`,
+  CV cancellation + refusals in smoke) each watched to fail against a targeted sabotage.
+  **Deferred (medium/low, in the commit message):** B7 structured artifact-write result, B9
+  strict numeric parsing (a GUI-wide `atol`/`atof` pattern, not CV-specific), B11 per-procedure
+  RNG substream policy (a reproducibility-contract decision for Craig). Docs corrected in a
+  follow-up (D1–D10): the two nondeterminism docs de-staled (the resolved `errorType` bug, the
+  reverted Matrix red herring — no more "reopen the bug" instructions); the report spec + this
+  Phase-4 plan annotated SHIPPED vs ASPIRATIONAL; the pure-CV Tier-1 caveat fixed ("no inferential
+  comparison in this run" rather than implying locked-test inference occurred); README present-
+  tensed; AGENTS golden count (3) + parity logging inventory (cv/regress) corrected; stale
+  "later slice" source comments updated. (D11 obd_plan banner already existed; D12
+  `cross_validation.md` voice cleanup deferred.) Gates green throughout.
+
 ## ROADMAP 4 (agreed with Craig 2026-07-22) — a general representative test-set splitter
 
 ### Why (rationale)
@@ -1556,7 +1586,20 @@ re-bless — it is the scale/representativeness proof.
   untouched).
 
 - **Phase 4 — cross-validation & honest multi-model comparison (dataset/model-GENERAL, SEER
-  as the acceptance test).** The estimator axis, reshaped 2026-07-22 across two rounds of a
+  as the acceptance test).**
+  > **STATUS (2026-07-23): the single-run workflow is DONE and shipped** (see the CV Step
+  > 1–4 status entries above: runner, adapters, coordinator, three-tier report, `/api/cv` +
+  > GUI panel, and the bug-sweep hardening). This subsection is the ORIGINAL PLAN, kept as
+  > the design record; where it and the shipped code disagree, the code + the status entries
+  > win. Item-level status: **4a/4b-refactor/4c/4b-CV = DONE**; **"4c DO FIRST" = done first,
+  > as planned**. **DEFERRED / NOT YET IMPLEMENTED** (do not read as current behavior):
+  > CV composing with covariate-strata / group-aware folds (folds are outcome-stratified
+  > only); the locked-test DeLong primary-comparison layer; "OBD metric: select on AUC"
+  > (OBD still selects on held-out **error/loss**, not AUC — a backlog product decision);
+  > Tier-2 calibration; per-fold timing; Tier-3 download buttons. See
+  > `docs/evaluation_report_spec.md`'s status note for the report format actually shipped.
+
+  The estimator axis, reshaped 2026-07-22 across two rounds of a
   ChatGPT statistical review Craig relayed (conceptual companion `docs/cross_validation.md`).
   **The founding discipline is the same as the rest of ROADMAP 4: SEER is a demanding
   acceptance case, never a source of hard-coded policy.** Phase 4 assumes NONE of — a locked
