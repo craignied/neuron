@@ -1274,6 +1274,35 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   neural+nested-OBD over one shared fold plan), then `/api/cv` + the Tier-1/2/3 report
   (`docs/evaluation_report_spec.md`).
 
+  **CV Step 3b (2026-07-23): the nested-OBD adapter — honest architecture selection inside
+  every fold. And a legacy operator bug the DRY fix exposed.** `cvadapters::nestedObdProcedure(
+  cfg, innerValFraction, selectedHidden*)`: for each outer fold it carves an inner
+  train/validation split from the fold's TRAINING rows alone (outcome-stratified
+  `nsplit::stratifiedHoldout`), materializes the fold THREE ways via `makeFold(innerTrain,
+  testRows, innerVal)`, and runs `obd::run` on it — so the ENTIRE architecture search happens
+  inside the fold. Leak-free by construction: OBD early-stops on the inner validation set
+  (`sampleTestError` reroutes there, Phase 4c), so the outer held-out rows never influence which
+  hidden size is chosen; the selected, early-stopped winner is scored once on the held-out rows and
+  its `reportAccuracy` guesses are read back as the fold's OOF predictions. Per-fold bootstrap
+  disabled (the runner pools ROC itself). To give an adapter the raw row memberships it needs for an
+  inner split, `crossval::Procedure` now takes `(foldData, trainRows, testRows)` — the plain
+  train/DFA adapters ignore the indices; the runner still owns repetition (rule 6). Optional
+  `selectedHidden*` side-channel appends each fold's chosen size (architecture-selection metadata
+  the report will summarize). `check_crossval` gained four nested-OBD assertions (every row predicted
+  once, pooled OOF AUC beats chance, per-fold size in range, reproducible); the honest-fit + size
+  assertions **watched to FAIL against a skip-the-search sabotage** (rule 2). **Legacy operator bug
+  found via the DRY path:** comparing the `vector<unsigned>` sizes tripped `vector_ops.h`'s
+  `operator==`, whose loop hardcoded `vector<double>::iterator` inside a `template<class T>` — it had
+  silently only ever worked for `vector<double>` (the reason no caller had hit it). Fixed to
+  `typename vector<T>::const_iterator` + const-ref params (also `operator!=`) — the primitive is now
+  correct and const-correct for any element type, so the test reads `pickedHidden == pickedHidden2`
+  instead of a hand-rolled loop (Craig caught the hand-rolled version as a hack — fix the layer, rule
+  4/6). Engine-wide but behavior-identical (the old signature admitted only `vector<double>`, whose
+  comparison is unchanged): gates all green — zero-warning build, 9/9 ctest, goldens byte-identical,
+  oracle numerically identical, smoke green. **Next: the CV report rendering** (Tier-1 headline table
+  + Tier-2 detail + Tier-3 `cv_*.csv/json` from a `crossval::Comparison`, per
+  `docs/evaluation_report_spec.md`), then `/api/cv` + the GUI panel.
+
 ## ROADMAP 4 (agreed with Craig 2026-07-22) — a general representative test-set splitter
 
 ### Why (rationale)

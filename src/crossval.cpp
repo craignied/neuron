@@ -69,7 +69,9 @@ crossval::RunResult crossval::run( DataSet& data,
 		DataSet foldData = data; // a copy carrying Raw + the config
 		foldData.makeFold( trainRows, testRows );
 
-		vector< double > preds = proc( foldData ); // held-out preds, test order
+		// held-out preds in test-row order; trainRows/testRows let a nested
+		//    procedure re-split the training rows for its own inner validation set
+		vector< double > preds = proc( foldData, trainRows, testRows );
 		if ( preds.size() != testRows.size() )
 		{
 			res.message = "a procedure returned the wrong number of predictions";

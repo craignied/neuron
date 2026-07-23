@@ -41,10 +41,16 @@ struct RunResult {
 	double oofTrap = -1;           // pooled out-of-fold trapezoidal ROC area
 };
 
-// A procedure fits a model on foldData's TRAINING set -- its ENTIRE fit and
+// A procedure fits a model on the fold's TRAINING rows -- its ENTIRE fit and
 //    selection, so nothing sees the held-out rows -- and returns the predicted
-//    probabilities for foldData's TEST rows, in test-row order.
-using Procedure = function< vector< double >( DataSet& ) >;
+//    probabilities for the TEST rows, in test-row order. foldData arrives already
+//    materialized ( train = trainRows, test = testRows ); trainRows and testRows
+//    are the raw row indices, passed so an adapter that needs an INNER split of
+//    the training rows -- nested OBD carves its own validation set from them --
+//    can re-materialize the fold three ways without ever touching the held-out
+//    rows. The plain adapters ignore the index arguments.
+using Procedure = function< vector< double >( DataSet& foldData,
+	const vector< unsigned >& trainRows, const vector< unsigned >& testRows ) >;
 
 // Run ONE procedure over a fold plan. data must be a rawLoaded, discrete,
 //    1-output DataSet; foldId[ r ] is raw row r's fold ( 0 .. k-1 ), e.g. from

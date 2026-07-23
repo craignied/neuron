@@ -114,6 +114,7 @@ add_test(NAME obd_sizing COMMAND check_obd)
 add_executable(check_crossval
     tests/crossval/check_crossval.cpp
     src/crossval.cpp src/cvadapters.cpp src/netclone.cpp
+    src/obd.cpp src/autoalgo.cpp
     src/simpleprop.cpp src/bareprop.cpp src/backprop.cpp src/logistic.cpp
     src/ldfa.cpp src/qdfa.cpp src/dfa.cpp
     src/network.cpp src/iterative.cpp src/model.cpp src/dataset.cpp src/split.cpp

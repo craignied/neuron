@@ -257,17 +257,19 @@ istream& operator >> ( istream& input, vector< T >& rhs )
 
 // Overloaded ==
 template< class T >
-bool operator == ( vector< T >& lhs, vector< T >& rhs )
+bool operator == ( const vector< T >& lhs, const vector< T >& rhs )
 {
 	bool success = true; // the result
-	
+
 	// Catch different size vectors
 	if ( lhs.size() != rhs.size() )
 		success = false;
 
 	else
 	{
-		vector< double >::iterator p1, p2; // let's do this through iterators
+		// Iterate through the element type -- NOT a hardcoded double, which
+		//    silently limited this comparison to vector< double > for years
+		typename vector< T >::const_iterator p1, p2;
 
 		// Compare the vectors element by element
 		for ( p1 = lhs.begin(), p2 = rhs.begin(); p1 != lhs.end(); p1++, p2++ )
@@ -283,7 +285,7 @@ bool operator == ( vector< T >& lhs, vector< T >& rhs )
 
 // Overloaded !=
 template< class T >
-bool operator != ( vector< T >& lhs, vector< T >& rhs )
+bool operator != ( const vector< T >& lhs, const vector< T >& rhs )
 {
 	// Use previously coded == method
 	return ( !( lhs == rhs ) );

@@ -14,6 +14,7 @@
 
 #include "crossval.h"
 #include "cvadapters.h"
+#include "obd.h"
 #include "simpleprop.h"
 #include "dataset.h"
 #include "split.h"
@@ -126,6 +127,44 @@ int main()
 	expect( paired && cmp.entries[ 0 ].result.oofTrap > 0.6 &&
 		cmp.entries[ 1 ].result.oofTrap > 0.6,
 		"every patient has a paired out-of-fold prediction from each procedure" );
+
+	// The nested-OBD adapter: for each fold the ENTIRE architecture search runs on
+	// an inner train/validation split of the fold's training rows, and the winner
+	// is scored on the outer held-out rows. Leak-free by construction (OBD early-
+	// stops on the inner validation set, never the held-out rows), and every row
+	// still gets exactly one out-of-fold prediction.
+	obd::Config ocfg;
+	ocfg.hStart = 2; ocfg.hMax = 4; ocfg.iterBudget = 300;
+	ocfg.sampleEvery = 20; ocfg.algorithm = 0;
+	vector< unsigned > pickedHidden;
+
+	util::set_seed( 7 );
+	crossval::RunResult ro = crossval::run( data, foldId,
+		cvadapters::nestedObdProcedure( ocfg, 0.25, &pickedHidden ) );
+
+	expect( ro.ok && ro.folds.size() == 5, "the nested-OBD CV run completes over every fold" );
+
+	bool obdAll = true;
+	for ( unsigned i = 0; i < n; i++ )
+		if ( ro.oofPrediction[ i ] < 0.0 ) obdAll = false;
+	expect( obdAll,
+		"nested OBD gives every row an out-of-fold prediction (held out exactly once)" );
+
+	expect( ro.oofTrap > 0.6,
+		"nested-OBD pooled out-of-fold AUC beats chance (the search fits honestly)" );
+
+	bool sizesSane = ( pickedHidden.size() == 5 );
+	for ( unsigned i = 0; i < pickedHidden.size(); i++ )
+		if ( pickedHidden[ i ] < 1 || pickedHidden[ i ] > ocfg.hMax ) sizesSane = false;
+	expect( sizesSane,
+		"each fold reports a selected hidden-unit count within the search range" );
+
+	util::set_seed( 7 );
+	vector< unsigned > pickedHidden2;
+	crossval::RunResult ro2 = crossval::run( data, foldId,
+		cvadapters::nestedObdProcedure( ocfg, 0.25, &pickedHidden2 ) );
+	expect( ro.oofPrediction == ro2.oofPrediction && pickedHidden == pickedHidden2,
+		"the same seed reproduces the nested-OBD out-of-fold predictions and sizes" );
 
 	if ( failures == 0 )
 	{
