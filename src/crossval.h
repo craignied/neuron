@@ -99,8 +99,15 @@ using Procedure = function< ProcResult( DataSet& foldData,
 //    checked between folds and passed to the procedure, so Stop ends the run
 //    promptly with cancelled = true. A fold the procedure cannot fit is recorded
 //    as a failed FoldResult and its rows get no out-of-fold prediction.
+//    When substreams is true the engine RNG is re-seeded per fold from a mix of
+//    ( seed, fold ), so a procedure's fitted result depends only on its own
+//    (procedure, fold) key -- never on how much RNG earlier work consumed. This
+//    isolation lives inside CV; it uses util::set_seed at controlled points and
+//    adds no new RNG mechanism. With substreams false the ambient RNG is used
+//    (the caller seeds once), preserving the standalone-run behavior.
 RunResult run( DataSet& data, const vector< unsigned >& foldId, Procedure proc,
-	const atomic< bool >* cancel = nullptr );
+	const atomic< bool >* cancel = nullptr, bool substreams = false,
+	unsigned seed = 0 );
 
 // A named procedure, for the comparison coordinator.
 struct ProcedureSpec {
@@ -138,8 +145,14 @@ struct Comparison {
 // The comparison coordinator: run each procedure over the SAME fold plan and
 //    collect the results, so the procedures stay paired. It owns coordination
 //    only -- it does not train, select, or know any model family (rule 6).
+//    When substreams is true each procedure runs on its OWN deterministic RNG
+//    substream keyed by ( seed, procedure index, fold ), so a procedure's CV
+//    result is invariant to which OTHER procedures are compared and in what order
+//    -- comparison membership/ordering is a presentation choice, not an input to
+//    a procedure's fit. Pass the same seed used to build the shared fold plan.
 Comparison compare( DataSet& data, const vector< unsigned >& foldId,
-	const vector< ProcedureSpec >& procs, const atomic< bool >* cancel = nullptr );
+	const vector< ProcedureSpec >& procs, const atomic< bool >* cancel = nullptr,
+	bool substreams = false, unsigned seed = 0 );
 
 } // namespace crossval
 

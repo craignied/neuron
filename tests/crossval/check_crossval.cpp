@@ -267,6 +267,37 @@ int main()
 		cvadapters::trainProcedure( tmpl, 50 ) );
 	expect( !re3.ok, "run refuses a non-contiguous fold plan (an empty fold)" );
 
+	// B11: with deterministic substreams, a procedure's CV predictions depend only
+	// on its own (name, fold) key -- NOT on which other procedures are compared or
+	// in what order. Neural's predictions must be identical whether it runs alone,
+	// or after Logistic, or after Logistic+LDFA in a different order.
+	auto neuralOf = []( DataSet& d, const vector< unsigned >& fid, SimpleProp& t,
+		vector< crossval::ProcedureSpec > procs ) -> vector< double >
+	{
+		crossval::Comparison cm = crossval::compare( d, fid, procs, nullptr,
+			true /*substreams*/, 99 );
+		for ( unsigned i = 0; i < cm.entries.size(); i++ )
+			if ( cm.entries[ i ].name == "Neural" ) return cm.entries[ i ].result.oofPrediction;
+		return vector< double >();
+	};
+	// The OTHER procedures are stochastic networks (they consume RNG), so without
+	// substreams they would shift Neural's stream -- which is exactly what the
+	// name-keyed substreams must prevent.
+	vector< crossval::ProcedureSpec > justNeural = {
+		{ "Neural", cvadapters::trainProcedure( tmpl, 300 ), nullptr } };
+	vector< crossval::ProcedureSpec > logThenNeural = {
+		{ "OtherA", cvadapters::trainProcedure( tmpl, 300 ), nullptr },
+		{ "Neural", cvadapters::trainProcedure( tmpl, 300 ), nullptr } };
+	vector< crossval::ProcedureSpec > threeReordered = {
+		{ "OtherB", cvadapters::trainProcedure( tmpl, 300 ), nullptr },
+		{ "Neural", cvadapters::trainProcedure( tmpl, 300 ), nullptr },
+		{ "OtherA", cvadapters::trainProcedure( tmpl, 300 ), nullptr } };
+	vector< double > nAlone = neuralOf( data, foldId, tmpl, justNeural );
+	vector< double > nAfter = neuralOf( data, foldId, tmpl, logThenNeural );
+	vector< double > nReord = neuralOf( data, foldId, tmpl, threeReordered );
+	expect( !nAlone.empty() && nAlone == nAfter && nAlone == nReord,
+		"a procedure's CV predictions are invariant to other procedures' presence and order" );
+
 	// The three-tier report (docs/evaluation_report_spec.md). Build a Comparison
 	// of three procedures over the shared plan -- LDFA, plain neural, nested OBD
 	// (with its architecture-metadata sink wired) -- and render it.

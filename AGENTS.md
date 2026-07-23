@@ -452,7 +452,11 @@ and the nested-OBD procedure is k full OBD searches, so it is the most expensive
 run in the GUI — start with small `folds`/`hidden_max`/`iter_budget` on large data.
 No formal cross-validation inference is reported (the fold results are dependent);
 the only inferential comparison is a locked untouched test set, a separate step.
-See `docs/evaluation_report_spec.md` and `docs/cross_validation.md`.
+**Reproducibility:** for a given `seed`, each procedure runs on its own deterministic
+RNG substream keyed by its NAME and fold, so a procedure's fitted CV predictions are
+invariant to which OTHER procedures you compare and in what order (adding logistic to
+the run does not change the neural net's numbers). See
+`docs/evaluation_report_spec.md` and `docs/cross_validation.md`.
 
 ## 4. Verifying the installation
 

@@ -5,6 +5,33 @@
 #include <chrono>
 
 #include "twoset.h"
+#include "utility.h"
+
+// Deterministic seed mixing (a MurmurHash3 finalizer) -- keys an RNG substream by
+//    an index so ( seed, procedure, fold ) map to well-separated seeds. Used only
+//    to isolate CV's per-fold fits; it does not change the engine RNG mechanism.
+static unsigned mixSeed( unsigned base, unsigned k )
+{
+	unsigned h = base ^ ( k + 0x9E3779B9u + ( base << 6 ) + ( base >> 2 ) );
+	h ^= h >> 16; h *= 0x85EBCA6Bu;
+	h ^= h >> 13; h *= 0xC2B2AE35u;
+	h ^= h >> 16;
+	return h;
+}
+
+// FNV-1a over the procedure NAME -- a procedure's substream is keyed by its
+//    stable identity, NOT its position in the comparison, so adding, removing, or
+//    reordering other procedures never shifts its RNG (bug B11).
+static unsigned hashName( const string& s )
+{
+	unsigned h = 2166136261u;
+	for ( unsigned i = 0; i < s.size(); i++ )
+	{
+		h ^= ( unsigned char ) s[ i ];
+		h *= 16777619u;
+	}
+	return h;
+}
 
 // Build the held-out metrics for a set of (outcome, prediction) pairs by loading
 //    them into a TwoSet -- its column 0 is the true outcome, column 1 the guess.
@@ -39,7 +66,8 @@ crossval::Metrics crossval::metricsFor( const vector< unsigned >& outcome,
 }
 
 crossval::RunResult crossval::run( DataSet& data,
-	const vector< unsigned >& foldId, Procedure proc, const atomic< bool >* cancel )
+	const vector< unsigned >& foldId, Procedure proc, const atomic< bool >* cancel,
+	bool substreams, unsigned seed )
 {
 	RunResult res;
 
@@ -115,7 +143,12 @@ crossval::RunResult crossval::run( DataSet& data,
 		}
 
 		DataSet foldData = data; // a copy carrying Raw + the config
-		foldData.makeFold( trainRows, testRows );
+		foldData.makeFold( trainRows, testRows ); // deterministic (fixed indices)
+
+		// Start this fold's fit on its own deterministic RNG substream, so the
+		//    result depends only on ( seed, fold ) -- not on earlier consumption.
+		if ( substreams )
+			util::set_seed( mixSeed( seed, f + 1 ) );
 
 		// trainRows/testRows let a nested procedure re-split the training rows for
 		//    its own inner validation set; cancel lets a long fit stop promptly.
@@ -171,7 +204,7 @@ crossval::RunResult crossval::run( DataSet& data,
 
 crossval::Comparison crossval::compare( DataSet& data,
 	const vector< unsigned >& foldId, const vector< ProcedureSpec >& procs,
-	const atomic< bool >* cancel )
+	const atomic< bool >* cancel, bool substreams, unsigned seed )
 {
 	Comparison c;
 
@@ -184,9 +217,12 @@ crossval::Comparison crossval::compare( DataSet& data,
 	for ( unsigned i = 0; i < procs.size(); i++ )
 	{
 		// The coordinator owns coordination -- including timing each procedure
-		//    (rule 6). It does not train, select, or know the model family.
+		//    (rule 6). It does not train, select, or know the model family. Each
+		//    procedure gets its own substream base ( keyed by procedure index ), so
+		//    its result never depends on which OTHER procedures are in the run.
 		chrono::steady_clock::time_point t0 = chrono::steady_clock::now();
-		RunResult rr = run( data, foldId, procs[ i ].proc, cancel );
+		RunResult rr = run( data, foldId, procs[ i ].proc, cancel,
+			substreams, substreams ? mixSeed( seed, hashName( procs[ i ].name ) ) : 0 );
 		chrono::steady_clock::time_point t1 = chrono::steady_clock::now();
 
 		if ( rr.cancelled )

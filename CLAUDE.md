@@ -1411,9 +1411,18 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   validation set; **B13** `cv_run.json` escapes strings + emits null (never textual nan),
   `cv_metrics.csv` gains a per-fold `status` column. New tests (B2/B3/B4/B10 in `check_crossval`,
   CV cancellation + refusals in smoke) each watched to fail against a targeted sabotage.
-  **Deferred (medium/low, in the commit message):** B7 structured artifact-write result, B9
-  strict numeric parsing (a GUI-wide `atol`/`atof` pattern, not CV-specific), B11 per-procedure
-  RNG substream policy (a reproducibility-contract decision for Craig). Docs corrected in a
+  **B11 — deterministic per-(procedure, fold) RNG substreams (Craig's call: comparison
+  membership/ordering are presentation choices that must not alter a procedure's fitted CV
+  result; keep the isolation inside CV, don't touch the engine-wide stream).** `crossval::run`/
+  `compare` gained an opt-in `substreams`/`seed`: the coordinator keys each procedure's substream
+  by a hash of its NAME (its stable identity, NOT its list position) and the runner mixes in the
+  fold, then `util::set_seed` re-seeds the engine RNG at each (procedure, fold) boundary — no new
+  RNG mechanism, and standalone `run()` without a seed keeps the ambient behavior (existing tests
+  unchanged). The GUI enables it. `check_crossval` proves a procedure's predictions are identical
+  whether it runs alone, after another stochastic procedure, or reordered among three — **watched
+  to fail both against no-substreams AND against index-keying** (rule 2). Landed after the sweep.
+  **Still deferred (medium/low):** B7 structured artifact-write result, B9 strict numeric parsing
+  (a GUI-wide `atol`/`atof` pattern, not CV-specific). Docs corrected in a
   follow-up (D1–D10): the two nondeterminism docs de-staled (the resolved `errorType` bug, the
   reverted Matrix red herring — no more "reopen the bug" instructions); the report spec + this
   Phase-4 plan annotated SHIPPED vs ASPIRATIONAL; the pure-CV Tier-1 caveat fixed ("no inferential

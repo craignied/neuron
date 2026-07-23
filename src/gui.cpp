@@ -1725,7 +1725,10 @@ string runCvJob( CvConfig c )
 	util::set_seed( c.seed );
 	// Stop propagates INTO the run now: the token reaches each procedure's folds
 	//    (the network observer, obd::run) so a long CV cancels promptly (bug B1).
-	crossval::Comparison cmp = crossval::compare( data, foldId, procs, &job.cancel );
+	//    Deterministic per-(procedure,fold) substreams (bug B11): a procedure's CV
+	//    result is invariant to which other procedures are compared and their order.
+	crossval::Comparison cmp = crossval::compare( data, foldId, procs, &job.cancel,
+		true /* substreams */, c.seed );
 	if ( cmp.cancelled )
 		return string( "{\"ok\":false,\"cancelled\":true,\"message\":\"" )
 			+ jsonEscape( cmp.message.empty() ? "cancelled" : cmp.message ) + "\"}";
