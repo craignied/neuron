@@ -22,8 +22,10 @@
 
 #include <atomic>
 #include <cmath>
+#include <cstring>
 #include <iostream>
 #include <limits>
+#include <new>
 #include <sstream>
 #include <vector>
 
@@ -55,7 +57,38 @@ class ProbeProp : public SimpleProp {
 public:
 	unsigned trainRows() { return Train.rows(); }
 	double trainOutput( unsigned r ) { forward( Train, r ); return o; }
+	unsigned char errorTypeByte() const
+	{
+		unsigned char byte;
+		memcpy( &byte, &errorType, sizeof byte );
+		return byte;
+	}
+	double currentGradMax() const { return currGradMax; }
+	void setCurrentGradMax( double value ) { currGradMax = value; }
 };
+
+// A directly constructed engine model (as used by OBD, without passing through
+// the menu/API error-function setter) must agree with its "LMS" label. Poison
+// the complete object storage first so this test reliably catches a constructor
+// that leaves the scalar errorType byte indeterminate.
+static void test_default_and_copied_scalar_state()
+{
+	alignas( ProbeProp ) unsigned char storage[ sizeof( ProbeProp ) ];
+	memset( storage, 0xff, sizeof storage );
+	ProbeProp* poisoned = new ( storage ) ProbeProp;
+	expect( poisoned->errorTypeByte() == 0,
+		"a directly constructed network defaults to LMS error" );
+	poisoned->~ProbeProp();
+
+	// The copy chain must carry every training-state scalar. This is not the
+	// canonical-backprop OBD trigger above (CGD/Shanno own currGradMax), but the
+	// same member-list audit found this sibling omission.
+	ProbeProp source;
+	source.setCurrentGradMax( 0.125 );
+	ProbeProp copied( source );
+	expect( copied.currentGradMax() == source.currentGradMax(),
+		"a copied network carries its current maximum gradient" );
+}
 
 // Build a learnable DataSet: a linearly separable 2-input problem with a little
 // noise, split into train/test. randomize() normalizes inputs and stratifies.
@@ -413,6 +446,7 @@ int main()
 	ostringstream discard;
 	util::set_screen( discard );
 
+	test_default_and_copied_scalar_state();
 	test_grow_remove();
 	test_saliency();
 	test_train_after_ops();

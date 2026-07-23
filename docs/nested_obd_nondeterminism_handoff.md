@@ -1,4 +1,25 @@
-# Handoff: residual cross-process nondeterminism in nested-OBD cross-validation
+# Resolved: cross-process nondeterminism in nested-OBD cross-validation
+
+## Resolution (2026-07-23)
+
+The residual non-Matrix read was `Model::errorType`. The default constructor
+set `errorLabel` to `"LMS"` but never initialized the corresponding boolean.
+Menu/API flows normally call an error-function setter, masking the omission;
+OBD constructs `SimpleProp` directly, so its training error depended on an
+indeterminate byte. Initializing `errorType` to `false` makes the implementation
+agree with the existing LMS label and removes the process-dependent training
+endpoint.
+
+The same member-list audit found a sibling defect: `Network::currGradMax` was
+neither initialized nor copied. It does not explain the canonical-backprop OBD
+failure (`getGradMax()` packs and measures that gradient directly), but it is
+training state used by CGD/Shanno and is now initialized and copied.
+
+`tests/obd/check_obd.cpp` guards both scalars. The LMS test placement-constructs
+a network in pre-poisoned storage, making the former uninitialized byte fail
+reliably; the copy test seeds a known maximum gradient and requires the clone to
+carry it. Both assertions were run against the old code and failed before the
+fixes were restored.
 
 **Repo:** `/Users/craign/code/neUROn2++/neuron-3.0` (branch `main`)
 **Context doc:** `CLAUDE.md` → ROADMAP 4 Phase 4 (cross-validation). Read the standing rules

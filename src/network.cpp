@@ -52,6 +52,7 @@ Network::Network()
 	condNum = -1;
 	condMaxEig = -1;
 	condMinEig = -1;
+	currGradMax = 0;
 }
 
 // Default destructor
@@ -104,6 +105,7 @@ void Network::copy( const Network& rhs )
 	condNum = rhs.condNum;
 	condMaxEig = rhs.condMaxEig;
 	condMinEig = rhs.condMinEig;
+	currGradMax = rhs.currGradMax;
 }
 
 // Set the learning rate

@@ -97,11 +97,7 @@ public:
 	Matrix( const Matrix< T >& );  // copy constructor
 	Matrix< T >& operator= ( const Matrix< T >& );  // = operator
 
-	// Method to resize Matrix: the new Matrix is VALUE-INITIALIZED (zeros). It
-	//    used to be left as garbage; an uninitialized cell read on the OBD
-	//    grow/clone/validation path made architecture selection nondeterministic
-	//    across processes, so the primitive now zeroes (rule 4 -- the layer is
-	//    correct by construction). Callers that fill every cell are unaffected.
+	// Method to resize Matrix: remember the new Matrix is filled with GARBAGE!
 	Matrix< T >& resize( const unsigned, const unsigned );
 
 	// Method to clear a Matrix
@@ -324,7 +320,7 @@ inline Matrix< T >::Matrix() : data_ ( 0 ), nrows_ ( 0 ),
 // Constructor with rows, columns as arguments
 template< class T >
 inline Matrix< T >::Matrix( const unsigned nrows, const unsigned ncols ) :
-	data_  ( new T[ nrows * ncols ]() ), nrows_ ( nrows ),
+	data_  ( new T[ nrows * ncols ] ), nrows_ ( nrows ),
 	ncols_ ( ncols ), outputHeaderFlag ( true )
 {
 	assert ( data_ != 0 ); // bomb out if memory can't be allocated
@@ -369,7 +365,7 @@ Matrix< T >::Matrix( const vector< T >& Q, const vector< T >& Pt ) :
 	assert ( nrows_ != 0 && ncols_ != 0 );
 
 	// Construct the Matrix data array
-	data_ = new T[ nrows_ * ncols_ ]();
+	data_ = new T[ nrows_ * ncols_ ];
 	assert ( data_ != 0 ); // Bomb out if memory can't be allocated
 
 	// Use previously coded outprod method
@@ -388,7 +384,7 @@ Matrix< T >::Matrix( string& filename, const unsigned ncols ) :
 	// Now that the number of rows is known, construct the Matrix
 	//    for the dataset
 	assert ( nrows_ != 0 && ncols != 0 );
-	data_ = new T[ nrows_ * ncols_ ]();
+	data_ = new T[ nrows_ * ncols_ ];
 	assert ( data_ != 0 ); // bomb out if memory can't be allocated
 
 	// Load the file into the Matrix data
@@ -757,7 +753,7 @@ Matrix< T >::Matrix( const Matrix< T >& rhs ) :
 	nrows_( rhs.nrows_ ), ncols_( rhs.ncols_ ),
 	outputHeaderFlag ( rhs.outputHeaderFlag )
 {
-	data_ = new T[ nrows_ * ncols_ ](); // construct new Matrix space (value-initialized)
+	data_ = new T[ nrows_ * ncols_ ]; // construct new Matrix space
 	assert ( data_ != 0 ); // bomb out if memory can't be allocated
 
 	// Copy old Matrix into new object using algorithm::copy
@@ -783,15 +779,14 @@ Matrix< T >& Matrix< T >::operator=( const Matrix< T >& rhs )
 	return *this; // enables A = B = C;
 }
 
-// Method to resize Matrix: the new Matrix is VALUE-INITIALIZED (zeros), not
-//    garbage -- see the declaration's note.
+// Method to resize Matrix: remember the new Matrix is filled with GARBAGE!
 template< class T >
 Matrix< T >& Matrix< T >::resize( const unsigned nrows, const unsigned ncols )
 {
 	delete [] data_; // deallocate current Matrix data
 	nrows_ = nrows; // reset dimensions
 	ncols_ = ncols;
-	data_ = new T[ nrows_ * ncols_ ](); // construct new Matrix space (value-initialized)
+	data_ = new T[ nrows_ * ncols_ ]; // construct new Matrix space
 	assert ( data_ != 0 ); // bomb out if memory can't be allocated
 
 	return *this; // enables use in Matrix formulae

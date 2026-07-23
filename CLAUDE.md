@@ -1320,22 +1320,32 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   (1) **`Model::copy` never copied the `Validation` submatrix** — a clone's held-out monitor read an
   EMPTY set, so **OBD's prune phase silently ignored validation early-stopping** (a correctness bug,
   and it amplified the flake once the clone actually samples validation); guarded by a new `check_obd`
-  assertion **proven to fail** against the old code. (2) **`Matrix` allocations were left as garbage
-  (`new T[n]`)** — an uninitialized cell read on the grow→clone→validation path made architecture
-  selection nondeterministic across processes; fixed by value-initializing every `Matrix` allocation
-  (`new T[n]()`, rule 4 — the bounds-safe layer is now init-safe). Goldens byte-identical and oracle
-  numerically identical prove nothing correct depended on the garbage; reverting the value-init
-  reproduces the flake at 17/40, pinning causation. Confirmed uninitialized-memory two ways (zero-init
-  AND NaN-poison both restore determinism). **STILL OPEN — a residual ~2–4% cross-process flake on the
-  nested-OBD reproducibility assertion.** Traced to the same uninitialized-memory class (value-init
-  killed the bulk; the residual is non-Matrix — no raw `new[]`/arrays in the path) but NOT localized:
-  macOS clang has no MemorySanitizer, and instrumentation suppresses it (layout-sensitive). Full
-  cold-start briefing for whoever picks it up: **`docs/nested_obd_nondeterminism_handoff.md`** (repro
-  recipe, what's ruled out, prime suspect = audit every `copy()` in the SimpleProp→Network→Iterative→
-  Model chain for another omitted member like `Validation`, and the right tool = a Linux MSan/valgrind
-  `--track-origins` run via the ubuntu CI job). **Because of this residual the ctest is ~3% flaky, so
-  this commit is a deliberate checkpoint, not a clean green baseline** — resolve the residual (or make
-  the assertion reliable) before relying on CI. **Next after that: `/api/cv` + the GUI panel.**
+  assertion **proven to fail** against the old code. (2) **I MISDIAGNOSED the rest as a `Matrix`
+  garbage-allocation bug** and value-initialized every `Matrix` allocation. It reduced the flake
+  (~20% → ~3%) and I committed it in the 3c checkpoint — but reverting it later brought the flake
+  *back only to ~3%, not ~20%*, and I had flagged at the time that it might be pure heap perturbation.
+  **It was.** See the resolution below.
+
+  **RESOLVED 2026-07-23 — the real bug was an uninitialized scalar, found by ChatGPT 5.6 ("Sol")
+  from the handoff doc, verified here by measurement (rule 3).** `Model::Model()` set the error
+  *label* to `"LMS"` but never initialized the `errorType` *bool*. Normal menu/API paths call the
+  error-function setter, which masked it; **OBD constructs `SimpleProp` directly and does not**, so it
+  trained with LMS or cross-entropy according to stack garbage → a different training endpoint from the
+  *same* architecture → the "same sizes, a few predictions differ, cross-process only" signature
+  exactly. Fix: `errorType ( false )` in the ctor (agrees with the `"LMS"` label). Sol's copy-chain
+  audit — the prime suspect the handoff named — also caught a sibling, `Network::currGradMax`, neither
+  initialized nor copied (CGD/Shanno state); fixed in the ctor + `Network::copy`. **Verified:**
+  `errorType` fix *alone with `Matrix` reverted to garbage* → **0 / ~170** across stress batches (vs
+  ~3% before), so the scalar was the whole cause and **the `Matrix` value-init was reverted** as a
+  misdiagnosis (it changed the primitive's contract and memset every arithmetic temporary for no real
+  bug; goldens/oracle were byte-identical with OR without it — nothing ever read an uninitialized
+  `Matrix` cell). Sol's two `check_obd` guards are **proven to fail** against the reverted fixes and
+  are *reliable* (the scalar test placement-constructs into `0xff`-poisoned storage and reads the raw
+  byte — the trick my allocator-reuse `Matrix` test couldn't manage, which is why that vacuous test
+  was dropped). Full account: `docs/nested_obd_nondeterminism_resolution_report.md` +
+  `docs/nested_obd_nondeterminism_handoff.md`. Gates green, **0/110 stress in the shipped config**.
+  **Lesson (rule 3, again): a fix that only *reduces* a flake and is heap-layout-sensitive is a
+  suspect, not a cure — the real one is binary.** **Next: `/api/cv` + the GUI panel.**
 
   **Browser-verified (2026-07-23): the ROADMAP 4 splitter GUI controls — standing debt cleared.**
   The Phase 2/3/4c dataset-panel controls (added 2026-07-22) had been curl/smoke-verified only;

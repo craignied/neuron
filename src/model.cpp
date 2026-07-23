@@ -6,6 +6,7 @@
 
 // Default constructor
 Model::Model() : builtFlag ( false ), historyFlag ( true ), lastopFlag ( true ),
+	errorType ( false ),
 	historyFilename ( "neuron.log" ), lastopFilename ( "model.txt" ),
 	errorLabel ( "LMS" ) { }
 
