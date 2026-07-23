@@ -613,7 +613,7 @@ done
 grep -q '"running":false' cv_status.json || fail "CV never completed"
 $PY - <<'PY' || fail "CV result malformed"
 import json
-d = json.load(open("cv_status.json"))["result"]
+d = json.load(open("cv_status.json", encoding="utf-8"))["result"]  # Tier-1 has UTF-8 box glyphs; Windows open() defaults to cp1252
 assert d["ok"], d
 cv = d["cv"]
 assert "SUMMARY" in cv["tier1"] and "AUC (CV)" in cv["tier1"], cv["tier1"][:200]
