@@ -196,6 +196,19 @@ delong::Contrast delong::contrast( const Result& r, unsigned i, unsigned j )
 		//    standardized statistic diverges, so p is 0. Flagged so the caller states
 		//    the condition rather than a bare "significant" -- and z is kept finite
 		//    (0) so nothing serializes a non-finite number (the condition is the flag).
+		//
+		// DLG-2 numerical note (measured, not assumed): the two seDelta==0 branches
+		//    split on delta==0 EXACTLY. That is safe because a structural zero
+		//    difference-variance forces the two placement vectors to differ by a
+		//    constant, so their area difference is that constant computed from
+		//    identical arithmetic -- exactly 0 when the areas are equal, exactly the
+		//    offset otherwise (never a tiny fp residual). A structural zero also
+		//    yields vd == 0 exactly (for a constant offset, cij == vi == vj, so
+		//    vi+vj-2cij == 0) and never needs the fp-cancellation clamp above -- so
+		//    the clamp path cannot reach seDelta==0 with a nonzero delta. A probe of
+		//    200,000 near-perfectly-correlated random pairs found zero such cases.
+		//    Hence no scale-aware delta tolerance is introduced (it would be
+		//    unreachable, untestable code); the exact comparison stands.
 		c.separated = true;
 		c.z = 0;
 		c.p = 0.0;

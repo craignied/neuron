@@ -1390,7 +1390,7 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   covariate-strata / group-aware split modes (fold plan is outcome-stratified k-fold for now); Tier-3
   download buttons (files are written to disk, paths reported). *(The locked-test DeLong inference layer,
   once listed here as deferred, SHIPPED 2026-07-24 — see the entry below; ordinary DeLong is opt-in and
-  IID-only, with cluster-aware inference the remaining follow-on.)* **ROADMAP 4 Phase 4 is done for the
+  opt-in via independence=rows, independent-rows-only, with cluster-aware inference the remaining follow-on.)* **ROADMAP 4 Phase 4 is done for the
   single-run workflow; group-aware CV folds and cluster-aware locked-test inference are the remaining
   backlog.**
 
@@ -1472,7 +1472,9 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
      `cv_locked_predictions.csv` (row id + one col per procedure, B7 machinery) + a `lockedTest`
      block in `cv_run.json`. Identical predictions render "no testable difference" (never a fake p).
   4. **`/api/cv` `locked_fraction`/`locked_n` + `primary`/`reference`.** `runCvJob` splits off an
-     outcome-stratified **IID** locked test held ENTIRELY out of CV (dev-only DataSet via
+     outcome-stratified **row holdout** *(this entry originally shipped it labelled "IID" and
+     auto-ran DeLong — the DeLong sweep below made inference opt-in; a row holdout does not
+     establish independence)* held ENTIRELY out of CV (dev-only DataSet via
      `includerows`/`setRawMatrix`); CV folds the dev rows; each procedure is **refit on the dev rows
      by its OWN prespecified rule** — logistic/DFA on all dev, **nested OBD carves its own inner
      validation split of the dev rows, NOT a forced full-dev refit** (Sol's central correction: the
@@ -1489,7 +1491,8 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
      GUI-beyond-CLI row + params), `evaluation_report_spec.md` (locked layer SHIPPED), `cvreport.h`
      header de-staled.
   **Scope, stated everywhere (Sol's framing + Craig's ordering):** ordinary DeLong assumes
-  **independent test rows** — valid on this IID locked test, NOT on clustered (SEER county) data;
+  **independent test rows** — a row holdout does not establish that (the sweep below makes
+  inference opt-in via `independence=rows`), and it is NOT valid on clustered (SEER county) data;
   group-aware splitting stops leakage but does not make rows independent, so **cluster-aware test
   inference is the deferred follow-on**. Gates every piece: zero-warning build, goldens
   byte-identical, oracle numerically identical, 10/10 ctest (added `delong_areas`), smoke green.
@@ -1707,7 +1710,7 @@ re-bless — it is the scale/representativeness proof.
   > the design record; where it and the shipped code disagree, the code + the status entries
   > win. Item-level status: **4a/4b-refactor/4c/4b-CV = DONE**; **"4c DO FIRST" = done first,
   > as planned**. **The locked-test DeLong primary-comparison layer SHIPPED 2026-07-24**
-  > (opt-in `independence=rows`, IID-only; see that dated entry) — no longer deferred.
+  > (opt-in `independence=rows`, independent-rows-only; see that dated entry) — no longer deferred.
   > **DEFERRED / NOT YET IMPLEMENTED** (do not read as current behavior):
   > CV composing with covariate-strata / group-aware folds (folds are outcome-stratified
   > only); cluster-aware (non-IID) locked-test inference; "OBD metric: select on AUC"

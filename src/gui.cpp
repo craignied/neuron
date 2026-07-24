@@ -1647,9 +1647,11 @@ struct CvConfig
 	unsigned neuralHidden = 5;    // fixed-architecture neural (when !neuralObd)
 	double innerVal = 0.25;       // inner validation fraction for nested OBD
 	obd::Config obd;              // per-fold OBD search (when neuralObd)
-	// Locked-test inference (ROADMAP 4 Phase 4). lockedN > 0 sets aside an
-	//    outcome-stratified IID locked test held OUT of CV; each procedure is refit
-	//    on the development rows by its own rule and scored once on it, then DeLong.
+	// Locked-test evaluation (ROADMAP 4 Phase 4). lockedN > 0 sets aside an
+	//    outcome-stratified ROW holdout held OUT of CV; each procedure is refit on
+	//    the development rows by its own rule and scored once on it. DeLong is NOT
+	//    automatic -- it runs only when `independence` declares an independent-row
+	//    sampling unit (a row holdout does not by itself establish independence).
 	unsigned lockedN = 0;         // locked-test size (0 = pure CV, no locked test)
 	string primary, reference;    // the prespecified DeLong contrast (internal names)
 	// The declared sampling unit (DLG-1). Ordinary DeLong is produced ONLY when the
@@ -1834,10 +1836,11 @@ string runCvJob( CvConfig c )
 	}
 
 	// Optional locked-test split (ROADMAP 4 Phase 4). When set, an outcome-
-	//    stratified IID locked test is held ENTIRELY out of CV; CV then folds only
-	//    the development rows, and each procedure is later refit on the development
-	//    rows and scored once on the locked rows (evaluateOnce + DeLong). devRows /
-	//    lockedRows are raw row indices into the original dataset.
+	//    stratified ROW holdout is held ENTIRELY out of CV; CV then folds only the
+	//    development rows, and each procedure is later refit on the development rows
+	//    and scored once on the locked rows (evaluateOnce). DeLong runs only if the
+	//    caller declared an independent-row sampling unit. devRows / lockedRows are
+	//    raw row indices into the original dataset.
 	bool locked = ( c.lockedN > 0 );
 	vector< unsigned > devRows, lockedRows;
 	DataSet devData;              // built (dev-only Raw) only when locked
