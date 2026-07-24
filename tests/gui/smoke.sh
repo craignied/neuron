@@ -650,6 +650,53 @@ done
 [ "$cvStopped" = 1 ] || fail "a long CV did not stop promptly after Stop (cancellation not propagated)"
 grep -q '"cancelled":true' cv_cancel.json || fail "a stopped CV result must say cancelled"
 
+# --- Locked-test inference (ROADMAP 4 Phase 4) -----------------------------
+# Validation refusals first (Sol's caution: a prespecified contrast must name
+#    SELECTED procedures; a locked test must be large enough to estimate).
+curl -s -X POST "$URL/api/cv" -d "logistic=1&neural=1&primary=qdfa&reference=logistic&locked_fraction=0.2" \
+    | grep -q '"ok":false' || fail "a contrast naming an unselected procedure must be refused"
+curl -s -X POST "$URL/api/cv" -d "logistic=1&neural=1&primary=neural&locked_fraction=0.2" \
+    | grep -q '"ok":false' || fail "a contrast with primary but no reference must be refused"
+curl -s -X POST "$URL/api/cv" -d "logistic=1&neural=1&locked_n=2" \
+    | grep -q '"ok":false' || fail "a locked test smaller than 4 rows must be refused"
+
+# Happy path: CV on the development rows + a locked-test DeLong comparison. Fixed
+#    4-hidden neural (fast) so the run finishes quickly; default contrast is
+#    Neural vs Logistic (both selected).
+curl -s -X POST "$URL/api/cv" \
+    -d "folds=5&seed=42&maxiter=300&logistic=1&neural=1&neural_obd=0&neural_hidden=4&locked_fraction=0.25" \
+    | grep -q '"ok":true' || fail "locked-test CV run did not start"
+for i in $(seq 1 120); do
+    curl -s "$URL/api/train/status" > cv_locked.json
+    grep -q '"running":false' cv_locked.json && break
+    sleep 0.3
+done
+grep -q '"running":false' cv_locked.json || fail "locked-test CV never completed"
+$PY - <<'PY' || fail "locked-test CV result malformed"
+import json
+d = json.load(open("cv_locked.json", encoding="utf-8"))["result"]
+assert d["ok"], d
+cv = d["cv"]
+# Tier 1 gains the AUC(test) column, the DeLong verdict, and the locked-test caveat.
+assert "AUC (test) [95% CI]" in cv["tier1"], cv["tier1"]
+assert ("DeLong p" in cv["tier1"]) or ("no testable difference" in cv["tier1"]), cv["tier1"]
+assert "inferential" in cv["tier1"] and "locked test set" in cv["tier1"], cv["tier1"]
+lk = cv["locked"]
+assert lk["n"] >= 4 and len(lk["areas"]) == 2, lk
+# The prespecified contrast defaults to neural vs logistic, primary - reference.
+c = lk["contrast"]
+assert c and c["primary"] == "Neural" and c["reference"] == "Logistic", c
+assert c.get("degenerate") or (c["p"] is not None), c   # a real DeLong p unless degenerate
+# Tier 3 now writes FOUR files (adds cv_locked_predictions.csv), all reported ok.
+assert len(cv["files"]) == 4, cv["files"]
+assert cv.get("warnings", None) == [], cv.get("warnings")
+PY
+# The locked predictions file preserves row identity (raw id first), one column
+#    per procedure -- the externally auditable pairing DeLong consumed.
+[ -f cv_locked_predictions.csv ] || fail "no cv_locked_predictions.csv written"
+head -1 cv_locked_predictions.csv | grep -q "^row,outcome,Logistic,Neural" \
+    || fail "cv_locked_predictions.csv header wrong (row identity + one column per procedure)"
+
 # --- Per-action audit log (every user action logged, 2026-07-19) -----------
 # Every GUI action lands in neuron_actions.log beside the data, timestamped,
 # with the exact parameter values it carried. The session above drove load,
@@ -661,4 +708,4 @@ grep -qE '^[0-9-]+T[0-9:]+ train ' neuron_actions.log || fail "train not audited
 grep -q 'algorithm=' neuron_actions.log || fail "train parameters not recorded in the audit log"
 grep -qE '^[0-9-]+T[0-9:]+ dfa '   neuron_actions.log || fail "dfa not audited"
 
-echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, binormal fits + null when impossible, logistic Wald/condition number, regress, saves, plateau auto-stop + control + validation, train-panel parity controls (learning rate/weight decay/batch-epoch/stopping conditions/print counter) + behavioral proof + validation, model-panel parity (bias->BareProp/multi-layer->BackProp/error function/load-network), no-bias BackProp save/load round trip, multipart log toggles, logistic batch/epoch guard, DFA (linear/quadratic + report/stats + guesses saves), dataset characteristics + ROC reporting load params, test_n exact split, covariate stratification + diagnostic, group-aware split + zero-leakage diagnostic, three-way validation split, multi-output load/BackProp/train/DFA + logistic refusal, async train/status/stop + 409 busy + cancel, algorithm=auto blocking + async, OBD sizing (refusal/async grow-then-prune/obd status phase/plain-train has none/409 busy/cancel), per-action audit log)"
+echo "OK: GUI endpoints (version, page, load incl. pre-split pair, model, train + ROC + full stats JSON, /api/stats, binormal fits + null when impossible, logistic Wald/condition number, regress, saves, plateau auto-stop + control + validation, train-panel parity controls (learning rate/weight decay/batch-epoch/stopping conditions/print counter) + behavioral proof + validation, model-panel parity (bias->BareProp/multi-layer->BackProp/error function/load-network), no-bias BackProp save/load round trip, multipart log toggles, logistic batch/epoch guard, DFA (linear/quadratic + report/stats + guesses saves), dataset characteristics + ROC reporting load params, test_n exact split, covariate stratification + diagnostic, group-aware split + zero-leakage diagnostic, three-way validation split, multi-output load/BackProp/train/DFA + logistic refusal, async train/status/stop + 409 busy + cancel, algorithm=auto blocking + async, OBD sizing (refusal/async grow-then-prune/obd status phase/plain-train has none/409 busy/cancel), locked-test DeLong inference (contrast validation refusals + AUC(test) column + prespecified contrast p + cv_locked_predictions.csv row identity + four Tier-3 files), per-action audit log)"

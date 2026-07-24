@@ -43,6 +43,7 @@
 #include "crossval.h"
 #include "cvadapters.h"
 #include "cvreport.h"
+#include "delong.h"
 #include "split.h"
 #include "utility.h"
 #include "version.h"
@@ -1646,6 +1647,11 @@ struct CvConfig
 	unsigned neuralHidden = 5;    // fixed-architecture neural (when !neuralObd)
 	double innerVal = 0.25;       // inner validation fraction for nested OBD
 	obd::Config obd;              // per-fold OBD search (when neuralObd)
+	// Locked-test inference (ROADMAP 4 Phase 4). lockedN > 0 sets aside an
+	//    outcome-stratified IID locked test held OUT of CV; each procedure is refit
+	//    on the development rows by its own rule and scored once on it, then DeLong.
+	unsigned lockedN = 0;         // locked-test size (0 = pure CV, no locked test)
+	string primary, reference;    // the prespecified DeLong contrast (internal names)
 };
 
 // The whole comparison on the worker thread: build an outcome-stratified k-fold
@@ -1653,11 +1659,118 @@ struct CvConfig
 //    the ONE shared plan (crossval::compare), render the three-tier report, and
 //    write the Tier-3 files beside the data. Does NOT touch modelPtr -- CV is a
 //    standalone analysis, like DFA. The caller must own the engine.
+// Assemble the report's LockedInfo from a locked-test evaluation: DeLong over the
+//    procedures that fitted (paired on the same rows), each column's area + 95% CI,
+//    and the prespecified contrast AUC(primary) - AUC(reference) when both are
+//    present AND fitted. DeLong assumes independent locked-test rows (see delong.h).
+static cvreport::LockedInfo buildLockedInfo( const crossval::LockedResult& lr,
+	const CvConfig& c )
+{
+	cvreport::LockedInfo L;
+	L.has = true;
+	L.n = ( unsigned ) lr.testRows.size();
+	L.events = 0;
+	for ( unsigned i = 0; i < lr.outcome.size(); i++ ) L.events += lr.outcome[ i ];
+	L.testRows = lr.testRows;
+	L.outcome = lr.outcome;
+	L.splitPlan = "outcome-stratified IID locked holdout, seed " + to_string( c.seed );
+
+	// DeLong over the entries that produced predictions, paired on the same rows.
+	vector< vector< double > > preds;
+	vector< int > idx( lr.entries.size(), -1 ); // entry -> column in the DeLong result
+	for ( unsigned e = 0; e < lr.entries.size(); e++ )
+		if ( lr.entries[ e ].ok )
+		{
+			idx[ e ] = ( int ) preds.size();
+			preds.push_back( lr.entries[ e ].pred );
+		}
+	delong::Result dr = delong::analyze( lr.outcome, preds );
+
+	for ( unsigned e = 0; e < lr.entries.size(); e++ )
+	{
+		cvreport::LockedColumn col;
+		col.name = lr.entries[ e ].name;
+		col.pred = lr.entries[ e ].pred;
+		if ( !lr.entries[ e ].archHidden.empty() )
+			col.arch = to_string( lr.entries[ e ].archHidden[ 0 ] ) + " hidden";
+		if ( !lr.entries[ e ].ok )
+			col.note = "failed: " + lr.entries[ e ].reason;
+		else if ( dr.ok )
+		{
+			delong::Interval iv = delong::interval( dr, ( unsigned ) idx[ e ] );
+			col.has = true; col.auc = iv.auc; col.lo = iv.lo; col.hi = iv.hi;
+		}
+		else col.note = "AUC not computable: " + dr.reason;
+		L.columns.push_back( col );
+	}
+
+	// The prespecified contrast (both procedures must be present AND have fitted).
+	if ( !c.primary.empty() && !c.reference.empty() )
+	{
+		cvreport::LockedContrast& ct = L.contrast;
+		ct.primary = c.primary; ct.reference = c.reference;
+		int pe = -1, re = -1;
+		for ( unsigned e = 0; e < lr.entries.size(); e++ )
+		{
+			if ( lr.entries[ e ].name == c.primary ) pe = ( int ) e;
+			if ( lr.entries[ e ].name == c.reference ) re = ( int ) e;
+		}
+		if ( pe < 0 || re < 0 )
+			ct.note = "a contrast procedure was not evaluated";
+		else if ( !dr.ok )
+			ct.note = "DeLong not computable: " + dr.reason;
+		else if ( idx[ pe ] < 0 || idx[ re ] < 0 )
+			ct.note = "a contrast procedure failed on the locked test";
+		else
+		{
+			delong::Contrast dc = delong::contrast( dr,
+				( unsigned ) idx[ pe ], ( unsigned ) idx[ re ] );
+			ct.has = true;
+			ct.delta = dc.delta; ct.p = dc.p; ct.degenerate = dc.degenerate;
+			ct.significant = ( !dc.degenerate && dc.p < 0.05 );
+		}
+	}
+	return L;
+}
+
+// A compact JSON summary of the locked-test inference for machine consumers (the
+//    human path reads the rendered tier1/tier2). Numbers use the signed area scale.
+static string lockedJson( const cvreport::LockedInfo& L )
+{
+	ostringstream j;
+	j << "{\"n\":" << L.n << ",\"events\":" << L.events << ",\"areas\":[";
+	for ( unsigned i = 0; i < L.columns.size(); i++ )
+	{
+		const cvreport::LockedColumn& col = L.columns[ i ];
+		j << ( i ? "," : "" ) << "{\"name\":\"" << jsonEscape( col.name ) << "\"";
+		if ( col.has )
+			j << ",\"auc\":" << col.auc << ",\"lo\":" << col.lo << ",\"hi\":" << col.hi;
+		else
+			j << ",\"auc\":null,\"note\":\"" << jsonEscape( col.note ) << "\"";
+		j << "}";
+	}
+	j << "]";
+	if ( L.contrast.has )
+		j << ",\"contrast\":{\"primary\":\"" << jsonEscape( L.contrast.primary )
+			<< "\",\"reference\":\"" << jsonEscape( L.contrast.reference )
+			<< "\",\"delta\":" << L.contrast.delta
+			<< ",\"p\":" << ( L.contrast.degenerate ? string( "null" )
+				: to_string( L.contrast.p ) )
+			<< ",\"significant\":" << ( L.contrast.significant ? "true" : "false" )
+			<< ",\"degenerate\":" << ( L.contrast.degenerate ? "true" : "false" ) << "}";
+	else if ( !L.contrast.note.empty() )
+		j << ",\"contrast\":{\"note\":\"" << jsonEscape( L.contrast.note ) << "\"}";
+	else
+		j << ",\"contrast\":null";
+	j << "}";
+	return j.str();
+}
+
 string runCvJob( CvConfig c )
 {
 	DataSet& data = *dataPtr;
 
-	// Fold plan: outcome-stratified k-fold over the raw outcome column.
+	// Outcome labels + event count over the WHOLE raw dataset.
 	Matrix< double >& raw = data.getRawMatrix();
 	unsigned n = raw.rows(), outCol = raw.cols() - 1;
 	vector< unsigned > label( n );
@@ -1667,50 +1780,88 @@ string runCvJob( CvConfig c )
 		label[ r ] = ( raw( r, outCol ) != 0 ) ? 1u : 0u;
 		events += label[ r ];
 	}
-	util::set_seed( c.seed );
-	vector< unsigned > foldId = nsplit::kFold( label, c.k );
 
-	// Templates for the network procedures. They MUST outlive compare() --
-	//    trainProcedure captures the template by reference -- so they live here
-	//    for the whole synchronous run below. Sized on a train=all fold.
-	DataSet full = data;
-	vector< unsigned > allRows( n ), none;
-	for ( unsigned r = 0; r < n; r++ ) allRows[ r ] = r;
+	// Optional locked-test split (ROADMAP 4 Phase 4). When set, an outcome-
+	//    stratified IID locked test is held ENTIRELY out of CV; CV then folds only
+	//    the development rows, and each procedure is later refit on the development
+	//    rows and scored once on the locked rows (evaluateOnce + DeLong). devRows /
+	//    lockedRows are raw row indices into the original dataset.
+	bool locked = ( c.lockedN > 0 );
+	vector< unsigned > devRows, lockedRows;
+	DataSet devData;              // built (dev-only Raw) only when locked
+	DataSet* cvData = &data;      // the dataset CV folds
+	if ( locked )
+	{
+		util::set_seed( c.seed );
+		nsplit::Holdout h = nsplit::stratifiedHoldout( label, c.lockedN );
+		devRows = h.train; lockedRows = h.test;
+		Matrix< double > devRaw = raw.includerows( devRows );
+		devData = data;                 // copy config (inputs/outputs/discrete)
+		devData.setRawMatrix( devRaw );  // dev-only Raw; CV never sees the locked rows
+		cvData = &devData;
+	}
+
+	// Fold plan: outcome-stratified k-fold over the CV dataset (dev rows if locked).
+	Matrix< double >& craw = cvData->getRawMatrix();
+	unsigned nCv = craw.rows(), cvOut = craw.cols() - 1;
+	vector< unsigned > cvLabel( nCv );
+	for ( unsigned r = 0; r < nCv; r++ )
+		cvLabel[ r ] = ( craw( r, cvOut ) != 0 ) ? 1u : 0u;
+	util::set_seed( c.seed );
+	vector< unsigned > foldId = nsplit::kFold( cvLabel, c.k );
+
+	// Templates for the network procedures. They MUST outlive compare()/evaluateOnce
+	//    -- trainProcedure captures the template by reference -- so they live here
+	//    for the whole synchronous run below. Sized on a train=all fold of the CV
+	//    dataset, so the locked rows never enter template construction.
+	DataSet full = *cvData;
+	vector< unsigned > allRows( nCv ), none;
+	for ( unsigned r = 0; r < nCv; r++ ) allRows[ r ] = r;
 	full.makeFold( allRows, none );
 
 	unique_ptr< Logistic > lg;
 	unique_ptr< SimpleProp > sp;
-	vector< unsigned > archSink; // per-fold OBD selection, for the report metadata
-
-	vector< crossval::ProcedureSpec > procs;
 	if ( c.logistic )
 	{
 		lg = make_unique< Logistic >();
 		lg->setDataSet( full );
 		lg->setHistory( false ); lg->setLastop( false ); lg->setLogPrint( false );
 		util::set_seed( c.seed ); lg->randomize();
-		procs.push_back( { "Logistic", cvadapters::trainProcedure( *lg, c.maxIter ), nullptr } );
 	}
-	if ( c.ldfa )
-		procs.push_back( { "LDFA", cvadapters::dfaProcedure( false ), nullptr } );
-	if ( c.qdfa )
-		procs.push_back( { "QDFA", cvadapters::dfaProcedure( true ), nullptr } );
-	if ( c.neural )
+	if ( c.neural && !c.neuralObd )
 	{
-		if ( c.neuralObd )
-			procs.push_back( { "Neural (OBD)",
-				cvadapters::nestedObdProcedure( c.obd, c.innerVal, &archSink ), &archSink } );
-		else
-		{
-			sp = make_unique< SimpleProp >();
-			sp->setDataSet( full );
-			sp->setHidden( c.neuralHidden );
-			sp->setHistory( false ); sp->setLastop( false ); sp->setLogPrint( false );
-			util::set_seed( c.seed ); sp->randomize();
-			procs.push_back( { "Neural", cvadapters::trainProcedure( *sp, c.maxIter ), nullptr } );
-		}
+		sp = make_unique< SimpleProp >();
+		sp->setDataSet( full );
+		sp->setHidden( c.neuralHidden );
+		sp->setHistory( false ); sp->setLastop( false ); sp->setLogPrint( false );
+		util::set_seed( c.seed ); sp->randomize();
 	}
 
+	// Assemble the procedure specs given an arch sink, so CV and the locked-test
+	//    evaluation each get their OWN sink (CV's records a size per fold; the
+	//    locked one records the single frozen fit's size).
+	auto assemble = [ & ]( vector< unsigned >* archSink )
+	{
+		vector< crossval::ProcedureSpec > ps;
+		if ( c.logistic )
+			ps.push_back( { "Logistic", cvadapters::trainProcedure( *lg, c.maxIter ), nullptr } );
+		if ( c.ldfa )
+			ps.push_back( { "LDFA", cvadapters::dfaProcedure( false ), nullptr } );
+		if ( c.qdfa )
+			ps.push_back( { "QDFA", cvadapters::dfaProcedure( true ), nullptr } );
+		if ( c.neural )
+		{
+			if ( c.neuralObd )
+				ps.push_back( { "Neural (OBD)",
+					cvadapters::nestedObdProcedure( c.obd, c.innerVal, archSink ), archSink } );
+			else
+				ps.push_back( { "Neural", cvadapters::trainProcedure( *sp, c.maxIter ), nullptr } );
+		}
+		return ps;
+	};
+
+	vector< unsigned > cvArchSink;
+	vector< crossval::ProcedureSpec > procs = assemble( &cvArchSink );
 	if ( procs.empty() )
 		return jsonMsg( false, "select at least one procedure to compare" );
 
@@ -1727,7 +1878,7 @@ string runCvJob( CvConfig c )
 	//    (the network observer, obd::run) so a long CV cancels promptly (bug B1).
 	//    Deterministic per-(procedure,fold) substreams (bug B11): a procedure's CV
 	//    result is invariant to which other procedures are compared and their order.
-	crossval::Comparison cmp = crossval::compare( data, foldId, procs, &job.cancel,
+	crossval::Comparison cmp = crossval::compare( *cvData, foldId, procs, &job.cancel,
 		true /* substreams */, c.seed );
 	if ( cmp.cancelled )
 		return string( "{\"ok\":false,\"cancelled\":true,\"message\":\"" )
@@ -1735,25 +1886,50 @@ string runCvJob( CvConfig c )
 	if ( !cmp.ok )
 		return jsonMsg( false, cmp.message.empty() ? "cross-validation failed" : cmp.message );
 
+	// Locked-test inference: refit each procedure on the development rows by its own
+	//    rule, score once on the untouched locked rows, then DeLong on the pairing.
+	cvreport::LockedInfo lockedInfo;
+	if ( locked )
+	{
+		{
+			lock_guard< mutex > lock( job.progressMutex );
+			job.obdPhase = "locked-test evaluation";
+		}
+		vector< unsigned > lockedArchSink;
+		vector< crossval::ProcedureSpec > lprocs = assemble( &lockedArchSink );
+		util::set_seed( c.seed );
+		crossval::LockedResult lr = crossval::evaluateOnce( data, devRows, lockedRows,
+			lprocs, &job.cancel, true /* substreams */, c.seed );
+		if ( lr.cancelled )
+			return string( "{\"ok\":false,\"cancelled\":true,\"message\":\"" )
+				+ jsonEscape( lr.message.empty() ? "cancelled" : lr.message ) + "\"}";
+		if ( !lr.ok )
+			return jsonMsg( false, lr.message.empty()
+				? "locked-test evaluation failed" : lr.message );
+		lockedInfo = buildLockedInfo( lr, c );
+	}
+
 	// Report: Tier 1 + Tier 2 as text, Tier 3 written beside the data.
 	cvreport::PlanInfo info;
 	info.n = n;
 	info.events = events;
 	info.foldPlan = "outcome-stratified " + to_string( c.k ) + "-fold, seed "
-		+ to_string( c.seed );
-	if ( c.neural && c.logistic )
+		+ to_string( c.seed )
+		+ ( locked ? " (development rows only)" : string() );
+	if ( !locked && c.neural && c.logistic )
 	{
 		info.primary = c.neuralObd ? "Neural (OBD)" : "Neural";
 		info.reference = "Logistic";
 	}
 
-	string tier1 = cvreport::tier1( cmp, info );
-	string tier2 = cvreport::tier2( cmp, info );
+	string tier1 = cvreport::tier1( cmp, info, lockedInfo );
+	string tier2 = cvreport::tier2( cmp, info, lockedInfo );
 
 	string dir = util::run_path( "" ); // the run directory (trailing slash, or "")
 	if ( dir.empty() ) dir = ".";
 	else if ( dir.back() == '/' || dir.back() == '\\' ) dir.pop_back();
-	vector< cvreport::ArtifactResult > arts = cvreport::writeArtifacts( cmp, info, dir );
+	vector< cvreport::ArtifactResult > arts =
+		cvreport::writeArtifacts( cmp, info, dir, lockedInfo );
 
 	// files[] lists ONLY the artifacts that fully succeeded (opened, written,
 	//    flushed, closed); a failed one goes to warnings[] with its reason, so the
@@ -1781,15 +1957,21 @@ string runCvJob( CvConfig c )
 
 	ostringstream msg;
 	msg << "cross-validation complete (" << cmp.entries.size() << " procedure"
-		<< ( cmp.entries.size() == 1 ? "" : "s" ) << ", " << c.k << " folds)";
+		<< ( cmp.entries.size() == 1 ? "" : "s" ) << ", " << c.k << " folds";
+	if ( locked ) msg << " + locked test (" << lockedInfo.n << " rows)";
+	msg << ")";
 	if ( anyFailed )
 		msg << " -- WARNING: one or more machine-readable files could not be written";
 
-	return string( "{\"ok\":true,\"message\":\"" ) + jsonEscape( msg.str() )
-		+ "\",\"cv\":{\"tier1\":\"" + jsonEscape( tier1 ) + "\""
+	string cvBlock = string( "{\"tier1\":\"" ) + jsonEscape( tier1 ) + "\""
 		+ ",\"tier2\":\"" + jsonEscape( tier2 ) + "\""
 		+ ",\"files\":" + filesJson.str()
-		+ ",\"warnings\":" + warnJson.str() + "}}";
+		+ ",\"warnings\":" + warnJson.str();
+	if ( locked ) cvBlock += ",\"locked\":" + lockedJson( lockedInfo );
+	cvBlock += "}";
+
+	return string( "{\"ok\":true,\"message\":\"" ) + jsonEscape( msg.str() )
+		+ "\",\"cv\":" + cvBlock + "}";
 }
 
 string handleCv( const httplib::Request& req )
@@ -1854,6 +2036,80 @@ string handleCv( const httplib::Request& req )
 		return jsonMsg( false, "folds cannot exceed the number of rows" );
 	if ( !( c.logistic || c.ldfa || c.qdfa || c.neural ) )
 		return jsonMsg( false, "select at least one procedure to compare" );
+
+	// Locked-test inference (ROADMAP 4 Phase 4): an outcome-stratified IID locked
+	//    test held out of CV. locked_fraction (0,1) or locked_n (a count) sizes it.
+	unsigned nRows = dataPtr->getRawMatrix().rows();
+	{
+		string frac = param( req, "locked_fraction" ), cnt = param( req, "locked_n" );
+		if ( !frac.empty() )
+		{
+			double f = atof( frac.c_str() );
+			if ( !( f > 0 && f < 1 ) )
+				return jsonMsg( false, "locked_fraction must be between 0 and 1" );
+			c.lockedN = ( unsigned )( f * nRows + 0.5 );
+		}
+		else if ( !cnt.empty() )
+		{
+			long v = atol( cnt.c_str() );
+			if ( v < 0 ) return jsonMsg( false, "locked_n cannot be negative" );
+			c.lockedN = ( unsigned ) v;
+		}
+		if ( c.lockedN > 0 )
+		{
+			// The locked test needs both classes to be estimable (DeLong needs >= 2
+			//    per class), and CV needs at least k development rows left.
+			if ( c.lockedN < 4 )
+				return jsonMsg( false, "the locked test is too small (use at least "
+					"4 rows so both classes can be represented)" );
+			if ( nRows < c.lockedN + c.k )
+				return jsonMsg( false, "the locked test leaves too few development "
+					"rows for the requested folds" );
+		}
+	}
+
+	// The prespecified DeLong contrast. Tokens (logistic|ldfa|qdfa|neural) resolve to
+	//    the SELECTED procedures; an explicit contrast naming an unselected procedure
+	//    is a validation error -- we never silently default to a pair that isn't in
+	//    the run (Sol's caution). Absent tokens default to neural vs logistic ONLY
+	//    when both are selected, else no contrast is drawn.
+	{
+		string neuralName = c.neuralObd ? "Neural (OBD)" : "Neural";
+		auto resolve = [ & ]( const string& tok, string& out ) -> string
+		{
+			string t = tok;
+			for ( unsigned i = 0; i < t.size(); i++ ) t[ i ] = tolower( t[ i ] );
+			if ( t == "logistic" ) { if ( !c.logistic ) return "logistic"; out = "Logistic"; }
+			else if ( t == "ldfa" ) { if ( !c.ldfa ) return "LDFA"; out = "LDFA"; }
+			else if ( t == "qdfa" ) { if ( !c.qdfa ) return "QDFA"; out = "QDFA"; }
+			else if ( t == "neural" ) { if ( !c.neural ) return "neural"; out = neuralName; }
+			else return "?";
+			return ""; // ok
+		};
+		string pTok = param( req, "primary" ), rTok = param( req, "reference" );
+		if ( !pTok.empty() || !rTok.empty() )
+		{
+			if ( pTok.empty() || rTok.empty() )
+				return jsonMsg( false, "specify both primary and reference for a "
+					"prespecified contrast, or neither" );
+			string badP = resolve( pTok, c.primary ), badR = resolve( rTok, c.reference );
+			if ( badP == "?" || badR == "?" )
+				return jsonMsg( false, "primary/reference must be one of "
+					"logistic, ldfa, qdfa, neural" );
+			if ( !badP.empty() )
+				return jsonMsg( false, "primary procedure '" + badP
+					+ "' is not among the selected procedures" );
+			if ( !badR.empty() )
+				return jsonMsg( false, "reference procedure '" + badR
+					+ "' is not among the selected procedures" );
+			if ( c.primary == c.reference )
+				return jsonMsg( false, "primary and reference must differ" );
+		}
+		else if ( c.neural && c.logistic )
+		{
+			c.primary = neuralName; c.reference = "Logistic"; // default contrast
+		}
+	}
 
 	// Async-only, like OBD: many training runs on the worker thread.
 	if ( job.worker.joinable() )

@@ -415,6 +415,22 @@ network; the size-vs-error search appears in the chart below.</span></div>
     <input class="num" type="number" id="cv_inner_val" value="0.25" step="0.05"
     min="0.05" max="0.9"></label>
 </div>
+<div class="row">
+  <label title="Set aside an untouched, outcome-stratified locked test set (0 = none). Each procedure is refit on the development rows and scored once on the locked test; DeLong then compares the areas. The locked test never enters CV, OBD, or tuning.">Locked-test fraction
+    <input class="num" type="number" id="cv_locked_fraction" value="0" step="0.05"
+    min="0" max="0.9"></label>
+  <label title="The prespecified DeLong contrast, AUC(primary) - AUC(reference), on the locked test. Default = Neural vs Logistic when both are selected.">Contrast
+    <select id="cv_primary">
+      <option value="">primary (auto)</option>
+      <option value="neural">neural</option><option value="logistic">logistic</option>
+      <option value="ldfa">ldfa</option><option value="qdfa">qdfa</option>
+    </select>
+    <select id="cv_reference">
+      <option value="">reference (auto)</option>
+      <option value="neural">neural</option><option value="logistic">logistic</option>
+      <option value="ldfa">ldfa</option><option value="qdfa">qdfa</option>
+    </select></label>
+</div>
 <div class="row"><span class="status">Every procedure is scored over ONE shared,
 outcome-stratified k-fold plan, so their out-of-fold predictions are paired row
 for row. The nested-OBD pipeline reruns the whole architecture search inside each
@@ -422,7 +438,11 @@ fold (no leakage). A standalone analysis &mdash; it does not touch the trained
 model above. The headline table, per-fold detail, and machine-readable files
 (cv_predictions.csv / cv_metrics.csv / cv_run.json, written beside your data)
 appear below. The CV &plusmn; is descriptive spread across dependent folds, not a
-confidence interval.</span></div>
+confidence interval. With a locked-test fraction &gt; 0, an untouched
+outcome-stratified test set is held out of CV entirely; each procedure is refit on
+the development rows and scored once on it, and DeLong gives the AUC 95% CIs and
+the prespecified contrast's p (cv_locked_predictions.csv is written too). DeLong
+assumes independent test rows &mdash; not for clustered data (a follow-on).</span></div>
 </fieldset>
 
 <fieldset>
@@ -691,6 +711,10 @@ async function runCv() {
     qdfa: cb("cv_qdfa"), neural: cb("cv_neural"), neural_obd: cb("cv_neural_obd"),
     neural_hidden: $("cv_neural_hidden").value, hidden_max: $("cv_hidden_max").value,
     iter_budget: $("cv_iter_budget").value, inner_val: $("cv_inner_val").value };
+  const lf = parseFloat($("cv_locked_fraction").value);
+  if (lf > 0) p.locked_fraction = lf;
+  if ($("cv_primary").value) p.primary = $("cv_primary").value;
+  if ($("cv_reference").value) p.reference = $("cv_reference").value;
   const j = await api("/api/cv", p);
   if (!j.ok) { setStatus("cvstatus", false, j.message); return; }
   cving = true;
