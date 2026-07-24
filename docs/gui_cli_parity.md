@@ -119,6 +119,7 @@ have **no CLI equivalent by design** — that is not a parity gap.
 | Group-aware split — keep clusters intact for a harder unseen-group test (ROADMAP 4 Phase 3) | Dataset panel "Group on" columns | `POST /api/load` `group=` (1-based cols; rows with identical values stay together) | — n/a (new capability, menus frozen) |
 | Three-way split — train/validation/test so selection (OBD) monitors validation and the test set stays untouched (ROADMAP 4 Phase 4c) | Dataset panel "Validation fraction" | `POST /api/load` `val_fraction=` (or `val_n=` with `test_n=`) | — n/a (new capability, menus frozen) |
 | Cross-validation model comparison — logistic / LDFA / QDFA / neural (nested OBD) over ONE shared outcome-stratified k-fold plan, three-tier report (ROADMAP 4 Phase 4) | Dataset-independent "Cross-validation" panel + pinned Tier-1 headline table | `POST /api/cv` (async; three-tier report in the result) | — n/a (new capability, menus frozen) |
+| Locked-test DeLong inference — set aside an untouched IID locked test; refit each procedure on the development rows, score once, DeLong compares the AUCs (ROADMAP 4 Phase 4) | CV panel "Locked-test fraction" + primary/reference contrast selects | `POST /api/cv` `locked_fraction=` (or `locked_n=`), `primary`/`reference` tokens | — n/a (new capability, menus frozen) |
 
 `POST /api/obd` params: `hidden_start`, `hidden_max`, `iter_budget`,
 `sample_every`, `early_stop_tol`, `early_stop_patience`, `grow_patience`,
@@ -138,6 +139,18 @@ report as text (`cv.tier1`/`cv.tier2`) and the paths of the Tier-3 files
 (`cv_predictions.csv` / `cv_metrics.csv` / `cv_run.json`, written beside the data).
 The fold plan is outcome-stratified k-fold; composing CV with the covariate-strata
 / group-aware split modes is a later extension.
+
+Locked-test inference params on the same call: `locked_fraction` (0–1) or
+`locked_n` (a count) set aside an outcome-stratified **IID** locked test held out of
+CV; each procedure is refit on the development rows by its own rule and scored once
+on the locked test, then **DeLong** compares the areas. `primary`/`reference`
+(tokens `logistic`|`ldfa`|`qdfa`|`neural`) name the prespecified contrast and **must
+be selected procedures** (else a validation error); absent, it defaults to neural vs
+logistic when both are present. Tier 1 gains an `AUC (test) [95% CI]` column + the
+contrast verdict (ΔAUC + DeLong *p*), `cv.locked` carries the machine-readable
+areas/CIs and signed contrast, and `cv_locked_predictions.csv` (row id + one column
+per procedure) is written. **DeLong assumes independent test rows** — not valid for
+clustered (e.g. county) data; cluster-aware test inference is a follow-on.
 
 ## Logging (cross-cutting)
 

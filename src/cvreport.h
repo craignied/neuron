@@ -8,12 +8,14 @@
      Tier 3 -- machine-readable files (cv_predictions.csv / cv_metrics.csv /
                cv_run.json), written beside the data and NEVER printed.
 
-   The report is CV-only in this slice: there is no locked test set, so the
-   AUC(test)/DeLong column and contrast are omitted and the verdict states the
-   CV policy (the locked-test comparison is a later policy layer above the
-   mechanism). Ownership (rule 6): the coordinator owns the summary; this renderer
-   iterates procedures and whatever metadata each carries -- it has NO model-family
-   switches, and nothing here is SEER-specific. */
+   With a locked test (a LockedInfo, has = true) Tier 1 gains an AUC(test) [95% CI]
+   column and the prespecified DeLong contrast verdict, Tier 2 a locked-test section,
+   and Tier 3 a cv_locked_predictions.csv + a lockedTest block in cv_run.json; without
+   one the report is CV-only and byte-identical. The locked-test summary is filled by
+   a policy layer above the mechanism (the GUI CV job: crossval::evaluateOnce + delong);
+   DeLong assumes independent test rows (see delong.h). Ownership (rule 6): the
+   coordinator owns the summary; this renderer iterates procedures and whatever metadata
+   each carries -- it has NO model-family switches, and nothing here is SEER-specific. */
 
 #ifndef CVREPORT_H
 #define CVREPORT_H

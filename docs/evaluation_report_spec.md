@@ -9,9 +9,16 @@
 > (with per-procedure `validFolds` + `failures`). A Tier-3 file that cannot be written (unwritable
 > directory, full disk) is reported as a run WARNING naming the file + reason — never silently
 > dropped, and never counted as written unless it opened/wrote/flushed/closed cleanly.
+> **SHIPPED 2026-07-24 — the locked-test inference layer:** with `locked_fraction`/`locked_n`
+> on `/api/cv`, Tier 1 gains the `AUC (test) [95% CI]` column and the prespecified DeLong
+> contrast verdict (ΔAUC + two-sided *p* → significant/not); Tier 2 gains a locked-test
+> section; Tier 3 gains `cv_locked_predictions.csv` and a `lockedTest` block in `cv_run.json`;
+> the "frozen architecture" appears as each procedure's locked-test `arch`. Scoped to
+> **independent (IID) test rows** — cluster-aware test inference remains a follow-on.
 > **NOT yet implemented (aspirational below):**
-> a locked-test AUC/DeLong column and frozen-architecture result; Tier-2 calibration; per-fold
-> timing; Tier-3 download buttons; a fully metric-agnostic Tier 1. **Format note:**
+> Tier-2 calibration; per-fold timing; Tier-3 download buttons; a fully metric-agnostic
+> Tier 1; composing the locked/CV split with the covariate-strata or group-aware modes.
+> **Format note:**
 > `cv_predictions.csv` ships as **one row per exemplar with one prediction column per
 > procedure** (a paired wide format), NOT the "one row per (exemplar, procedure)" the body
 > describes. And Tier-2 detail is returned only when the async CV job finishes; it does not

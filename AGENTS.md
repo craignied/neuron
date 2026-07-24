@@ -454,7 +454,28 @@ file was written unless it truly was. **Cost:** CV is k trainings per procedure,
 and the nested-OBD procedure is k full OBD searches, so it is the most expensive
 run in the GUI — start with small `folds`/`hidden_max`/`iter_budget` on large data.
 No formal cross-validation inference is reported (the fold results are dependent);
-the only inferential comparison is a locked untouched test set, a separate step.
+the inferential comparison is a **locked untouched test set** — supported in the same
+call (see next paragraph).
+
+**Locked-test inference (DeLong).** Add `locked_fraction` (0–1) or `locked_n` (a
+count) to set aside an **outcome-stratified IID locked test held ENTIRELY out of
+CV**. Then CV folds only the development rows, each procedure is **refit on the
+development rows by its own prespecified rule** (logistic/DFA on all dev rows;
+nested OBD carves its own inner validation split of the dev rows — no forced
+full-dev refit), scored **once** on the untouched locked test, and **DeLong** compares
+the areas. Tier 1 gains an `AUC (test) [95% CI]` column and a prespecified-contrast
+verdict (ΔAUC + DeLong two-sided *p* → significant/not at 0.05); `cv.locked` carries
+the areas/CIs and the signed contrast (`delta` = AUC(primary) − AUC(reference)), and
+`cv_locked_predictions.csv` (raw row id, outcome, one column per procedure — the
+auditable pairing) joins the Tier-3 files. The prespecified contrast is set with
+`primary`/`reference` tokens (`logistic`|`ldfa`|`qdfa`|`neural`) which **must name
+selected procedures** (an unselected one is a validation error, never a silent
+default); absent, it defaults to neural vs logistic only when both are selected.
+**Scope: ordinary DeLong assumes INDEPENDENT test rows** — it is valid on this IID
+locked test but NOT on clustered data (e.g. SEER patients sharing a county);
+group-aware splitting stops leakage but does not make the rows independent, so
+**cluster-aware test inference is a deliberate follow-on**, not this layer.
+
 **Reproducibility:** for a given `seed`, each procedure runs on its own deterministic
 RNG substream keyed by its NAME and fold, so a procedure's fitted CV predictions are
 invariant to which OTHER procedures you compare and in what order (adding logistic to
