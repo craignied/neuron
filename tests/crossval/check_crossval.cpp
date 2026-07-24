@@ -155,6 +155,73 @@ int main()
 		cmp.entries[ 1 ].result.oofTrap > 0.6,
 		"every patient has a paired out-of-fold prediction from each procedure" );
 
+	// evaluateOnce: the locked-test mechanism. Split off a locked test set, apply
+	// each procedure ONCE to the development rows, and collect paired predictions on
+	// the locked rows -- the substrate a locked-test inference (DeLong) consumes.
+	{
+		util::set_seed( 11 );
+		nsplit::Holdout hLock = nsplit::stratifiedHoldout( label, 60 );
+		// hLock.test = the 60 locked rows; hLock.train = the development rows.
+
+		vector< crossval::ProcedureSpec > lprocs;
+		lprocs.push_back( { "Neural", cvadapters::trainProcedure( tmpl, 400 ) } );
+		lprocs.push_back( { "Logistic", cvadapters::trainProcedure( ltmpl, 400 ) } );
+
+		crossval::LockedResult lr = crossval::evaluateOnce(
+			data, hLock.train, hLock.test, lprocs, nullptr, true /*substreams*/, 7 );
+
+		expect( lr.ok && lr.entries.size() == 2 && lr.testRows == hLock.test,
+			"evaluateOnce runs both procedures and preserves the locked-test row identity" );
+
+		// Row identity is auditable: outcome[ i ] is testRows[ i ]'s true outcome.
+		bool outcomePaired = ( lr.outcome.size() == hLock.test.size() );
+		for ( unsigned i = 0; i < hLock.test.size(); i++ )
+			if ( lr.outcome[ i ] != ( unsigned )( raw( hLock.test[ i ], 2 ) != 0 ) )
+				outcomePaired = false;
+		expect( outcomePaired, "each locked-test outcome is paired to its raw row" );
+
+		// Each procedure produces exactly one finite paired prediction per locked row.
+		bool bothProduced = true;
+		for ( unsigned e = 0; e < lr.entries.size(); e++ )
+		{
+			if ( !lr.entries[ e ].ok || lr.entries[ e ].pred.size() != hLock.test.size() )
+				bothProduced = false;
+			else for ( double v : lr.entries[ e ].pred )
+				if ( !( v == v ) ) bothProduced = false; // NaN check
+		}
+		expect( bothProduced,
+			"each procedure produces one finite paired locked-test prediction per row" );
+
+		// The train=dev / test=locked wiring is correct: logistic on this separable
+		// data attains a near-perfect locked-test AUC. (A mispaired or train-on-test
+		// wiring would not yield ~1.0 on genuinely held-out rows.) The neural net's
+		// held-out AUC is model-and-seed dependent on 60 rows, so the wiring proof
+		// rests on the deterministic logistic fit, not on a per-seed neural threshold.
+		vector< unsigned > lrows( hLock.test.size() );
+		for ( unsigned i = 0; i < lrows.size(); i++ ) lrows[ i ] = i;
+		crossval::Metrics lm = crossval::metricsFor(
+			lr.outcome, lr.entries[ 1 ].pred, lrows );
+		expect( lm.trap > 0.9,
+			"locked-test wiring: logistic (fit on dev) scores ~1 AUC on the held-out rows" );
+
+		// Membership/order invariance (bug B11): Logistic's locked-test predictions
+		// are the same whether it runs alone or beside Neural -- the substream is
+		// keyed by NAME, not position. (Watched to FAIL against index-keying.)
+		vector< crossval::ProcedureSpec > lonly;
+		lonly.push_back( { "Logistic", cvadapters::trainProcedure( ltmpl, 400 ) } );
+		crossval::LockedResult lr1 = crossval::evaluateOnce(
+			data, hLock.train, hLock.test, lonly, nullptr, true, 7 );
+		expect( lr1.ok && lr1.entries[ 0 ].pred == lr.entries[ 1 ].pred,
+			"locked-test predictions are invariant to comparison membership/order" );
+
+		// Reproducible under the same seed.
+		crossval::LockedResult lr2 = crossval::evaluateOnce(
+			data, hLock.train, hLock.test, lprocs, nullptr, true, 7 );
+		expect( lr.entries[ 0 ].pred == lr2.entries[ 0 ].pred
+			&& lr.entries[ 1 ].pred == lr2.entries[ 1 ].pred,
+			"the same seed reproduces the locked-test predictions" );
+	}
+
 	// The nested-OBD adapter: for each fold the ENTIRE architecture search runs on
 	// an inner train/validation split of the fold's training rows, and the winner
 	// is scored on the outer held-out rows. Leak-free by construction (OBD early-

@@ -142,6 +142,52 @@ struct Comparison {
 	vector< Entry > entries;
 };
 
+// One procedure's result on a single locked-test split. ok is false when the
+//    procedure could not fit -- then reason explains it and pred is empty and NO
+//    prediction was fabricated (the same contract as a failed CV fold). pred is in
+//    test-row order, paired across entries by position (i.e. by testRows[ i ]).
+struct LockedEntry {
+	string name;
+	bool ok = false;
+	string reason;
+	vector< double > pred;         // per locked-test row (paired across entries)
+	double seconds = 0;            // wall-clock for this procedure's fit + score
+	vector< unsigned > archHidden; // frozen architecture metadata, if any
+};
+
+// Several procedures evaluated ONCE on one shared locked-test split -- the
+//    paired substrate for a locked-test inference (e.g. DeLong). testRows is the
+//    row identity (raw indices), outcome[ i ] is testRows[ i ]'s true 0/1 outcome,
+//    and every entry's pred[ i ] is that same row's prediction, so the pairing is
+//    externally auditable (row -> outcome -> one prediction per procedure).
+struct LockedResult {
+	bool ok = false;
+	bool cancelled = false;
+	string message;                 // refusal text when !ok
+	vector< unsigned > testRows;    // locked-test raw row indices (identity)
+	vector< unsigned > outcome;     // per locked-test row, true 0/1 (paired)
+	vector< LockedEntry > entries;  // one per procedure, in request order
+};
+
+// Evaluate each procedure ONCE on a single (train, test) partition of data's Raw:
+//    materialize the split (makeFold), apply the procedure to the TRAINING rows by
+//    its OWN prespecified fitting rule -- for a nested-OBD procedure that includes
+//    carving an inner validation split from the training rows for architecture
+//    selection and early stopping, so the final model is whatever the procedure
+//    produces (NOT necessarily trained on every training row) -- and collect its
+//    predictions on the test rows, paired across procedures. This is FINAL
+//    evaluation on a locked test set, not repetition, but it reuses the same
+//    Procedure adapters (a procedure that fits on a fold's training rows fits
+//    equally on the development rows). The caller (a policy layer) owns what to do
+//    with the pairing (e.g. DeLong). The split METHOD is the caller's -- this
+//    mechanism sees only the row-index partition, so an indivisible-group locked
+//    split slots in later without changing it. Substream/seed isolate each
+//    procedure's fit by NAME (bug B11), as in compare().
+LockedResult evaluateOnce( DataSet& data, const vector< unsigned >& trainRows,
+	const vector< unsigned >& testRows, const vector< ProcedureSpec >& procs,
+	const atomic< bool >* cancel = nullptr, bool substreams = false,
+	unsigned seed = 0 );
+
 // The comparison coordinator: run each procedure over the SAME fold plan and
 //    collect the results, so the procedures stay paired. It owns coordination
 //    only -- it does not train, select, or know any model family (rule 6).

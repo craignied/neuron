@@ -202,6 +202,87 @@ crossval::RunResult crossval::run( DataSet& data,
 	return res;
 }
 
+crossval::LockedResult crossval::evaluateOnce( DataSet& data,
+	const vector< unsigned >& trainRows, const vector< unsigned >& testRows,
+	const vector< ProcedureSpec >& procs, const atomic< bool >* cancel,
+	bool substreams, unsigned seed )
+{
+	LockedResult lr;
+
+	if ( !data.rawLoaded() ) { lr.message = "no raw dataset loaded"; return lr; }
+	if ( procs.empty() ) { lr.message = "no procedures to evaluate"; return lr; }
+	if ( trainRows.empty() || testRows.empty() )
+	{
+		lr.message = "the locked-test split needs nonempty training and test sets";
+		return lr;
+	}
+
+	Matrix< double >& raw = data.getRawMatrix();
+	unsigned outCol = raw.cols() - 1;
+
+	// Row identity + the paired true outcomes (the audit substrate).
+	lr.testRows = testRows;
+	lr.outcome.resize( testRows.size() );
+	for ( unsigned i = 0; i < testRows.size(); i++ )
+		lr.outcome[ i ] = ( raw( testRows[ i ], outCol ) != 0 ) ? 1u : 0u;
+
+	for ( unsigned p = 0; p < procs.size(); p++ )
+	{
+		if ( cancel && cancel->load() )
+		{
+			lr.cancelled = true; lr.message = "cancelled"; return lr;
+		}
+
+		DataSet foldData = data;                 // Raw + config
+		foldData.makeFold( trainRows, testRows ); // deterministic (fixed indices)
+
+		// Each procedure fits on its own name-keyed substream, so its locked-test
+		//    result is invariant to which OTHER procedures are evaluated and in what
+		//    order (bug B11) -- membership/order is a presentation choice.
+		if ( substreams )
+			util::set_seed( mixSeed( seed, hashName( procs[ p ].name ) ) );
+
+		chrono::steady_clock::time_point t0 = chrono::steady_clock::now();
+		ProcResult pr = procs[ p ].proc( foldData, trainRows, testRows, cancel );
+		chrono::steady_clock::time_point t1 = chrono::steady_clock::now();
+
+		if ( pr.cancelled )
+		{
+			lr.cancelled = true;
+			lr.message = "cancelled during '" + procs[ p ].name + "'";
+			return lr;
+		}
+
+		LockedEntry e;
+		e.name = procs[ p ].name;
+		e.seconds = chrono::duration< double >( t1 - t0 ).count();
+		if ( !pr.ok )
+		{
+			// A failed procedure is retained as MISSING and reported, never a
+			//    fabricated prediction -- the CV contract, applied to the locked test.
+			e.ok = false;
+			e.reason = pr.reason.empty() ? "the procedure failed on the locked test"
+				: pr.reason;
+		}
+		else if ( pr.pred.size() != testRows.size() )
+		{
+			lr.message = "a procedure returned the wrong number of "
+				"locked-test predictions";
+			return lr;
+		}
+		else
+		{
+			e.ok = true;
+			e.pred = pr.pred;
+			if ( procs[ p ].archHidden ) e.archHidden = *procs[ p ].archHidden;
+		}
+		lr.entries.push_back( e );
+	}
+
+	lr.ok = true;
+	return lr;
+}
+
 crossval::Comparison crossval::compare( DataSet& data,
 	const vector< unsigned >& foldId, const vector< ProcedureSpec >& procs,
 	const atomic< bool >* cancel, bool substreams, unsigned seed )
