@@ -606,6 +606,30 @@ int main()
 		expect( !tooBig, "randomize3 refuses a split that leaves no training data" );
 	}
 
+	// nsplit::partitionError -- the shared row-partition validator (DLG-5).
+	{
+		// Valid full coverage of 6 rows, arbitrary order, split any way -> "".
+		expect( nsplit::partitionError( 6, { 4, 0, 2 }, { 5, 1, 3 }, true ).empty(),
+			"partition: complete coverage in arbitrary order is accepted" );
+		// One row omitted (5 missing) with coverage required -> refused.
+		expect( nsplit::partitionError( 6, { 0, 2 }, { 1, 3, 4 }, true )
+			.find( "omit some rows" ) != string::npos,
+			"partition: one omitted row is refused when coverage is required" );
+		// Several omitted, coverage required -> refused.
+		expect( !nsplit::partitionError( 10, { 0, 1 }, { 2, 3 }, true ).empty(),
+			"partition: several omitted rows are refused" );
+		// The SAME incomplete split is fine when coverage is NOT required (a subset).
+		expect( nsplit::partitionError( 10, { 0, 1 }, { 2, 3 }, false ).empty(),
+			"partition: an intentional subset is allowed without the coverage flag" );
+		// Structural errors are caught regardless of the coverage flag.
+		expect( nsplit::partitionError( 6, { 0, 1, 2 }, { 2, 3 }, false )
+			.find( "overlap" ) != string::npos, "partition: overlap is refused" );
+		expect( nsplit::partitionError( 6, { 0, 0 }, { 3 }, false )
+			.find( "duplicate training" ) != string::npos, "partition: a dup is refused" );
+		expect( nsplit::partitionError( 6, { 0 }, { 9 }, false )
+			.find( "out of range" ) != string::npos, "partition: out-of-range is refused" );
+	}
+
 	if ( failures == 0 )
 	{
 		cout << "check_split: stratified holdout is exact, balanced, and reproducible"

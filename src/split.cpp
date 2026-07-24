@@ -7,6 +7,33 @@
 #include <algorithm>
 #include <cassert>
 
+string nsplit::partitionError( unsigned nRows, const vector< unsigned >& train,
+	const vector< unsigned >& test, bool requireCoverage )
+{
+	vector< char > seen( nRows, 0 );
+	for ( unsigned i = 0; i < train.size(); i++ )
+	{
+		unsigned r = train[ i ];
+		if ( r >= nRows ) return "a training row index is out of range";
+		if ( seen[ r ] ) return "a duplicate training row index";
+		seen[ r ] = 1;
+	}
+	for ( unsigned i = 0; i < test.size(); i++ )
+	{
+		unsigned r = test[ i ];
+		if ( r >= nRows ) return "a test row index is out of range";
+		if ( seen[ r ] == 1 ) return "the training and test row sets overlap (leakage)";
+		if ( seen[ r ] == 2 ) return "a duplicate test row index";
+		seen[ r ] = 2;
+	}
+	if ( requireCoverage )
+		for ( unsigned r = 0; r < nRows; r++ )
+			if ( !seen[ r ] )
+				return "the training and test row sets omit some rows "
+					"(they must partition the whole dataset)";
+	return "";
+}
+
 // Partial Fisher-Yates: move k randomly-chosen elements of idx to its front,
 //    consuming k draws from the training RNG stream. idx is modified in place;
 //    on return idx[ 0 .. k-1 ] are the selected rows (destined for the test

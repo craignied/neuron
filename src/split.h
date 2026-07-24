@@ -12,11 +12,25 @@ group-aware assignment, and k-fold estimators (see ROADMAP 4 in CLAUDE.md). */
 #ifndef SPLIT_H
 #define SPLIT_H
 
+#include <string>
 #include <vector>
 
 using namespace std;
 
 namespace nsplit {
+
+// Validate a two-way row partition of a population of nRows rows (DLG-5). Returns
+//    "" when well formed, else a human-readable reason. Checks, in this order:
+//    every index < nRows, no duplicate within either side, the sides are DISJOINT
+//    (an overlap would leak test rows into training), and -- only when
+//    requireCoverage -- that train and test together cover EVERY row (so no row is
+//    silently dropped). The shared partition-contract check for row-index entry
+//    points; a locked-test evaluation, whose train+test must partition the whole
+//    raw dataset, calls it with requireCoverage = true. It owns index bookkeeping
+//    only, no fold or model policy (rule 6), and does NOT force coverage on callers
+//    that intentionally select a subset -- that is the caller's declared choice.
+string partitionError( unsigned nRows, const vector< unsigned >& train,
+	const vector< unsigned >& test, bool requireCoverage );
 
 // The result of a stratified single holdout at the index level. test and train
 //    hold row indices into the caller's data; together they partition

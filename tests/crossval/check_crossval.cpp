@@ -240,6 +240,12 @@ int main()
 		expect( onceMsg( { 0, 1 }, { 2, 3 }, { ok, ok } ).find( "duplicate procedure name" )
 			!= string::npos,
 			"evaluateOnce refuses duplicate procedure names (the RNG/report identity)" );
+		// DLG-5 follow-up: a partition that OMITS raw rows (train+test do not cover the
+		// dataset) silently dropped them. evaluateOnce now requires full coverage.
+		// {0,1} + {2,3} on n=250 leaves 246 rows out. (Watched to FAIL against c7c6baa,
+		// whose validator had no coverage check and returned a successful LockedResult.)
+		expect( onceMsg( { 0, 1 }, { 2, 3 }, { ok } ).find( "omit some rows" ) != string::npos,
+			"evaluateOnce refuses a partition that omits raw rows (incomplete coverage)" );
 	}
 
 	// The nested-OBD adapter: for each fold the ENTIRE architecture search runs on

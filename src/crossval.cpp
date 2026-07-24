@@ -5,16 +5,18 @@
 #include <chrono>
 #include <set>
 
+#include "split.h"
 #include "twoset.h"
 #include "utility.h"
 
 // Defend the row-partition + procedure contract for a locked-test evaluation
 //    (DLG-5). evaluateOnce is a public class-layer API meant to accept later group
-//    partitions, so it validates rather than trusts its caller: indices in range,
-//    no duplicate within a set, train and test DISJOINT (a shared row would leak
-//    test into training), and every procedure callable with a unique, nonempty
-//    name (the name is the stable RNG-substream and report identity). Returns ""
-//    when ok, else the reason.
+//    partitions, so it validates rather than trusts its caller. The row-partition
+//    invariants (in range, no duplicate, disjoint, and FULL coverage -- dev + locked
+//    must partition the whole raw dataset, so no row silently vanishes) are the
+//    shared nsplit::partitionError; here we add the procedure-identity checks: every
+//    procedure callable with a unique, nonempty name (the name is the stable
+//    RNG-substream and report identity). Returns "" when ok, else the reason.
 static string validateOnceInputs( unsigned nRows,
 	const vector< unsigned >& trainRows, const vector< unsigned >& testRows,
 	const vector< crossval::ProcedureSpec >& procs )
@@ -27,23 +29,8 @@ static string validateOnceInputs( unsigned nRows,
 		if ( !names.insert( procs[ i ].name ).second )
 			return "duplicate procedure name '" + procs[ i ].name + "'";
 	}
-	vector< char > seen( nRows, 0 );
-	for ( unsigned i = 0; i < trainRows.size(); i++ )
-	{
-		unsigned r = trainRows[ i ];
-		if ( r >= nRows ) return "a training row index is out of range";
-		if ( seen[ r ] ) return "a duplicate training row index";
-		seen[ r ] = 1;
-	}
-	for ( unsigned i = 0; i < testRows.size(); i++ )
-	{
-		unsigned r = testRows[ i ];
-		if ( r >= nRows ) return "a test row index is out of range";
-		if ( seen[ r ] == 1 ) return "the training and test row sets overlap (leakage)";
-		if ( seen[ r ] == 2 ) return "a duplicate test row index";
-		seen[ r ] = 2;
-	}
-	return "";
+	// A locked-test split must partition the ENTIRE dataset (require coverage).
+	return nsplit::partitionError( nRows, trainRows, testRows, true );
 }
 
 // Deterministic seed mixing (a MurmurHash3 finalizer) -- keys an RNG substream by
