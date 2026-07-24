@@ -13,272 +13,279 @@ begun in 1992 by Craig Niederberger.
 | 1996–2016 | neUROn2++ | Migrated to C++ (1996), fully object-oriented redesign (2000), GNU autotools distribution (2007). Final release 2.6.4 (2016). |
 | 2026– | neuron 3.0 | This project — a modern reanimation |
 
-neUROn2++ was a full-featured, menu-driven statistical modeling workbench built around
-a common dataset/model architecture:
+neuron combines feed-forward neural networks with classical statistical models and
+serious model evaluation. It is designed for researchers who want to train a model,
+understand how it behaves, compare it honestly with alternatives, and preserve enough
+evidence to reproduce the analysis.
 
-- **Feed-forward neural networks** trained by backpropagation (SimpleProp, BareProp, BackProp)
-- **Binary logistic regression** with weight decay, conjugate gradient descent, and
-  Shanno's algorithm; Wald tests and condition-number diagnostics
-- **Linear and quadratic discriminant function analysis**
-- **Stepwise regression** over model inputs
-- **Goodness-of-fit and validation statistics**: ROC analysis, classification tables,
-  Kolmogorov–Smirnov, Pearson chi-square, Hosmer–Lemeshow
-- **Model exporters** that turned trained models into standalone calculators for the
-  web (HTML/JavaScript), Palm OS, and iPhone
+The current project carries the full neUROn2++ computational engine forward in modern
+C++17, restores its deployment path, and adds a local browser interface for the entire
+modeling workflow. The original menu interface remains available for scripted and
+reproducible sessions.
 
-It was used extensively in medical research — notably neural-network prediction models
-in urology and reproductive medicine.
+neUROn and neUROn2++ were used extensively in medical research, particularly for
+prediction models in urology and reproductive medicine. neuron 3.0 retains that
+research orientation: statistical output is part of the model, not an afterthought.
 
-## Design
+## What neuron does
 
-- **Hybrid stack** — a C++ engine for speed, Python for data preparation and tooling
-- **Simple, portable interface** — a plain CLI plus an embedded local web GUI (a single
-  vendored header, no heavy frameworks), easy to port
-- **Full engine scope** — the neural networks and all of the statistical machinery
-  (the novel and useful core) are carried forward. Of the legacy exporters, the web
-  HTML calculator is reborn as `tools/neuron2web.py`; the Palm OS and iPhone ones are not
+### Models
 
-## Building
+- Feed-forward neural networks: SimpleProp, BareProp, and general BackProp
+- Binary logistic regression
+- Linear and quadratic discriminant function analysis
+- Stepwise input selection for trained networks
+- Automatic hidden-layer sizing by Optimal Brain Damage (OBD)
 
-Requires CMake and the [GNU Scientific Library](https://www.gnu.org/software/gsl/):
+### Training
+
+- Canonical gradient descent, conjugate gradient descent, and Shanno's algorithm
+- Automatic optimizer selection by short, reproducible probes
+- Batch/epoch and per-exemplar training where mathematically appropriate
+- Learning-rate control, weight decay, configurable stopping conditions, and
+  plateau-based automatic stopping
+- Asynchronous GUI training with a live error chart and graceful cancellation
+- Seeded weight initialization and data splitting
+
+### Evaluation
+
+- Classification tables, accuracy, sensitivity, specificity, and predictive values
+- Exact empirical ROC area and fitted binormal ROC area
+- 95% confidence intervals and goodness-of-fit diagnostics
+- Logistic coefficient estimates, Wald tests, and information-matrix condition number
+- Outcome-stratified, covariate-stratified, group-aware, and three-way
+  train/validation/test splits
+- Shared-fold cross-validation across logistic regression, LDFA, QDFA, and neural
+  procedures
+- Nested OBD inside cross-validation, so architecture selection does not leak
+- Optional untouched locked-test evaluation with paired empirical AUC comparison
+- Auditable prediction, metric, configuration, and action-log artifacts
+
+### Deployment
+
+A trained model can be exported as a single self-contained HTML calculator. The form,
+scaling rules, weights, and forward pass are all embedded; it can be opened locally,
+emailed, or hosted as a static page. Computation stays in the visitor's browser.
+
+## The interface
+
+The GUI is the primary human interface:
 
 ```sh
-brew install gsl cmake    # macOS
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
-./build/neuron
+./build/neuron --gui
 ```
 
+neuron binds an embedded HTTP server to `127.0.0.1` on an available port, prints the
+URL, and opens the browser. The page and server are compiled into the binary; there is
+no web framework, Node installation, or external service. Use `--no-browser` when you
+want the URL without opening a browser automatically.
+
+The GUI covers the full load → configure → train → evaluate → save workflow, including
+the complete statistical report, live ROC and training plots, model comparison, OBD,
+and session artifacts. Every GUI/API action is recorded with its parameters in
+`neuron_actions.log`.
+
+For reproducible automation, the original menu interface remains:
+
+```sh
+./build/neuron --seed 42
 ```
+
+Scripted runs feed one menu response per line through standard input. The menu surface
+is frozen but authoritative; every menu capability also has a GUI control and HTTP API
+parameter.
+
+## Installation
+
+neuron requires:
+
+- A C++17 compiler
+- CMake
+- [GNU Scientific Library (GSL)](https://www.gnu.org/software/gsl/)
+- Python 3 only for the optional data-preparation and deployment tools
+
+### macOS
+
+```sh
+brew install cmake gsl
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+./build/neuron --gui
+```
+
+### Ubuntu/Debian
+
+```sh
+sudo apt install build-essential cmake libgsl-dev
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+./build/neuron --gui
+```
+
+### Windows
+
+Install CMake and GSL—for example, `vcpkg install gsl`—then configure and build with
+your CMake generator. The CI workflow in
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) is the tested reference for
+Windows setup.
+
+Command-line options:
+
+```text
 Usage: neuron [--seed N] [--gui [--no-browser]] [--version]
 ```
 
-`--gui` starts the same engine behind a **local web page** instead of the
-menus: the binary embeds a small HTTP server (cpp-httplib, vendored in
-`third_party/`), binds 127.0.0.1 on an **OS-assigned free port** — it can
-never collide with anything else you run — prints the URL, and opens your
-browser. Pick a data file, pick a model, train — watching a realtime
-error-vs-iteration chart, with a Stop button, automatic algorithm selection
-(`auto` probes all three optimizers and adopts the best), plateau auto-stop,
-and **OBD hidden-layer sizing** (grow-then-prune with validation early
-stopping picks the hidden-unit count for you) — then read the full statistics
-beside a live ROC plot — classification and confusion counts, trapezoidal
-and binormal areas with their intervals, goodness of fit, and (for logistic
-models) the coefficient table with Wald p values and the condition number —
-then save the **session files**: the network and
-scaling factors (everything `tools/neuron2web.py` needs to deploy the
-model) plus the training/test sets, guesses, and report (everything a
-write-up needs). Each file is written into the directory you started
-`neuron` from and downloaded by the browser. Loopback only; the CLI
-remains fully functional.
+If a source directory was copied or moved with an existing `build/` directory, remove
+that build directory before configuring again. CMake caches absolute source paths.
 
-The binary is self-contained (the GUI page is embedded), so a good habit
-is one directory per experiment: `cd` there — or copy `build/neuron`
-there — and everything the session produces stays together.
+## Data and experiment files
 
-`--seed N` makes runs reproducible: the same seed with the same inputs produces
-bit-identical training (weight initialization and train/test splits both draw from
-the seeded generator). The generator is `std::mt19937`, whose output stream the
-C++ standard specifies exactly — so seeded runs reproduce across platforms and
-compilers, not just on one machine. Without `--seed`, the generator is seeded from
-the clock, as neUROn2++ always was.
+The engine works with numeric datasets whose outcome is the final column. The
+standard-library-only [`tools/mkdataset.py`](tools/mkdataset.py) utility converts
+ordinary CSV exports into that form:
 
-The engine is C++17 with no dependencies beyond GSL — it builds anywhere those exist.
+- alternate delimiters;
+- categorical and binary text values;
+- reference-category one-hot coding;
+- missing-value indicator pairs;
+- key files mapping numeric columns back to variables; and
+- grouped input definitions for stepwise analysis.
 
-> **If you copied or moved this directory:** delete any `build/` that came along
-> before configuring (`rm -rf build`). CMake caches the absolute source path and
-> refuses to reuse a cache created at a different location.
+The GUI can load a raw dataset and make a split, or load an existing training/test
+pair. A good practice is to launch neuron from one directory per experiment: uploaded
+data, network and scaling files, reports, predictions, and the timestamped action log
+then remain together.
 
-## Training algorithms
+`--seed N` controls weight initialization, splits, resampling, and other stochastic
+operations. The generator is `std::mt19937`; its stream is specified by the C++
+standard. The repository's seeded golden transcripts reproduce across macOS, Linux,
+and Windows.
 
-Every gradient-trained model — the feed-forward neural nets (SimpleProp, BareProp,
-BackProp) and binary logistic regression — can be trained by any of **three
-optimization algorithms**, offered at train time as a menu (and as `algorithm` 1–3
-in the GUI). All three minimize the same error over the same weights; they differ
-only in how each iteration chooses its search direction. (The DFA and stepwise
-models are not trained by this trio.)
+## Statistical interpretation
 
-1. **Canonical backpropagation (gradient descent)** — textbook backprop: step
-   directly downhill along the negative gradient, scaled by the step size. Cheapest
-   per iteration and the most robust in practice; the workhorse.
-2. **Conjugate gradient descent (CGD)** — each direction is the negative gradient
-   plus a correction from the previous direction, so successive steps stay conjugate
-   (Golden pp. 221–222). Fewer *iterations* on well-behaved problems, but more work
-   per iteration.
-3. **Shanno's algorithm** — a memoryless quasi-Newton method that approximates
-   curvature from the last gradient/direction pair, without storing a full Hessian
-   (Golden pp. 217–218). Strongest convergence per iteration when it works, most
-   expensive per iteration.
+neuron reports two complementary ROC areas:
 
-**Batch/epoch training is required for CGD and Shanno.** Both assume a true (batch)
-gradient accumulated over the whole training set; on an online/per-exemplar update
-their conjugacy and curvature estimates are meaningless. The engine warns you if you
-select either without epoch training on. Canonical gradient descent is fine either
-way.
+- **Binormal \(A_z\)** fits the ROC in z-space following Wickens' signal-detection
+  formulation. Its percentile 95% confidence interval is obtained by stratified
+  case bootstrap.
+- **Empirical AUC** is the exact non-parametric Mann–Whitney area over the observed
+  scores. Its Hanley–McNeil interval provides an independent cross-check.
 
-**Fewer iterations is not less wall-clock, and can be worse.** The per-iteration cost
-of CGD and Shanno (line searches, automatic step-size selection) is high, and their
-step control can go unstable on large datasets. On the bank-marketing walkthrough,
-canonical GD reached the logistic MLE in about 12 seconds, while **uncapped CGD ran
-80 minutes and ended worse than useless** (test ROC 0.57, step-size instability,
-"Numerical out of bounds"). The practical recipe: **cap the iteration count** and
-prefer canonical gradient descent unless you have a specific reason not to. See
-`docs/datasets/bank-marketing/WALKTHROUGH.md` for the full comparison.
+The report states the number of fitted operating points and bootstrap resamples. It
+also includes Kolmogorov–Smirnov, Pearson, and Hosmer–Lemeshow diagnostics where
+appropriate. Continuous-score binormal fit probabilities should not be read as proof
+of a perfect model; [`docs/roc_theory.md`](docs/roc_theory.md) explains the estimands,
+assumptions, implementation, citations, and recommended reporting language.
 
-## Testing
+Cross-validation summaries are descriptive: folds share training observations, so
+fold-to-fold variation is not a confidence interval. Formal paired empirical-AUC
+comparison is available on an untouched locked test through ordinary DeLong inference
+only when the analyst explicitly declares that rows are independent sampling units.
+A mechanical row split does not establish independence. Ordinary DeLong is not valid
+for clustered observations such as patients within counties or hospitals;
+cluster-aware ROC inference remains planned work.
 
-Every push is built and tested on macOS, Linux, and Windows by the GitHub Actions
-matrix in `.github/workflows/ci.yml`. The core check is the **golden transcript
-test** (`tests/golden/run_golden.sh`): fully seeded sessions must reproduce their
-committed transcripts byte for byte (only the elapsed-time line is excluded). Because
-the RNG is `std::mt19937`, the same transcripts must match on all three platforms;
-any numerical drift anywhere in the engine fails the build. After an intentional
-output change, regenerate with `./tests/golden/run_golden.sh --bless`.
+Group-aware splitting and cluster-aware inference solve different problems. Keeping a
+group wholly on one side prevents train/test leakage and measures generalization to
+unseen groups; it does not make rows within a held-out group independent.
 
-The suite has three cases: `xor_seed42` (SimpleProp training and statistics),
-`regress_seed42` (plus stepwise regression), and `binormal_seed42`, which runs the
-low-birth-weight data through a seeded logistic fit to cover the **statistical ROC
-report** — the binormal area, its bootstrap interval, and the goodness-of-fit tests. The
-first two are too small to reach that path at all, so before the third existed the entire
-ROC report was invisible to the goldens.
+## Model comparison and data splitting
 
-**The suite also asserts its own coverage.** A green run means nothing if the transcripts
-never execute what you changed, so `run_golden.sh` carries a list of paths that some
-transcript must reach — the binormal report, the bootstrap interval, the zROC fit, K–S,
-Hosmer–Lemeshow, stepwise. Delete or retarget a case and the suite fails and names what
-it stopped covering, rather than going quietly green. That check exists because the ROC
-confidence interval was once replaced entirely with every test passing and none of them
-running the code.
+The default raw split is stratified on the binary outcome. Optional covariate
+stratification can improve subgroup coverage in smaller datasets, but it should be a
+deliberate choice: forcing the test set to resemble the training set may hide
+covariate drift.
 
-A second, local-only check (`tests/oracle/`) cross-verifies the engine against the
-original neUROn2++ binary; see its README.
+Group-aware splitting keeps all rows sharing selected group values on one side—for
+example, all patients from a site or county. This is the appropriate design when the
+question is performance on entirely unseen groups. A validation split can additionally
+reserve model-selection data so the final test remains untouched.
 
-## ROC area confidence intervals
+The cross-validation comparison runs selected procedures over one shared,
+outcome-stratified fold plan, producing paired out-of-fold predictions. Neural
+architecture search is nested within each fold. Procedure-specific deterministic RNG
+substreams make a procedure's result invariant to which other procedures are included
+or how they are ordered.
 
-Every ROC area the engine reports carries a 95% confidence interval. The binormal
-area A_z uses a **stratified bootstrap percentile interval**; the empirical
-(trapezoidal) area keeps the closed-form **Hanley–McNeil** estimator as an independent
-cross-check. **`docs/roc_theory.md` is the authority** — it carries the full derivation,
-the Methods-section language, and a page-level citation table. Read it before quoting an
-interval in print.
+Tiered output keeps the headline comparison readable while preserving the substrate:
 
-The signal-detection basis is Wickens, *Elementary Signal Detection Theory* (Oxford,
-2002). A_z = Φ(a/√(1+b²)) is his Eq. 4.7 (p. 68).
+- a compact summary and prespecified contrast;
+- per-fold metrics and failures; and
+- CSV/JSON predictions, metrics, configuration, architecture, and provenance.
 
-**Why the interval is bootstrapped rather than analytic.** neuron sweeps thresholds
-across one continuous score on one sample, so its operating points are formed by
-cumulating the same observations and are **not statistically independent** (Wickens
-2002, pp. 87–88) — the rating case, not the independent-bias-condition case. Wickens
-says that dependence must be accommodated in the fitting algorithm and that it
-*increases* sampling variability (§5.3, p. 88); he offers no analytic standard error
-for a least-squares z-ROC line, routing multi-point data to maximum likelihood, which
-supplies the SEs (§3.6, p. 57). Resampling cases reproduces the dependence rather than
-modelling it, and the percentile interval is asymmetric by construction — which A_z
-requires, since its standard error varies with the parameter (§11.4, pp. 206–207).
+## Standalone model deployment
 
-The earlier delta-method interval assumed independent points and was ~5× too narrow;
-it has been retired. Validation: on the low-birth-weight data the bootstrap SE agrees
-with Hanley–McNeil to within ~3% (0.0524 vs 0.0522 at n = 142; 0.0844 vs 0.0870 at
-n = 47) and scales with n as it must — two estimators with different assumptions
-agreeing, where the delta method agreed with neither. Against simulation the mean
-reported bootstrap SE matches the empirical SD of A_z to within 1%.
+[`tools/neuron2web.py`](tools/neuron2web.py) combines:
 
-The interval line reports the effective number of resamples and how many failed —
-quote both. Failures track ties rather than occurring at random, so a nonzero count
-means a slightly narrow interval; on the low-birth-weight data a current build uses
-all 2000. (Until 2026-07-15 it discarded 27% of them there, because the variance of
-a bin holding a flat run of the ROC was computed by a formula that returned NaN
-instead of zero. Fixing that widened the interval to its honest width.)
+1. a saved network;
+2. the training-data scaling factors; and
+3. a human-readable label specification.
 
-**A_z is the primary measure, not the trapezoidal area.** The trapezoidal area is
-negatively biased — it connects operating points by straight lines where real
-isosensitivity contours are bowed — and the bias grows when points are few or bunched
-(Wickens 2002, pp. 70–71). Unless there is specific reason to doubt the Gaussian model,
-A_z is preferable (p. 72). The trapezoidal area is the exact non-parametric AUC — the
-Mann–Whitney *U* statistic over every operating point — and is retained because its
-Hanley–McNeil variance estimator rests on different assumptions than the bootstrap,
-making agreement between the two meaningful.
+It validates that the specification matches the model and can evaluate a known row
+before export. The resulting HTML contains no external scripts or runtime dependency.
+See [`docs/deploy.md`](docs/deploy.md) for the label format and deployment contract.
 
-**Validated against the literature.** Wickens' own worked example (Table 5.1, p. 84 —
-rating data he analyses by hand through chapter 5, publishing A_z = 0.784 on p. 90) is a
-ctest: the engine answers **0.7839**. Each operating point carries Wickens' binomial
-error bar, σ²_z ≈ p(1−p)/N ÷ φ²(z) (Eq. 11.2 + 11.3, p. 202), and the z-ROC line is
-fitted to the distinct operating points directly — there is no binning.
+The Python tools use only the standard library. They run with a bare `python3`; no
+virtual environment or package installation is required.
 
-Until 2026-07-15 the z-points were grouped into fixed-count bins whose within-bin
-standard deviations served as error bars, a device with no counterpart in Wickens that
-measured bin width rather than sampling error. On Wickens' data that was worth 0.011 of
-A_z — as much as the whole confidence interval — with the arbitrary bin count deciding
-the answer. It is gone.
+## Verification
 
-## Representative test sets
+Every push is built and tested on macOS, Linux, and Windows by GitHub Actions.
 
-A held-out test set is only trustworthy if it *represents* the population the model will
-face. For an imbalanced problem — where a rare outcome is concentrated in a small, high-risk
-part of the covariate space, and records may cluster (patients within a hospital, an area)
-— a naive random split can quietly misrepresent it, and a single split is only one draw.
-neuron has a general splitter (ROADMAP 4 in `CLAUDE.md`): a single holdout stratified on
-the outcome and, optionally, on named covariates, and optionally keeping clusters intact
-(a group-aware split) — each with a diagnostic report that makes the split's balance visible
-rather than assumed — plus a three-way train/validation/test split and a cross-validation
-model-comparison panel so the estimate does not hinge on one draw. The comparison can also set
-aside an untouched locked test set: each procedure is refit on the development data and scored
-once on it, and DeLong compares the areas — but that inferential *p*-value is produced only when
-you declare the test observations independent, because ordinary DeLong is invalid on clustered
-data (a cluster-aware version is a planned follow-on). Cross-validation currently uses
-outcome-stratified folds (composing CV with covariate-strata / group-aware folds is a planned
-extension). The design is general across datasets, with a 226k-row, 3%-prevalence
-SEER prostate-cancer cohort as the hardest case it must handle; it also replaces an O(n²)
-legacy split that does not scale to data that size.
+```sh
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+./tests/golden/run_golden.sh
+./tests/tools/run_tools.sh
+```
 
-**On covariate stratification — a word of caution.** Balancing the split on the *outcome*
-is on by default and is almost always what you want (it keeps the event rate from drifting
-between train and test). Balancing on *covariates* as well is optional and a genuine
-judgment call, not a free upgrade. It guarantees a rare-but-important subgroup lands in the
-test set — but it also makes the test set look more like the training data, which can hide
-the very covariate drift a held-out set exists to detect, and on a large dataset the
-outcome-only split already reproduces the covariate mix to a few parts per thousand, so it
-adds little. Use it when you will report performance *within* a subgroup, or when the data
-are small enough that a random draw could imbalance a strong predictor; otherwise leave it
-off. (Balancing makes the test *resemble* your sample; when you want a *harder* test —
-new patients from sites the model never trained on — that is the group-aware split, a
-different tool.)
+The verification layers include:
 
-## Layout
+- unit and subsystem tests for matrix operations, splitting, training, ROC statistics,
+  goodness of fit, OBD, cross-validation, and DeLong covariance;
+- three seeded end-to-end golden sessions whose transcripts must remain
+  byte-identical apart from elapsed time;
+- explicit coverage assertions ensuring the goldens actually execute the statistical
+  paths they claim to protect;
+- a full GUI/API smoke suite; and
+- a local oracle harness that builds the final neUROn2++ release and compares shared
+  numerical paths with neuron 3.0.
 
-- `src/` — the C++ engine (carried forward from neUROn2++, modernized incrementally
-  in place), including the embedded web GUI (`gui.cpp`, `gui_page.html`)
-- `third_party/` — vendored single-header dependencies (cpp-httplib, MIT)
-- `tests/oracle/` — the legacy oracle harness: builds the original neUROn2++ binary
-  from its release tarball and cross-checks the 3.0 engine against it
-  (`verify_oracle.sh` requires numerically identical output)
-- `docs/` — the neUROn2++ documentation: `manifest.pdf` is the full manual,
-  `spin.html` the tutorial, `tex/` the LaTeX sources; `roc_theory.md` explains
-  the signal-detection-theory (Wickens) basis of the statistical ROC area and
-  how the engine implements it; `datasets/` holds sample datasets with READMEs
-  (prostate-biopsy, ready to load; bank-marketing, a raw-data grooming example)
-- `tools/` — Python utilities around the engine. **Standard library only** — they
-  run on a bare `python3`, no pip installs or venv ever required (CI enforces
-  this on all three platforms). `mkdataset.py` converts `.csv` exports into
-  neuron-ready datasets (delimiters, one-hot encoding, reference-category
-  coding, missing-value indicator pairs); `neuron2web.py` deploys a trained
-  model as a single self-contained HTML calculator you can open from disk or
-  post on any static web host (`docs/deploy.md`).
-- `AGENTS.md` — the operating manual for AI assistants: verified recipes that
-  take "I have a dataset" to a groomed file, a trained model, and a deployed
-  calculator.
+Tests for new behavior are required to fail against the behavior they guard before
+they are trusted. This rule exists because a green test suite once failed to execute
+an entire replaced ROC confidence-interval path.
 
-## Status
+## Project map
 
-The full neUROn2++ engine is ported and modernized in place as `neuron 3.0.0-dev` —
-C++17-clean, zero warnings, and cross-verified numerically identical to the legacy 2.6.4
-binary (the "oracle") on every shared code path. On that base: the embedded web GUI
-(`neuron --gui`) is now the primary interface — async training with a realtime error
-chart, automatic algorithm selection, plateau auto-stop, and OBD hidden-layer sizing —
-while the frozen CLI menus remain fully functional; the ROC statistics were rebuilt on a
-documented signal-detection-theory basis (above, and `docs/roc_theory.md`); Python tooling
-grooms data (`mkdataset.py`) and deploys trained models as standalone HTML calculators
-(`neuron2web.py`); and nine long-standing bugs in the 1992–2016 code — several in the ROC
-and goodness-of-fit routines — have been found and fixed, each pinned by a test proven to
-catch it. Every push is green on the
-macOS/Linux/Windows CI matrix. See `CLAUDE.md` for the detailed running state and roadmap.
+| Path | Contents |
+|---|---|
+| [`src/`](src/) | C++ engine, statistical models, evaluation, embedded server, and GUI |
+| [`tools/`](tools/) | Standard-library Python tools for data grooming and HTML deployment |
+| [`tests/`](tests/) | Unit, golden, GUI, tool, and legacy-oracle verification |
+| [`docs/`](docs/) | Statistical theory, deployment reference, evaluation design, legacy manual, and datasets |
+| [`third_party/`](third_party/) | Vendored lightweight dependencies |
+| [`AGENTS.md`](AGENTS.md) | Operational recipes and repository rules for AI assistants |
+| [`CLAUDE.md`](CLAUDE.md) | Detailed engineering history, decisions, and active roadmap |
+
+The original neUROn2++ manual is preserved at
+[`docs/manifest.pdf`](docs/manifest.pdf). It documents the engine's model and menu
+lineage; current GUI/API behavior is documented in the repository's Markdown
+references.
+
+## Current status
+
+neuron reports version `3.0.0-dev`. The complete neUROn2++ engine has been carried
+forward and made C++17-clean. The current code builds without warnings, preserves
+legacy numerical behavior on shared paths through the oracle comparison, and pins
+intentional corrections with regression tests.
+
+The primary interface is now the embedded GUI, while the menu interface remains
+available for automation and compatibility. Data grooming, model deployment, modern
+ROC intervals, scalable splitting, validation-aware OBD, cross-validation comparison,
+locked-test inference guardrails, and auditable experiment artifacts are implemented.
+The detailed development record and remaining roadmap live in
+[`CLAUDE.md`](CLAUDE.md).
+
+Contributions should preserve the project's central contract: one authoritative
+implementation of each mechanism, reproducible analysis, GUI/CLI parity, and
+statistical claims no stronger than the design supports.
