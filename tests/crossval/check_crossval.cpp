@@ -581,6 +581,22 @@ int main()
 		expect( lpLines == lk.testRows.size() + 1
 			&& firstDataRow.rfind( "3,", 0 ) == 0, // raw id 3, outcome 0, preds...
 			"cv_locked_predictions.csv has a header + one row per locked exemplar, row id first" );
+
+		// DLG-4: predictions are the audit substrate and must be written even when
+		// DeLong could not compute an AUC/CI for that procedure (has=false). Blank a
+		// column's inference but keep its predictions; the CSV must still hold the
+		// scores. Watched to FAIL against the old c.has write gate.
+		cvreport::LockedInfo lk2 = lk;
+		lk2.columns[ 1 ].has = false;            // DeLong unavailable for this procedure
+		lk2.columns[ 1 ].auc = lk2.columns[ 1 ].lo = lk2.columns[ 1 ].hi = 0;
+		lk2.columns[ 1 ].note = "AUC not computable";
+		lk2.columns[ 1 ].pred = { 0.11, 0.22, 0.33, 0.44 }; // but predictions exist
+		cvreport::writeArtifacts( rc, info, ".", lk2 );
+		string row0;
+		{ ifstream lf( "./cv_locked_predictions.csv" ); getline( lf, row0 ); getline( lf, row0 ); }
+		// row 0: "3,0,<col0 pred>,0.110000" -- the second procedure's prediction retained
+		expect( row0.find( ",0.110000" ) != string::npos,
+			"cv_locked_predictions.csv retains a procedure's predictions even when its DeLong AUC is unavailable" );
 	}
 
 	if ( failures == 0 )

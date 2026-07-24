@@ -619,30 +619,54 @@ vector< cvreport::ArtifactResult > cvreport::writeArtifacts(
 	//    preserved so the pairing is externally auditable (Sol's caution). Written
 	//    only when a locked test was run, and through the SAME B7 machinery.
 	if ( locked.has )
-		results.push_back( writeOne( dir, "cv_locked_predictions.csv", [&]( ostream& f )
+	{
+		// The predictions are the audit/future-analysis substrate and must be
+		//    written whenever they EXIST -- independent of whether an AUC/CI or
+		//    contrast was estimable (DLG-4: the old gate on LockedColumn::has blanked
+		//    perfectly valid predictions exactly when a one-class/sparse locked test
+		//    made DeLong unavailable). First refuse on a structural length mismatch,
+		//    rather than pad a short outcome/prediction column with a fabricated 0.
+		bool consistent = ( locked.outcome.size() == locked.testRows.size() );
+		for ( unsigned p = 0; p < locked.columns.size(); p++ )
+			if ( !locked.columns[ p ].pred.empty()
+				&& locked.columns[ p ].pred.size() != locked.testRows.size() )
+				consistent = false;
+
+		if ( !consistent )
 		{
-			f << "row,outcome";
-			for ( unsigned p = 0; p < locked.columns.size(); p++ )
-				f << "," << csv( locked.columns[ p ].name );
-			f << "\n";
-			for ( unsigned i = 0; i < locked.testRows.size(); i++ )
+			ArtifactResult r;
+			r.name = "cv_locked_predictions.csv";
+			r.path = ( dir.empty() ? string() : dir + "/" ) + r.name;
+			r.error = "locked-test rows, outcomes, and predictions have inconsistent "
+				"lengths (not written)";
+			results.push_back( r );
+		}
+		else
+			results.push_back( writeOne( dir, "cv_locked_predictions.csv", [&]( ostream& f )
 			{
-				f << locked.testRows[ i ] << ","
-					<< ( i < locked.outcome.size() ? locked.outcome[ i ] : 0u );
+				f << "row,outcome";
 				for ( unsigned p = 0; p < locked.columns.size(); p++ )
-				{
-					const LockedColumn& c = locked.columns[ p ];
-					f << ",";
-					if ( c.has && i < c.pred.size() && isfinite( c.pred[ i ] ) )
-					{
-						ostringstream v;
-						v << setiosflags( ios::fixed ) << setprecision( 6 ) << c.pred[ i ];
-						f << v.str();
-					}
-				}
+					f << "," << csv( locked.columns[ p ].name );
 				f << "\n";
-			}
-		} ) );
+				for ( unsigned i = 0; i < locked.testRows.size(); i++ )
+				{
+					f << locked.testRows[ i ] << "," << locked.outcome[ i ];
+					for ( unsigned p = 0; p < locked.columns.size(); p++ )
+					{
+						const LockedColumn& c = locked.columns[ p ];
+						f << ",";
+						// write every FINITE prediction that exists, regardless of has
+						if ( i < c.pred.size() && isfinite( c.pred[ i ] ) )
+						{
+							ostringstream v;
+							v << setiosflags( ios::fixed ) << setprecision( 6 ) << c.pred[ i ];
+							f << v.str();
+						}
+					}
+					f << "\n";
+				}
+			} ) );
+	}
 
 	return results;
 }
