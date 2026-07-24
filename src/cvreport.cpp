@@ -555,7 +555,11 @@ vector< cvreport::ArtifactResult > cvreport::writeArtifacts(
 	// cv_metrics.csv -- fold x procedure metrics, plus a pooled row per procedure.
 	results.push_back( writeOne( dir, "cv_metrics.csv", [&]( ostream& f )
 	{
-		f << "fold,procedure,status,n,auc_trap,auc_binormal,sens,spec\n";
+		// n_valid = rows with a computed metric; n_total = rows the row is ABOUT.
+		//    They differ only on the pooled row after a fold failed (DLG-6): every
+		//    row is then self-describing (status + both denominators), never claiming
+		//    more observations than were actually used.
+		f << "fold,procedure,status,n_valid,n_total,auc_trap,auc_binormal,sens,spec\n";
 		for ( unsigned p = 0; p < cmp.entries.size(); p++ )
 		{
 			const crossval::Comparison::Entry& e = cmp.entries[ p ];
@@ -566,27 +570,28 @@ vector< cvreport::ArtifactResult > cvreport::writeArtifacts(
 					if ( e.result.folds[ i ].fold == fold )
 						{ fr = &e.result.folds[ i ]; break; }
 
-				if ( fr && !fr->ok ) // a failed fold: reason, no metrics
+				if ( fr && !fr->ok ) // a failed fold: reason, no metrics, 0 valid
 				{
 					f << fold << "," << csv( e.name ) << "," << csv( fr->reason )
-						<< "," << fr->nHeldout << ",,,,\n";
+						<< ",0," << fr->nHeldout << ",,,,\n";
 					continue;
 				}
 				vector< unsigned > rows = rowsInFold( cmp.foldId, fold );
 				crossval::Metrics m = crossval::metricsFor(
 					e.result.outcome, e.result.oofPrediction, rows );
-				f << fold << "," << csv( e.name ) << ",ok," << m.n << ","
+				f << fold << "," << csv( e.name ) << ",ok," << m.n << "," << m.n << ","
 					<< num( m.trap ) << "," << num( m.az ) << ","
 					<< num( m.sens ) << "," << num( m.spec ) << "\n";
 			}
-			// The pooled row's denominator is the rows that actually got an
-			//    out-of-fold prediction, NOT the whole dataset -- after a failed
-			//    fold those differ, and status is 'partial' so the CSV never claims
-			//    more observations than the pooled metric used (DLG-6).
+			// The pooled denominators: n_valid is the rows that actually got an
+			//    out-of-fold prediction; n_total is the whole dataset. After a failed
+			//    fold they differ and status is 'partial'; on a clean run they are
+			//    equal and status is 'ok' (DLG-6).
 			unsigned pooledN = e.result.pooledN;
 			const char* pooledStatus = ( pooledN < n ) ? "partial" : "ok";
 			f << "pooled," << csv( e.name ) << "," << pooledStatus << "," << pooledN
-				<< "," << num( e.result.oofTrap ) << "," << num( e.result.oofAz ) << ",,\n";
+				<< "," << n << "," << num( e.result.oofTrap ) << ","
+				<< num( e.result.oofAz ) << ",,\n";
 		}
 	} ) );
 

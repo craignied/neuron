@@ -5,7 +5,7 @@
 > three-tier structure; Tier-1 headline table (Procedure · AUC(CV) mean ± sd · Arch · Time)
 > + verdict block + the standing caveat; Tier-2 per-fold AUC/sens/spec, per-procedure
 > failures (with reasons) and validFolds, and OBD architecture-selection frequency; Tier-3
-> `cv_predictions.csv` / `cv_metrics.csv` (now with a per-fold `status` column) / `cv_run.json`
+> `cv_predictions.csv` / `cv_metrics.csv` (with a `status` column and both `n_valid`/`n_total`) / `cv_run.json`
 > (with per-procedure `validFolds` + `failures`). A Tier-3 file that cannot be written (unwritable
 > directory, full disk) is reported as a run WARNING naming the file + reason — never silently
 > dropped, and never counted as written unless it opened/wrote/flushed/closed cleanly.
@@ -131,7 +131,10 @@ Written via `util::run_path` (beside the data, like `neuron.log`):
 - **`cv_predictions.csv`** — one row per (exemplar, procedure): exemplar id, true outcome, fold,
   out-of-fold predicted probability. *These paired OOF predictions are the substrate for any
   future CV-aware inferential method — retained, never summarised away.*
-- **`cv_metrics.csv`** — fold × procedure × metrics.
+- **`cv_metrics.csv`** — fold × procedure × metrics, with a `status` column and BOTH
+  denominators (`n_valid`, `n_total`): they are equal on a clean fold/run, and on the pooled
+  row after a fold fails `n_valid < n_total` with `status = partial` (so the row never claims
+  more observations than were used).
 - **`cv_run.json`** — fold plan, seed, procedures, per-fold timings, failures, software version.
 
 ## Ordering & per-interface rendering (same Tier-1 content, one source)

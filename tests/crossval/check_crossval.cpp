@@ -337,13 +337,32 @@ int main()
 		crossval::Comparison qcmp = crossval::compare( cdata, cfold, qp );
 		cvreport::PlanInfo qinfo; qinfo.n = 120;
 		cvreport::writeArtifacts( qcmp, qinfo, "." );
-		string pooledLine;
+		string pooledLine, headerLine;
+		ifstream mf( "./cv_metrics.csv" ); string line; unsigned ln = 0;
+		while ( getline( mf, line ) )
+		{
+			if ( ln++ == 0 ) headerLine = line;
+			if ( line.rfind( "pooled,", 0 ) == 0 ) pooledLine = line;
+		}
+		// The schema exposes BOTH denominators (DLG-6). All folds singular -> 0 valid
+		//    of 120 total, status partial (not the old n+'ok', and not one 'n' field).
+		expect( headerLine.find( "n_valid,n_total" ) != string::npos,
+			"cv_metrics.csv header exposes both n_valid and n_total" );
+		expect( pooledLine.find( "pooled,QDFA,partial,0,120," ) != string::npos,
+			"pooled row after failures = n_valid 0 of n_total 120, status 'partial'" );
+	}
+	{
+		// A clean run (cmp, no fold failures): pooled n_valid == n_total, status 'ok'.
+		cvreport::PlanInfo oinfo; oinfo.n = n;
+		cvreport::writeArtifacts( cmp, oinfo, "." );
+		string pooledOk;
 		ifstream mf( "./cv_metrics.csv" ); string line;
 		while ( getline( mf, line ) )
-			if ( line.rfind( "pooled,", 0 ) == 0 ) pooledLine = line;
-		// all folds singular -> 0 pooled predictions, status partial (not 120,ok)
-		expect( pooledLine.find( "pooled,QDFA,partial,0," ) != string::npos,
-			"pooled cv_metrics row after failures = actual denominator + 'partial', not n + 'ok'" );
+			if ( line.rfind( "pooled,LDFA,", 0 ) == 0 ) pooledOk = line;
+		char want[ 48 ];
+		snprintf( want, sizeof want, "pooled,LDFA,ok,%u,%u,", n, n );
+		expect( pooledOk.find( want ) != string::npos,
+			"a clean pooled row reports n_valid == n_total with status 'ok'" );
 	}
 
 	// B4: a column CONSTANT within the TRAINING fold must normalize to a finite
