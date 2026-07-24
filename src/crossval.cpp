@@ -3,9 +3,48 @@
 #include "crossval.h"
 
 #include <chrono>
+#include <set>
 
 #include "twoset.h"
 #include "utility.h"
+
+// Defend the row-partition + procedure contract for a locked-test evaluation
+//    (DLG-5). evaluateOnce is a public class-layer API meant to accept later group
+//    partitions, so it validates rather than trusts its caller: indices in range,
+//    no duplicate within a set, train and test DISJOINT (a shared row would leak
+//    test into training), and every procedure callable with a unique, nonempty
+//    name (the name is the stable RNG-substream and report identity). Returns ""
+//    when ok, else the reason.
+static string validateOnceInputs( unsigned nRows,
+	const vector< unsigned >& trainRows, const vector< unsigned >& testRows,
+	const vector< crossval::ProcedureSpec >& procs )
+{
+	set< string > names;
+	for ( unsigned i = 0; i < procs.size(); i++ )
+	{
+		if ( !procs[ i ].proc ) return "a procedure has no callable function";
+		if ( procs[ i ].name.empty() ) return "a procedure has an empty name";
+		if ( !names.insert( procs[ i ].name ).second )
+			return "duplicate procedure name '" + procs[ i ].name + "'";
+	}
+	vector< char > seen( nRows, 0 );
+	for ( unsigned i = 0; i < trainRows.size(); i++ )
+	{
+		unsigned r = trainRows[ i ];
+		if ( r >= nRows ) return "a training row index is out of range";
+		if ( seen[ r ] ) return "a duplicate training row index";
+		seen[ r ] = 1;
+	}
+	for ( unsigned i = 0; i < testRows.size(); i++ )
+	{
+		unsigned r = testRows[ i ];
+		if ( r >= nRows ) return "a test row index is out of range";
+		if ( seen[ r ] == 1 ) return "the training and test row sets overlap (leakage)";
+		if ( seen[ r ] == 2 ) return "a duplicate test row index";
+		seen[ r ] = 2;
+	}
+	return "";
+}
 
 // Deterministic seed mixing (a MurmurHash3 finalizer) -- keys an RNG substream by
 //    an index so ( seed, procedure, fold ) map to well-separated seeds. Used only
@@ -197,6 +236,7 @@ crossval::RunResult crossval::run( DataSet& data,
 	// Pooled out-of-fold ROC over the rows that got a real prediction only.
 	Metrics pooled = metricsFor( res.outcome, res.oofPrediction, pooledRows );
 	res.oofAz = pooled.az; res.oofTrap = pooled.trap;
+	res.pooledN = ( unsigned ) pooledRows.size(); // the honest pooled denominator
 
 	res.ok = true;
 	return res;
@@ -219,6 +259,11 @@ crossval::LockedResult crossval::evaluateOnce( DataSet& data,
 
 	Matrix< double >& raw = data.getRawMatrix();
 	unsigned outCol = raw.cols() - 1;
+
+	// Defend the partition + procedure contract BEFORE indexing raw or invoking a
+	//    procedure (DLG-5): in range, disjoint, no dupes, callable + unique names.
+	string bad = validateOnceInputs( raw.rows(), trainRows, testRows, procs );
+	if ( !bad.empty() ) { lr.message = bad; return lr; }
 
 	// Row identity + the paired true outcomes (the audit substrate).
 	lr.testRows = testRows;

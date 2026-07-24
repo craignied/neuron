@@ -65,6 +65,8 @@ struct RunResult {
 	                                //    ( -1 for a row whose fold FAILED -- absent )
 	vector< unsigned > outcome;     // per raw row: its true 0/1 outcome
 	unsigned validFolds = 0;        // folds that produced predictions
+	unsigned pooledN = 0;           // rows with a real out-of-fold prediction (the
+	                                //    pooled-metric denominator; < n after a failure)
 	double oofAz = -1;              // pooled out-of-fold binormal ROC area
 	double oofTrap = -1;           // pooled out-of-fold trapezoidal ROC area
 };

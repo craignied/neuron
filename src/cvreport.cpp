@@ -533,8 +533,14 @@ vector< cvreport::ArtifactResult > cvreport::writeArtifacts(
 					<< num( m.trap ) << "," << num( m.az ) << ","
 					<< num( m.sens ) << "," << num( m.spec ) << "\n";
 			}
-			f << "pooled," << csv( e.name ) << ",ok," << n << ","
-				<< num( e.result.oofTrap ) << "," << num( e.result.oofAz ) << ",,\n";
+			// The pooled row's denominator is the rows that actually got an
+			//    out-of-fold prediction, NOT the whole dataset -- after a failed
+			//    fold those differ, and status is 'partial' so the CSV never claims
+			//    more observations than the pooled metric used (DLG-6).
+			unsigned pooledN = e.result.pooledN;
+			const char* pooledStatus = ( pooledN < n ) ? "partial" : "ok";
+			f << "pooled," << csv( e.name ) << "," << pooledStatus << "," << pooledN
+				<< "," << num( e.result.oofTrap ) << "," << num( e.result.oofAz ) << ",,\n";
 		}
 	} ) );
 

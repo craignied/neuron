@@ -220,6 +220,26 @@ int main()
 		expect( lr.entries[ 0 ].pred == lr2.entries[ 0 ].pred
 			&& lr.entries[ 1 ].pred == lr2.entries[ 1 ].pred,
 			"the same seed reproduces the locked-test predictions" );
+
+		// DLG-5: evaluateOnce defends its row-partition + procedure contract. Each
+		// refusal is watched to FAIL against the un-validated code (rule 2).
+		crossval::ProcedureSpec ok = { "P", cvadapters::trainProcedure( ltmpl, 50 ) };
+		auto onceMsg = [ & ]( const vector< unsigned >& tr, const vector< unsigned >& te,
+			vector< crossval::ProcedureSpec > ps )
+		{ return crossval::evaluateOnce( data, tr, te, ps ).message; };
+
+		expect( onceMsg( { 0, 1, 2 }, { 2, 3 }, { ok } ).find( "overlap" ) != string::npos,
+			"evaluateOnce refuses train/test overlap (leakage)" );
+		expect( onceMsg( { 0, 1 }, { 2, 2 }, { ok } ).find( "duplicate test" ) != string::npos,
+			"evaluateOnce refuses a duplicate test row" );
+		expect( onceMsg( { 0, 1 }, { n + 5 }, { ok } ).find( "out of range" ) != string::npos,
+			"evaluateOnce refuses an out-of-range row index" );
+		expect( onceMsg( { 0, 1 }, { 2, 3 },
+			{ { "Empty", crossval::Procedure() } } ).find( "callable" ) != string::npos,
+			"evaluateOnce refuses a procedure with no callable function" );
+		expect( onceMsg( { 0, 1 }, { 2, 3 }, { ok, ok } ).find( "duplicate procedure name" )
+			!= string::npos,
+			"evaluateOnce refuses duplicate procedure names (the RNG/report identity)" );
 	}
 
 	// The nested-OBD adapter: for each fold the ENTIRE architecture search runs on
@@ -301,6 +321,24 @@ int main()
 		&& rq.folds[ 0 ].reason.find( "singular" ) != string::npos;
 	expect( dfaFailed && dfaReasoned,
 		"a singular DFA fold is failed with a reason, not read from unwritten storage" );
+
+	// DLG-6: after fold failures the pooled cv_metrics.csv row must report the ACTUAL
+	// number of pooled out-of-fold predictions and status 'partial' -- never the whole
+	// dataset with status 'ok' (which would claim more observations than were pooled).
+	// Watched to FAIL against the old code that always wrote n + "ok".
+	{
+		vector< crossval::ProcedureSpec > qp = { { "QDFA", cvadapters::dfaProcedure( true ) } };
+		crossval::Comparison qcmp = crossval::compare( cdata, cfold, qp );
+		cvreport::PlanInfo qinfo; qinfo.n = 120;
+		cvreport::writeArtifacts( qcmp, qinfo, "." );
+		string pooledLine;
+		ifstream mf( "./cv_metrics.csv" ); string line;
+		while ( getline( mf, line ) )
+			if ( line.rfind( "pooled,", 0 ) == 0 ) pooledLine = line;
+		// all folds singular -> 0 pooled predictions, status partial (not 120,ok)
+		expect( pooledLine.find( "pooled,QDFA,partial,0," ) != string::npos,
+			"pooled cv_metrics row after failures = actual denominator + 'partial', not n + 'ok'" );
+	}
 
 	// B4: a column CONSTANT within the TRAINING fold must normalize to a finite
 	// value, not inf/NaN from a zero-range (0/0) division. Input 0 is constant in
