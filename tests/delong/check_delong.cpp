@@ -159,6 +159,39 @@ int main()
 			"reversed-vs-perfect: flagged SEPARATED with p == 0, NOT 'no difference, p=1'" );
 	}
 
+	// ---- DLG-2 numerical: contrast() is a PUBLIC API and must not report NUMERICAL
+	//      NOISE as a deterministic separation. Hand-build a Result whose covariance
+	//      is one ULP away from PSD (off-diagonal just above the equal diagonals) so
+	//      the difference variance clamps to zero from fp cancellation, paired with a
+	//      one-ULP area difference. That is equal areas within noise, NOT a
+	//      separation. The exact delta==0 test reported it as separated p=0 (Sol's
+	//      counterexample); a scale-aware tolerance now reports degenerate p=1.
+	//      (Watched to FAIL against the exact-comparison code.)
+	{
+		delong::Result r;
+		r.ok = true; r.n0 = 10; r.n1 = 10;
+		r.auc = { 0.5, nextafter( 0.5, 1.0 ) };   // one-ULP area difference
+		r.cov = Matrix< double >( 2, 2 );
+		double d = 0.01, off = nextafter( d, 1.0 ); // off one ULP above the diagonal
+		r.cov( 0, 0 ) = d; r.cov( 1, 1 ) = d;
+		r.cov( 0, 1 ) = off; r.cov( 1, 0 ) = off;   // -> vd = 2d - 2off < 0 (clamped)
+		delong::Contrast c = delong::contrast( r, 0, 1 );
+		expect( c.valid && near( c.seDelta, 0.0, 1e-12 ) && c.delta != 0.0,
+			"noise fixture: variance clamps to zero with a sub-ULP nonzero delta" );
+		expect( c.degenerate && !c.separated && near( c.p, 1.0 ),
+			"public Result: fp-clamped zero variance + sub-ULP delta is degenerate (p=1), NOT separated" );
+
+		// And a genuine large area difference with zero variance is STILL separated.
+		delong::Result r2;
+		r2.ok = true; r2.n0 = 10; r2.n1 = 10;
+		r2.auc = { 0.2, 0.8 };
+		r2.cov = Matrix< double >( 2, 2 );
+		r2.cov( 0, 0 ) = r2.cov( 1, 1 ) = r2.cov( 0, 1 ) = r2.cov( 1, 0 ) = 0.0; // vd = 0
+		delong::Contrast c2 = delong::contrast( r2, 0, 1 );
+		expect( c2.separated && !c2.degenerate && near( c2.p, 0.0 ),
+			"a material area difference with zero variance is still a separation (p=0)" );
+	}
+
 	// A clearly stronger classifier vs a constant-ish weak one gives a small p.
 	{
 		vector< unsigned > lab;

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 #include "stats.h"
 
@@ -180,38 +181,35 @@ delong::Contrast delong::contrast( const Result& r, unsigned i, unsigned j )
 		// two-sided p = P( |Z| > |z| ) = erfc( |z| / sqrt(2) )
 		c.p = stats::erfc( fabs( c.z ) / sqrt( 2.0 ) );
 	}
-	else if ( c.delta == 0 )
-	{
-		// Equal areas AND zero variance: no discriminable difference. This is the
-		//    only case that is genuinely "no testable difference" -- p reported as 1.
-		c.degenerate = true;
-		c.z = 0;
-		c.p = 1.0;
-	}
 	else
 	{
-		// Zero variance but the areas DIFFER (constant placements -- e.g. one
-		//    classifier ranks every positive above every negative and the other
-		//    below): a deterministic separation, not an absence of difference. The
-		//    standardized statistic diverges, so p is 0. Flagged so the caller states
-		//    the condition rather than a bare "significant" -- and z is kept finite
-		//    (0) so nothing serializes a non-finite number (the condition is the flag).
-		//
-		// DLG-2 numerical note (measured, not assumed): the two seDelta==0 branches
-		//    split on delta==0 EXACTLY. That is safe because a structural zero
-		//    difference-variance forces the two placement vectors to differ by a
-		//    constant, so their area difference is that constant computed from
-		//    identical arithmetic -- exactly 0 when the areas are equal, exactly the
-		//    offset otherwise (never a tiny fp residual). A structural zero also
-		//    yields vd == 0 exactly (for a constant offset, cij == vi == vj, so
-		//    vi+vj-2cij == 0) and never needs the fp-cancellation clamp above -- so
-		//    the clamp path cannot reach seDelta==0 with a nonzero delta. A probe of
-		//    200,000 near-perfectly-correlated random pairs found zero such cases.
-		//    Hence no scale-aware delta tolerance is introduced (it would be
-		//    unreachable, untestable code); the exact comparison stands.
-		c.separated = true;
-		c.z = 0;
-		c.p = 0.0;
+		// seDelta == 0. The difference is either genuinely absent (equal areas) or a
+		//    deterministic separation (constant placements -- e.g. one classifier
+		//    ranks every positive above every negative and the other below). Split on
+		//    delta with a SCALE-AWARE tolerance, NOT an exact == 0: contrast() accepts
+		//    an arbitrary public Result, so a not-quite-PSD covariance can clamp the
+		//    difference variance to zero from floating-point cancellation (the
+		//    negative-vd clamp above) while delta is a sub-ULP nonzero -- and an exact
+		//    test would then report that numerical NOISE as a deterministic separation
+		//    with p = 0 (Sol's counterexample: auc {0.5, nextafter(0.5,1)}, equal
+		//    diagonals, off-diagonal one ULP above). Within the tolerance the areas are
+		//    equal (no testable difference, p = 1); beyond it a materially nonzero
+		//    difference with zero variance is a true separation (p = 0; e.g. AUC 0 vs
+		//    1). z stays finite (0) so nothing serializes a non-finite number.
+		double scale = fmax( 1.0, fmax( fabs( c.aucI ), fabs( c.aucJ ) ) );
+		double deltaTol = 1024.0 * numeric_limits< double >::epsilon() * scale;
+		if ( fabs( c.delta ) <= deltaTol )
+		{
+			c.degenerate = true;
+			c.z = 0;
+			c.p = 1.0;
+		}
+		else
+		{
+			c.separated = true;
+			c.z = 0;
+			c.p = 0.0;
+		}
 	}
 
 	c.valid = true;
