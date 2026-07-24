@@ -39,11 +39,58 @@ struct PlanInfo {
 	string reference;  // the procedure it is contrasted against
 };
 
-// Tier 1: the one-screen headline summary (box table + verdict block) as text.
-string tier1( const crossval::Comparison& cmp, const PlanInfo& info );
+// The locked-test inference results (ROADMAP 4 Phase 4). A policy layer above the
+//    CV mechanism (the GUI CV job) fills this from crossval::evaluateOnce + delong:
+//    each procedure refit by its own rule on the development set, scored once on an
+//    untouched locked test set, then DeLong on the paired predictions. When has is
+//    false the report is CV-only and byte-identical to a run without a locked test.
+//    A column is matched to a cmp.entries row by NAME, so column order is free.
+//    DeLong assumes the locked-test rows are INDEPENDENT (see delong.h) -- the
+//    renderer states that assumption; it does not decide the split method.
+struct LockedColumn {
+	string name;
+	bool has = false;      // an AUC(test) with CI is available for this procedure
+	double auc = 0, lo = 0, hi = 0;
+	string arch;           // frozen architecture string ("" if none)
+	string note;           // e.g. "failed: <reason>" when the procedure did not fit
+	vector< double > pred; // per locked-test row (paired to LockedInfo.testRows);
+	                       //    empty when the procedure did not fit
+};
 
-// Tier 2: the descriptive per-fold detail as text.
-string tier2( const crossval::Comparison& cmp, const PlanInfo& info );
+// The prespecified primary contrast on the locked test: delta is always
+//    AUC(primary) - AUC(reference), with DeLong's two-sided p. significant is the
+//    caller's decision at its alpha (a policy, passed in). degenerate marks an
+//    untestable difference (identical predictions). note carries a refusal reason
+//    when the contrast could not be computed at all.
+struct LockedContrast {
+	bool has = false;
+	string primary, reference;
+	double delta = 0, p = 0;
+	bool significant = false;
+	bool degenerate = false;
+	string note;
+};
+
+struct LockedInfo {
+	bool has = false;
+	unsigned n = 0, events = 0;    // locked-test size and event count
+	string splitPlan;              // how the locked test was formed (free text)
+	vector< unsigned > testRows;   // locked-test raw row ids (identity, for the CSV)
+	vector< unsigned > outcome;    // per locked-test row, true 0/1 (paired)
+	vector< LockedColumn > columns;
+	LockedContrast contrast;
+};
+
+// Tier 1: the one-screen headline summary (box table + verdict block) as text.
+//    With a locked-test result (locked.has) the table gains an AUC (test) [95% CI]
+//    column and the verdict states the DeLong contrast; otherwise byte-identical.
+string tier1( const crossval::Comparison& cmp, const PlanInfo& info,
+	const LockedInfo& locked = LockedInfo() );
+
+// Tier 2: the descriptive per-fold detail as text (plus a locked-test section
+//    when locked.has; byte-identical to before when it does not).
+string tier2( const crossval::Comparison& cmp, const PlanInfo& info,
+	const LockedInfo& locked = LockedInfo() );
 
 // The outcome of writing one Tier-3 artifact. ok is true ONLY when the file was
 //    opened, fully written, flushed, and closed without error -- so a mid-write
@@ -60,12 +107,13 @@ struct ArtifactResult {
 //    ArtifactResult PER attempted file, so the caller can report exactly which
 //    failed and why. NEVER printed -- these are the machine-readable substrate.
 vector< ArtifactResult > writeArtifacts( const crossval::Comparison& cmp,
-	const PlanInfo& info, const string& dir );
+	const PlanInfo& info, const string& dir,
+	const LockedInfo& locked = LockedInfo() );
 
 // Log ordering: stream Tier 2 then the Tier 1 summary LAST, and write the Tier 3
 //    artifacts into dir (dir "" skips the files). One call for the CLI/log path.
 void render( ostream& out, const crossval::Comparison& cmp, const PlanInfo& info,
-	const string& dir );
+	const string& dir, const LockedInfo& locked = LockedInfo() );
 
 } // namespace cvreport
 

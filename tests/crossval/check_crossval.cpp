@@ -475,6 +475,76 @@ int main()
 	if ( !didPostOpen )
 		expect( true, "post-open write-failure path skipped (no /dev/full here)" );
 
+	// Locked-test rendering (report piece). Build a LockedInfo by hand (the DeLong
+	// wiring lives in the GUI job) and confirm: the pure-CV render is UNCHANGED when
+	// locked.has is false (the default arg), and the locked render adds the AUC(test)
+	// column, the prespecified DeLong contrast, and a cv_locked_predictions.csv with
+	// row identity. Watched to FAIL against dropping the locked branch.
+	{
+		// Default arg == no locked test: byte-identical to the explicit-empty call.
+		expect( cvreport::tier1( rc, info ) == cvreport::tier1( rc, info,
+			cvreport::LockedInfo() ),
+			"pure-CV Tier 1 is unchanged by the locked-test parameter's default" );
+
+		cvreport::LockedInfo lk;
+		lk.has = true; lk.n = 40; lk.events = 12;
+		lk.splitPlan = "outcome-stratified locked holdout, seed 7";
+		lk.testRows = { 3, 7, 11, 15 };            // raw ids (identity)
+		lk.outcome  = { 0, 1, 0, 1 };
+		for ( unsigned p = 0; p < rc.entries.size(); p++ )
+		{
+			cvreport::LockedColumn c;
+			c.name = rc.entries[ p ].name;
+			c.has = true; c.auc = 0.812 + 0.01 * p; c.lo = c.auc - 0.05; c.hi = c.auc + 0.05;
+			c.pred = { 0.2, 0.8, 0.3, 0.7 };
+			lk.columns.push_back( c );
+		}
+		lk.contrast.has = true;
+		lk.contrast.primary = "Neural (OBD)"; lk.contrast.reference = "LDFA";
+		lk.contrast.delta = 0.021; lk.contrast.p = 0.37; lk.contrast.significant = false;
+
+		string lt1 = cvreport::tier1( rc, info, lk );
+		string lt2 = cvreport::tier2( rc, info, lk );
+		expect( lt1.find( "AUC (test) [95% CI]" ) != string::npos
+			&& lt1.find( "(prespecified)" ) != string::npos
+			&& lt1.find( "DeLong p" ) != string::npos
+			&& lt1.find( "not significant" ) != string::npos,
+			"locked Tier 1 adds the AUC(test) column and the DeLong contrast verdict" );
+		expect( lt1.find( "inferential\n comparison is on the locked test" ) != string::npos,
+			"locked Tier 1 caveat states the inference is on the locked test" );
+		expect( lt2.find( "Locked-test evaluation" ) != string::npos
+			&& lt2.find( "delta = AUC(primary) - AUC(reference)" ) != string::npos
+			&& lt2.find( "cluster-aware inference is a follow-on" ) != string::npos,
+			"locked Tier 2 details the areas, the contrast direction, and the scope" );
+
+		vector< cvreport::ArtifactResult > lfiles =
+			cvreport::writeArtifacts( rc, info, ".", lk );
+		bool wroteLocked = false, allOk = ( lfiles.size() == 4 );
+		for ( unsigned i = 0; i < lfiles.size(); i++ )
+		{
+			if ( !lfiles[ i ].ok ) allOk = false;
+			if ( lfiles[ i ].name == "cv_locked_predictions.csv" ) wroteLocked = true;
+		}
+		expect( allOk && wroteLocked,
+			"locked writeArtifacts adds cv_locked_predictions.csv (4 files, all ok)" );
+
+		// The locked-predictions file preserves row identity: header + one row per
+		// locked exemplar, first column the raw row id.
+		unsigned lpLines = 0; string firstDataRow;
+		{
+			ifstream lf( "./cv_locked_predictions.csv" );
+			string line;
+			while ( getline( lf, line ) )
+			{
+				if ( lpLines == 1 ) firstDataRow = line;
+				lpLines++;
+			}
+		}
+		expect( lpLines == lk.testRows.size() + 1
+			&& firstDataRow.rfind( "3,", 0 ) == 0, // raw id 3, outcome 0, preds...
+			"cv_locked_predictions.csv has a header + one row per locked exemplar, row id first" );
+	}
+
 	if ( failures == 0 )
 	{
 		cout << "check_crossval: the CV runner holds every row out once and fits honestly"
