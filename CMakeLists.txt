@@ -108,6 +108,18 @@ target_include_directories(check_obd PRIVATE src)
 target_link_libraries(check_obd PRIVATE GSL::gsl GSL::gslcblas)
 add_test(NAME obd_sizing COMMAND check_obd)
 
+# Unit test: DeLong's test for correlated ROC areas (ROADMAP 4 Phase 4, the
+# locked-test inference layer). AUC == the engine's exact Mann-Whitney area, a
+# 2-classifier fixture pinned to an independent Python DeLong, and structural
+# identities (identical classifiers -> Var(delta)==0; degeneracy refused). Links
+# the twoset stack for the Mann-Whitney cross-check; no GSL.
+add_executable(check_delong
+    tests/delong/check_delong.cpp
+    src/delong.cpp src/twoset.cpp src/stats.cpp src/matrix.cpp
+    src/vector_ops.cpp src/utility.cpp)
+target_include_directories(check_delong PRIVATE src)
+add_test(NAME delong_areas COMMAND check_delong)
+
 # Unit test: the generic cross-validation runner (ROADMAP 4 Phase 4b-CV). Runs a
 # train procedure over a stratified fold plan and checks every row gets one
 # out-of-fold prediction, the pooled OOF AUC beats chance, and it is reproducible.
