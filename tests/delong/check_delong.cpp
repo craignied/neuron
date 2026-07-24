@@ -135,8 +135,28 @@ int main()
 		delong::Contrast c = delong::contrast( r, 0, 1 );
 		expect( near( c.delta, 0.0 ) && near( c.seDelta, 0.0, 1e-12 ),
 			"identical classifiers: delta == 0 and Var(delta) == 0 exactly" );
-		expect( c.degenerate && near( c.p, 1.0 ),
+		expect( c.degenerate && !c.separated && near( c.p, 1.0 ),
 			"identical classifiers: flagged degenerate (no testable difference), p == 1" );
+	}
+
+	// ---- DLG-2: zero variance with a NONZERO area difference is deterministic
+	//      SEPARATION, not "no difference". A ranks every positive below every
+	//      negative (AUC 0); B ranks every positive above (AUC 1). Both have
+	//      constant placements -> Var(delta) == 0, but delta == -1. The old code
+	//      reported degenerate + p == 1 (the opposite of the data); this must now
+	//      report separated + p == 0. (Watched to FAIL against the pre-fix contrast.)
+	{
+		vector< unsigned > lab = { 1, 1, 0, 0 };
+		vector< double > A = { 0, 1, 2, 3 }; // positives (idx 0,1) below negatives
+		vector< double > B = { 2, 3, 0, 1 }; // positives above negatives
+		delong::Result r = delong::analyze( lab, { A, B } );
+		expect( r.ok && near( r.auc[ 0 ], 0.0 ) && near( r.auc[ 1 ], 1.0 ),
+			"reversed-vs-perfect: areas are 0 and 1" );
+		delong::Contrast c = delong::contrast( r, 0, 1 );
+		expect( c.valid && near( c.delta, -1.0 ) && near( c.seDelta, 0.0, 1e-12 ),
+			"reversed-vs-perfect: delta == -1 with zero difference variance" );
+		expect( c.separated && !c.degenerate && near( c.p, 0.0 ),
+			"reversed-vs-perfect: flagged SEPARATED with p == 0, NOT 'no difference, p=1'" );
 	}
 
 	// A clearly stronger classifier vs a constant-ish weak one gives a small p.

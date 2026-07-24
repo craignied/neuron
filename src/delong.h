@@ -66,13 +66,21 @@ Result analyze( const vector< unsigned >& label,
 // A pairwise contrast of areas i and j from a Result. The difference is always
 //    delta = auc[ i ] - auc[ j ] (the caller passes i = the prespecified PRIMARY,
 //    j = the REFERENCE, so delta reads AUC(primary) - AUC(reference) everywhere).
-//    p is two-sided (H0: equal areas). ci* are 95% normal intervals on the area
-//    scale, clamped to [0,1] (classic DeLong; a logit interval is a noted future
-//    refinement). valid is false when i/j are out of range or the Result is not
-//    ok. degenerate is true when the two classifiers give the SAME area with zero
-//    difference-variance (e.g. identical predictions) -- there is then no testable
-//    difference: delta is 0, se(delta) is 0, and p is reported as 1, but the flag
-//    lets the caller say so explicitly rather than present a fabricated z/p.
+//    p is two-sided (H0: equal areas). ci* are 95% normal (Wald) intervals on the
+//    area scale, clamped to [0,1] (classic DeLong; a logit interval is a noted
+//    future refinement -- see interval()). valid is false when i/j are out of
+//    range, the Result is not ok, or the difference variance is materially
+//    negative (an invalid covariance, refused not silently zeroed) -- then note
+//    explains it.
+//
+//    The zero-difference-variance case has TWO distinct meanings and they must not
+//    be conflated (a materially different pair can have zero estimated variance):
+//      - degenerate: seDelta == 0 AND delta == 0 -- the two areas are equal with no
+//        spread, so there is genuinely NO testable difference (p reported as 1).
+//      - separated:  seDelta == 0 AND delta != 0 -- the placements are constant and
+//        the areas differ deterministically (e.g. AUC 0 vs AUC 1): the difference is
+//        real and total, not absent. p is 0 and the flag says so, rather than the
+//        old code's fabricated "no difference, p = 1" (the DLG-2 bug).
 struct Contrast {
 	double aucI = 0, aucJ = 0, delta = 0;   // areas and their difference (i - j)
 	double seI = 0, seJ = 0, seDelta = 0;   // standard errors
@@ -80,7 +88,9 @@ struct Contrast {
 	double ciLoJ = 0, ciHiJ = 0;            // 95% CI on area j
 	double ciLoDelta = 0, ciHiDelta = 0;    // 95% CI on the difference
 	double z = 0, p = 1;                    // test statistic and two-sided p
-	bool degenerate = false;                // zero difference-variance (no test)
+	bool degenerate = false;                // equal areas, zero variance: no test
+	bool separated = false;                 // areas differ deterministically (p = 0)
+	string note;                            // reason when !valid
 	bool valid = false;
 };
 Contrast contrast( const Result& r, unsigned i, unsigned j );

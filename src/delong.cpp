@@ -148,7 +148,23 @@ delong::Contrast delong::contrast( const Result& r, unsigned i, unsigned j )
 	double vi = r.cov( i, i ), vj = r.cov( j, j ), cij = r.cov( i, j );
 	c.seI = vi > 0 ? sqrt( vi ) : 0;
 	c.seJ = vj > 0 ? sqrt( vj ) : 0;
+
+	// Var(delta) = e^T Cov e with e = (1,-1). Cov is a sum of sample covariance
+	//    matrices (PSD), so this is >= 0 in exact arithmetic. A tiny negative value
+	//    is floating-point cancellation and is clamped to zero; a MATERIALLY
+	//    negative value is an invalid covariance and is refused, not silently zeroed.
 	double vd = vi + vj - 2 * cij;
+	if ( vd < 0 )
+	{
+		double scale = ( vi + vj ) > 0 ? ( vi + vj ) : 1.0;
+		if ( vd < -1e-9 * scale - 1e-15 )
+		{
+			c.note = "DeLong difference variance is materially negative "
+				"(invalid covariance)";
+			return c; // valid stays false
+		}
+		vd = 0; // fp cancellation
+	}
 	c.seDelta = vd > 0 ? sqrt( vd ) : 0;
 
 	c.ciLoI = clamp01( c.aucI - Z975 * c.seI );
@@ -164,15 +180,25 @@ delong::Contrast delong::contrast( const Result& r, unsigned i, unsigned j )
 		// two-sided p = P( |Z| > |z| ) = erfc( |z| / sqrt(2) )
 		c.p = stats::erfc( fabs( c.z ) / sqrt( 2.0 ) );
 	}
-	else
+	else if ( c.delta == 0 )
 	{
-		// Zero difference-variance: the two areas cannot be told apart by DeLong
-		//    (identical predictions, or a perfectly correlated pair). This is an
-		//    explicit degenerate result, not a real z == 0 test -- the caller is
-		//    expected to report "no testable difference", not "p = 1, significant".
+		// Equal areas AND zero variance: no discriminable difference. This is the
+		//    only case that is genuinely "no testable difference" -- p reported as 1.
 		c.degenerate = true;
 		c.z = 0;
 		c.p = 1.0;
+	}
+	else
+	{
+		// Zero variance but the areas DIFFER (constant placements -- e.g. one
+		//    classifier ranks every positive above every negative and the other
+		//    below): a deterministic separation, not an absence of difference. The
+		//    standardized statistic diverges, so p is 0. Flagged so the caller states
+		//    the condition rather than a bare "significant" -- and z is kept finite
+		//    (0) so nothing serializes a non-finite number (the condition is the flag).
+		c.separated = true;
+		c.z = 0;
+		c.p = 0.0;
 	}
 
 	c.valid = true;
