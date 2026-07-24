@@ -724,6 +724,27 @@ PY
 head -1 cv_locked_predictions.csv | grep -q "^row,outcome,Logistic,Neural" \
     || fail "cv_locked_predictions.csv header wrong (row identity + one column per procedure)"
 
+# DLG-3 (k-aware development feasibility): a rare-event set where the locked test
+#    can hold >= 2 of each class, but the development set is left with fewer than k
+#    events -- so some outer fold could not contain an event. The request must be
+#    refused BEFORE the async job, naming k and the achieved counts. 30 rows, 5
+#    events: locked_n=12 -> 2 events / 10 non locked (ok), dev = 3 events < k=5.
+$PY - <<'PY'
+import random
+random.seed(1)
+rows=[]
+for i in range(30):
+    y = 1 if i < 5 else 0                 # exactly 5 events
+    rows.append(f"{(i%7)/7.0:.4f} {(i%5)/5.0:.4f} {y}")
+open("rare_events.set","w",newline="\n").write("\n".join(rows)+"\n")
+PY
+curl -s -X POST "$URL/api/load" -d "mode=raw&path=rare_events.set&fraction=0&inputs=2" >/dev/null
+rareResp=$(curl -s -X POST "$URL/api/cv" -d "folds=5&logistic=1&neural=1&neural_obd=0&neural_hidden=3&locked_n=12&independence=rows")
+echo "$rareResp" | grep -q '"ok":false' || fail "DLG-3: too few dev events for k folds must be refused"
+echo "$rareResp" | grep -q "5-fold development" || fail "DLG-3 refusal must name the fold count and counts"
+# reload the working dataset for anything after
+curl -s -X POST "$URL/api/load" -d "mode=raw&path=lowbwt2-2train.txt&fraction=0.25&seed=1" >/dev/null
+
 # --- Per-action audit log (every user action logged, 2026-07-19) -----------
 # Every GUI action lands in neuron_actions.log beside the data, timestamped,
 # with the exact parameter values it carried. The session above drove load,

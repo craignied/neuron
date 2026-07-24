@@ -2143,11 +2143,22 @@ string handleCv( const httplib::Request& req )
 					"locked size.";
 				return jsonMsg( false, m.str() );
 			}
-			if ( dv0 < 2 || dv1 < 2 )
+			// The development set feeds a k-fold plan, so it needs enough of EACH
+			//    class that every outer fold can contain both -- i.e. >= k events and
+			//    >= k non-events (stratified k-fold deals each class round-robin, so
+			//    fewer than k of a class necessarily leaves some fold without it, and
+			//    that fold's ROC area cannot be computed). This is stricter than the
+			//    old ">= 2" check, which was independent of k (DLG-3). Nested OBD's
+			//    inner validation split is NOT proven feasible by this check -- if an
+			//    inner split is degenerate the adapter fails that fold and reports it
+			//    (graceful, never silent), which is the intended contract there.
+			if ( dv0 < c.k || dv1 < c.k )
 			{
 				ostringstream m;
-				m << "too few of a class remain for development (events=" << dv1
-					<< ", non-events=" << dv0 << "; need >= 2 of each).";
+				m << "too few of a class remain for " << c.k << "-fold development "
+					"(events=" << dv1 << ", non-events=" << dv0 << "; each outer fold "
+					"needs both classes, so >= " << c.k << " of each is required). Use a "
+					"smaller locked size or fewer folds.";
 				return jsonMsg( false, m.str() );
 			}
 		}

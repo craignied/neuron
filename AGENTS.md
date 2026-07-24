@@ -484,8 +484,10 @@ contrast is set with `primary`/`reference` tokens (`logistic`|`ldfa`|`qdfa`|
 `neural`) which **must name selected procedures** (an unselected one is a
 validation error, never a silent default); absent, it defaults to neural vs
 logistic only when both are selected. The locked size is validated for **achieved
-per-class counts** (≥ 2 events and ≥ 2 non-events on both sides), not just the
-total, so a rare-event request is refused up front with the counts.
+per-class counts** (not just the total): the locked test needs ≥ 2 events and ≥ 2
+non-events (DeLong's minimum), and the **development set needs ≥ k of each class**
+so every outer fold can contain both — a rare-event request that would leave some
+fold without an event is refused up front with the counts and `k`.
 
 **Reproducibility:** for a given `seed`, each procedure runs on its own deterministic
 RNG substream keyed by its NAME and fold, so a procedure's fitted CV predictions are
