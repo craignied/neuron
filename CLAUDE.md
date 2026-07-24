@@ -1443,6 +1443,60 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   "later slice" source comments updated. (D11 obd_plan banner already existed; D12
   `cross_validation.md` voice cleanup deferred.) Gates green throughout.
 
+  **ROADMAP 4 Phase 4 — the locked-test DeLong inference layer DONE (2026-07-24).** The primary
+  scientific workflow's inferential half: CV describes procedure stability; the locked test
+  *decides*. Built in five committed, independently-gated pieces, each new test watched to FAIL
+  against a targeted sabotage (rule 2). **ChatGPT 5.6 ("Sol") reviewed the plan before any code and
+  corrected the contract in seven ways — all adopted**, the load-bearing one being the OBD estimand:
+  1. **`src/delong.{h,cpp}` + `check_delong` (ctest `delong_areas`).** DeLong (1988) fast mid-rank
+     AUC covariance in the class layer (`Matrix<double>` covariance, order-statistic mid-ranks the
+     one scalar part per rule 4); `contrast()` = AUC(i)−AUC(j) with SE/z/two-sided p/95% CIs;
+     `interval()` per area. Validated three independent ways: AUC ≡ the engine's exact trapezoidal
+     Mann-Whitney area (covering ties AND both score orientations — Sol's caution, so a convention
+     mismatch can't masquerade as an inference bug); a tied 2-classifier fixture pinned to an
+     **independent Python DeLong computed two ways** (naive psi-sum AND mid-rank, agreeing to machine
+     precision — provenance only, `scratchpad/delong_ref.py`; the ctest embeds constants, never calls
+     Python); and structural identities (identical classifiers → Var(Δ)=0 exactly, flagged
+     `degenerate`; a class < 2 / non-finite scores refused). Three sabotages (drop tie half-credit,
+     n vs n−1 divisor, off-diagonal from k twice) each proven to fail the right assertion.
+  2. **`crossval::evaluateOnce`** — run procedures ONCE on a (train, test) row-index partition →
+     paired predictions. Symmetric to `compare()`; reuses the adapters; sees only the partition (so
+     an indivisible-group locked split slots in later — Sol's caution 2). Row identity + paired
+     outcomes returned for audit; failed procedure retained !ok, never fabricated; name-keyed
+     substreams (B11). Membership/order invariance watched to fail against index-keying.
+  3. **`cvreport` locked column/contrast/file** behind a **default-empty `LockedInfo`** → pure-CV
+     path byte-identical (proven). Tier 1 gains `AUC (test) [95% CI]` + the prespecified verdict
+     (Δ = AUC(primary)−AUC(reference), DeLong p → significant/not), Tier 2 a locked section, Tier 3
+     `cv_locked_predictions.csv` (row id + one col per procedure, B7 machinery) + a `lockedTest`
+     block in `cv_run.json`. Identical predictions render "no testable difference" (never a fake p).
+  4. **`/api/cv` `locked_fraction`/`locked_n` + `primary`/`reference`.** `runCvJob` splits off an
+     outcome-stratified **IID** locked test held ENTIRELY out of CV (dev-only DataSet via
+     `includerows`/`setRawMatrix`); CV folds the dev rows; each procedure is **refit on the dev rows
+     by its OWN prespecified rule** — logistic/DFA on all dev, **nested OBD carves its own inner
+     validation split of the dev rows, NOT a forced full-dev refit** (Sol's central correction: the
+     estimand is "the procedure applied to development data", not "trained on every dev row") — then
+     scored once on the locked test; DeLong on the pairing. `primary`/`reference` tokens **must name
+     selected procedures** (unselected → validation error, never a silent default — Sol's caution 3);
+     default neural-vs-logistic only when both selected. Direction fixed AUC(primary)−AUC(reference)
+     in JSON and report. Page: a Locked-test fraction field + contrast selects. smoke: the three
+     validation refusals (the unselected-procedure one watched to fail against removing the guard) +
+     the happy-path AUC(test) column + DeLong p + four Tier-3 files + `cv_locked_predictions.csv` row
+     identity. **Live curl on lowbwt** rendered the full Tier 1 (Logistic 0.744 [0.582–0.906],
+     "Neural − Logistic  ΔAUC = −0.226, DeLong p = 0.145 → not significant").
+  5. **Docs** (rule 1 + rule 5, same commits): AGENTS.md CV section, parity matrix (new
+     GUI-beyond-CLI row + params), `evaluation_report_spec.md` (locked layer SHIPPED), `cvreport.h`
+     header de-staled.
+  **Scope, stated everywhere (Sol's framing + Craig's ordering):** ordinary DeLong assumes
+  **independent test rows** — valid on this IID locked test, NOT on clustered (SEER county) data;
+  group-aware splitting stops leakage but does not make rows independent, so **cluster-aware test
+  inference is the deferred follow-on**. Gates every piece: zero-warning build, goldens
+  byte-identical, oracle numerically identical, 10/10 ctest (added `delong_areas`), smoke green.
+  **Remaining ROADMAP 4 backlog: (1) group-aware / covariate-stratified CV folds** (folds are
+  outcome-stratified k-fold today), **(2) county-cluster-aware test inference** (the non-IID DeLong
+  successor), **(3) B9** the GUI-wide strict-parsing pass. **Not yet done: in-browser click of the
+  locked-test controls** (endpoint fully curl/smoke-verified + the live render confirmed; the page
+  field is one param) — the standing browser-verification debt.
+
 ## ROADMAP 4 (agreed with Craig 2026-07-22) — a general representative test-set splitter
 
 ### Why (rationale)
