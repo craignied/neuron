@@ -526,18 +526,23 @@ int main()
 
 		cvreport::LockedInfo lk;
 		lk.has = true; lk.n = 40; lk.events = 12;
-		lk.splitPlan = "outcome-stratified locked holdout, seed 7";
+		lk.splitPlan = "outcome-stratified row holdout, seed 7";
+		lk.inferenceRan = true; // independence declared -> CIs + contrast p render
+		lk.samplingUnit = "row (declared independent)";
+		lk.independenceStatus = "declared: independent rows";
+		lk.inferenceMethod = "DeLong (ordinary, independent rows)";
 		lk.testRows = { 3, 7, 11, 15 };            // raw ids (identity)
 		lk.outcome  = { 0, 1, 0, 1 };
 		for ( unsigned p = 0; p < rc.entries.size(); p++ )
 		{
 			cvreport::LockedColumn c;
 			c.name = rc.entries[ p ].name;
-			c.has = true; c.auc = 0.812 + 0.01 * p; c.lo = c.auc - 0.05; c.hi = c.auc + 0.05;
+			c.hasAuc = c.hasCi = true;
+			c.auc = 0.812 + 0.01 * p; c.lo = c.auc - 0.05; c.hi = c.auc + 0.05;
 			c.pred = { 0.2, 0.8, 0.3, 0.7 };
 			lk.columns.push_back( c );
 		}
-		lk.contrast.has = true;
+		lk.contrast.hasDelta = lk.contrast.hasInference = true;
 		lk.contrast.primary = "Neural (OBD)"; lk.contrast.reference = "LDFA";
 		lk.contrast.delta = 0.021; lk.contrast.p = 0.37; lk.contrast.significant = false;
 
@@ -587,7 +592,7 @@ int main()
 		// column's inference but keep its predictions; the CSV must still hold the
 		// scores. Watched to FAIL against the old c.has write gate.
 		cvreport::LockedInfo lk2 = lk;
-		lk2.columns[ 1 ].has = false;            // DeLong unavailable for this procedure
+		lk2.columns[ 1 ].hasAuc = lk2.columns[ 1 ].hasCi = false; // DeLong unavailable
 		lk2.columns[ 1 ].auc = lk2.columns[ 1 ].lo = lk2.columns[ 1 ].hi = 0;
 		lk2.columns[ 1 ].note = "AUC not computable";
 		lk2.columns[ 1 ].pred = { 0.11, 0.22, 0.33, 0.44 }; // but predictions exist
@@ -597,6 +602,25 @@ int main()
 		// row 0: "3,0,<col0 pred>,0.110000" -- the second procedure's prediction retained
 		expect( row0.find( ",0.110000" ) != string::npos,
 			"cv_locked_predictions.csv retains a procedure's predictions even when its DeLong AUC is unavailable" );
+
+		// DLG-1: without a declared sampling unit, ordinary DeLong is WITHHELD -- the
+		// point AUC shows but no CI, the contrast is a point difference with no p, and
+		// the caveat says inference was withheld. (Watched to FAIL if the layer emitted
+		// a CI/p without the declaration.)
+		cvreport::LockedInfo lk3 = lk;
+		lk3.inferenceRan = false;
+		lk3.samplingUnit = "unspecified"; lk3.independenceStatus = "not declared";
+		lk3.inferenceMethod = "none (sampling unit not declared independent)";
+		for ( unsigned i = 0; i < lk3.columns.size(); i++ ) lk3.columns[ i ].hasCi = false;
+		lk3.contrast.hasInference = false; lk3.contrast.significant = false;
+		lk3.contrast.note = "sampling unit not declared independent";
+		string wt1 = cvreport::tier1( rc, info, lk3 );
+		expect( wt1.find( "AUC (test)" ) != string::npos
+			&& wt1.find( "[95% CI]" ) == string::npos           // no CI header
+			&& wt1.find( "DeLong p" ) == string::npos           // no p
+			&& wt1.find( "inference unavailable" ) != string::npos
+			&& wt1.find( "withheld because the sampling unit was not declared" ) != string::npos,
+			"undeclared sampling unit: point AUC shown, DeLong CI/p WITHHELD with an explanation" );
 	}
 
 	if ( failures == 0 )

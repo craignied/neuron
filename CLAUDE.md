@@ -1387,10 +1387,12 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   intact, zero page JS errors (only Chrome-extension noise). Gates: zero-warning build, 9/9 ctest,
   goldens byte-identical, oracle numerically identical, smoke green. Parity matrix + AGENTS.md document
   `/api/cv` as GUI-beyond-CLI. **Deliberately deferred (noted, not gaps):** composing CV folds with the
-  covariate-strata / group-aware split modes (fold plan is outcome-stratified k-fold for now); a locked-
-  test DeLong primary comparison (the separate inferential-policy layer); Tier-3 download buttons (files
-  are written to disk, paths reported). **ROADMAP 4 Phase 4 is done for the single-run workflow; the
-  locked-test inference layer and group-aware CV folds are the remaining backlog.**
+  covariate-strata / group-aware split modes (fold plan is outcome-stratified k-fold for now); Tier-3
+  download buttons (files are written to disk, paths reported). *(The locked-test DeLong inference layer,
+  once listed here as deferred, SHIPPED 2026-07-24 — see the entry below; ordinary DeLong is opt-in and
+  IID-only, with cluster-aware inference the remaining follow-on.)* **ROADMAP 4 Phase 4 is done for the
+  single-run workflow; group-aware CV folds and cluster-aware locked-test inference are the remaining
+  backlog.**
 
   **CV bug + doc sweep (2026-07-23): ChatGPT 5.6 ("Sol") audited the Phase-4 CV work
   (`basic_rodmap4_bug_sweep.md`, `basic_rodmap4_doc_sweep.md`). Every finding was verified
@@ -1493,9 +1495,46 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   byte-identical, oracle numerically identical, 10/10 ctest (added `delong_areas`), smoke green.
   **Remaining ROADMAP 4 backlog: (1) group-aware / covariate-stratified CV folds** (folds are
   outcome-stratified k-fold today), **(2) county-cluster-aware test inference** (the non-IID DeLong
-  successor), **(3) B9** the GUI-wide strict-parsing pass. **Not yet done: in-browser click of the
-  locked-test controls** (endpoint fully curl/smoke-verified + the live render confirmed; the page
-  field is one param) — the standing browser-verification debt.
+  successor), **(3) B9** the GUI-wide strict-parsing pass.
+
+  **DeLong inference sweep (2026-07-24) — Sol reviewed the shipped layer (`DeLong_inference_sweep.md`);
+  every finding verified against the source (rule 3) before acting, then fixed with red proofs
+  (rule 2).** Two were confirmed CORRECTNESS bugs by measurement. Landed:
+  - **DLG-2 (conclusion-reversing):** `delong::contrast` flagged ANY zero difference-variance as
+    "degenerate, p=1". But Var(Δ)=0 with a NONZERO area difference (constant placements — AUC 0 vs
+    AUC 1) is a deterministic SEPARATION (p=0), the opposite of "no difference". Measured: the
+    reversed-vs-perfect fixture reported p=1. Now `degenerate` needs Δ=0 too; `separated` (p=0)
+    otherwise; a materially negative variance is refused (invalid covariance), only fp-cancellation
+    clamped. Sol's 4-row fixture, watched to fail.
+  - **DLG-4:** `cv_locked_predictions.csv` gated each prediction on `LockedColumn::has` (an AUC was
+    computed) — so a sparse/one-class locked test that defeats DeLong blanked perfectly valid
+    predictions, the audit substrate, exactly when needed. Now every finite prediction is written
+    regardless; a structural length mismatch refuses the file instead of padding a fabricated 0.
+  - **DLG-1 (Craig chose the STRONG guardrail):** the layer called a mechanical row holdout "IID" and
+    auto-ran ordinary DeLong with no way to establish independence — anti-conservative on clustered
+    SEER data, and the report asserted independence as fact. Now **inference is OPT-IN**: DeLong CIs +
+    contrast p are produced ONLY when the caller declares `independence=rows`; default scores +
+    point AUCs but WITHHOLDS ordinary DeLong with an explanation; `independence=cluster` is refused
+    (a follow-on that must never fall back to ordinary DeLong). Structured metadata
+    (`samplingUnit`/`independenceStatus`/`inferenceMethod`/`inferenceRan`) replaces the hardcoded
+    `independenceAssumed:true`. GUI: a "Sampling unit" dropdown (not a jargon checkbox). Craig's
+    words: *"Metadata cannot repair an invalid p-value after it has been presented."*
+  - **DLG-3:** locked-size validation now previews the seeded holdout and refuses on ACHIEVED
+    per-class counts (≥ 2 events and non-events on both sides), not just the total — a rare-event
+    request is caught up front with the counts, not after the job. **DLG-5:** `evaluateOnce` (a public
+    class-layer API) now defends its partition contract (in range, disjoint train/test, no dupes,
+    callable + unique procedure names) — an overlap used to silently leak, an out-of-range index to
+    throw. **DLG-6:** the pooled `cv_metrics.csv` row wrote the whole-dataset size + status "ok" after
+    a fold failed; now the actual pooled denominator + "partial". **DLG-9:** the AUC interval is
+    documented as the Wald DeLong interval (logit/bootstrap for near-boundary areas = future).
+  - **DLG-7/B9:** the two locked-specific parser niceties fixed (`locked_fraction=0` = none not an
+    error; both `locked_fraction` and `locked_n` = conflict); the broad GUI-wide strict-parsing stays
+    the deferred B9. **DLG-8** (structured cluster/sampling-unit artifact metadata) is a prerequisite
+    for the group-aware phase — deferred there. Doc drift fixed in-commit (rule 1/5): CLAUDE.md
+    "deferred" lines, `crossval.h` substream "index"→"name", the IID language across AGENTS/parity/
+    spec/README. Companion `group-aware_plan.md` (Sol) holds the group-aware + cluster-aware plan.
+  Gates every fix: zero-warning build, goldens byte-identical, oracle identical, 10/10 ctest, smoke
+  green, **live in-browser** drive of the Sampling-unit dropdown (declared → CI+p; the debt cleared).
 
 ## ROADMAP 4 (agreed with Craig 2026-07-22) — a general representative test-set splitter
 
@@ -1667,9 +1706,11 @@ re-bless — it is the scale/representativeness proof.
   > GUI panel, and the bug-sweep hardening). This subsection is the ORIGINAL PLAN, kept as
   > the design record; where it and the shipped code disagree, the code + the status entries
   > win. Item-level status: **4a/4b-refactor/4c/4b-CV = DONE**; **"4c DO FIRST" = done first,
-  > as planned**. **DEFERRED / NOT YET IMPLEMENTED** (do not read as current behavior):
+  > as planned**. **The locked-test DeLong primary-comparison layer SHIPPED 2026-07-24**
+  > (opt-in `independence=rows`, IID-only; see that dated entry) — no longer deferred.
+  > **DEFERRED / NOT YET IMPLEMENTED** (do not read as current behavior):
   > CV composing with covariate-strata / group-aware folds (folds are outcome-stratified
-  > only); the locked-test DeLong primary-comparison layer; "OBD metric: select on AUC"
+  > only); cluster-aware (non-IID) locked-test inference; "OBD metric: select on AUC"
   > (OBD still selects on held-out **error/loss**, not AUC — a backlog product decision);
   > Tier-2 calibration; per-fold timing; Tier-3 download buttons. See
   > `docs/evaluation_report_spec.md`'s status note for the report format actually shipped.

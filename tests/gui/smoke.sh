@@ -652,20 +652,44 @@ grep -q '"cancelled":true' cv_cancel.json || fail "a stopped CV result must say 
 
 # --- Locked-test inference (ROADMAP 4 Phase 4) -----------------------------
 # Validation refusals first (Sol's caution: a prespecified contrast must name
-#    SELECTED procedures; a locked test must be large enough to estimate).
+#    SELECTED procedures; the split must be sized/composed correctly).
 curl -s -X POST "$URL/api/cv" -d "logistic=1&neural=1&primary=qdfa&reference=logistic&locked_fraction=0.2" \
     | grep -q '"ok":false' || fail "a contrast naming an unselected procedure must be refused"
 curl -s -X POST "$URL/api/cv" -d "logistic=1&neural=1&primary=neural&locked_fraction=0.2" \
     | grep -q '"ok":false' || fail "a contrast with primary but no reference must be refused"
-curl -s -X POST "$URL/api/cv" -d "logistic=1&neural=1&locked_n=2" \
-    | grep -q '"ok":false' || fail "a locked test smaller than 4 rows must be refused"
+# DLG-3: a locked test too small to hold >= 2 of each class is refused with counts,
+#    not accepted then reported "AUC not computable" after an expensive job.
+curl -s -X POST "$URL/api/cv" -d "logistic=1&neural=1&locked_n=3" \
+    | grep -q '"ok":false' || fail "a locked test with < 2 of a class must be refused (DLG-3)"
+# DLG-7: locked_fraction and locked_n are alternatives; both is a conflict.
+curl -s -X POST "$URL/api/cv" -d "logistic=1&neural=1&locked_fraction=0.2&locked_n=40" \
+    | grep -q '"ok":false' || fail "supplying both locked_fraction and locked_n must be refused"
+# DLG-1: clustered inference is a follow-on -- it must be refused, never silently
+#    run as ordinary DeLong.
+curl -s -X POST "$URL/api/cv" -d "logistic=1&neural=1&locked_fraction=0.25&independence=cluster" \
+    | grep -q '"ok":false' || fail "independence=cluster must be refused (not yet available)"
 
-# Happy path: CV on the development rows + a locked-test DeLong comparison. Fixed
-#    4-hidden neural (fast) so the run finishes quickly; default contrast is
-#    Neural vs Logistic (both selected).
+# DLG-1: WITHOUT a declared sampling unit, the locked test still scores + gives point
+#    AUCs, but ordinary DeLong (CI + p) is WITHHELD -- an invalid p is never produced.
 curl -s -X POST "$URL/api/cv" \
     -d "folds=5&seed=42&maxiter=300&logistic=1&neural=1&neural_obd=0&neural_hidden=4&locked_fraction=0.25" \
-    | grep -q '"ok":true' || fail "locked-test CV run did not start"
+    | grep -q '"ok":true' || fail "locked-test CV (no declaration) did not start"
+for i in $(seq 1 120); do curl -s "$URL/api/train/status" > cv_wh.json; grep -q '"running":false' cv_wh.json && break; sleep 0.3; done
+$PY - <<'PY' || fail "locked-test withheld-inference result malformed"
+import json
+cv = json.load(open("cv_wh.json", encoding="utf-8"))["result"]["cv"]
+assert "AUC (test)" in cv["tier1"] and "[95% CI]" not in cv["tier1"], cv["tier1"]  # point AUC, no CI
+assert "DeLong p" not in cv["tier1"] and "withheld" in cv["tier1"], cv["tier1"]
+lk = cv["locked"]
+assert lk["inferenceRan"] is False, lk
+assert lk["areas"][0]["auc"] is not None and lk["areas"][0]["lo"] is None, lk  # point AUC, no CI
+assert lk["contrast"]["inferenceRan"] is False and lk["contrast"]["p"] is None, lk["contrast"]
+PY
+
+# Happy path: DECLARE independent rows -> DeLong runs. Default contrast Neural vs Logistic.
+curl -s -X POST "$URL/api/cv" \
+    -d "folds=5&seed=42&maxiter=300&logistic=1&neural=1&neural_obd=0&neural_hidden=4&locked_fraction=0.25&independence=rows" \
+    | grep -q '"ok":true' || fail "locked-test CV (declared) did not start"
 for i in $(seq 1 120); do
     curl -s "$URL/api/train/status" > cv_locked.json
     grep -q '"running":false' cv_locked.json && break
@@ -677,16 +701,19 @@ import json
 d = json.load(open("cv_locked.json", encoding="utf-8"))["result"]
 assert d["ok"], d
 cv = d["cv"]
-# Tier 1 gains the AUC(test) column, the DeLong verdict, and the locked-test caveat.
+# Declared -> Tier 1 gains the AUC(test) [95% CI] column, the DeLong verdict, the caveat.
 assert "AUC (test) [95% CI]" in cv["tier1"], cv["tier1"]
-assert ("DeLong p" in cv["tier1"]) or ("no testable difference" in cv["tier1"]), cv["tier1"]
+assert ("DeLong p" in cv["tier1"]) or ("deterministic separation" in cv["tier1"]) \
+    or ("no testable difference" in cv["tier1"]), cv["tier1"]
 assert "inferential" in cv["tier1"] and "locked test set" in cv["tier1"], cv["tier1"]
 lk = cv["locked"]
-assert lk["n"] >= 4 and len(lk["areas"]) == 2, lk
+assert lk["inferenceRan"] is True and lk["n"] >= 4 and len(lk["areas"]) == 2, lk
+assert lk["areas"][0]["lo"] is not None, lk  # a CI is present
 # The prespecified contrast defaults to neural vs logistic, primary - reference.
 c = lk["contrast"]
 assert c and c["primary"] == "Neural" and c["reference"] == "Logistic", c
-assert c.get("degenerate") or (c["p"] is not None), c   # a real DeLong p unless degenerate
+assert c["inferenceRan"] is True, c
+assert c.get("degenerate") or c.get("separated") or (c["p"] is not None), c
 # Tier 3 now writes FOUR files (adds cv_locked_predictions.csv), all reported ok.
 assert len(cv["files"]) == 4, cv["files"]
 assert cv.get("warnings", None) == [], cv.get("warnings")

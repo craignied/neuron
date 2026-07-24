@@ -95,7 +95,11 @@ struct Contrast {
 };
 Contrast contrast( const Result& r, unsigned i, unsigned j );
 
-// A single area with its 95% DeLong interval (the AUC (test) [95% CI] column).
+// A single area with its 95% DeLong interval. This is a NORMAL (Wald) interval on
+//    the area scale, auc +/- 1.96*se, clamped to [0,1] (classic DeLong 1988).
+//    Truncation near the boundary shifts nominal coverage; a logit-scale or
+//    bootstrap interval for near-boundary areas is noted future work (DLG-9). The
+//    report labels this the Wald DeLong interval.
 struct Interval {
 	double auc = 0, se = 0, lo = 0, hi = 0;
 	bool valid = false;

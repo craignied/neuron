@@ -1652,6 +1652,11 @@ struct CvConfig
 	//    on the development rows by its own rule and scored once on it, then DeLong.
 	unsigned lockedN = 0;         // locked-test size (0 = pure CV, no locked test)
 	string primary, reference;    // the prespecified DeLong contrast (internal names)
+	// The declared sampling unit (DLG-1). Ordinary DeLong is produced ONLY when the
+	//    user consciously declares independent-row observations; empty = not declared
+	//    (score + point AUCs, but inference withheld). "cluster" is reserved for the
+	//    coming clustered estimator and must never fall back to ordinary DeLong.
+	string independence;          // "" (unspecified) | "rows" | "cluster"
 };
 
 // The whole comparison on the worker thread: build an outcome-stratified k-fold
@@ -1673,9 +1678,21 @@ static cvreport::LockedInfo buildLockedInfo( const crossval::LockedResult& lr,
 	for ( unsigned i = 0; i < lr.outcome.size(); i++ ) L.events += lr.outcome[ i ];
 	L.testRows = lr.testRows;
 	L.outcome = lr.outcome;
-	L.splitPlan = "outcome-stratified IID locked holdout, seed " + to_string( c.seed );
 
-	// DeLong over the entries that produced predictions, paired on the same rows.
+	// The sampling unit governs whether ordinary DeLong is produced at all (DLG-1).
+	//    A mechanically generated row holdout is NOT independent unless the user says
+	//    the observations are independent -- so inference runs only for "rows".
+	//    "cluster" is reserved for the coming clustered estimator: until it lands we
+	//    withhold inference rather than fall back to an invalid ordinary DeLong.
+	bool declaredRows = ( c.independence == "rows" );
+	bool declaredCluster = ( c.independence == "cluster" );
+	L.splitPlan = "outcome-stratified row holdout, seed " + to_string( c.seed );
+	L.samplingUnit = declaredRows ? "row (declared independent)"
+		: declaredCluster ? "cluster" : "unspecified";
+	L.independenceStatus = declaredRows ? "declared: independent rows" : "not declared";
+
+	// Point AUCs (and, if independence is declared, the covariance) over the entries
+	//    that produced predictions -- paired on the same rows.
 	vector< vector< double > > preds;
 	vector< int > idx( lr.entries.size(), -1 ); // entry -> column in the DeLong result
 	for ( unsigned e = 0; e < lr.entries.size(); e++ )
@@ -1686,19 +1703,29 @@ static cvreport::LockedInfo buildLockedInfo( const crossval::LockedResult& lr,
 		}
 	delong::Result dr = delong::analyze( lr.outcome, preds );
 
+	L.inferenceRan = declaredRows && dr.ok;
+	L.inferenceMethod = declaredRows
+		? ( dr.ok ? "DeLong (ordinary, independent rows)"
+			: "none (locked test too sparse: " + dr.reason + ")" )
+		: declaredCluster ? "none (clustered inference is a follow-on)"
+		: "none (sampling unit not declared independent)";
+
 	for ( unsigned e = 0; e < lr.entries.size(); e++ )
 	{
 		cvreport::LockedColumn col;
 		col.name = lr.entries[ e ].name;
-		col.pred = lr.entries[ e ].pred;
+		col.pred = lr.entries[ e ].pred; // written regardless (DLG-4)
 		if ( !lr.entries[ e ].archHidden.empty() )
 			col.arch = to_string( lr.entries[ e ].archHidden[ 0 ] ) + " hidden";
 		if ( !lr.entries[ e ].ok )
 			col.note = "failed: " + lr.entries[ e ].reason;
 		else if ( dr.ok )
 		{
+			// The point AUC is available whether or not inference was declared; the
+			//    95% CI (Wald DeLong) only when it was.
 			delong::Interval iv = delong::interval( dr, ( unsigned ) idx[ e ] );
-			col.has = true; col.auc = iv.auc; col.lo = iv.lo; col.hi = iv.hi;
+			col.hasAuc = true; col.auc = iv.auc;
+			if ( declaredRows ) { col.hasCi = true; col.lo = iv.lo; col.hi = iv.hi; }
 		}
 		else col.note = "AUC not computable: " + dr.reason;
 		L.columns.push_back( col );
@@ -1717,17 +1744,31 @@ static cvreport::LockedInfo buildLockedInfo( const crossval::LockedResult& lr,
 		}
 		if ( pe < 0 || re < 0 )
 			ct.note = "a contrast procedure was not evaluated";
-		else if ( !dr.ok )
-			ct.note = "DeLong not computable: " + dr.reason;
-		else if ( idx[ pe ] < 0 || idx[ re ] < 0 )
-			ct.note = "a contrast procedure failed on the locked test";
+		else if ( !dr.ok || idx[ pe ] < 0 || idx[ re ] < 0 )
+			ct.note = "a contrast procedure has no point AUC on the locked test";
 		else
 		{
-			delong::Contrast dc = delong::contrast( dr,
-				( unsigned ) idx[ pe ], ( unsigned ) idx[ re ] );
-			ct.has = true;
-			ct.delta = dc.delta; ct.p = dc.p; ct.degenerate = dc.degenerate;
-			ct.significant = ( !dc.degenerate && dc.p < 0.05 );
+			// The point difference is always available; the DeLong p only when
+			//    independence is declared.
+			ct.hasDelta = true;
+			ct.delta = dr.auc[ idx[ pe ] ] - dr.auc[ idx[ re ] ];
+			if ( declaredRows )
+			{
+				delong::Contrast dc = delong::contrast( dr,
+					( unsigned ) idx[ pe ], ( unsigned ) idx[ re ] );
+				if ( !dc.valid )
+					ct.note = dc.note.empty() ? "DeLong contrast not computable" : dc.note;
+				else
+				{
+					ct.hasInference = true;
+					ct.delta = dc.delta; ct.p = dc.p;
+					ct.degenerate = dc.degenerate; ct.separated = dc.separated;
+					ct.significant = ( dc.separated || ( !dc.degenerate && dc.p < 0.05 ) );
+				}
+			}
+			else
+				ct.note = declaredCluster ? "clustered inference is a follow-on"
+					: "sampling unit not declared independent";
 		}
 	}
 	return L;
@@ -1738,26 +1779,37 @@ static cvreport::LockedInfo buildLockedInfo( const crossval::LockedResult& lr,
 static string lockedJson( const cvreport::LockedInfo& L )
 {
 	ostringstream j;
-	j << "{\"n\":" << L.n << ",\"events\":" << L.events << ",\"areas\":[";
+	j << "{\"n\":" << L.n << ",\"events\":" << L.events
+		<< ",\"samplingUnit\":\"" << jsonEscape( L.samplingUnit ) << "\""
+		<< ",\"independenceStatus\":\"" << jsonEscape( L.independenceStatus ) << "\""
+		<< ",\"inferenceMethod\":\"" << jsonEscape( L.inferenceMethod ) << "\""
+		<< ",\"inferenceRan\":" << ( L.inferenceRan ? "true" : "false" )
+		<< ",\"areas\":[";
 	for ( unsigned i = 0; i < L.columns.size(); i++ )
 	{
 		const cvreport::LockedColumn& col = L.columns[ i ];
 		j << ( i ? "," : "" ) << "{\"name\":\"" << jsonEscape( col.name ) << "\"";
-		if ( col.has )
-			j << ",\"auc\":" << col.auc << ",\"lo\":" << col.lo << ",\"hi\":" << col.hi;
-		else
-			j << ",\"auc\":null,\"note\":\"" << jsonEscape( col.note ) << "\"";
+		// the point AUC appears whenever it is estimable; the CI only with inference
+		if ( col.hasAuc ) j << ",\"auc\":" << col.auc;
+		else j << ",\"auc\":null";
+		if ( col.hasCi ) j << ",\"lo\":" << col.lo << ",\"hi\":" << col.hi;
+		else j << ",\"lo\":null,\"hi\":null";
+		if ( !col.note.empty() ) j << ",\"note\":\"" << jsonEscape( col.note ) << "\"";
 		j << "}";
 	}
 	j << "]";
-	if ( L.contrast.has )
+	if ( L.contrast.hasDelta )
 		j << ",\"contrast\":{\"primary\":\"" << jsonEscape( L.contrast.primary )
 			<< "\",\"reference\":\"" << jsonEscape( L.contrast.reference )
 			<< "\",\"delta\":" << L.contrast.delta
-			<< ",\"p\":" << ( L.contrast.degenerate ? string( "null" )
-				: to_string( L.contrast.p ) )
-			<< ",\"significant\":" << ( L.contrast.significant ? "true" : "false" )
-			<< ",\"degenerate\":" << ( L.contrast.degenerate ? "true" : "false" ) << "}";
+			<< ",\"inferenceRan\":" << ( L.contrast.hasInference ? "true" : "false" )
+			<< ",\"p\":" << ( ( L.contrast.hasInference && !L.contrast.degenerate )
+				? to_string( L.contrast.p ) : string( "null" ) )
+			<< ",\"significant\":" << ( ( L.contrast.hasInference && L.contrast.significant )
+				? "true" : "false" )
+			<< ",\"degenerate\":" << ( L.contrast.degenerate ? "true" : "false" )
+			<< ",\"separated\":" << ( L.contrast.separated ? "true" : "false" )
+			<< ",\"note\":\"" << jsonEscape( L.contrast.note ) << "\"}";
 	else if ( !L.contrast.note.empty() )
 		j << ",\"contrast\":{\"note\":\"" << jsonEscape( L.contrast.note ) << "\"}";
 	else
@@ -2037,17 +2089,20 @@ string handleCv( const httplib::Request& req )
 	if ( !( c.logistic || c.ldfa || c.qdfa || c.neural ) )
 		return jsonMsg( false, "select at least one procedure to compare" );
 
-	// Locked-test inference (ROADMAP 4 Phase 4): an outcome-stratified IID locked
-	//    test held out of CV. locked_fraction (0,1) or locked_n (a count) sizes it.
+	// Locked-test evaluation (ROADMAP 4 Phase 4): an outcome-stratified ROW holdout
+	//    held out of CV. locked_fraction [0,1) or locked_n (a count) sizes it (0 =
+	//    none). The two are alternatives -- supplying both is a conflict (DLG-7).
 	unsigned nRows = dataPtr->getRawMatrix().rows();
 	{
 		string frac = param( req, "locked_fraction" ), cnt = param( req, "locked_n" );
+		if ( !frac.empty() && !cnt.empty() )
+			return jsonMsg( false, "specify locked_fraction OR locked_n, not both" );
 		if ( !frac.empty() )
 		{
 			double f = atof( frac.c_str() );
-			if ( !( f > 0 && f < 1 ) )
-				return jsonMsg( false, "locked_fraction must be between 0 and 1" );
-			c.lockedN = ( unsigned )( f * nRows + 0.5 );
+			if ( f < 0 || f >= 1 )
+				return jsonMsg( false, "locked_fraction must be in [0, 1) (0 = none)" );
+			c.lockedN = ( unsigned )( f * nRows + 0.5 ); // 0 -> none
 		}
 		else if ( !cnt.empty() )
 		{
@@ -2057,15 +2112,63 @@ string handleCv( const httplib::Request& req )
 		}
 		if ( c.lockedN > 0 )
 		{
-			// The locked test needs both classes to be estimable (DeLong needs >= 2
-			//    per class), and CV needs at least k development rows left.
-			if ( c.lockedN < 4 )
-				return jsonMsg( false, "the locked test is too small (use at least "
-					"4 rows so both classes can be represented)" );
 			if ( nRows < c.lockedN + c.k )
 				return jsonMsg( false, "the locked test leaves too few development "
 					"rows for the requested folds" );
+
+			// DLG-3: validate the ACHIEVED per-class counts of the actual seeded
+			//    holdout, not just the total. A rare outcome can leave zero or one
+			//    event in the locked test (or the development set), which no total-
+			//    size check catches; that would accept an expensive job only to
+			//    return "AUC not computable". Preview the split (same seed the worker
+			//    uses -> identical), require >= 2 of each class on BOTH sides, and
+			//    report the achieved counts in the refusal.
+			Matrix< double >& rawM = dataPtr->getRawMatrix();
+			unsigned oc = rawM.cols() - 1;
+			vector< unsigned > lab( nRows );
+			for ( unsigned r = 0; r < nRows; r++ )
+				lab[ r ] = ( rawM( r, oc ) != 0 ) ? 1u : 0u;
+			util::set_seed( c.seed );
+			nsplit::Holdout h = nsplit::stratifiedHoldout( lab, c.lockedN );
+			unsigned lk1 = 0, lk0 = 0, dv1 = 0, dv0 = 0;
+			for ( unsigned i = 0; i < h.test.size(); i++ )
+				( lab[ h.test[ i ] ] ? lk1 : lk0 )++;
+			for ( unsigned i = 0; i < h.train.size(); i++ )
+				( lab[ h.train[ i ] ] ? dv1 : dv0 )++;
+			if ( lk0 < 2 || lk1 < 2 )
+			{
+				ostringstream m;
+				m << "the locked test has too few of a class (events=" << lk1
+					<< ", non-events=" << lk0 << "; need >= 2 of each). Use a larger "
+					"locked size.";
+				return jsonMsg( false, m.str() );
+			}
+			if ( dv0 < 2 || dv1 < 2 )
+			{
+				ostringstream m;
+				m << "too few of a class remain for development (events=" << dv1
+					<< ", non-events=" << dv0 << "; need >= 2 of each).";
+				return jsonMsg( false, m.str() );
+			}
 		}
+	}
+
+	// The declared sampling unit (DLG-1). Ordinary DeLong assumes INDEPENDENT test
+	//    observations; a mechanically generated row holdout does not establish that,
+	//    so inference (CIs / p) is produced ONLY when the user consciously declares
+	//    it. Default (unset) still scores and reports point AUCs, but withholds
+	//    ordinary DeLong. "cluster" is reserved for the coming clustered estimator.
+	{
+		string ind = param( req, "independence" );
+		for ( unsigned i = 0; i < ind.size(); i++ ) ind[ i ] = tolower( ind[ i ] );
+		if ( ind == "cluster" )
+			return jsonMsg( false, "clustered locked-test inference is not yet available "
+				"(a follow-on). Omit the sampling unit to get predictions and point "
+				"AUCs without ordinary DeLong, which would be invalid on clustered data." );
+		if ( !ind.empty() && ind != "rows" )
+			return jsonMsg( false, "independence (sampling unit) must be 'rows' "
+				"(independent observations) or unset" );
+		c.independence = ind;
 	}
 
 	// The prespecified DeLong contrast. Tokens (logistic|ldfa|qdfa|neural) resolve to

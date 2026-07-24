@@ -199,13 +199,18 @@ const cvreport::LockedColumn* findCol(
 	return nullptr;
 }
 
-// "0.874 [0.835-0.914]", or a note (e.g. "failed"), or an em-dash when absent.
+// "0.874 [0.835-0.914]" with a CI, "0.874" (point AUC only, no inference), a note,
+//    or an em-dash. The CI appears only when inference was declared (hasCi).
 string testCell( const cvreport::LockedColumn* c )
 {
 	if ( !c ) return "\xE2\x80\x94"; // em dash
-	if ( c->has )
-		return fixed3( c->auc ) + " [" + fixed3( c->lo )
-			+ "\xE2\x80\x93" + fixed3( c->hi ) + "]";
+	if ( c->hasAuc )
+	{
+		string s = fixed3( c->auc );
+		if ( c->hasCi )
+			s += " [" + fixed3( c->lo ) + "\xE2\x80\x93" + fixed3( c->hi ) + "]";
+		return s;
+	}
 	if ( !c->note.empty() ) return c->note;
 	return "\xE2\x80\x94";
 }
@@ -248,7 +253,10 @@ string cvreport::tier1( const crossval::Comparison& cmp, const PlanInfo& info,
 	os << rule( COLS, "\xE2\x95\x90" ) << "\n";
 
 	os << " " << padRight( "Procedure", wName ) << padRight( "AUC (CV)", wAuc );
-	if ( L ) os << padRight( "AUC (test) [95% CI]", wTest );
+	// The CI only appears when inference was declared; otherwise the column is the
+	//    point AUC alone (DLG-1).
+	if ( L ) os << padRight( locked.inferenceRan ? "AUC (test) [95% CI]"
+		: "AUC (test)", wTest );
 	os << padRight( "Arch", wArch ) << "Time" << "\n";
 	os << " " << rule( COLS - 1, "\xE2\x94\x80" ) << "\n";
 
@@ -263,16 +271,22 @@ string cvreport::tier1( const crossval::Comparison& cmp, const PlanInfo& info,
 	}
 	os << " " << rule( COLS - 1, "\xE2\x94\x80" ) << "\n";
 
-	// Verdict block. With a locked test, the prespecified DeLong contrast IS the
-	//    inference. Without one, a descriptive CV contrast (no p), never inference.
-	if ( L && locked.contrast.has )
+	// Verdict block. With a locked test AND a declared sampling unit, the
+	//    prespecified DeLong contrast IS the inference. With a locked test but no
+	//    declaration, the point difference is descriptive and inference is withheld.
+	//    Without a locked test, a descriptive CV contrast (no p), never inference.
+	if ( L && locked.contrast.hasInference )
 	{
 		const LockedContrast& c = locked.contrast;
 		os << " Primary contrast (prespecified): " << c.primary
 			<< " \xE2\x88\x92 " << c.reference << "\n";
 		if ( c.degenerate )
-			os << "   Locked test: identical predictions \xE2\x80\x94 no testable "
-				"difference.\n";
+			os << "   Locked test: equal areas \xE2\x80\x94 no testable difference.\n";
+		else if ( c.separated )
+			os << "   Locked test: \xCE\x94" << "AUC = "
+				<< ( c.delta >= 0 ? "+" : "" ) << fixed3( c.delta )
+				<< ", deterministic separation (DeLong p \xE2\x89\x88 0)  \xE2\x86\x92  "
+				"significant.\n";
 		else
 		{
 			ostringstream pv;
@@ -282,6 +296,15 @@ string cvreport::tier1( const crossval::Comparison& cmp, const PlanInfo& info,
 				<< ", DeLong p = " << pv.str() << "  \xE2\x86\x92  "
 				<< ( c.significant ? "significant" : "not significant" ) << "\n";
 		}
+	}
+	else if ( L && locked.contrast.hasDelta )
+	{
+		const LockedContrast& c = locked.contrast;
+		os << " Primary contrast (prespecified): " << c.primary
+			<< " \xE2\x88\x92 " << c.reference << "\n";
+		os << "   \xCE\x94" << "AUC (point) = " << ( c.delta >= 0 ? "+" : "" )
+			<< fixed3( c.delta ) << " \xE2\x80\x94 inference unavailable ("
+			<< ( c.note.empty() ? "sampling unit not declared" : c.note ) << ").\n";
 	}
 	else if ( L && !locked.contrast.note.empty() )
 		os << " Primary contrast: " << locked.contrast.note << "\n";
@@ -317,10 +340,14 @@ string cvreport::tier1( const crossval::Comparison& cmp, const PlanInfo& info,
 	}
 
 	// The one standing caveat, always.
-	if ( L )
+	if ( L && locked.inferenceRan )
 		os << " CV \xC2\xB1 is descriptive spread across dependent folds, not a CI; "
-			"the inferential\n comparison is on the locked test set (DeLong, assuming "
-			"independent test rows).\n";
+			"the inferential\n comparison is on the locked test set (DeLong, which "
+			"assumes the declared\n independent-row sampling unit).\n";
+	else if ( L )
+		os << " CV \xC2\xB1 is descriptive spread across dependent folds, not a CI; "
+			"ordinary DeLong is\n withheld because the sampling unit was not declared "
+			"independent -- point AUCs\n above are descriptive.\n";
 	else
 		os << " CV \xC2\xB1 is descriptive spread across dependent folds, not a CI; "
 			"this run performs no\n inferential comparison -- locked-test inference is "
@@ -410,32 +437,51 @@ string cvreport::tier2( const crossval::Comparison& cmp, const PlanInfo& info,
 		os << "Locked test: " << locked.n << " rows, " << locked.events << " events";
 		if ( !locked.splitPlan.empty() ) os << "   " << locked.splitPlan;
 		os << "\n";
-		os << "  procedure         AUC(test)   95% CI                arch\n";
+		// Design metadata: what the inference assumes (DLG-1).
+		os << "  sampling unit: "
+			<< ( locked.samplingUnit.empty() ? "unspecified" : locked.samplingUnit )
+			<< "   independence: "
+			<< ( locked.independenceStatus.empty() ? "not declared" : locked.independenceStatus )
+			<< "\n";
+		os << "  inference: "
+			<< ( locked.inferenceMethod.empty() ? "none" : locked.inferenceMethod ) << "\n";
+		os << "  procedure         AUC(test)   " << ( locked.inferenceRan ? "95% CI"
+			: "(no CI -- inference withheld)" ) << "\n";
 		for ( unsigned i = 0; i < locked.columns.size(); i++ )
 		{
 			const LockedColumn& c = locked.columns[ i ];
 			os << "  " << padRight( c.name, 16 ) << "  ";
-			if ( c.has )
-				os << padRight( fixed3( c.auc ), 10 ) << "  "
-					<< padRight( "[" + fixed3( c.lo ) + ", " + fixed3( c.hi ) + "]", 20 )
-					<< "  " << ( c.arch.empty() ? "-" : c.arch );
+			if ( c.hasAuc )
+			{
+				os << padRight( fixed3( c.auc ), 10 ) << "  ";
+				if ( c.hasCi )
+					os << padRight( "[" + fixed3( c.lo ) + ", " + fixed3( c.hi ) + "]", 20 );
+				else
+					os << padRight( "-", 20 );
+				os << "  " << ( c.arch.empty() ? "-" : c.arch );
+			}
 			else
 				os << ( c.note.empty() ? "n/a" : c.note );
 			os << "\n";
 		}
-		if ( locked.contrast.has )
+		if ( locked.contrast.hasDelta )
 		{
 			const LockedContrast& c = locked.contrast;
 			os << "  Prespecified contrast: " << c.primary << " - " << c.reference
 				<< "  (delta = AUC(primary) - AUC(reference))\n";
-			if ( c.degenerate )
-				os << "    identical predictions: no testable difference\n";
+			os << "    delta AUC = " << ( c.delta >= 0 ? "+" : "" ) << fixed3( c.delta );
+			if ( !c.hasInference )
+				os << "  (point difference; inference withheld"
+					<< ( c.note.empty() ? "" : " -- " + c.note ) << ")\n";
+			else if ( c.degenerate )
+				os << "  (equal areas: no testable difference)\n";
+			else if ( c.separated )
+				os << "  (deterministic separation, DeLong p ~ 0: significant)\n";
 			else
 			{
 				ostringstream pv;
 				pv << setiosflags( ios::fixed ) << setprecision( 4 ) << c.p;
-				os << "    delta AUC = " << ( c.delta >= 0 ? "+" : "" )
-					<< fixed3( c.delta ) << ", DeLong two-sided p = " << pv.str()
+				os << ", DeLong two-sided p = " << pv.str()
 					<< "  (" << ( c.significant ? "significant" : "not significant" )
 					<< ")\n";
 			}
@@ -584,27 +630,38 @@ vector< cvreport::ArtifactResult > cvreport::writeArtifacts(
 			f << ",\n  \"lockedTest\": {\n";
 			f << "    \"n\": " << locked.n << ", \"events\": " << locked.events << ",\n";
 			f << "    \"splitPlan\": " << jsonStr( locked.splitPlan ) << ",\n";
-			f << "    \"independenceAssumed\": true,\n";
+			// Structured design metadata -- ordinary DeLong assumes independent test
+			//    observations; these say whether that was DECLARED and what inference
+			//    (if any) ran, replacing the old hardcoded independenceAssumed=true.
+			f << "    \"samplingUnit\": " << jsonStr( locked.samplingUnit ) << ",\n";
+			f << "    \"independenceStatus\": " << jsonStr( locked.independenceStatus ) << ",\n";
+			f << "    \"inferenceMethod\": " << jsonStr( locked.inferenceMethod ) << ",\n";
+			f << "    \"inferenceRan\": " << ( locked.inferenceRan ? "true" : "false" ) << ",\n";
 			f << "    \"areas\": [";
 			for ( unsigned i = 0; i < locked.columns.size(); i++ )
 			{
 				const LockedColumn& c = locked.columns[ i ];
 				f << ( i ? ", " : "" ) << "{ \"name\": " << jsonStr( c.name )
-					<< ", \"auc\": " << ( c.has ? jnumOrNull( c.auc ) : string( "null" ) )
-					<< ", \"lo\": " << ( c.has ? jnumOrNull( c.lo ) : string( "null" ) )
-					<< ", \"hi\": " << ( c.has ? jnumOrNull( c.hi ) : string( "null" ) )
+					<< ", \"auc\": " << ( c.hasAuc ? jnumOrNull( c.auc ) : string( "null" ) )
+					<< ", \"lo\": " << ( c.hasCi ? jnumOrNull( c.lo ) : string( "null" ) )
+					<< ", \"hi\": " << ( c.hasCi ? jnumOrNull( c.hi ) : string( "null" ) )
 					<< ", \"note\": " << jsonStr( c.note ) << " }";
 			}
 			f << "]";
-			if ( locked.contrast.has )
+			if ( locked.contrast.hasDelta )
 			{
 				const LockedContrast& c = locked.contrast;
 				f << ",\n    \"contrast\": { \"primary\": " << jsonStr( c.primary )
 					<< ", \"reference\": " << jsonStr( c.reference )
 					<< ", \"delta\": " << c.delta // signed; not the num()/-1 convention
-					<< ", \"p\": " << ( c.degenerate ? string( "null" ) : jnumOrNull( c.p ) )
-					<< ", \"significant\": " << ( c.significant ? "true" : "false" )
-					<< ", \"degenerate\": " << ( c.degenerate ? "true" : "false" ) << " }";
+					<< ", \"inferenceRan\": " << ( c.hasInference ? "true" : "false" )
+					<< ", \"p\": " << ( ( c.hasInference && !c.degenerate ) ? jnumOrNull( c.p )
+						: string( "null" ) )
+					<< ", \"significant\": " << ( ( c.hasInference && c.significant )
+						? "true" : "false" )
+					<< ", \"degenerate\": " << ( c.degenerate ? "true" : "false" )
+					<< ", \"separated\": " << ( c.separated ? "true" : "false" )
+					<< ", \"note\": " << jsonStr( c.note ) << " }";
 			}
 			else if ( !locked.contrast.note.empty() )
 				f << ",\n    \"contrast\": { \"note\": "

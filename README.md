@@ -221,9 +221,13 @@ neuron has a general splitter (ROADMAP 4 in `CLAUDE.md`): a single holdout strat
 the outcome and, optionally, on named covariates, and optionally keeping clusters intact
 (a group-aware split) — each with a diagnostic report that makes the split's balance visible
 rather than assumed — plus a three-way train/validation/test split and a cross-validation
-model-comparison panel so the estimate does not hinge on one draw. Cross-validation currently
-uses outcome-stratified folds (composing CV with covariate-strata / group-aware folds is a
-planned extension). The design is general across datasets, with a 226k-row, 3%-prevalence
+model-comparison panel so the estimate does not hinge on one draw. The comparison can also set
+aside an untouched locked test set: each procedure is refit on the development data and scored
+once on it, and DeLong compares the areas — but that inferential *p*-value is produced only when
+you declare the test observations independent, because ordinary DeLong is invalid on clustered
+data (a cluster-aware version is a planned follow-on). Cross-validation currently uses
+outcome-stratified folds (composing CV with covariate-strata / group-aware folds is a planned
+extension). The design is general across datasets, with a 226k-row, 3%-prevalence
 SEER prostate-cancer cohort as the hardest case it must handle; it also replaces an O(n²)
 legacy split that does not scale to data that size.
 

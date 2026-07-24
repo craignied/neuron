@@ -51,25 +51,30 @@ struct PlanInfo {
 //    renderer states that assumption; it does not decide the split method.
 struct LockedColumn {
 	string name;
-	bool has = false;      // an AUC(test) with CI is available for this procedure
+	bool hasAuc = false;   // a point AUC (Mann-Whitney area) is available
+	bool hasCi = false;    // a DeLong 95% interval is available (inference declared)
 	double auc = 0, lo = 0, hi = 0;
 	string arch;           // frozen architecture string ("" if none)
-	string note;           // e.g. "failed: <reason>" when the procedure did not fit
-	vector< double > pred; // per locked-test row (paired to LockedInfo.testRows);
-	                       //    empty when the procedure did not fit
+	string note;           // reason when no AUC (a sparse / one-class locked test)
+	vector< double > pred; // per locked-test row; written whenever finite (DLG-4),
+	                       //    independent of whether an AUC/CI was estimable
 };
 
-// The prespecified primary contrast on the locked test: delta is always
-//    AUC(primary) - AUC(reference), with DeLong's two-sided p. significant is the
-//    caller's decision at its alpha (a policy, passed in). degenerate marks an
-//    untestable difference (identical predictions). note carries a refusal reason
-//    when the contrast could not be computed at all.
+// The prespecified primary contrast on the locked test. delta is always
+//    AUC(primary) - AUC(reference). hasDelta means a point difference is available;
+//    hasInference means a DeLong p was produced (inference was declared and
+//    estimable). p/significant/degenerate/separated apply ONLY when hasInference.
+//    degenerate = equal areas with zero variance (no testable difference);
+//    separated = areas differ deterministically (p ~ 0). note carries the reason
+//    when inference or the contrast is unavailable.
 struct LockedContrast {
-	bool has = false;
+	bool hasDelta = false;
+	bool hasInference = false;
 	string primary, reference;
 	double delta = 0, p = 0;
 	bool significant = false;
 	bool degenerate = false;
+	bool separated = false;
 	string note;
 };
 
@@ -77,6 +82,15 @@ struct LockedInfo {
 	bool has = false;
 	unsigned n = 0, events = 0;    // locked-test size and event count
 	string splitPlan;              // how the locked test was formed (free text)
+	// Structured design metadata (DLG-1): ordinary DeLong assumes INDEPENDENT test
+	//    observations, which a mechanically generated row holdout does not
+	//    establish. Inference (CIs / p) is produced ONLY when the user has declared
+	//    an independent-rows sampling unit; otherwise the layer still scores and
+	//    reports point AUCs, but withholds ordinary DeLong. These fields say which.
+	bool inferenceRan = false;     // DeLong CIs / p were produced
+	string samplingUnit;           // "row" (declared independent) / "unspecified"
+	string independenceStatus;     // "declared: independent rows" / "not declared"
+	string inferenceMethod;        // "DeLong (ordinary)" / "none (...)"
 	vector< unsigned > testRows;   // locked-test raw row ids (identity, for the CSV)
 	vector< unsigned > outcome;    // per locked-test row, true 0/1 (paired)
 	vector< LockedColumn > columns;

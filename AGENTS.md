@@ -457,24 +457,35 @@ No formal cross-validation inference is reported (the fold results are dependent
 the inferential comparison is a **locked untouched test set** — supported in the same
 call (see next paragraph).
 
-**Locked-test inference (DeLong).** Add `locked_fraction` (0–1) or `locked_n` (a
-count) to set aside an **outcome-stratified IID locked test held ENTIRELY out of
-CV**. Then CV folds only the development rows, each procedure is **refit on the
-development rows by its own prespecified rule** (logistic/DFA on all dev rows;
-nested OBD carves its own inner validation split of the dev rows — no forced
-full-dev refit), scored **once** on the untouched locked test, and **DeLong** compares
-the areas. Tier 1 gains an `AUC (test) [95% CI]` column and a prespecified-contrast
-verdict (ΔAUC + DeLong two-sided *p* → significant/not at 0.05); `cv.locked` carries
-the areas/CIs and the signed contrast (`delta` = AUC(primary) − AUC(reference)), and
+**Locked-test inference (DeLong).** Add `locked_fraction` (0–1, `0` = none) or
+`locked_n` (a count — supply one, not both) to set aside an **outcome-stratified
+row holdout held ENTIRELY out of CV**. Then CV folds only the development rows,
+each procedure is **refit on the development rows by its own prespecified rule**
+(logistic/DFA on all dev rows; nested OBD carves its own inner validation split of
+the dev rows — no forced full-dev refit), and scored **once** on the untouched
+locked test. `cv.locked` carries per-procedure **point AUCs** and predictions;
 `cv_locked_predictions.csv` (raw row id, outcome, one column per procedure — the
-auditable pairing) joins the Tier-3 files. The prespecified contrast is set with
-`primary`/`reference` tokens (`logistic`|`ldfa`|`qdfa`|`neural`) which **must name
-selected procedures** (an unselected one is a validation error, never a silent
-default); absent, it defaults to neural vs logistic only when both are selected.
-**Scope: ordinary DeLong assumes INDEPENDENT test rows** — it is valid on this IID
-locked test but NOT on clustered data (e.g. SEER patients sharing a county);
-group-aware splitting stops leakage but does not make the rows independent, so
-**cluster-aware test inference is a deliberate follow-on**, not this layer.
+auditable pairing, written whenever predictions exist) joins the Tier-3 files.
+**Inference is OPT-IN (this is the guardrail).** Ordinary DeLong assumes
+*independent* test observations, which a mechanical row holdout does not establish
+— so the AUC 95% CIs and the contrast *p* are produced **only when you declare the
+sampling unit**: `independence=rows` (independent observations). Without it you
+still get predictions + point AUCs, but ordinary DeLong is **withheld** with an
+explanation (never a silently invalid *p*, e.g. on clustered SEER county data).
+`independence=cluster` is **refused** for now — clustered inference is a
+follow-on; when it lands, `cluster` will route to a clustered estimator and must
+**never** fall back to ordinary DeLong. When inference runs, Tier 1 gains the
+`AUC (test) [95% CI]` column and the prespecified-contrast verdict (ΔAUC + DeLong
+two-sided *p* → significant/not at 0.05; a *deterministic separation* of areas
+reports p≈0, and *equal areas* report "no testable difference"); `cv.locked`
+adds the CIs and the signed contrast (`delta` = AUC(primary) − AUC(reference)) plus
+`samplingUnit`/`independenceStatus`/`inferenceMethod`/`inferenceRan` metadata. The
+contrast is set with `primary`/`reference` tokens (`logistic`|`ldfa`|`qdfa`|
+`neural`) which **must name selected procedures** (an unselected one is a
+validation error, never a silent default); absent, it defaults to neural vs
+logistic only when both are selected. The locked size is validated for **achieved
+per-class counts** (≥ 2 events and ≥ 2 non-events on both sides), not just the
+total, so a rare-event request is refused up front with the counts.
 
 **Reproducibility:** for a given `seed`, each procedure runs on its own deterministic
 RNG substream keyed by its NAME and fold, so a procedure's fitted CV predictions are

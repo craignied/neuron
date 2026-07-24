@@ -9,12 +9,19 @@
 > (with per-procedure `validFolds` + `failures`). A Tier-3 file that cannot be written (unwritable
 > directory, full disk) is reported as a run WARNING naming the file + reason — never silently
 > dropped, and never counted as written unless it opened/wrote/flushed/closed cleanly.
-> **SHIPPED 2026-07-24 — the locked-test inference layer:** with `locked_fraction`/`locked_n`
-> on `/api/cv`, Tier 1 gains the `AUC (test) [95% CI]` column and the prespecified DeLong
-> contrast verdict (ΔAUC + two-sided *p* → significant/not); Tier 2 gains a locked-test
-> section; Tier 3 gains `cv_locked_predictions.csv` and a `lockedTest` block in `cv_run.json`;
-> the "frozen architecture" appears as each procedure's locked-test `arch`. Scoped to
-> **independent (IID) test rows** — cluster-aware test inference remains a follow-on.
+> **SHIPPED 2026-07-24 — the locked-test layer (inference is OPT-IN):** with
+> `locked_fraction`/`locked_n` on `/api/cv`, an outcome-stratified ROW holdout is scored for
+> point AUCs and predictions (`cv_locked_predictions.csv`; a `lockedTest` block in
+> `cv_run.json`). Ordinary DeLong assumes *independent* observations, which a mechanical row
+> holdout does not establish, so the AUC 95% CIs and the contrast *p* are produced **only when
+> the caller declares `independence=rows`**; otherwise inference is **withheld** (point AUCs
+> still shown) and the metadata records why. When inference runs, Tier 1 gains the
+> `AUC (test) [95% CI]` column and the prespecified DeLong verdict (ΔAUC + two-sided *p* →
+> significant/not; a deterministic area separation reports p≈0, equal areas "no testable
+> difference"); Tier 2 gains a locked-test section with sampling-unit/inference metadata; the
+> "frozen architecture" appears as each procedure's locked-test `arch`. `independence=cluster`
+> is refused — **cluster-aware test inference is a follow-on** and must never fall back to
+> ordinary DeLong.
 > **NOT yet implemented (aspirational below):**
 > Tier-2 calibration; per-fold timing; Tier-3 download buttons; a fully metric-agnostic
 > Tier 1; composing the locked/CV split with the covariate-strata or group-aware modes.
@@ -62,7 +69,7 @@ One row per procedure. A column appears only when it is meaningful:
 |---|---|---|
 | **Procedure** | always | `Logistic`, `LDFA`, `QDFA`, `Neural (OBD)`, … |
 | **AUC (CV)** | CV ran | mean ± sd across the outer folds. **The sd is descriptive spread across _dependent_ folds — NOT a confidence interval.** |
-| **AUC (test) [95% CI]** | a locked test set exists | point AUC on the untouched test set + its DeLong 95% CI |
+| **AUC (test)** / **AUC (test) [95% CI]** | a locked test set exists | point AUC on the untouched test set; the Wald DeLong 95% CI is appended ONLY when the sampling unit was declared independent (`independence=rows`), else the point AUC alone. Needs both classes (≥ 2 each) and finite predictions. |
 | **Arch** | the procedure has architecture metadata | modal selection + frequency (e.g. `4-2 (7/10)`); `—` for procedures without it |
 | **Time** | always | wall-clock for that procedure |
 

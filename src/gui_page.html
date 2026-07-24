@@ -431,6 +431,14 @@ network; the size-vs-error search appears in the chart below.</span></div>
       <option value="ldfa">ldfa</option><option value="qdfa">qdfa</option>
     </select></label>
 </div>
+<div class="row">
+  <label title="DeLong assumes INDEPENDENT test observations. Declare the sampling unit so the AUC confidence intervals and the contrast p-value are only produced when independence is justified. Leave unspecified to get predictions and point AUCs without inference. 'Clustered' (e.g. shared county) is a follow-on and cannot be selected yet.">Sampling unit
+    <select id="cv_independence">
+      <option value="">— not declared (no inference)</option>
+      <option value="rows">independent rows (IID) — run DeLong</option>
+      <option value="cluster" disabled>clustered — not yet available</option>
+    </select></label>
+</div>
 <div class="row"><span class="status">Every procedure is scored over ONE shared,
 outcome-stratified k-fold plan, so their out-of-fold predictions are paired row
 for row. The nested-OBD pipeline reruns the whole architecture search inside each
@@ -440,9 +448,12 @@ model above. The headline table, per-fold detail, and machine-readable files
 appear below. The CV &plusmn; is descriptive spread across dependent folds, not a
 confidence interval. With a locked-test fraction &gt; 0, an untouched
 outcome-stratified test set is held out of CV entirely; each procedure is refit on
-the development rows and scored once on it, and DeLong gives the AUC 95% CIs and
-the prespecified contrast's p (cv_locked_predictions.csv is written too). DeLong
-assumes independent test rows &mdash; not for clustered data (a follow-on).</span></div>
+the development rows and scored once on it (cv_locked_predictions.csv is written
+too). DeLong produces the AUC 95% CIs and the prespecified contrast's p ONLY when
+you declare the sampling unit as independent rows &mdash; ordinary DeLong assumes
+independent observations, which a mechanical row holdout does not establish (on
+clustered data, e.g. shared county, it would be invalid). Without the declaration
+you still get predictions and point AUCs; clustered inference is a follow-on.</span></div>
 </fieldset>
 
 <fieldset>
@@ -715,6 +726,7 @@ async function runCv() {
   if (lf > 0) p.locked_fraction = lf;
   if ($("cv_primary").value) p.primary = $("cv_primary").value;
   if ($("cv_reference").value) p.reference = $("cv_reference").value;
+  if ($("cv_independence").value) p.independence = $("cv_independence").value;
   const j = await api("/api/cv", p);
   if (!j.ok) { setStatus("cvstatus", false, j.message); return; }
   cving = true;

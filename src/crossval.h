@@ -194,8 +194,9 @@ LockedResult evaluateOnce( DataSet& data, const vector< unsigned >& trainRows,
 //    collect the results, so the procedures stay paired. It owns coordination
 //    only -- it does not train, select, or know any model family (rule 6).
 //    When substreams is true each procedure runs on its OWN deterministic RNG
-//    substream keyed by ( seed, procedure index, fold ), so a procedure's CV
-//    result is invariant to which OTHER procedures are compared and in what order
+//    substream keyed by ( seed, procedure NAME, fold ) -- the name is the stable
+//    identity, so a procedure's CV result is invariant to which OTHER procedures
+//    are compared and in what order
 //    -- comparison membership/ordering is a presentation choice, not an input to
 //    a procedure's fit. Pass the same seed used to build the shared fold plan.
 Comparison compare( DataSet& data, const vector< unsigned >& foldId,
