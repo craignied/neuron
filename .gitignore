@@ -18,3 +18,8 @@ neuron.log
 neuron_actions.log
 model.txt
 tests/gui/runs/
+# Tier-3 cross-validation artifacts, written next to the loaded dataset
+cv_predictions.csv
+cv_metrics.csv
+cv_locked_predictions.csv
+cv_run.json
