@@ -39,10 +39,19 @@ struct ValidationObserver : Iterative::Observer
 	double trainAtMin = numeric_limits< double >::infinity();
 	unsigned samplesAbove = 0;
 
+	// Why this observer stopped the run. Both exits below return false, but a
+	//    caller cancel and held-out deterioration are different facts: the first
+	//    makes the trial INELIGIBLE, the second is a meaningful stopping rule.
+	Iterative::StopReason reason = Iterative::STOP_CANCELLED;
+	Iterative::StopReason whyStopped() const override { return reason; }
+
 	bool onIteration( unsigned iteration, double setError ) override
 	{
 		if ( cancel && cancel->load() )
+		{
+			reason = Iterative::STOP_CANCELLED;
 			return false;
+		}
 
 		if ( iteration % cfg->sampleEvery != 0 ) // sample on the cadence only
 			return true;
@@ -62,9 +71,14 @@ struct ValidationObserver : Iterative::Observer
 		}
 		else if ( testErr > minTestErr * ( 1.0 + cfg->earlyStopTol ) )
 		{
-			// The test error has clearly turned back up: overtraining
+			// The test error has clearly turned back up: overtraining. This is
+			//    a meaningful stopping rule -- the size is scored at its
+			//    held-out minimum and the trial is eligible.
 			if ( ++samplesAbove >= cfg->earlyStopPatience )
+			{
+				reason = Iterative::STOP_EARLY_STOP;
 				return false;
+			}
 		}
 
 		return true;
@@ -189,10 +203,11 @@ void printTable( ostream& out, const vector< obd::SizeTrial >& history,
 		if ( t->testCA >= 0 ) out << setw( 8 ) << t->testCA * 100 << "%";
 		else out << setw( 9 ) << "n/a";
 		out << resetiosflags( ios::fixed ) << "   "
-			<< ( t->stop == Iterative::STOP_OBSERVER ? "early stop"
+			<< ( t->stop == Iterative::STOP_EARLY_STOP ? "early stop"
 				: t->stop == Iterative::STOP_PLATEAU ? "plateau"
 				: t->stop == Iterative::STOP_GRADMAX ? "converged"
-				: "budget" ) << endl;
+				: t->stop == Iterative::STOP_CANCELLED ? "cancelled"
+				: "CEILING" ) << endl;
 	}
 	out << "Selected: " << selected << " hidden nodes (grew to " << grewTo << ")." << endl;
 }

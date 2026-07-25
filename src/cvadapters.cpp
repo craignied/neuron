@@ -66,6 +66,12 @@ struct CancelObserver : Iterative::Observer
 	{
 		return !( cancel && cancel->load() );
 	}
+	// The only way this observer stops a run is a cancel, which is the
+	//    Observer default -- named here so the intent is explicit.
+	Iterative::StopReason whyStopped() const override
+	{
+		return Iterative::STOP_CANCELLED;
+	}
 };
 }
 

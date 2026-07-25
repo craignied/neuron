@@ -325,10 +325,75 @@ static void test_early_stop_fires()
 
 	bool anyEarlyStop = false;
 	for ( const obd::SizeTrial& t : r.history )
-		if ( t.stop == Iterative::STOP_OBSERVER )
+		if ( t.stop == Iterative::STOP_EARLY_STOP )
 			anyEarlyStop = true;
 	expect( r.ok && anyEarlyStop && !r.cancelled,
 		"a size whose test error only rises is early-stopped, not run to budget" );
+}
+
+// Cancellation and validation early stopping are DIFFERENT FACTS and must be
+// distinguishable from a trial's recorded stop reason. Both make OBD's
+// ValidationObserver return false, and before the Observer boundary could name
+// its reason they collapsed onto one enum value -- so a cancelled trial was
+// reported as a successful early stop (the OBD table literally printed "early
+// stop" for a user cancel, while the GUI printed "cancelled" for the same
+// value). Deliberately written WITHOUT naming either enum constant, so it
+// compiles against the pre-fix engine too and fails on the behavior rather than
+// on a missing symbol: pre-fix the two reasons are equal, post-fix they differ.
+static void test_cancel_and_early_stop_are_distinguishable()
+{
+	// (a) A trial stopped by held-out deterioration: inverted test labels, so
+	//     the test error can only rise -- the same fixture as above.
+	util::set_seed( 3 );
+	unsigned n = 80;
+	Matrix< double > tr( n, 3 ), te( n, 3 );
+	for ( unsigned i = 0; i < n; i++ )
+	{
+		double x0 = -1.0 + 2.0 * ( ( i * 37 ) % 100 ) / 99.0;
+		double x1 = -1.0 + 2.0 * ( ( i * 53 ) % 100 ) / 99.0;
+		unsigned rule = ( x0 + x1 > 0 ) ? 1 : 0;
+		tr( i, 0 ) = x0; tr( i, 1 ) = x1; tr( i, 2 ) = rule;
+		te( i, 0 ) = x0; te( i, 1 ) = x1; te( i, 2 ) = 1 - rule;
+	}
+	DataSet inverted;
+	inverted.setInput( 2 ); inverted.setOutput( 1 );
+	inverted.setDiscrete( true ); inverted.setHistory( false );
+	inverted.setTrainMatrix( tr );
+	inverted.setTestMatrix( te );
+
+	obd::Config cfg;
+	cfg.hStart = 4; cfg.hMax = 5; cfg.iterBudget = 2000; cfg.sampleEvery = 5;
+	cfg.earlyStopPatience = 2; cfg.growPatience = 1;
+
+	obd::Result early = obd::run( inverted, cfg, nullptr, nullptr );
+	bool haveEarly = false;
+	Iterative::StopReason earlyReason = Iterative::STOP_NONE;
+	for ( const obd::SizeTrial& t : early.history )
+		if ( !haveEarly && t.stop != Iterative::STOP_MAX_ITERATIONS
+			&& t.stop != Iterative::STOP_PLATEAU
+			&& t.stop != Iterative::STOP_GRADMAX )
+		{
+			earlyReason = t.stop; haveEarly = true;
+		}
+
+	// (b) A trial stopped by cancellation: the progress callback trips the flag
+	//     on its first sample, so the very next iteration cancels mid-trial and
+	//     the trial is still recorded in the history.
+	util::set_seed( 7 );
+	DataSet d = makeData( 150, 45 );
+	atomic< bool > cancel{ false };
+	obd::ProgressFn trip = [ &cancel ]( const char*, unsigned, unsigned,
+		double, double ) { cancel.store( true ); };
+
+	obd::Result stopped = obd::run( d, cfg, trip, &cancel );
+	bool haveCancel = !stopped.history.empty();
+	Iterative::StopReason cancelReason = haveCancel
+		? stopped.history.front().stop : Iterative::STOP_NONE;
+
+	expect( haveEarly && haveCancel && stopped.cancelled,
+		"the fixtures produce one early-stopped trial and one cancelled trial" );
+	expect( earlyReason != cancelReason,
+		"a cancelled trial and an early-stopped trial record DIFFERENT stop reasons" );
 }
 
 // The train-plateau backstop must be WIRED into each size's training: a size
@@ -452,6 +517,7 @@ int main()
 	test_train_after_ops();
 	test_driver();
 	test_early_stop_fires();
+	test_cancel_and_early_stop_are_distinguishable();
 	test_plateau_backstop_fires();
 	test_validation_monitor();
 

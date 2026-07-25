@@ -18,6 +18,28 @@ using namespace std;
 
 class Iterative : public Model {
 public:
+	// Why the last train() ended. Set at every exit from the training loop.
+	//
+	// ELIGIBILITY: only STOP_MIN_ERROR, STOP_CHANGE, STOP_WINDOW, STOP_GRADMAX,
+	//    STOP_PLATEAU, and STOP_EARLY_STOP mean a stopping RULE fired -- the fit
+	//    reached a point it was asked to stop at. STOP_MAX_ITERATIONS is a safety
+	//    ceiling, not a stopping rule: reaching it is a failure to converge, and
+	//    no caller may treat those weights as a finished fit (see obd::eligible).
+	//    STOP_CANCELLED and STOP_PROBE_BUDGET are likewise not convergence.
+	enum StopReason {
+		STOP_NONE, // train() has not run
+		STOP_MAX_ITERATIONS, // the iteration budget ran out: NOT convergence
+		STOP_MIN_ERROR, // error fell below the minimum
+		STOP_CHANGE, // change in error over 1 iteration fell below delta
+		STOP_WINDOW, // error increased over the window
+		STOP_GRADMAX, // maximum absolute gradient fell below the limit
+		STOP_PLATEAU, // the error stopped improving (auto-stop, ROADMAP 2 Ph3)
+		STOP_CANCELLED, // an outside request stopped the run (GUI/CV cancel)
+		STOP_EARLY_STOP, // held-out error deteriorated (OBD validation early stop)
+		STOP_PROBE_BUDGET // an autoalgo probe's time budget expired: a bounded
+		                  //    experiment, never a claim of convergence
+	};
+
 	// Observer of a training run. onIteration() is called at the BOTTOM of
 	//    every training iteration, after all the existing stop checks, so a
 	//    run with no observer is bit-identical to one that never had the
@@ -28,19 +50,17 @@ public:
 	public:
 		virtual ~Observer() {}
 		virtual bool onIteration( unsigned iteration, double setError ) = 0;
-	};
 
-	// Why the last train() ended. Set at every exit from the training loop;
-	//    printed output is unchanged (each reason's message predates this).
-	enum StopReason {
-		STOP_NONE, // train() has not run
-		STOP_MAX_ITERATIONS, // the iteration budget ran out
-		STOP_MIN_ERROR, // error fell below the minimum
-		STOP_CHANGE, // change in error over 1 iteration fell below delta
-		STOP_WINDOW, // error increased over the window
-		STOP_GRADMAX, // maximum absolute gradient fell below the limit
-		STOP_PLATEAU, // the error stopped improving (auto-stop, ROADMAP 2 Ph3)
-		STOP_OBSERVER // the observer said stop (GUI cancel)
+		// Why this observer just asked training to stop. Called by the train
+		//    loop ONLY after onIteration() returned false, and recorded as the
+		//    run's StopReason. The observer is the only thing that knows: the
+		//    loop cannot tell a user cancel from held-out deterioration from an
+		//    expired probe window, and collapsing them once made a cancelled
+		//    trial indistinguishable from a successful early stop.
+		//    Default = STOP_CANCELLED, the conservative reading (an outside
+		//    request). An observer that stops for its own reason overrides this
+		//    and MUST NOT report a convergence reason it did not observe.
+		virtual StopReason whyStopped() const { return STOP_CANCELLED; }
 	};
 
 	Iterative(); // default constructor

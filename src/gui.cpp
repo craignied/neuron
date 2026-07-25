@@ -159,9 +159,10 @@ struct GuiObserver : Iterative::Observer
 	}
 };
 
-// The engine's stop reason as a JSON-friendly name. STOP_OBSERVER reads as
-//    "cancelled" here because the GUI's observer only ever stops on the Stop
-//    button; the plateau auto-stop reports separately as "plateau".
+// The engine's stop reason as a JSON-friendly name. These tokens are the
+//    machine-readable contract: a caller must be able to tell a converged fit
+//    (grad_max / plateau / validation_early_stop) from a run that merely ran
+//    out of ceiling (max_iterations) or was stopped from outside (cancelled).
 const char* stopReasonName( Iterative::StopReason r )
 {
 	switch ( r )
@@ -172,7 +173,9 @@ const char* stopReasonName( Iterative::StopReason r )
 	case Iterative::STOP_WINDOW: return "error_window";
 	case Iterative::STOP_GRADMAX: return "grad_max";
 	case Iterative::STOP_PLATEAU: return "plateau";
-	case Iterative::STOP_OBSERVER: return "cancelled";
+	case Iterative::STOP_CANCELLED: return "cancelled";
+	case Iterative::STOP_EARLY_STOP: return "validation_early_stop";
+	case Iterative::STOP_PROBE_BUDGET: return "probe_budget";
 	default: return "none";
 	}
 }

@@ -30,12 +30,24 @@ struct BudgetObserver : Iterative::Observer
 			+ chrono::milliseconds( budgetMs ) ),
 		cancel( cancelFlag ) {}
 
+	// A probe is a bounded EXPERIMENT, not a final fit: when its window expires
+	//    it must say so rather than borrow a convergence reason. A probe that
+	//    ends this way has not converged and never claims to have.
+	Iterative::StopReason reason = Iterative::STOP_PROBE_BUDGET;
+	Iterative::StopReason whyStopped() const override { return reason; }
+
 	bool onIteration( unsigned iteration, double ) override
 	{
 		lastIteration = iteration;
 		if ( cancel && cancel->load() )
+		{
+			reason = Iterative::STOP_CANCELLED;
 			return false;
-		return chrono::steady_clock::now() < deadline;
+		}
+		if ( chrono::steady_clock::now() < deadline )
+			return true;
+		reason = Iterative::STOP_PROBE_BUDGET;
+		return false;
 	}
 };
 
@@ -148,8 +160,10 @@ autoalgo::Result autoalgo::pick( const Network& start, unsigned budgetMs,
 				<< setiosflags( ios::scientific ) << setprecision( 6 )
 				<< p->error << resetiosflags( ios::scientific )
 				<< " after " << p->iterations << " iterations";
-			if ( p->stop == Iterative::STOP_OBSERVER )
+			if ( p->stop == Iterative::STOP_PROBE_BUDGET )
 				callerScreen << " (budget spent)";
+			else if ( p->stop == Iterative::STOP_CANCELLED )
+				callerScreen << " (cancelled)";
 			else if ( p->stop == Iterative::STOP_GRADMAX )
 				callerScreen << " (CONVERGED inside the budget)";
 			callerScreen << endl;

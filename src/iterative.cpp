@@ -378,14 +378,23 @@ double Iterative::train()
 		{
 			screenStream.str( "" ); // reset screen stream
 
-			// Prepare line for printing to screen (only observer-driven runs
-			//    can ever print this, so transcripts without one are unchanged)
-			screenStream << "Training was stopped by request." << endl;
+			// The observer names its own reason -- a cancel, a validation early
+			//    stop, and an expired probe window are different facts and must
+			//    not be reported alike. Only observer-driven runs can print any
+			//    of these, so transcripts without one are unchanged.
+			StopReason why = observerPtr->whyStopped();
+
+			if ( why == STOP_EARLY_STOP )
+				screenStream << "Held-out error deteriorated: stopped early." << endl;
+			else if ( why == STOP_PROBE_BUDGET )
+				screenStream << "The probe's time budget expired." << endl;
+			else
+				screenStream << "Training was stopped by request." << endl;
 
 			fileStream << screenStream.str(); // stream line into file stream
 			util::screen() << screenStream.str(); // then print to screen
 
-			stopReason = STOP_OBSERVER;
+			stopReason = why;
 			break;
 		}
 	}

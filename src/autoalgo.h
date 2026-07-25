@@ -29,8 +29,10 @@ struct Probe {
 	double error;       // final training error inside the budget
 	unsigned iterations; // iterations completed inside the budget
 	bool usable;        // finite, non-negative error (a diverged probe is not)
-	// Why the probe ended: STOP_OBSERVER = the budget; STOP_GRADMAX =
-	//    it CONVERGED inside the budget (a strong signal)
+	// Why the probe ended: STOP_PROBE_BUDGET = the probe window expired (a
+	//    bounded experiment, NOT a converged fit); STOP_GRADMAX = it CONVERGED
+	//    inside the budget (a strong signal). Whichever probe wins, the real
+	//    training that follows must still reach an eligible stopping condition.
 	Iterative::StopReason stop = Iterative::STOP_NONE;
 };
 
