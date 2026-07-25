@@ -63,6 +63,12 @@ public:
 		virtual StopReason whyStopped() const { return STOP_CANCELLED; }
 	};
 
+	// THE machine-readable name of a stop reason -- one spelling, used by every
+	//    report, JSON payload, and artifact so a caller never meets two names for
+	//    the same outcome (rule 6). A caller that also needs to say whether the
+	//    run counts as a fitted model asks obd::classify, not this.
+	static const char* stopReasonToken( StopReason r );
+
 	Iterative(); // default constructor
 	virtual ~Iterative(); // destructor
 

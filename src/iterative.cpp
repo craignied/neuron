@@ -17,6 +17,23 @@ Iterative::Iterative() : maxIterations ( 1000000 ), printCount ( 1000 ),
 	delta ( 1e-16 ), gradMaxLimit ( 1e-6 ), autoStopTol ( 1e-4 ),
 	autoStopWindow ( 100 ), observerPtr ( nullptr ), stopReason ( STOP_NONE ) { }
 
+const char* Iterative::stopReasonToken( StopReason r )
+{
+	switch ( r )
+	{
+	case STOP_MAX_ITERATIONS: return "max_iterations"; // NOT convergence
+	case STOP_MIN_ERROR: return "min_error";
+	case STOP_CHANGE: return "min_change";
+	case STOP_WINDOW: return "error_window";
+	case STOP_GRADMAX: return "grad_max";
+	case STOP_PLATEAU: return "plateau";
+	case STOP_CANCELLED: return "cancelled";
+	case STOP_EARLY_STOP: return "validation_early_stop";
+	case STOP_PROBE_BUDGET: return "probe_budget";
+	default: return "none";
+	}
+}
+
 // Default destructor
 Iterative::~Iterative() { }
 

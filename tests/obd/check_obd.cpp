@@ -253,6 +253,16 @@ static void test_driver()
 	obd::Config cfg;
 	cfg.hStart = 2; cfg.hMax = 5; cfg.iterBudget = 300; cfg.sampleEvery = 10;
 	cfg.earlyStopPatience = 2; cfg.growPatience = 1;
+	// A plateau tolerance that CAN fire on this fixture. Measured: with the
+	// shipped default (1e-4) canonical training on this problem never reaches
+	// gradient convergence (limit 1e-6), never plateaus, and never trips the
+	// held-out rise -- not at 1,000 iterations and not at 20,000 -- so every
+	// trial ends at the ceiling and the search now (correctly) refuses. The
+	// cliff is sharp: 3e-3 never fires, 1e-2 fires at iteration 217. This test
+	// is about the driver completing a search, so it uses a tolerance under
+	// which trials genuinely finish; whether the PRODUCT default can fire is a
+	// separate question, measured and reported rather than tuned away here.
+	cfg.plateauTol = 1e-2;
 
 	obd::Result r = obd::run( d, cfg, nullptr, nullptr );
 
@@ -396,6 +406,169 @@ static void test_cancel_and_early_stop_are_distinguishable()
 		"a cancelled trial and an early-stopped trial record DIFFERENT stop reasons" );
 }
 
+// A ceiling-censored search must REFUSE, not select. With a tiny iteration
+// budget and both real stopping rules pushed out of reach, every trial ends at
+// max_iterations -- which is a failure to converge, not a stopping condition.
+// Before eligibility existed, OBD compared those unfinished descents anyway:
+// each candidate was still improving, so the prune tolerance accepted nearly
+// anything and the search collapsed toward the minimum architecture. This test
+// fails against the pre-fix code, which returns ok with a selected size.
+static void test_ceiling_censored_search_refuses()
+{
+	util::set_seed( 5 );
+	DataSet d = makeData( 150, 45 );
+
+	obd::Config cfg;
+	cfg.hStart = 2; cfg.hMax = 6;
+	cfg.iterBudget = 25;      // far too few to converge
+	cfg.sampleEvery = 5;
+	cfg.earlyStopTol = 10.0;  // held-out rise can never reach this: no early stop
+	cfg.plateauWindow = 500;  // needs 1000 iterations to even evaluate: no plateau
+	cfg.growPatience = 1;
+
+	obd::Result r = obd::run( d, cfg, nullptr, nullptr );
+
+	expect( !r.ok && r.winner == nullptr,
+		"a ceiling-censored search produces NO model" );
+	expect( r.selectedHidden == 0,
+		"a ceiling-censored search reports NO selected architecture" );
+	expect( r.ceilingExhausted && !r.cancelled,
+		"the refusal is reported as ceiling exhaustion, not cancellation" );
+	expect( r.message.find( "ceiling" ) != string::npos,
+		"the refusal explains that the iteration ceiling was reached" );
+
+	// Pruning must not have begun: every recorded trial belongs to the grow phase.
+	bool anyPrune = false, anyEligible = false;
+	for ( const obd::SizeTrial& t : r.history )
+	{
+		if ( !t.phaseGrow ) anyPrune = true;
+		if ( t.eligibility == obd::ELIGIBLE ) anyEligible = true;
+	}
+	expect( !anyPrune, "pruning never begins from an unfinished trial" );
+	expect( !anyEligible && !r.history.empty(),
+		"every censored trial is recorded and marked ineligible" );
+}
+
+// Eligible and ineligible trials in one run: the search must stop at the first
+// trial it cannot finish rather than fall back on the sizes that did finish.
+// A completed trial's presence does not license selecting from an incomplete
+// one, and an incomplete trial with a numerically lower loss cannot win.
+static void test_incomplete_cannot_win_over_completed()
+{
+	util::set_seed( 9 );
+	DataSet d = makeData( 150, 45 );
+
+	// A generous plateau tolerance lets the FIRST size finish honestly (plateau
+	// fires quickly), while a budget too small for the larger warm-started sizes
+	// leaves a later trial censored.
+	obd::Config cfg;
+	cfg.hStart = 2; cfg.hMax = 6;
+	cfg.iterBudget = 120;
+	cfg.sampleEvery = 5;
+	cfg.earlyStopTol = 10.0;   // no early stop
+	cfg.plateauTol = 0.5;      // any window improvement under 50% is a strike
+	cfg.plateauWindow = 20;
+	cfg.growPatience = 3;
+
+	obd::Result r = obd::run( d, cfg, nullptr, nullptr );
+
+	// Whatever the mix, the invariant is the same: anything reported as selected
+	// must have come from an eligible trial, and an ineligible trial in the
+	// history means the search refused rather than selected.
+	bool sawIneligible = false;
+	for ( const obd::SizeTrial& t : r.history )
+		if ( t.eligibility != obd::ELIGIBLE ) sawIneligible = true;
+
+	if ( sawIneligible )
+		expect( !r.ok && r.selectedHidden == 0,
+			"a run containing an unfinished trial selects nothing, even though "
+			"earlier trials finished" );
+	else
+	{
+		bool winnerEligible = false;
+		for ( const obd::SizeTrial& t : r.history )
+			if ( t.hidden == r.selectedHidden && t.eligibility == obd::ELIGIBLE )
+				winnerEligible = true;
+		expect( r.ok && winnerEligible,
+			"the selected architecture came from a trial that ended on a "
+			"stopping rule" );
+	}
+}
+
+// The classification boundary itself, exercised directly: every meaningful
+// stopping rule is eligible, every non-rule outcome is not, and a non-finite
+// loss is a numerical failure whatever ended the run.
+static void test_eligibility_classification()
+{
+	bool rulesEligible =
+		obd::classify( Iterative::STOP_GRADMAX, 0.3, 0.2 ) == obd::ELIGIBLE
+		&& obd::classify( Iterative::STOP_PLATEAU, 0.3, 0.2 ) == obd::ELIGIBLE
+		&& obd::classify( Iterative::STOP_EARLY_STOP, 0.3, 0.2 ) == obd::ELIGIBLE
+		&& obd::classify( Iterative::STOP_MIN_ERROR, 0.3, 0.2 ) == obd::ELIGIBLE
+		&& obd::classify( Iterative::STOP_CHANGE, 0.3, 0.2 ) == obd::ELIGIBLE
+		&& obd::classify( Iterative::STOP_WINDOW, 0.3, 0.2 ) == obd::ELIGIBLE;
+	expect( rulesEligible,
+		"gradient, plateau, validation early stop and the configured error "
+		"conditions are all eligible stopping rules" );
+
+	expect( obd::classify( Iterative::STOP_MAX_ITERATIONS, 0.3, 0.2 )
+			== obd::INCOMPLETE_CEILING,
+		"reaching max_iterations is INCOMPLETE, never a successful stop" );
+	expect( obd::classify( Iterative::STOP_CANCELLED, 0.3, 0.2 )
+			== obd::INCOMPLETE_CANCELLED,
+		"cancellation stays cancellation and is not eligible" );
+	expect( obd::classify( Iterative::STOP_PROBE_BUDGET, 0.3, 0.2 ) != obd::ELIGIBLE,
+		"an expired probe window is not a converged fit" );
+
+	double nan_ = numeric_limits< double >::quiet_NaN();
+	double inf_ = numeric_limits< double >::infinity();
+	expect( obd::classify( Iterative::STOP_GRADMAX, nan_, 0.2 )
+			== obd::NUMERICAL_FAILURE
+		&& obd::classify( Iterative::STOP_PLATEAU, 0.3, inf_ )
+			== obd::NUMERICAL_FAILURE,
+		"a non-finite score or training error is a numerical failure even when a "
+		"stopping rule fired" );
+
+	// The machine-readable tokens the reports and artifacts publish.
+	bool tokens =
+		string( obd::stopToken( Iterative::STOP_GRADMAX, obd::ELIGIBLE ) ) == "grad_max"
+		&& string( obd::stopToken( Iterative::STOP_PLATEAU, obd::ELIGIBLE ) ) == "plateau"
+		&& string( obd::stopToken( Iterative::STOP_EARLY_STOP, obd::ELIGIBLE ) )
+			== "validation_early_stop"
+		&& string( obd::stopToken( Iterative::STOP_MAX_ITERATIONS,
+			obd::INCOMPLETE_CEILING ) ) == "max_iterations"
+		&& string( obd::stopToken( Iterative::STOP_CANCELLED,
+			obd::INCOMPLETE_CANCELLED ) ) == "cancelled"
+		&& string( obd::stopToken( Iterative::STOP_GRADMAX,
+			obd::NUMERICAL_FAILURE ) ) == "numerical_failure";
+	expect( tokens,
+		"each outcome has its own machine-readable token (gradient, plateau, "
+		"validation_early_stop, max_iterations, cancelled, numerical_failure)" );
+}
+
+// A cancelled search must remain cancelled -- never relabelled as a ceiling
+// refusal, and never yielding a nominal selected architecture.
+static void test_cancellation_is_not_a_ceiling_refusal()
+{
+	util::set_seed( 13 );
+	DataSet d = makeData( 150, 45 );
+
+	obd::Config cfg;
+	cfg.hStart = 2; cfg.hMax = 6; cfg.iterBudget = 4000; cfg.sampleEvery = 5;
+	cfg.earlyStopTol = 10.0; cfg.plateauWindow = 500; cfg.growPatience = 1;
+
+	atomic< bool > cancel{ false };
+	obd::ProgressFn trip = [ &cancel ]( const char*, unsigned, unsigned,
+		double, double ) { cancel.store( true ); };
+
+	obd::Result r = obd::run( d, cfg, trip, &cancel );
+
+	expect( r.cancelled && !r.ceilingExhausted,
+		"a cancelled search reports cancellation, not ceiling exhaustion" );
+	expect( r.selectedHidden == 0 && r.winner == nullptr,
+		"a cancelled search yields no nominal architecture" );
+}
+
 // The train-plateau backstop must be WIRED into each size's training: a size
 // that converges flat never trips the test-error rise, so the plateau detector
 // is what saves its remaining budget. Proven with a huge tolerance (0.5): any
@@ -518,6 +691,10 @@ int main()
 	test_driver();
 	test_early_stop_fires();
 	test_cancel_and_early_stop_are_distinguishable();
+	test_eligibility_classification();
+	test_ceiling_censored_search_refuses();
+	test_incomplete_cannot_win_over_completed();
+	test_cancellation_is_not_a_ceiling_refusal();
 	test_plateau_backstop_fires();
 	test_validation_monitor();
 

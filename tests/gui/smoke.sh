@@ -532,11 +532,41 @@ curl -s -X POST "$URL/api/load" -d "mode=raw&path=lowbwt2-2train.txt&fraction=0"
 curl -s -X POST "$URL/api/obd" -d "hidden_start=2&hidden_max=4" \
     | grep -q '"ok":false' || fail "OBD must refuse a dataset with no test set"
 
-# Happy path: an async grow-then-prune search that reports its phase while it
-#    runs and returns a size-vs-error history plus the winner's ROC and stats
+# A reached safety ceiling is a FAILURE TO CONVERGE, presented as such: no
+#    architecture is selected, every trial is reported with its stop reason and
+#    eligibility, and pruning never begins. A tiny budget with the default
+#    stopping tolerances guarantees the ceiling fires first.
 curl -s -X POST "$URL/api/load" -d "mode=raw&path=lowbwt2-2train.txt&fraction=0.3&seed=1" >/dev/null
 curl -s -X POST "$URL/api/obd" \
-    -d "hidden_start=2&hidden_max=4&iter_budget=200&sample_every=10&grow_patience=1&seed=1" \
+    -d "hidden_start=2&hidden_max=6&iter_budget=40&sample_every=5&seed=1" \
+    | grep -q '"ok":true' || fail "OBD ceiling search did not start"
+for i in $(seq 1 120); do
+    curl -s "$URL/api/train/status" > obd_ceiling.json
+    grep -q '"running":false' obd_ceiling.json && break
+    sleep 0.3
+done
+$PY - <<'PY' || fail "a ceiling-exhausted OBD run must refuse, not select"
+import json
+d = json.load(open("obd_ceiling.json"))["result"]
+assert d["ok"] is False, d                      # not a success
+assert d.get("ceilingExhausted") is True, d     # and specifically this failure
+assert "selectedHidden" not in d, d             # NO architecture reported
+assert "ceiling" in d["message"], d["message"]
+t = d["trials"]
+assert t and all(x["eligible"] is False for x in t), t
+assert all(x["stopReason"] == "max_iterations" for x in t), t
+assert all(x["phase"] == "grow" for x in t), t  # pruning never began
+PY
+
+# Happy path: an async grow-then-prune search that reports its phase while it
+#    runs and returns a size-vs-error history plus the winner's ROC and stats.
+#    autostop_tol is raised from the 1e-4 default because on this dataset no
+#    stopping rule fires at the default within any practical budget (measured:
+#    not at 20,000 iterations), and a search whose trials cannot finish now
+#    correctly refuses rather than comparing unfinished fits.
+curl -s -X POST "$URL/api/load" -d "mode=raw&path=lowbwt2-2train.txt&fraction=0.3&seed=1" >/dev/null
+curl -s -X POST "$URL/api/obd" \
+    -d "hidden_start=2&hidden_max=4&iter_budget=2000&sample_every=10&grow_patience=1&seed=1&autostop_tol=0.01" \
     | grep -q '"ok":true' || fail "OBD search did not start"
 sawObd=0
 for i in $(seq 1 120); do
@@ -555,6 +585,13 @@ assert d["selectedHidden"] >= 1, d["selectedHidden"]
 h = d["obd"]["history"]
 assert h and h[0]["hidden"] == 2, h                 # grow starts at hidden_start
 assert "stats" in d and "roc" in d, list(d)
+# Every trial admitted to the comparison ended on a real stopping rule, and the
+# run names the optimizer it ran on (Auto records that it chose).
+t = d["obd"]["trials"]
+assert t and all(x["eligible"] is True for x in t), t
+assert all(x["stopReason"] != "max_iterations" for x in t), t
+assert d["optimizer"] in ("Canonical", "CGD", "Shanno"), d.get("optimizer")
+assert d["optimizerAuto"] is False, d               # this run fixed it by default
 PY
 
 # A plain training run reports NO obd field in its status (that field is
@@ -621,7 +658,7 @@ curl -s -X POST "$URL/api/load" -d "mode=raw&path=lowbwt2-2train.txt&fraction=0.
 #    returning the three-tier report (Tier 1 headline text, Tier 2 detail, Tier 3
 #    files) and writing the machine-readable CSVs beside the data
 curl -s -X POST "$URL/api/cv" \
-    -d "folds=5&seed=42&logistic=1&ldfa=0&qdfa=0&neural=1&neural_obd=1&hidden_max=4&iter_budget=200&inner_val=0.25" \
+    -d "folds=5&seed=42&logistic=1&ldfa=0&qdfa=0&neural=1&neural_obd=1&hidden_max=4&iter_budget=2000&inner_val=0.25&autostop_tol=0.01" \
     | grep -q '"ok":true' || fail "CV run did not start"
 sawCv=0
 for i in $(seq 1 120); do
@@ -656,6 +693,29 @@ PY
 lines=$(wc -l < cv_predictions.csv | tr -d ' ')
 [ "$lines" -eq 190 ] || fail "cv_predictions.csv should have 190 lines (header + 189), got $lines"
 head -1 cv_predictions.csv | grep -q "Logistic" || fail "cv_predictions.csv missing a procedure column"
+
+# Nested OBD that cannot finish a trial inside its ceiling: every fold FAILS.
+#    The neural procedure must contribute no AUC, no architecture and no
+#    optimizer metadata -- a failed fold fabricates nothing (and the comparison
+#    beside it still reports the procedures that did fit).
+curl -s -X POST "$URL/api/cv" \
+    -d "folds=5&seed=42&logistic=1&neural=1&neural_obd=1&hidden_max=4&iter_budget=40&inner_val=0.25" \
+    | grep -q '"ok":true' || fail "ceiling-limited CV run did not start"
+for i in $(seq 1 200); do
+    curl -s "$URL/api/train/status" > cv_ceiling.json
+    grep -q '"running":false' cv_ceiling.json && break
+    sleep 0.3
+done
+$PY - <<'PY' || fail "a ceiling-exhausted nested OBD must fail its folds, not fabricate"
+import json
+cv = json.load(open("cv_ceiling.json", encoding="utf-8"))["result"]["cv"]
+t1, t2 = cv["tier1"], cv["tier2"]
+assert "Neural (OBD)" in t1, t1
+# no architecture footnote and no optimizer summary for a procedure that never fitted
+assert "OBD selected" not in t1, t1
+assert "Optimizer selection:" not in t2, t2
+assert "ceiling" in t2, t2[:800]      # the failure reason is reported, per fold
+PY
 
 # 409 busy while a CV run owns the engine (shares the OBD/train job machinery)
 # AND Stop must PROPAGATE into the running work (B1): a plain-neural CV with a

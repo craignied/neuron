@@ -165,19 +165,7 @@ struct GuiObserver : Iterative::Observer
 //    out of ceiling (max_iterations) or was stopped from outside (cancelled).
 const char* stopReasonName( Iterative::StopReason r )
 {
-	switch ( r )
-	{
-	case Iterative::STOP_MAX_ITERATIONS: return "max_iterations";
-	case Iterative::STOP_MIN_ERROR: return "min_error";
-	case Iterative::STOP_CHANGE: return "min_change";
-	case Iterative::STOP_WINDOW: return "error_window";
-	case Iterative::STOP_GRADMAX: return "grad_max";
-	case Iterative::STOP_PLATEAU: return "plateau";
-	case Iterative::STOP_CANCELLED: return "cancelled";
-	case Iterative::STOP_EARLY_STOP: return "validation_early_stop";
-	case Iterative::STOP_PROBE_BUDGET: return "probe_budget";
-	default: return "none";
-	}
+	return Iterative::stopReasonToken( r ); // one spelling, engine-owned
 }
 
 // --- JSON helpers (responses only; requests arrive form-encoded) ---------
@@ -1098,6 +1086,15 @@ string runTrainingAndBuildResult( bool continued, const string& autoJson,
 		: "trained; final error " ) << finalError;
 	if ( stopReason == "cancelled" )
 		msg << " (stopped by request)";
+	// Reaching the iteration ceiling is a FAILURE TO CONVERGE, not a finished
+	//    fit. Ordinary training keeps the weights -- the user may continue from
+	//    them, which is the whole point of a resumable run -- but the result must
+	//    never read as successful completion. The page renders this prominently.
+	else if ( stopReason == "max_iterations" )
+		msg << " -- WARNING: training did NOT converge. It stopped because it hit "
+			"the maximum iteration count, which is a safety limit, not a stopping "
+			"condition. The weights are kept so you can continue training; raise "
+			"the maximum iterations, or set a stopping condition that can fire.";
 
 	lastReport = preamble + cap.text.str(); // downloadable as report.txt
 	lastTrainError = finalError; // baseline for stepwise regression
@@ -1495,12 +1492,35 @@ string runObdJob( const obd::Config& cfg )
 
 	obd::Result r = obd::run( *dataPtr, cfg, progress, &job.cancel );
 
+	// Every trial's stop reason and eligibility, machine-readable -- present on
+	//    a refusal too, which is when a caller most needs to see WHY nothing was
+	//    selected. Emitted from the same records the printed table renders.
+	ostringstream trials;
+	trials << "[";
+	for ( unsigned i = 0; i < r.history.size(); i++ )
+	{
+		const obd::SizeTrial& t = r.history[ i ];
+		trials << ( i ? "," : "" )
+			<< "{\"phase\":\"" << ( t.phaseGrow ? "grow" : "prune" )
+			<< "\",\"hidden\":" << t.hidden
+			<< ",\"iterations\":" << t.iterations
+			<< ",\"stopReason\":\"" << obd::stopToken( t.stop, t.eligibility )
+			<< "\",\"eligible\":" << ( t.eligibility == obd::ELIGIBLE ? "true" : "false" )
+			<< "}";
+	}
+	trials << "]";
+
 	if ( !r.ok )
 		return string( "{\"ok\":false,\"message\":\"" )
 			+ jsonEscape( r.message.empty()
 				? ( r.cancelled ? "cancelled" : "OBD did not produce a model" )
 				: r.message )
 			+ "\",\"cancelled\":" + ( r.cancelled ? "true" : "false" )
+			// A ceiling refusal is its own outcome: the search ran correctly and
+			//    declined to compare unfinished fits. Callers must not read it as
+			//    a crash, and must not read it as a selection either.
+			+ ",\"ceilingExhausted\":" + ( r.ceilingExhausted ? "true" : "false" )
+			+ ",\"trials\":" + trials.str()
 			+ ",\"output\":\"" + jsonEscape( cap.text.str() ) + "\"}";
 
 	// Adopt the winner (probe/search progress kept); it is already trained
@@ -1530,7 +1550,11 @@ string runObdJob( const obd::Config& cfg )
 	return string( "{\"ok\":true,\"message\":\"" ) + jsonEscape( msg.str() )
 		+ "\",\"cancelled\":" + ( r.cancelled ? "true" : "false" )
 		+ ",\"selectedHidden\":" + to_string( r.selectedHidden )
+		+ ",\"optimizer\":\"" + ( r.algorithm == 0 ? "Canonical"
+			: r.algorithm == 1 ? "CGD" : r.algorithm == 2 ? "Shanno" : "unknown" )
+		+ "\",\"optimizerAuto\":" + ( r.autoSelected ? "true" : "false" )
 		+ ",\"obd\":{\"selectedHidden\":" + to_string( r.selectedHidden )
+		+ ",\"trials\":" + trials.str()
 		+ ",\"history\":" + jsonObdHistory( r.history ) + "}"
 		+ ",\"output\":\"" + jsonEscape( lastReport ) + "\"" + roc + statsField + "}";
 }

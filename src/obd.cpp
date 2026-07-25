@@ -38,6 +38,7 @@ struct ValidationObserver : Iterative::Observer
 	double minTestErr = numeric_limits< double >::infinity();
 	double trainAtMin = numeric_limits< double >::infinity();
 	unsigned samplesAbove = 0;
+	unsigned lastIteration = 0; // iterations this trial actually used
 
 	// Why this observer stopped the run. Both exits below return false, but a
 	//    caller cancel and held-out deterioration are different facts: the first
@@ -47,6 +48,7 @@ struct ValidationObserver : Iterative::Observer
 
 	bool onIteration( unsigned iteration, double setError ) override
 	{
+		lastIteration = iteration;
 		if ( cancel && cancel->load() )
 		{
 			reason = Iterative::STOP_CANCELLED;
@@ -123,6 +125,21 @@ void configureNet( SimpleProp& net, unsigned trainingType )
 		net.setBatchEpoch( true );
 }
 
+// A trial's stop reason, printed in the size table. Kept beside classify() so
+//    the label and the eligibility decision can never drift apart.
+const char* stopLabel( Iterative::StopReason s )
+{
+	return s == Iterative::STOP_EARLY_STOP ? "early stop"
+		: s == Iterative::STOP_PLATEAU ? "plateau"
+		: s == Iterative::STOP_GRADMAX ? "converged"
+		: s == Iterative::STOP_MIN_ERROR ? "min error"
+		: s == Iterative::STOP_CHANGE ? "min change"
+		: s == Iterative::STOP_WINDOW ? "error window"
+		: s == Iterative::STOP_CANCELLED ? "cancelled"
+		: s == Iterative::STOP_MAX_ITERATIONS ? "CEILING"
+		: "other";
+}
+
 unsigned argmin( const vector< double >& v )
 {
 	unsigned best = 0;
@@ -152,7 +169,8 @@ void readAccuracies( SimpleProp& net, double& trainCA, double& testCA )
 Iterative::StopReason trainToValidationMin( SimpleProp& net, const obd::Config& cfg,
 	unsigned testStride, obd::ProgressFn progress, const atomic< bool >* cancel,
 	const char* phase, unsigned hidden, unsigned budget,
-	double& score, double& trainAtMin, ostringstream& discard )
+	double& score, double& trainAtMin, unsigned& iterationsUsed,
+	ostringstream& discard )
 {
 	ValidationObserver obs;
 	obs.net = &net; obs.testStride = testStride; obs.cfg = &cfg;
@@ -179,6 +197,7 @@ Iterative::StopReason trainToValidationMin( SimpleProp& net, const obd::Config& 
 	//    was too short to sample (budget < sampleEvery)
 	score = isfinite( obs.minTestErr ) ? obs.minTestErr : net.sampleTestError( testStride );
 	trainAtMin = isfinite( obs.trainAtMin ) ? obs.trainAtMin : score;
+	iterationsUsed = obs.lastIteration;
 	return net.getStopReason();
 }
 
@@ -187,7 +206,7 @@ void printTable( ostream& out, const vector< obd::SizeTrial >& history,
 {
 	out << endl << "OBD hidden-layer search (validation early stopping):" << endl;
 	out << "  phase   hidden   train error   test error   CA train   CA test   "
-		"stopped by" << endl;
+		"iters   stopped by" << endl;
 	for ( vector< obd::SizeTrial >::const_iterator t = history.begin();
 		t != history.end(); t++ )
 	{
@@ -202,17 +221,62 @@ void printTable( ostream& out, const vector< obd::SizeTrial >& history,
 		else out << setw( 10 ) << "n/a";
 		if ( t->testCA >= 0 ) out << setw( 8 ) << t->testCA * 100 << "%";
 		else out << setw( 9 ) << "n/a";
-		out << resetiosflags( ios::fixed ) << "   "
-			<< ( t->stop == Iterative::STOP_EARLY_STOP ? "early stop"
-				: t->stop == Iterative::STOP_PLATEAU ? "plateau"
-				: t->stop == Iterative::STOP_GRADMAX ? "converged"
-				: t->stop == Iterative::STOP_CANCELLED ? "cancelled"
-				: "CEILING" ) << endl;
+		out << resetiosflags( ios::fixed ) << setw( 8 ) << t->iterations << "   "
+			<< stopLabel( t->stop );
+		// An ineligible trial is marked in the table itself: it took no part in
+		//    the comparison, and a reader must not mistake its numbers for a fit.
+		if ( t->eligibility != obd::ELIGIBLE )
+			out << "  <- NOT a fitted model; excluded from comparison";
+		out << endl;
 	}
-	out << "Selected: " << selected << " hidden nodes (grew to " << grewTo << ")." << endl;
+	if ( selected )
+		out << "Selected: " << selected << " hidden nodes (grew to " << grewTo << ")." << endl;
+	else
+		out << "Selected: NONE -- no architecture was chosen (see below)." << endl;
 }
 
 } // namespace
+
+obd::Eligibility obd::classify( Iterative::StopReason stop,
+	double score, double trainErr )
+{
+	// A trial whose numbers are not finite tells us nothing, whatever ended it.
+	if ( !isfinite( score ) || !isfinite( trainErr ) )
+		return NUMERICAL_FAILURE;
+
+	switch ( stop )
+	{
+	// A stopping RULE fired: the fit reached a point it was asked to stop at.
+	case Iterative::STOP_GRADMAX:    // gradient convergence
+	case Iterative::STOP_PLATEAU:    // training-loss plateau
+	case Iterative::STOP_EARLY_STOP: // held-out error demonstrably deteriorated
+	case Iterative::STOP_MIN_ERROR:
+	case Iterative::STOP_CHANGE:
+	case Iterative::STOP_WINDOW:
+		return ELIGIBLE;
+
+	// The safety ceiling is not a stopping rule. Reaching it means the model
+	//    never converged, so its loss is not a fit to compare.
+	case Iterative::STOP_MAX_ITERATIONS:
+		return INCOMPLETE_CEILING;
+
+	case Iterative::STOP_CANCELLED:
+		return INCOMPLETE_CANCELLED;
+
+	// A probe budget never governs a real trial, and STOP_NONE means train()
+	//    never ran; neither is a finished fit.
+	default:
+		return INCOMPLETE_CEILING;
+	}
+}
+
+const char* obd::stopToken( Iterative::StopReason stop, Eligibility e )
+{
+	// A trial whose numbers are not finite is reported as the numerical failure
+	//    it is, whatever ended the loop; otherwise the engine's one spelling.
+	if ( e == NUMERICAL_FAILURE ) return "numerical_failure";
+	return Iterative::stopReasonToken( stop );
+}
 
 obd::Result obd::run( DataSet& data, const Config& cfg,
 	ProgressFn progress, const atomic< bool >* cancel )
@@ -290,16 +354,34 @@ obd::Result obd::run( DataSet& data, const Config& cfg,
 	unique_ptr< Network > bestNet;
 	unsigned bestHidden = 0, grewTo = cfg.hStart, sinceImprovement = 0;
 
+	// A trial the search NEEDED could not be finished. Record it, abandon the
+	//    search, and say exactly why -- never fall through to a nominal winner.
+	bool halted = false;
+
 	for ( unsigned h = cfg.hStart; h <= cfg.hMax; h++ )
 	{
 		if ( cancel && cancel->load() ) { result.cancelled = true; break; }
 
 		grewTo = h;
 		double score, trainAtMin, trainCA, testCA;
+		unsigned used = 0;
 		Iterative::StopReason stop = trainToValidationMin( *net, cfg, testStride,
-			progress, cancel, "grow", h, cfg.iterBudget, score, trainAtMin, discard );
+			progress, cancel, "grow", h, cfg.iterBudget, score, trainAtMin,
+			used, discard );
 		readAccuracies( *net, trainCA, testCA );
-		result.history.push_back( { h, trainAtMin, score, trainCA, testCA, stop, true } );
+		Eligibility el = classify( stop, score, trainAtMin );
+		result.history.push_back( { h, trainAtMin, score, trainCA, testCA, stop,
+			true, el, used } );
+
+		// An INELIGIBLE trial is not a fit. Its loss is not compared, it is not
+		//    snapshotted as the winner, and pruning never starts from it.
+		if ( el != ELIGIBLE )
+		{
+			if ( el == INCOMPLETE_CANCELLED ) result.cancelled = true;
+			else result.ceilingExhausted = ( el == INCOMPLETE_CEILING );
+			halted = true;
+			break;
+		}
 
 		if ( score < bestTestErr ) // a larger net helped: snapshot it
 		{
@@ -317,7 +399,7 @@ obd::Result obd::run( DataSet& data, const Config& cfg,
 	}
 
 	// --- PRUNE phase --------------------------------------------------------
-	if ( !result.cancelled && bestNet )
+	if ( !halted && !result.cancelled && bestNet )
 	{
 		unique_ptr< Network > workBase = cloneNetwork( *bestNet );
 		SimpleProp* work = dynamic_cast< SimpleProp* >( workBase.get() );
@@ -331,12 +413,30 @@ obd::Result obd::run( DataSet& data, const Config& cfg,
 			work->removeHidden( { argmin( sal ) } );
 			hCur--;
 
-			unsigned budget = cfg.iterBudget / 4 < 100 ? 100 : cfg.iterBudget / 4;
+			// The SAME configured ceiling as a grow trial. A quarter-budget would
+			//    be a second, undocumented ceiling -- and since reaching a ceiling
+			//    now refuses the search, an internal one would fail runs the user
+			//    configured perfectly well. Pruning warm-starts from a fitted net,
+			//    so it converges quickly anyway.
 			double score, trainAtMin, trainCA, testCA;
+			unsigned used = 0;
 			Iterative::StopReason stop = trainToValidationMin( *work, cfg, testStride,
-				progress, cancel, "prune", hCur, budget, score, trainAtMin, discard );
+				progress, cancel, "prune", hCur, cfg.iterBudget, score, trainAtMin,
+				used, discard );
 			readAccuracies( *work, trainCA, testCA );
-			result.history.push_back( { hCur, trainAtMin, score, trainCA, testCA, stop, false } );
+			Eligibility el = classify( stop, score, trainAtMin );
+			result.history.push_back( { hCur, trainAtMin, score, trainCA, testCA, stop,
+				false, el, used } );
+
+			// An incomplete pruned candidate is never accepted -- and because its
+			//    loss is meaningless the search cannot continue past it either.
+			if ( el != ELIGIBLE )
+			{
+				if ( el == INCOMPLETE_CANCELLED ) result.cancelled = true;
+				else result.ceilingExhausted = ( el == INCOMPLETE_CEILING );
+				halted = true;
+				break;
+			}
 
 			if ( score <= bestTestErr * ( 1.0 + cfg.pruneTol ) ) // small net still good
 			{
@@ -351,6 +451,31 @@ obd::Result obd::run( DataSet& data, const Config& cfg,
 	}
 
 	// --- Finish -------------------------------------------------------------
+	// A search that could not finish a trial it needed reports THAT, with the
+	//    whole trial table, and selects nothing. Comparing unfinished fits is the
+	//    defect this refusal exists to prevent, so there is no "best effort" path.
+	if ( halted && !result.cancelled )
+	{
+		const SizeTrial& t = result.history.back();
+		ostringstream m;
+		if ( t.eligibility == NUMERICAL_FAILURE )
+			m << "the " << t.hidden << "-hidden trial produced a non-finite error "
+				<< "(a diverged fit) -- try a different optimizer or a lower "
+				<< "learning rate. No architecture was selected.";
+		else
+			m << "training did not converge: the " << t.hidden << "-hidden "
+				<< ( t.phaseGrow ? "grow" : "prune" ) << " trial ran out of its "
+				<< cfg.iterBudget << "-iteration ceiling before any stopping "
+				<< "condition fired. An iteration ceiling is a safety limit, not "
+				<< "a stopping rule, so its weights are not a fitted model and "
+				<< "NO architecture was selected. Raise the iteration budget, or "
+				<< "change the optimizer or stopping conditions, and run again.";
+		result.message = m.str();
+		printTable( screen, result.history, 0, grewTo );
+		screen << "OBD REFUSED: " << result.message << endl;
+		return result;
+	}
+
 	if ( !bestNet )
 	{
 		result.message = result.cancelled

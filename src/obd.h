@@ -34,6 +34,32 @@ namespace obd {
 using ProgressFn = std::function< void( const char* phase, unsigned hidden,
 	unsigned iteration, double trainErr, double testErr ) >;
 
+// Whether a trial may be ADMITTED to architecture comparison.
+//
+// Reaching the iteration ceiling is a failure to converge, never a successful
+//    stopping condition: the weights at that point are wherever the run happened
+//    to be, so comparing two such trials compares two unfinished descents. Doing
+//    it silently is what made the prune tolerance near-vacuous -- every candidate
+//    was still improving, so every candidate looked "close enough" to the best
+//    and pruning ran to the minimum architecture. Only a trial that ended because
+//    a stopping RULE fired is eligible.
+enum Eligibility {
+	ELIGIBLE,            // a stopping rule fired: gradient, plateau, or early stop
+	INCOMPLETE_CEILING,  // hit max_iterations -- failure to converge
+	INCOMPLETE_CANCELLED,// stopped from outside; the fit was never finished
+	NUMERICAL_FAILURE    // non-finite score or training error
+};
+
+// Classify one finished trial. score is the held-out score, trainErr the
+//    training error at that point. THE authoritative rule -- every caller that
+//    needs to know whether a trial counts asks this, and nothing re-derives it.
+Eligibility classify( Iterative::StopReason stop, double score, double trainErr );
+
+// A short machine-readable token for a trial's stop reason, for reports and
+//    artifacts: gradient | plateau | validation_early_stop | max_iterations |
+//    cancelled | numerical_failure | other.
+const char* stopToken( Iterative::StopReason stop, Eligibility e );
+
 // One size the search evaluated. testErr is the MINIMUM held-out error reached
 //    at this size (its score), not the final -- the net is early-stopped a short
 //    patience past that minimum. phaseGrow distinguishes growth from pruning.
@@ -45,6 +71,8 @@ struct SizeTrial {
 	double testCA;   // test-set classification accuracy at the early-stop point (0..1)
 	Iterative::StopReason stop;
 	bool phaseGrow;
+	Eligibility eligibility = ELIGIBLE; // admissible to comparison?
+	unsigned iterations = 0;           // iterations this trial actually used
 };
 
 struct Config {
@@ -72,6 +100,11 @@ struct Result {
 	std::vector< SizeTrial > history;
 	std::unique_ptr< Network > winner; // the trained (early-stopped) selected net; adopt it
 	bool cancelled = false;
+	// The configured ceiling was reached by a trial the search needed, so the
+	//    search REFUSED rather than compare unfinished fits. ok is false and
+	//    message says which size and what to do about it. Distinguished from
+	//    other refusals so a caller (CV, the GUI) can say so precisely.
+	bool ceilingExhausted = false;
 	// Which optimizer the search actually ran on, so a caller can observe the
 	//    choice instead of parsing the report for it. algorithm is the resolved
 	//    trainingType (0 canonical / 1 CGD / 2 Shanno), -1 only when the search

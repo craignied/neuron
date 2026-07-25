@@ -256,6 +256,13 @@ int main()
 	obd::Config ocfg;
 	ocfg.hStart = 2; ocfg.hMax = 4; ocfg.iterBudget = 300;
 	ocfg.sampleEvery = 20; ocfg.algorithm = 0;
+	// A plateau tolerance that CAN fire. With the shipped default (1e-4) neither
+	// gradient convergence, plateau, nor the held-out rise ever fires on this
+	// fixture, so every trial hits the ceiling and OBD (correctly) refuses every
+	// fold -- a real finding, reported separately, not something to paper over
+	// here: these cases are about CV mechanics, so they use a config that lets
+	// trials genuinely finish.
+	ocfg.plateauTol = 1e-2;
 	vector< crossval::FoldSelection > pickedHidden;
 
 	util::set_seed( 7 );
@@ -299,7 +306,9 @@ int main()
 	{
 		obd::Config fcfg = ocfg;
 		fcfg.algorithm = fixed;
+		fcfg.iterBudget = 1500;
 		vector< crossval::FoldSelection > fsel;
+		util::set_seed( 7 ); // deterministic: these runs must not inherit RNG state
 		crossval::run( data, foldId,
 			cvadapters::nestedObdProcedure( fcfg, 0.25, &fsel ) );
 
@@ -314,7 +323,9 @@ int main()
 
 	obd::Config acfg = ocfg;
 	acfg.algorithm = -1; // auto
+	acfg.iterBudget = 1500;
 	vector< crossval::FoldSelection > asel;
+	util::set_seed( 7 );
 	crossval::run( data, foldId,
 		cvadapters::nestedObdProcedure( acfg, 0.25, &asel ) );
 	bool autoEveryFold = ( asel.size() == 5 );
