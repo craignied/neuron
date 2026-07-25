@@ -265,7 +265,8 @@ an entire replaced ROC confidence-interval path.
 | [`docs/`](docs/) | Statistical theory, deployment reference, evaluation design, legacy manual, and datasets |
 | [`third_party/`](third_party/) | Vendored lightweight dependencies |
 | [`AGENTS.md`](AGENTS.md) | Operational recipes and repository rules for AI assistants |
-| [`CLAUDE.md`](CLAUDE.md) | Detailed engineering history, decisions, and active roadmap |
+| [`CLAUDE.md`](CLAUDE.md) | Standing rules, current state, settled decisions, and active roadmap |
+| [`docs/HISTORY.md`](docs/HISTORY.md) | Dated development record and completed roadmaps |
 
 The original neUROn2++ manual is preserved at
 [`docs/manifest.pdf`](docs/manifest.pdf). It documents the engine's model and menu
@@ -283,8 +284,9 @@ The primary interface is now the embedded GUI, while the menu interface remains
 available for automation and compatibility. Data grooming, model deployment, modern
 ROC intervals, scalable splitting, validation-aware OBD, cross-validation comparison,
 locked-test inference guardrails, and auditable experiment artifacts are implemented.
-The detailed development record and remaining roadmap live in
-[`CLAUDE.md`](CLAUDE.md).
+The standing rules, current state, and remaining roadmap live in
+[`CLAUDE.md`](CLAUDE.md); the dated development record is
+[`docs/HISTORY.md`](docs/HISTORY.md).
 
 Contributions should preserve the project's central contract: one authoritative
 implementation of each mechanism, reproducible analysis, GUI/CLI parity, and

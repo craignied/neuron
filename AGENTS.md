@@ -517,7 +517,8 @@ the run does not change the neural net's numbers). See
 | `docs/deploy.md` | Label-spec reference for deployment |
 | `docs/roc_theory.md` | What the ROC statistics mean and how to cite them |
 | `docs/manifest.pdf` | The complete manual (menu-by-menu) |
-| `CLAUDE.md` | Development log and roadmap (for working **on** neuron rather than **with** it) |
+| `CLAUDE.md` | Standing rules, current state, settled decisions, roadmap (for working **on** neuron rather than **with** it) |
+| `docs/HISTORY.md` | The dated development record — read on demand for the reasoning behind a decision |
 
 Maintainers: keep this file in sync when tools or menus change — it is the
 operating manual for AI assistants, and its recipes are promised to work.
