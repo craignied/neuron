@@ -2020,3 +2020,62 @@ Carried forward — live items now live in `CLAUDE.md` under "Backlog".
   (bootstrap). Reasoning: `docs/roc_theory.md`.
 - `getGoodData()` port from the roc app if something needs it.
 - More grooming tools (dataset describe/summary; train/test split outside engine).
+
+- **2026-07-25 — OBD completion semantics + nested optimizer parity. Two correctness
+  defects, both reproduced before being believed (rule 3) and both fixed with red proofs
+  (rule 2). Assignment: `nested_obd_optimizer_bug.md` (Sol); policy settled by Craig and
+  Sol after my evaluation.** Findings first:
+  1. **OBD compared unfinished fits, and the mechanism was worse than "mild optimism".**
+     `SizeTrial::stop` was recorded and printed but no decision read it: the grow snapshot
+     (`score < bestTestErr`) and the prune acceptance (`score <= bestTestErr*(1+pruneTol)`)
+     treated a ceiling-censored trial exactly like a converged one. When nothing has
+     converged every candidate is still descending, so a pruned net warm-started from a
+     good parent lands within `pruneTol` of a best that was itself captured mid-descent —
+     **the acceptance test becomes near-vacuous and the search collapses to the minimum
+     architecture.** Red proof, pre-fix, lowbwt at a 60-iteration ceiling: all 14 trials
+     `CEILING`, prune test errors 1.0942e-01 → 1.0921e-01 (each marginally "better"),
+     `ok=True selectedHidden=1` after growing to 8.
+  2. **`/api/cv` never parsed `algorithm`**, so `CvConfig::obd` was default-constructed and
+     every nested-OBD fold trained canonical whatever was requested. Red proof: two CV runs
+     differing only in the requested optimizer were statistically byte-identical
+     (`0.489 ± 0.090`, arch `1 (3/3)`), differing only in wall clock.
+  3. **`STOP_OBSERVER` conflated three facts** — GUI cancel, OBD validation early stop, and
+     autoalgo probe-budget expiry — so the OBD table printed a *cancelled* trial as
+     "early stop" while the GUI called the same value "cancelled". Fixed first, as its own
+     commit: `Observer::whyStopped()` (the observer is the only thing that knows, rule 6)
+     plus `STOP_CANCELLED` / `STOP_EARLY_STOP` / `STOP_PROBE_BUDGET`. Red proof written
+     without naming the new constants so it compiled against the pre-fix engine and failed
+     on behavior, not on a missing symbol.
+  **Policy (Craig/Sol, settled):** eligibility, not "completion". A trial is eligible only
+  if a stopping RULE fired (gradient, plateau, validation early stop, or a configured error
+  condition); `max_iterations`, cancellation and a non-finite loss are not. Standalone OBD
+  refuses loudly at the first ineligible trial and selects nothing; nested CV fails that
+  fold; the locked refit failing suppresses DeLong; ordinary training keeps its weights but
+  warns. **Automatic extension was explicitly NOT built** (unpredictable nested-CV runtime).
+  Prune trials now get the same configured ceiling as grow trials — the old quarter-budget
+  was a second, undocumented ceiling that would fail correctly configured runs.
+  **The measurement that outlives the fix:** with the shipped defaults (`autostop_tol=1e-4`,
+  gradient limit 1e-6) canonical training reaches NO stopping rule on the repo's own
+  fixtures — not at 1,000 iterations, not at 20,000. The cliff is sharp (3e-3 never fires,
+  1e-2 fires at iteration 217). **OBD has always run on its ceiling**, which is exactly why
+  this defect survived. Defaults were left alone and the finding reported instead; test and
+  smoke fixtures state a tolerance that can fire, with the measurement beside them.
+  **Civic Choice acceptance** (6,000 rows, 14 inputs, seed 20260724; generator committed):
+  the optimizer/ceiling sensitivity table shows canonical and CGD refusing at 1,500/3,000/
+  6,000 while **Shanno converges at 6,000** (5 hidden, test AUC 0.8172) and `auto` picks
+  Shanno — so **Auto's advantage is not only speed, it is often the only optimizer that
+  reaches a real stopping condition.** Loosening the tolerance to 0.01 makes runs "finish"
+  and produces *worse* models (canonical 1 hidden, AUC 0.53), which is the measured argument
+  against tuning it. Nested CV + locked test at ceiling 1,500 correctly reports every fold
+  failed with its reason and no contrast; at 20,000 all folds fit, Auto chose Shanno 5/5,
+  OBD selected 5 hidden in 4/5 folds, pooled OOF AUC 0.807 vs logistic 0.616, locked test
+  **0.812 [0.791–0.834] vs 0.601 [0.573–0.630], ΔAUC +0.211, DeLong p < 0.0001** — where the
+  pre-fix run had reported 1 hidden, ΔAUC +0.001, p = 0.952. The bug had inverted the
+  conclusion.
+  Also: `crossval::FoldSelection` replaces the bare arch sink so architecture and optimizer
+  are one per-fold record appended at a single site (a failed fold reports neither);
+  `Iterative::stopReasonToken` is the one machine-readable spelling; Tier 1/2 and
+  `cv_run.json` carry optimizer selection beside architecture; Tier 1 truncates a long
+  failure note so the one-screen table keeps its columns.
+  Gates every commit: zero-warning Release build, goldens byte-identical, oracle numerically
+  identical, 10/10 ctest, smoke green, tools green.

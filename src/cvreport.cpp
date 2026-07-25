@@ -238,7 +238,16 @@ string testCell( const cvreport::LockedColumn* c )
 			s += " [" + fixed3( c->lo ) + "\xE2\x80\x93" + fixed3( c->hi ) + "]";
 		return s;
 	}
-	if ( !c->note.empty() ) return c->note;
+	// Tier 1 is a ONE-SCREEN table, and a failure reason can run to several
+	//    sentences (a ceiling refusal names the trial and the remedy). The
+	//    headline keeps its columns aligned and says only that the procedure
+	//    failed; the full reason is printed in the Tier 2 locked-test section.
+	if ( !c->note.empty() )
+	{
+		string n = c->note;
+		if ( displayWidth( n ) > 22 ) n = n.substr( 0, 19 ) + "...";
+		return n;
+	}
 	return "\xE2\x80\x94";
 }
 

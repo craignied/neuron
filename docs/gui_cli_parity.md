@@ -119,6 +119,7 @@ have **no CLI equivalent by design** — that is not a parity gap.
 | Group-aware split — keep clusters intact for a harder unseen-group test (ROADMAP 4 Phase 3) | Dataset panel "Group on" columns | `POST /api/load` `group=` (1-based cols; rows with identical values stay together) | — n/a (new capability, menus frozen) |
 | Three-way split — train/validation/test so selection (OBD) monitors validation and the test set stays untouched (ROADMAP 4 Phase 4c) | Dataset panel "Validation fraction" | `POST /api/load` `val_fraction=` (or `val_n=` with `test_n=`) | — n/a (new capability, menus frozen) |
 | Cross-validation model comparison — logistic / LDFA / QDFA / neural (nested OBD) over ONE shared outcome-stratified k-fold plan, three-tier report (ROADMAP 4 Phase 4) | Dataset-independent "Cross-validation" panel + pinned Tier-1 headline table | `POST /api/cv` (async; three-tier report in the result) | — n/a (new capability, menus frozen) |
+| Nested-OBD optimizer rule — canonical / CGD / Shanno / Auto for the architecture search inside each CV fold, selected independently per fold and for the locked refit | CV panel "OBD optimizer" select (same four choices and wording as the standalone OBD panel) | `POST /api/cv` `algorithm=1\|2\|3\|auto` (default `auto`) | — n/a (new capability, menus frozen) |
 | Locked-test evaluation + opt-in DeLong inference — set aside an untouched row holdout; refit each procedure on the development rows, score once for point AUCs; DeLong CIs/contrast p ONLY when the sampling unit is declared independent (ROADMAP 4 Phase 4) | CV panel "Locked-test fraction" + primary/reference contrast selects + "Sampling unit" (independent rows / not declared / clustered-disabled) | `POST /api/cv` `locked_fraction=` (or `locked_n=`), `primary`/`reference` tokens, `independence=rows` | — n/a (new capability, menus frozen) |
 
 `POST /api/obd` params: `hidden_start`, `hidden_max`, `iter_budget`,
@@ -132,8 +133,15 @@ network replaces the current model.
 logistic / fixed-architecture neural), procedure flags `logistic`/`ldfa`/`qdfa`/
 `neural`, `neural_obd` (nested OBD per fold vs a fixed count), `neural_hidden`
 (the fixed count), `hidden_max`/`iter_budget` (the per-fold OBD search),
-`inner_val` (share of each fold's training rows held out as the inner validation
-set OBD monitors). Async-only, shares the training job (status + stop). It is a
+`algorithm` (1|2|3|auto — the optimizer for the nested-OBD search; **default
+auto**, same encoding and validation as `/api/obd`), `autostop_tol`/
+`autostop_window` (the per-size train-plateau backstop), `inner_val` (share of
+each fold's training rows held out as the inner validation set OBD monitors).
+`auto` is a procedure for CHOOSING an optimizer, not an optimizer: it probes once
+inside each fold on that fold's inner training data, keeps the choice for that
+fold's whole grow-and-prune search, and probes independently again for the
+locked-development refit — no fold reuses another fold's choice, the standalone
+panel's, or a previous run's. Async-only, shares the training job (status + stop). It is a
 standalone analysis — it does NOT touch the current model. The result carries the
 report as text (`cv.tier1`/`cv.tier2`) and the paths of the Tier-3 files
 (`cv_predictions.csv` / `cv_metrics.csv` / `cv_run.json`, written beside the data).

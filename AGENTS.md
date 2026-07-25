@@ -426,6 +426,29 @@ completion arrive through the same `GET /api/train/status` (a running OBD adds a
 budget; keep `iter_budget` modest (hundreds to low thousands) and `hidden_max`
 sane. See `docs/obd_plan.md`.
 
+**The ceiling is a safety limit, not a stopping condition.** A trial that ends by
+reaching `iter_budget` did not converge, so OBD will NOT compare its loss, select
+it, or prune from it. The search stops at the first such trial and refuses with
+`ok:false`, `ceilingExhausted:true`, and a message naming the size — the whole
+trial table is still printed, and `trials[]` gives each trial's `stopReason`,
+`iterations`, and `eligible` flag. **This is the correct outcome, not a bug:** the
+remedy is a bigger `iter_budget`, a different `algorithm`, or a stopping condition
+that can actually fire. Only `grad_max`, `plateau`, `validation_early_stop` and the
+configured error conditions count as convergence; `max_iterations`, `cancelled`
+and a non-finite loss do not.
+
+**Practical warning, measured:** with the shipped defaults (`autostop_tol=1e-4`,
+gradient limit 1e-6) a slowly-converging problem may reach NO stopping rule within
+any practical ceiling, so OBD refuses. On the 6,000-row Civic Choice fixture,
+canonical and CGD refuse at 1,500 / 3,000 / 6,000 iterations, while **Shanno**
+converges at 6,000 (plateau + validation early stop) and finds 5 hidden units with
+test AUC 0.817. `algorithm=auto` picks Shanno there, so **Auto's advantage is not
+only speed — it is often the only optimizer that reaches a real stopping condition
+on a given dataset.** Raising `autostop_tol` to make a run "finish" is usually the
+wrong move: at `0.01` the same fixture stops far too early and gives 1 hidden unit
+with AUC 0.53 (canonical) — a worse model than refusing would have told you about.
+Prefer a larger ceiling and Auto.
+
 The GUI also runs **honest cross-validation model comparison** (`POST /api/cv`,
 the "Cross-validation" panel). It scores several procedures — **logistic**, **LDFA**,
 **QDFA**, and a **neural network** (with **nested OBD**: the whole architecture search
@@ -437,8 +460,14 @@ done without leakage. Params: `folds` (k, ≥2, default 5), `seed` (42), `maxite
 `logistic`/`ldfa`/`qdfa`/`neural` (1/0; default logistic+neural), `neural_obd`
 (1 = nested OBD per fold, 0 = a fixed hidden count), `neural_hidden` (the fixed
 count when `neural_obd=0`), `hidden_max`/`iter_budget` (the per-fold OBD search),
+`algorithm` (1|2|3|auto for that search — **default `auto`**, probed independently
+inside each fold and again for the locked refit; same encoding as `/api/obd`),
+`autostop_tol`/`autostop_window` (the per-size plateau backstop),
 `inner_val` (share of each fold's training rows held out as the inner validation
-set OBD monitors, 0.25). It is **async-only** and a **standalone analysis** — it does
+set OBD monitors, 0.25). A fold whose OBD search cannot finish a trial inside its
+ceiling is a **failed fold**: it contributes no prediction, no architecture and no
+optimizer metadata, its reason is printed per fold, and the pooled AUC reads `n/a`
+rather than an average over whatever happened to fit. It is **async-only** and a **standalone analysis** — it does
 NOT touch the current model — and reaches completion through the same
 `GET /api/train/status` (a running CV adds `obd:{phase:"cross-validating"}`) and
 `POST /api/train/stop` doors. The result carries a **three-tier report**: `cv.tier1`

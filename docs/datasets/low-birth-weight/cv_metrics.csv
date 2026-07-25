@@ -1,0 +1,5 @@
+fold,procedure,status,n_valid,n_total,auc_trap,auc_binormal,sens,spec
+0,Neural (OBD),ok,63,63,0.568182,0.564350,0.052632,0.977273
+1,Neural (OBD),ok,63,63,0.611628,0.610011,0.100000,0.930233
+2,Neural (OBD),ok,63,63,0.653488,0.650413,0.000000,1.000000
+pooled,Neural (OBD),ok,189,189,0.574316,0.571999,,

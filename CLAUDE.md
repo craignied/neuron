@@ -203,7 +203,11 @@ grooming, `neuron2web.py` deployment to a self-contained HTML calculator).
 
 **Training automation.** `algorithm=auto` (wall-clock-budgeted probes of GD/CGD/Shanno,
 winner adopted), plateau auto-stop, and OBD hidden-layer sizing (grow-then-prune, each
-size early-stopped at its held-out minimum — no size trains to completion).
+size early-stopped at its held-out minimum — no size trains to completion). **Reaching
+the iteration ceiling is a failure to converge, never a stopping condition:** a trial that
+ends at `max_iterations` is ineligible, so OBD refuses loudly instead of comparing
+unfinished fits, and ordinary training warns. Nested OBD inside CV takes its optimizer
+from `/api/cv algorithm=` (default auto, probed independently per fold).
 
 **Splitting and evaluation.** `src/split.{h,cpp}` owns the index-level cube: outcome-
 stratified holdout, outcome × covariate strata (quantile-binned, Hamilton apportionment),
@@ -268,6 +272,11 @@ Re-proposing one is rework, not initiative. Full reasoning at the cited HISTORY 
 - **The oracle keeps its legacy bugs on purpose.** `verify_oracle.sh` excludes the known
   divergent lines (K-S, Pearson, H-L, 95% CI, "Number thresholds") and asserts 3.0's
   known-correct values instead. Do not "fix" the oracle. → `tests/oracle/README`.
+- **Do NOT loosen `autostop_tol` to make an OBD run "finish".** Measured on Civic Choice:
+  at the 1e-4 default a sufficient ceiling gives 5 hidden units and test AUC 0.817, while
+  at 0.01 the same search stops far too early and gives 1 unit at AUC 0.53. A refusal is
+  more informative than a model produced by a tolerance chosen to silence it. Raise the
+  ceiling or use `algorithm=auto`. → HISTORY 2026-07-25.
 - **Palm/iPhone exporters stay dead**; the HTML calculator lives on as
   `tools/neuron2web.py`. Python tooling is **stdlib-only** — no pip, no venv, enforced by
   CI on all three OSes.
