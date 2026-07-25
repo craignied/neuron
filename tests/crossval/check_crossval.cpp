@@ -256,7 +256,7 @@ int main()
 	obd::Config ocfg;
 	ocfg.hStart = 2; ocfg.hMax = 4; ocfg.iterBudget = 300;
 	ocfg.sampleEvery = 20; ocfg.algorithm = 0;
-	vector< unsigned > pickedHidden;
+	vector< crossval::FoldSelection > pickedHidden;
 
 	util::set_seed( 7 );
 	crossval::RunResult ro = crossval::run( data, foldId,
@@ -275,22 +275,67 @@ int main()
 
 	bool sizesSane = ( pickedHidden.size() == 5 );
 	for ( unsigned i = 0; i < pickedHidden.size(); i++ )
-		if ( pickedHidden[ i ] < 1 || pickedHidden[ i ] > ocfg.hMax ) sizesSane = false;
+		if ( pickedHidden[ i ].hidden < 1 || pickedHidden[ i ].hidden > ocfg.hMax )
+			sizesSane = false;
 	expect( sizesSane,
 		"each fold reports a selected hidden-unit count within the search range" );
 
 	util::set_seed( 7 );
-	vector< unsigned > pickedHidden2;
+	vector< crossval::FoldSelection > pickedHidden2;
 	crossval::RunResult ro2 = crossval::run( data, foldId,
 		cvadapters::nestedObdProcedure( ocfg, 0.25, &pickedHidden2 ) );
 	expect( ro.oofPrediction == ro2.oofPrediction && pickedHidden == pickedHidden2,
 		"the same seed reproduces the nested-OBD out-of-fold predictions and sizes" );
 
+	// The OPTIMIZER RULE must travel with the search into every fold. `auto` is a
+	// procedure for choosing an optimizer, not an optimizer: with auto requested,
+	// each fold probes on its own inner training data and records the choice it
+	// made; with a fixed optimizer, every fold must run on exactly that one.
+	// Proven through the per-fold selection metadata -- an observable seam, not
+	// scraped report text. Pre-fix there was no such metadata and, more to the
+	// point, /api/cv never set cfg.algorithm at all, so every fold silently ran
+	// canonical no matter what was requested.
+	for ( int fixed = 0; fixed <= 2; fixed++ )
+	{
+		obd::Config fcfg = ocfg;
+		fcfg.algorithm = fixed;
+		vector< crossval::FoldSelection > fsel;
+		crossval::run( data, foldId,
+			cvadapters::nestedObdProcedure( fcfg, 0.25, &fsel ) );
+
+		bool everyFold = ( fsel.size() == 5 );
+		for ( unsigned i = 0; i < fsel.size(); i++ )
+			if ( fsel[ i ].algorithm != fixed || fsel[ i ].autoSelected )
+				everyFold = false;
+		expect( everyFold,
+			string( "a fixed optimizer (" ) + to_string( fixed + 1 )
+			+ ") reaches every nested-OBD fold unchanged, with no auto probe" );
+	}
+
+	obd::Config acfg = ocfg;
+	acfg.algorithm = -1; // auto
+	vector< crossval::FoldSelection > asel;
+	crossval::run( data, foldId,
+		cvadapters::nestedObdProcedure( acfg, 0.25, &asel ) );
+	bool autoEveryFold = ( asel.size() == 5 );
+	for ( unsigned i = 0; i < asel.size(); i++ )
+		if ( !asel[ i ].autoSelected || asel[ i ].algorithm < 0
+			|| asel[ i ].algorithm > 2 )
+			autoEveryFold = false;
+	expect( autoEveryFold,
+		"auto reaches every nested-OBD fold as auto: each fold probes and records "
+		"its own optimizer choice" );
+
+	// Auto selects ONCE PER SEARCH, and that choice governs the fold's whole
+	// grow-and-prune run -- one record per fold, never one per trial.
+	expect( asel.size() == 5,
+		"auto performs exactly one optimizer selection per fold (5 folds, 5 records)" );
+
 	// B2: a fold OBD cannot fit is recorded as FAILED, never fabricated. hidden_max
 	// below hStart (2) makes OBD refuse every fold; the runner must mark them failed
 	// (no prediction, no fake 0.5), leave those rows absent, and pool nothing.
 	obd::Config badCfg; badCfg.hStart = 2; badCfg.hMax = 1; // empty range
-	vector< unsigned > badArch;
+	vector< crossval::FoldSelection > badArch;
 	crossval::RunResult rf = crossval::run( data, foldId,
 		cvadapters::nestedObdProcedure( badCfg, 0.25, &badArch ) );
 	bool allFoldsFailed = ( rf.ok && rf.validFolds == 0 && rf.folds.size() == 5 );
@@ -434,7 +479,7 @@ int main()
 	// The three-tier report (docs/evaluation_report_spec.md). Build a Comparison
 	// of three procedures over the shared plan -- LDFA, plain neural, nested OBD
 	// (with its architecture-metadata sink wired) -- and render it.
-	vector< unsigned > obdArch;
+	vector< crossval::FoldSelection > obdArch;
 	vector< crossval::ProcedureSpec > rprocs;
 	rprocs.push_back( { "LDFA", cvadapters::dfaProcedure( false ), nullptr } );
 	rprocs.push_back( { "Neural", cvadapters::trainProcedure( tmpl, 400 ), nullptr } );

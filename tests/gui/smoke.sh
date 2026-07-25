@@ -30,6 +30,21 @@ PY=python3; command -v python3 >/dev/null || PY=python
 
 curl -s "$URL/api/version" | grep -q "neuron" || fail "version endpoint"
 curl -s "$URL/" | grep -q "<title>neuron</title>" || fail "page not served"
+# GUI/CLI parity (rule 5): the CV panel must expose the nested-OBD optimizer with
+#    the SAME four choices and terminology as the standalone OBD panel, and must
+#    submit it -- a control the page never sends is not parity.
+curl -s "$URL/" > page.html
+grep -q 'id="cv_algorithm"' page.html || fail "CV panel has no optimizer control"
+for opt in 'value="auto"' 'value="1"' 'value="2"' 'value="3"'; do
+    $PY - "$opt" <<'PY' || fail "CV optimizer control is missing an option"
+import re, sys
+html = open("page.html", encoding="utf-8").read()
+sel = re.search(r'id="cv_algorithm".*?</select>', html, re.S)
+assert sel and sys.argv[1] in sel.group(0), sys.argv[1]
+PY
+done
+grep -q 'algorithm: \$("cv_algorithm").value' page.html \
+    || fail "the CV panel does not submit its optimizer choice"
 
 # No inputs/outputs given: the server derives them from the file's columns
 #    (xor_discrete.set is 2 inputs + 1 output) — the page relies on this
@@ -594,6 +609,12 @@ curl -s -X POST "$URL/api/load" -d "mode=raw&path=lowbwt2-2train.txt&fraction=0.
 curl -s -X POST "$URL/api/load" -d "mode=train&path=lowbwt2-2train.txt" >/dev/null
 curl -s -X POST "$URL/api/cv" -d "logistic=1" \
     | grep -q '"ok":false' || fail "CV must refuse a pre-split (mode=train) dataset"
+# Optimizer parity: an invalid token is rejected BEFORE any job starts, with the
+#    same message and encoding as standalone /api/obd (one public spelling)
+curl -s -X POST "$URL/api/cv" -d "logistic=1&algorithm=bogus" \
+    | grep -q '"ok":false' || fail "CV must reject an invalid algorithm token"
+curl -s -X POST "$URL/api/cv" -d "logistic=1&algorithm=4" \
+    | grep -q '"ok":false' || fail "CV must reject an out-of-range algorithm token"
 curl -s -X POST "$URL/api/load" -d "mode=raw&path=lowbwt2-2train.txt&fraction=0.25&seed=1" >/dev/null
 
 # Happy path: an async comparison of two procedures over one shared 5-fold plan,
@@ -622,6 +643,13 @@ assert "descriptive spread across dependent folds" in cv["tier1"], cv["tier1"]
 assert "Cross-validation detail" in cv["tier2"], cv["tier2"][:200]
 assert len(cv["files"]) == 3, cv["files"]           # all three Tier-3 files written
 assert cv.get("warnings", None) == [], cv.get("warnings")  # none failed (B7)
+# Nested OBD reports BOTH selection facts: the architecture it chose and the
+# optimizer it ran on. Absent an explicit algorithm= the default is Auto, which
+# selects independently inside each fold -- so the report must say so.
+assert "OBD selected" in cv["tier1"], cv["tier1"]        # architecture kept
+assert "optimizer:" in cv["tier1"], cv["tier1"]          # optimizer beside it
+assert "Optimizer selection:" in cv["tier2"], cv["tier2"][:400]
+assert "chosen independently per fold" in cv["tier2"], cv["tier2"][:400]
 PY
 # Tier 3 predictions: header + one row per exemplar (189 in lowbwt), one column
 #    per compared procedure -- the paired out-of-fold substrate

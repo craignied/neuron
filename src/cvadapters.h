@@ -32,11 +32,19 @@ crossval::Procedure dfaProcedure( bool quadratic );
 //    4c), so the outer held-out rows never influence which architecture is chosen
 //    (the no-leakage invariant). The selected, early-stopped winner is then scored
 //    once on the held-out rows. innerValFraction is the share of the fold's
-//    training rows held out as the inner validation set. When selectedHidden is
-//    non-null, each fold's chosen hidden-unit count is appended in fold order --
-//    the architecture-selection metadata the CV report summarizes.
+//    training rows held out as the inner validation set.
+//
+//    cfg.algorithm travels with the search: a fixed optimizer reaches every fold
+//    unchanged, and cfg.algorithm < 0 (auto) means each fold probes and chooses
+//    INDEPENDENTLY from its own inner training data -- never reusing a choice
+//    made by another fold, the standalone panel, or a previous run.
+//
+//    When selections is non-null, each fold that produced a model appends what it
+//    chose (hidden units AND the optimizer it ran on) in fold order -- the
+//    selection metadata the CV report summarizes. A failed fold appends nothing.
 crossval::Procedure nestedObdProcedure( const obd::Config& cfg,
-	double innerValFraction, vector< unsigned >* selectedHidden = nullptr );
+	double innerValFraction,
+	vector< crossval::FoldSelection >* selections = nullptr );
 
 } // namespace cvadapters
 

@@ -111,16 +111,38 @@ RunResult run( DataSet& data, const vector< unsigned >& foldId, Procedure proc,
 	const atomic< bool >* cancel = nullptr, bool substreams = false,
 	unsigned seed = 0 );
 
+// What a procedure CHOSE inside one fold, recorded by the procedure about
+//    itself. CV does not interpret this -- it carries it so the report can
+//    summarize selection behavior (rule 6: CV owns repetition, not selection).
+//    Architecture and optimizer are ONE record, appended together at a single
+//    site, so a fold can never report one without the other.
+//    A fold that produced no model records NOTHING: absence is how a failed or
+//    ineligible fold is represented, and the report must never fill it in.
+struct FoldSelection {
+	unsigned hidden = 0;       // hidden units selected inside the fold
+	int algorithm = -1;        // optimizer trainingType actually used (0/1/2)
+	bool autoSelected = false; // true when an auto probe chose that optimizer
+
+	// Value equality, so reproducibility checks can compare whole selection
+	//    vectors directly rather than hand-rolling a field-by-field loop.
+	bool operator== ( const FoldSelection& r ) const
+	{
+		return hidden == r.hidden && algorithm == r.algorithm
+			&& autoSelected == r.autoSelected;
+	}
+	bool operator!= ( const FoldSelection& r ) const { return !( *this == r ); }
+};
+
 // A named procedure, for the comparison coordinator.
 struct ProcedureSpec {
 	string name;      // "Logistic", "LDFA", "Neural (OBD)", ...
 	Procedure proc;
-	// Optional architecture-metadata sink: for a nested-OBD procedure, wire the
-	//    SAME vector into cvadapters::nestedObdProcedure( ..., archHidden ) and
-	//    here. After the run the coordinator snapshots it into the entry (the
-	//    per-fold selected hidden size), so the report can summarize it. Leave
-	//    null for procedures without architecture metadata.
-	vector< unsigned >* archHidden = nullptr;
+	// Optional per-fold selection sink: for a nested-OBD procedure, wire the
+	//    SAME vector into cvadapters::nestedObdProcedure( ..., selections ) and
+	//    here. After the run the coordinator snapshots it into the entry, so the
+	//    report can summarize which architecture and optimizer each fold chose.
+	//    Leave null for procedures that select nothing inside a fold.
+	vector< FoldSelection >* selections = nullptr;
 };
 
 // Several procedures' results over ONE shared fold plan. Because every entry
@@ -138,8 +160,8 @@ struct Comparison {
 	struct Entry {
 		string name;
 		RunResult result;
-		double seconds = 0;            // wall-clock for this procedure
-		vector< unsigned > archHidden; // per-fold selected size; empty if none
+		double seconds = 0;              // wall-clock for this procedure
+		vector< FoldSelection > selections; // per-fold choices; empty if none
 	};
 	vector< Entry > entries;
 };
@@ -154,7 +176,7 @@ struct LockedEntry {
 	string reason;
 	vector< double > pred;         // per locked-test row (paired across entries)
 	double seconds = 0;            // wall-clock for this procedure's fit + score
-	vector< unsigned > archHidden; // frozen architecture metadata, if any
+	vector< FoldSelection > selections; // the frozen refit's own choices, if any
 };
 
 // Several procedures evaluated ONCE on one shared locked-test split -- the

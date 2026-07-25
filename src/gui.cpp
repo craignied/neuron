@@ -1650,6 +1650,13 @@ struct CvConfig
 	unsigned neuralHidden = 5;    // fixed-architecture neural (when !neuralObd)
 	double innerVal = 0.25;       // inner validation fraction for nested OBD
 	obd::Config obd;              // per-fold OBD search (when neuralObd)
+
+	// Nested OBD defaults to AUTO: `auto` is a procedure for choosing an
+	//    optimizer, run once per fold on that fold's inner training data alone
+	//    and once more for the locked-development refit. The engine struct's own
+	//    default is canonical (standalone OBD's default), so CV states its
+	//    choice here explicitly rather than inheriting a silent one.
+	CvConfig() { obd.algorithm = -1; }
 	// Locked-test evaluation (ROADMAP 4 Phase 4). lockedN > 0 sets aside an
 	//    outcome-stratified ROW holdout held OUT of CV; each procedure is refit on
 	//    the development rows by its own rule and scored once on it. DeLong is NOT
@@ -1720,8 +1727,16 @@ static cvreport::LockedInfo buildLockedInfo( const crossval::LockedResult& lr,
 		cvreport::LockedColumn col;
 		col.name = lr.entries[ e ].name;
 		col.pred = lr.entries[ e ].pred; // written regardless (DLG-4)
-		if ( !lr.entries[ e ].archHidden.empty() )
-			col.arch = to_string( lr.entries[ e ].archHidden[ 0 ] ) + " hidden";
+		// The locked refit's own choices: architecture AND the optimizer it ran
+		//    on (its own independent Auto probe, when Auto was requested).
+		if ( !lr.entries[ e ].selections.empty() )
+		{
+			const crossval::FoldSelection& s = lr.entries[ e ].selections[ 0 ];
+			col.arch = to_string( s.hidden ) + " hidden";
+			col.arch += string( ", " ) + ( s.algorithm == 0 ? "Canonical"
+				: s.algorithm == 1 ? "CGD" : s.algorithm == 2 ? "Shanno" : "?" );
+			if ( s.autoSelected ) col.arch += " (auto)";
+		}
 		if ( !lr.entries[ e ].ok )
 			col.note = "failed: " + lr.entries[ e ].reason;
 		else if ( dr.ok )
@@ -1898,7 +1913,7 @@ string runCvJob( CvConfig c )
 	// Assemble the procedure specs given an arch sink, so CV and the locked-test
 	//    evaluation each get their OWN sink (CV's records a size per fold; the
 	//    locked one records the single frozen fit's size).
-	auto assemble = [ & ]( vector< unsigned >* archSink )
+	auto assemble = [ & ]( vector< crossval::FoldSelection >* archSink )
 	{
 		vector< crossval::ProcedureSpec > ps;
 		if ( c.logistic )
@@ -1918,7 +1933,7 @@ string runCvJob( CvConfig c )
 		return ps;
 	};
 
-	vector< unsigned > cvArchSink;
+	vector< crossval::FoldSelection > cvArchSink;
 	vector< crossval::ProcedureSpec > procs = assemble( &cvArchSink );
 	if ( procs.empty() )
 		return jsonMsg( false, "select at least one procedure to compare" );
@@ -1953,7 +1968,7 @@ string runCvJob( CvConfig c )
 			lock_guard< mutex > lock( job.progressMutex );
 			job.obdPhase = "locked-test evaluation";
 		}
-		vector< unsigned > lockedArchSink;
+		vector< crossval::FoldSelection > lockedArchSink;
 		vector< crossval::ProcedureSpec > lprocs = assemble( &lockedArchSink );
 		util::set_seed( c.seed );
 		crossval::LockedResult lr = crossval::evaluateOnce( data, devRows, lockedRows,
@@ -2066,6 +2081,17 @@ string handleCv( const httplib::Request& req )
 	//    range that would refuse every fold, so reject it up front (bug B2)
 	if ( c.neural && c.neuralObd && c.obd.hMax < c.obd.hStart )
 		return jsonMsg( false, "hidden_max must be at least the OBD start size (2)" );
+
+	// Optimizer for the nested-OBD search: 1|2|3 fixed, or auto (probe once per
+	//    fold and keep the choice for that fold's whole search). Same encoding and
+	//    validation as standalone /api/obd -- one public spelling, not two. Absent
+	//    = auto, the documented default (never a silent canonical).
+	string cvAlgo = param( req, "algorithm" );
+	if ( cvAlgo.empty() || cvAlgo == "auto" ) c.obd.algorithm = -1;
+	else if ( cvAlgo == "1" ) c.obd.algorithm = 0;
+	else if ( cvAlgo == "2" ) c.obd.algorithm = 1;
+	else if ( cvAlgo == "3" ) c.obd.algorithm = 2;
+	else return jsonMsg( false, "algorithm must be 1, 2, 3 or auto" );
 
 	// Procedure selection: present = the field decides; absent = the default set.
 	auto boolParam = [ & ]( const char* name, bool& dst )

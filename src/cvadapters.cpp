@@ -133,9 +133,9 @@ crossval::Procedure cvadapters::dfaProcedure( bool quadratic )
 }
 
 crossval::Procedure cvadapters::nestedObdProcedure( const obd::Config& cfg,
-	double innerValFraction, vector< unsigned >* selectedHidden )
+	double innerValFraction, vector< crossval::FoldSelection >* selections )
 {
-	return [ cfg, innerValFraction, selectedHidden ]( DataSet& foldData,
+	return [ cfg, innerValFraction, selections ]( DataSet& foldData,
 		const vector< unsigned >& trainRows,
 		const vector< unsigned >& testRows,
 		const atomic< bool >* cancel ) -> ProcResult
@@ -193,10 +193,18 @@ crossval::Procedure cvadapters::nestedObdProcedure( const obd::Config& cfg,
 			return pr;
 		}
 
-		// The selected size is recorded only for a fold that actually produced a
-		//    model -- a failed fold contributes no architecture metadata (no fake 0).
-		if ( selectedHidden )
-			selectedHidden->push_back( r.selectedHidden );
+		// What this fold chose is recorded ONLY for a fold that actually produced
+		//    a model -- a failed fold contributes no metadata at all (no fake 0
+		//    size, no fabricated optimizer). Architecture and optimizer are
+		//    appended together as one record so they cannot desync.
+		if ( selections )
+		{
+			crossval::FoldSelection s;
+			s.hidden = r.selectedHidden;
+			s.algorithm = r.algorithm;
+			s.autoSelected = r.autoSelected;
+			selections->push_back( s );
+		}
 
 		// OBD ran reportAccuracy on the winner over the outer held-out test set (in
 		//    test-row order); read those predictions from the winner's own DataSet.

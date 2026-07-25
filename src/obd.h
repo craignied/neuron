@@ -72,6 +72,13 @@ struct Result {
 	std::vector< SizeTrial > history;
 	std::unique_ptr< Network > winner; // the trained (early-stopped) selected net; adopt it
 	bool cancelled = false;
+	// Which optimizer the search actually ran on, so a caller can observe the
+	//    choice instead of parsing the report for it. algorithm is the resolved
+	//    trainingType (0 canonical / 1 CGD / 2 Shanno), -1 only when the search
+	//    never got as far as picking one; autoSelected records whether an auto
+	//    probe made that choice (Config::algorithm < 0) or the caller fixed it.
+	int algorithm = -1;
+	bool autoSelected = false;
 };
 
 // Run the search on data (which must carry a 1-output discrete training AND test

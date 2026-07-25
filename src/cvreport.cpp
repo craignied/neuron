@@ -105,24 +105,51 @@ string aucCell( const CvAuc& a )
 // Architecture metadata: modal hidden size + its frequency, and the range.
 struct ArchInfo { bool has; unsigned modal, modalCount, total, lo, hi; };
 
-ArchInfo archInfo( const vector< unsigned >& arch )
+ArchInfo archInfo( const vector< crossval::FoldSelection >& sel )
 {
-	ArchInfo a; a.has = !arch.empty();
-	a.modal = a.modalCount = 0; a.total = ( unsigned ) arch.size(); a.lo = a.hi = 0;
-	if ( arch.empty() ) return a;
+	ArchInfo a; a.has = !sel.empty();
+	a.modal = a.modalCount = 0; a.total = ( unsigned ) sel.size(); a.lo = a.hi = 0;
+	if ( sel.empty() ) return a;
 
 	map< unsigned, unsigned > freq;
-	a.lo = a.hi = arch[ 0 ];
-	for ( unsigned i = 0; i < arch.size(); i++ )
+	a.lo = a.hi = sel[ 0 ].hidden;
+	for ( unsigned i = 0; i < sel.size(); i++ )
 	{
-		freq[ arch[ i ] ]++;
-		if ( arch[ i ] < a.lo ) a.lo = arch[ i ];
-		if ( arch[ i ] > a.hi ) a.hi = arch[ i ];
+		freq[ sel[ i ].hidden ]++;
+		if ( sel[ i ].hidden < a.lo ) a.lo = sel[ i ].hidden;
+		if ( sel[ i ].hidden > a.hi ) a.hi = sel[ i ].hidden;
 	}
 	for ( map< unsigned, unsigned >::const_iterator it = freq.begin();
 		it != freq.end(); it++ )
 		if ( it->second > a.modalCount ) { a.modalCount = it->second; a.modal = it->first; }
 	return a;
+}
+
+// The optimizer names the report uses, matching the CLI/GUI menu terminology.
+const char* algorithmName( int a )
+{
+	return a == 0 ? "Canonical" : a == 1 ? "CGD" : a == 2 ? "Shanno" : "unknown";
+}
+
+// "CGD 3/5 folds, Shanno 2/5" -- how often each optimizer was chosen, in
+//    fold order of first appearance. Empty when nothing recorded an optimizer.
+string optimizerSummary( const vector< crossval::FoldSelection >& sel )
+{
+	map< int, unsigned > freq;
+	unsigned total = 0;
+	for ( unsigned i = 0; i < sel.size(); i++ )
+		if ( sel[ i ].algorithm >= 0 ) { freq[ sel[ i ].algorithm ]++; total++; }
+	if ( !total ) return "";
+
+	string out;
+	for ( map< int, unsigned >::const_iterator it = freq.begin();
+		it != freq.end(); it++ )
+	{
+		if ( !out.empty() ) out += ", ";
+		out += string( algorithmName( it->first ) ) + " "
+			+ to_string( it->second ) + "/" + to_string( total );
+	}
+	return out;
 }
 
 string archCell( const ArchInfo& a )
@@ -266,7 +293,7 @@ string cvreport::tier1( const crossval::Comparison& cmp, const PlanInfo& info,
 		os << " " << padRight( e.name, wName )
 			<< padRight( aucCell( cvAuc( e.result ) ), wAuc );
 		if ( L ) os << padRight( testCell( findCol( locked, e.name ) ), wTest );
-		os << padRight( archCell( archInfo( e.archHidden ) ), wArch )
+		os << padRight( archCell( archInfo( e.selections ) ), wArch )
 			<< fmtTime( e.seconds ) << "\n";
 	}
 	os << " " << rule( COLS - 1, "\xE2\x94\x80" ) << "\n";
@@ -332,11 +359,17 @@ string cvreport::tier1( const crossval::Comparison& cmp, const PlanInfo& info,
 	// Architecture footnote(s).
 	for ( unsigned i = 0; i < cmp.entries.size(); i++ )
 	{
-		ArchInfo a = archInfo( cmp.entries[ i ].archHidden );
+		ArchInfo a = archInfo( cmp.entries[ i ].selections );
 		if ( !a.has ) continue;
 		os << " * " << cmp.entries[ i ].name << ": OBD selected " << a.modal
 			<< " hidden in " << a.modalCount << "/" << a.total << " folds (range "
 			<< a.lo << "\xE2\x80\x93" << a.hi << ").\n";
+
+		// The optimizer each fold ran on, beside the architecture -- never
+		//    instead of it (both are selection metadata and both are reported).
+		string opt = optimizerSummary( cmp.entries[ i ].selections );
+		if ( !opt.empty() )
+			os << "   optimizer: " << opt << ".\n";
 	}
 
 	// The one standing caveat, always.
@@ -416,16 +449,30 @@ string cvreport::tier2( const crossval::Comparison& cmp, const PlanInfo& info,
 			os << "  note: " << degenerate << " fitted fold(s) had a degenerate "
 				"held-out set (one class), so no AUC\n";
 
-		ArchInfo a = archInfo( e.archHidden );
+		ArchInfo a = archInfo( e.selections );
 		if ( a.has )
 		{
 			map< unsigned, unsigned > freq;
-			for ( unsigned i = 0; i < e.archHidden.size(); i++ ) freq[ e.archHidden[ i ] ]++;
+			for ( unsigned i = 0; i < e.selections.size(); i++ )
+				freq[ e.selections[ i ].hidden ]++;
 			os << "  OBD architecture selection:";
 			for ( map< unsigned, unsigned >::const_iterator it = freq.begin();
 				it != freq.end(); it++ )
 				os << " " << it->first << "\xE2\x86\x92" << it->second << " fold(s)";
 			os << "\n";
+
+			// Which optimizer each fold's search actually ran on. With Auto this
+			//    is chosen independently per fold, so the spread is informative.
+			string opt = optimizerSummary( e.selections );
+			if ( !opt.empty() )
+			{
+				bool anyAuto = false;
+				for ( unsigned i = 0; i < e.selections.size(); i++ )
+					if ( e.selections[ i ].autoSelected ) anyAuto = true;
+				os << "  Optimizer selection: " << opt
+					<< ( anyAuto ? "  (Auto, chosen independently per fold)"
+						: "  (fixed by request)" ) << "\n";
+			}
 		}
 	}
 
@@ -613,8 +660,18 @@ vector< cvreport::ArtifactResult > cvreport::writeArtifacts(
 				<< ", \"validFolds\": " << e.result.validFolds
 				<< ", \"pooledAUC\": " << jnumOrNull( e.result.oofTrap )
 				<< ", \"arch\": [";
-			for ( unsigned i = 0; i < e.archHidden.size(); i++ )
-				f << ( i ? ", " : "" ) << e.archHidden[ i ];
+			for ( unsigned i = 0; i < e.selections.size(); i++ )
+				f << ( i ? ", " : "" ) << e.selections[ i ].hidden;
+			// Per-fold optimizer, paired positionally with "arch" above: both come
+			//    from the same per-fold record, so a fold appears in both or neither.
+			f << "], \"optimizer\": [";
+			for ( unsigned i = 0; i < e.selections.size(); i++ )
+				f << ( i ? ", " : "" )
+					<< jsonStr( algorithmName( e.selections[ i ].algorithm ) );
+			f << "], \"optimizerAuto\": [";
+			for ( unsigned i = 0; i < e.selections.size(); i++ )
+				f << ( i ? ", " : "" )
+					<< ( e.selections[ i ].autoSelected ? "true" : "false" );
 			f << "], \"failures\": [";
 			bool firstFail = true;
 			for ( unsigned i = 0; i < e.result.folds.size(); i++ )

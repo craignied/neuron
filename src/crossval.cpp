@@ -306,7 +306,7 @@ crossval::LockedResult crossval::evaluateOnce( DataSet& data,
 		{
 			e.ok = true;
 			e.pred = pr.pred;
-			if ( procs[ p ].archHidden ) e.archHidden = *procs[ p ].archHidden;
+			if ( procs[ p ].selections ) e.selections = *procs[ p ].selections;
 		}
 		lr.entries.push_back( e );
 	}
@@ -354,8 +354,8 @@ crossval::Comparison crossval::compare( DataSet& data,
 		e.name = procs[ i ].name;
 		e.result = rr;
 		e.seconds = chrono::duration< double >( t1 - t0 ).count();
-		if ( procs[ i ].archHidden ) // a procedure that carries architecture metadata
-			e.archHidden = *procs[ i ].archHidden;
+		if ( procs[ i ].selections ) // a procedure that carries architecture metadata
+			e.selections = *procs[ i ].selections;
 		c.entries.push_back( e );
 	}
 

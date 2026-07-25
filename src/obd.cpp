@@ -253,9 +253,14 @@ obd::Result obd::run( DataSet& data, const Config& cfg,
 	net->setLastop( false ); net->setHistory( false ); net->setLogPrint( false );
 	net->randomize();
 
-	// Optimizer: fixed, or probed once (autoalgo) and kept for every size
+	// Optimizer: fixed, or probed once (autoalgo) and kept for every size. Auto
+	//    is a procedure for CHOOSING an optimizer, not an optimizer: it runs once
+	//    per independent search, and the winner is then used for every grow and
+	//    prune trial below. A probe ending on its window is a bounded experiment
+	//    (STOP_PROBE_BUDGET) and never counts as a converged fit.
 	unsigned trainingType = ( cfg.algorithm >= 0 && cfg.algorithm <= 2 )
 		? ( unsigned ) cfg.algorithm : 0;
+	result.autoSelected = ( cfg.algorithm < 0 );
 	if ( cfg.algorithm < 0 ) // auto
 	{
 		util::set_screen( discard );
@@ -275,6 +280,7 @@ obd::Result obd::run( DataSet& data, const Config& cfg,
 			<< " for the search." << endl;
 	}
 	configureNet( *net, trainingType );
+	result.algorithm = ( int ) trainingType; // observable: what the search ran on
 
 	// Silence the bootstrap during the search; restore it on the winner
 	unsigned savedBoot = disableBootstrap( net->getDataSet() );
