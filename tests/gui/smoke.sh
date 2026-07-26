@@ -534,6 +534,18 @@ done
 grep -q '"running":false' status.json || fail "run never stopped after cancel"
 grep -q '"stopReason":"cancelled"' status.json || fail "cancelled run should say so"
 grep -q '"ok":true' status.json || fail "cancelled run should still be a completed run"
+# A cancelled run is a completed OPERATION but not a fitted model either: the
+#    engine report must say so for EVERY non-converged outcome, not only for the
+#    ceiling, and the JSON must report converged:false without claiming the
+#    ceiling was reached.
+$PY - <<'PY' || fail "a cancelled run must be reported as not converged"
+import json
+d = json.load(open("status.json", encoding="utf-8"))["result"]
+assert d["converged"] is False, d
+assert d["ceilingExhausted"] is False, d      # cancelled, not ceiling-exhausted
+assert "did NOT converge" in d["output"], d["output"][-400:]
+assert "cancelled" in d["output"], d["output"][-400:]
+PY
 # Stop with nothing running refuses cleanly
 curl -s -X POST -d "" "$URL/api/train/stop" | grep -q '"ok":false' \
     || fail "stop should refuse when nothing is running"

@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 #ifndef _WIN32
@@ -182,11 +183,41 @@ int main()
 	ltmpl.setHistory( false ); ltmpl.setLastop( false ); ltmpl.setLogPrint( false );
 	util::set_seed( 3 );
 	ltmpl.randomize();
-	ltmpl.setMinStop( true ); tmpl.setMinError( 0.12 ); // likewise: a rule this fixture reaches
+	// NO min-error stop here, deliberately: measured, this logistic converges on
+	// the shipped GRADIENT limit (1e-6) at a final error of 0.2421, so any
+	// min-error threshold low enough to look meaningful is unreachable and any
+	// threshold above 0.2421 would stop it early. The stopping rule that actually
+	// fires is asserted below, so this comment cannot quietly become false.
+
+	// EVERY fixture here must prove the stopping rule its comment claims. An
+	// unconverged fold is now refused, so these templates only work because some
+	// rule fires -- and a test that passes for a different reason than it states
+	// is exactly the failure mode this suite exists to prevent. (It already
+	// happened: a copy-paste set the LOGISTIC template's min-error threshold on
+	// the NEURAL one, leaving logistic with an unreachable 1e-30 default. Every
+	// assertion still passed, because logistic converges on gradient instead.)
+	{
+		SimpleProp nprobe( tmpl );
+		nprobe.setMaxIterations( 4000 );
+		util::set_seed( 7 ); nprobe.randomize();
+		ostringstream sink; ostream& saved = util::screen();
+		util::set_screen( sink ); nprobe.train(); util::set_screen( saved );
+		expect( nprobe.getStopReason() == Iterative::STOP_MIN_ERROR,
+			"the neural template stops on its target error, as its comment says "
+			"(without it this fixture runs to the ceiling)" );
+
+		Logistic lprobe( ltmpl );
+		lprobe.setMaxIterations( 10000 );
+		util::set_seed( 7 ); lprobe.randomize();
+		util::set_screen( sink ); lprobe.train(); util::set_screen( saved );
+		expect( lprobe.getStopReason() == Iterative::STOP_GRADMAX,
+			"the logistic template stops on the gradient limit, as its comment "
+			"says -- no min-error threshold is involved" );
+	}
 
 	util::set_seed( 7 );
 	crossval::RunResult rlog = crossval::run( data, foldId,
-		cvadapters::trainProcedure( ltmpl, 40000 ) );
+		cvadapters::trainProcedure( ltmpl, 10000 ) );
 	bool logAll = true;
 	for ( unsigned i = 0; i < n; i++ )
 		if ( rlog.oofPrediction[ i ] < 0.0 ) logAll = false;
@@ -225,7 +256,7 @@ int main()
 
 		vector< crossval::ProcedureSpec > lprocs;
 		lprocs.push_back( { "Neural", cvadapters::trainProcedure( tmpl, 4000 ) } );
-		lprocs.push_back( { "Logistic", cvadapters::trainProcedure( ltmpl, 40000 ) } );
+		lprocs.push_back( { "Logistic", cvadapters::trainProcedure( ltmpl, 10000 ) } );
 
 		crossval::LockedResult lr = crossval::evaluateOnce(
 			data, hLock.train, hLock.test, lprocs, nullptr, true /*substreams*/, 7 );
@@ -268,7 +299,7 @@ int main()
 		// are the same whether it runs alone or beside Neural -- the substream is
 		// keyed by NAME, not position. (Watched to FAIL against index-keying.)
 		vector< crossval::ProcedureSpec > lonly;
-		lonly.push_back( { "Logistic", cvadapters::trainProcedure( ltmpl, 40000 ) } );
+		lonly.push_back( { "Logistic", cvadapters::trainProcedure( ltmpl, 10000 ) } );
 		crossval::LockedResult lr1 = crossval::evaluateOnce(
 			data, hLock.train, hLock.test, lonly, nullptr, true, 7 );
 		expect( lr1.ok && lr1.entries[ 0 ].pred == lr.entries[ 1 ].pred,
@@ -283,7 +314,7 @@ int main()
 
 		// DLG-5: evaluateOnce defends its row-partition + procedure contract. Each
 		// refusal is watched to FAIL against the un-validated code (rule 2).
-		crossval::ProcedureSpec ok = { "P", cvadapters::trainProcedure( ltmpl, 40000 ) };
+		crossval::ProcedureSpec ok = { "P", cvadapters::trainProcedure( ltmpl, 10000 ) };
 		auto onceMsg = [ & ]( const vector< unsigned >& tr, const vector< unsigned >& te,
 			vector< crossval::ProcedureSpec > ps )
 		{ return crossval::evaluateOnce( data, tr, te, ps ).message; };

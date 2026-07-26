@@ -449,16 +449,26 @@ double Iterative::train()
 	//    report and the GUI all carry the same plain statement -- a caller must
 	//    not have to infer it from a JSON field. Runs that end on a real stopping
 	//    rule print nothing here, so a converged transcript is unchanged.
-	if ( stopReason == STOP_MAX_ITERATIONS )
+	if ( !converged( stopReason ) )
 	{
 		screenStream.str( "" );
-		screenStream << "WARNING: training did NOT converge. It stopped at the "
-			<< "maximum of " << maxIterations << " iterations, which is a safety "
-			<< "limit, not a stopping condition." << endl
-			<< "         The weights are kept, so training can be continued from "
-			<< "here, but this is not a fitted model:" << endl
-			<< "         raise the maximum iterations, or set a stopping "
-			<< "condition that can fire." << endl << endl;
+		if ( stopReason == STOP_MAX_ITERATIONS )
+			screenStream << "WARNING: training did NOT converge. It stopped at the "
+				<< "maximum of " << maxIterations << " iterations, which is a safety "
+				<< "limit, not a stopping condition." << endl
+				<< "         The weights are kept, so training can be continued from "
+				<< "here, but this is not a fitted model:" << endl
+				<< "         raise the maximum iterations, or set a stopping "
+				<< "condition that can fire." << endl << endl;
+		else
+			// Cancellation and an expired probe window already printed WHY the
+			//    loop ended, at the break above. What they have not said is what
+			//    it means: no stopping rule fired, so this is not a fitted model.
+			screenStream << "WARNING: training did NOT converge -- it ended before "
+				<< "any stopping condition fired (" << stopReasonToken( stopReason )
+				<< ")." << endl
+				<< "         The weights are kept and can be trained further, but "
+				<< "this is not a fitted model." << endl << endl;
 
 		fileStream << screenStream.str();
 		util::screen() << screenStream.str();

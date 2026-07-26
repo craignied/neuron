@@ -2122,3 +2122,34 @@ Carried forward — live items now live in `CLAUDE.md` under "Backlog".
   along — the same trap recorded on 2026-07-20. Rule 3 applies to test harnesses too.
   Gates: zero-warning Release build, goldens byte-identical, oracle numerically identical,
   10/10 ctest, smoke green, tools green.
+
+- **2026-07-25 (corrective) — three defects Sol caught in the follow-up, and the one that
+  matters most is why the suite stayed green.**
+  1. **A copy-paste typo set the LOGISTIC template's min-error threshold on the NEURAL
+     one** (`ltmpl.setMinStop( true ); tmpl.setMinError( 0.12 );`), leaving logistic with
+     minimum-error stopping enabled at its unreachable 1e-30 default. Every assertion still
+     passed — because logistic converges on the GRADIENT limit, so the fixture worked for a
+     different reason than its comment claimed. Measured before fixing: logistic reaches
+     `grad_max` at a final error of **0.2421**, so the documented 0.12 threshold could never
+     fire *even after correcting the typo* — the "fix" would have left the comment just as
+     false. The min-error line is therefore GONE from the logistic template, replaced by a
+     comment stating the measured mechanism. The neural template's `min_error` at 0.12 IS
+     load-bearing (without it that fixture ends at `max_iterations`, measured).
+     **The guard:** both templates now assert their own stopping rule
+     (`STOP_MIN_ERROR` / `STOP_GRADMAX`), so a comment cannot quietly become false again.
+     This is the standing lesson in its purest form — a green suite is not evidence until
+     you know WHY it is green.
+  2. **The "one authoritative predicate" claim was not true of the code.** `Iterative::
+     train()` reported on `stopReason == STOP_MAX_ITERATIONS` rather than asking
+     `converged()`, while the commit message, header comments and HISTORY all said the
+     training report used the predicate. Fixed in the direction that keeps the claim:
+     the epilogue now gates on `!converged( stopReason )` and explains EVERY non-converged
+     outcome — the ceiling gets its existing warning, and cancellation or an expired probe
+     window get a short statement that no stopping rule fired, so the run is not a fitted
+     model (the in-loop line already said *why* it ended, not what it means). smoke asserts
+     the cancelled case reports `converged:false`, `ceilingExhausted:false`, and the
+     explanation in the ENGINE report.
+  3. AGENTS.md: an orphaned paragraph left by an earlier insertion, re-headed
+     "**In OBD specifically:**".
+  Gates: zero-warning Release build, goldens byte-identical, oracle numerically identical,
+  10/10 ctest, smoke green, tools green.

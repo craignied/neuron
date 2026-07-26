@@ -438,9 +438,8 @@ contrast. `/api/cv` `autostop_tol`/`autostop_window` apply to the plain logistic
 and fixed-architecture neural procedures as well as the nested-OBD search, which
 is how you give them a stopping rule they can actually reach.
 
- A trial that ends by
-reaching `iter_budget` did not converge, so OBD will NOT compare its loss, select
-it, or prune from it. The search stops at the first such trial and refuses with
+**In OBD specifically:** a trial that ends by reaching `iter_budget` did not
+converge, so OBD will NOT compare its loss, select it, or prune from it. The search stops at the first such trial and refuses with
 `ok:false`, `ceilingExhausted:true`, and a message naming the size — the whole
 trial table is still printed, and `trials[]` gives each trial's `stopReason`,
 `iterations`, and `eligible` flag. **This is the correct outcome, not a bug:** the
