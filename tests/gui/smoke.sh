@@ -252,10 +252,23 @@ import json
 d = json.load(open("converged.json", encoding="utf-8"))
 assert "did NOT converge" not in d["output"], d["output"][-400:]
 PY
-# The page must render ceiling exhaustion as a WARNING state, not the green
-#    "ok" state that res.ok alone would have produced.
-grep -q 'res.ceilingExhausted) setWarnStatus' page.html \
-    || fail "the page must render ceiling exhaustion as a warning, not as ok"
+# The page must render an unconverged run as a WARNING state, not the green
+#    "ok" state that res.ok alone would have produced -- and it must key on
+#    CONVERGENCE, not on one particular way of failing to converge. Keying on
+#    ceilingExhausted alone painted a cancelled run green while the report under
+#    it said the run had not converged.
+$PY - <<'PY' || fail "the page must key its warning on convergence, not on ceiling exhaustion"
+import re
+html = open("page.html", encoding="utf-8").read()
+m = re.search(r'^\s*(?:const\s+)?(\w+)\s*=\s*\(res\.converged === false\);',
+              html, re.M)
+assert m, "the page does not derive an unconverged flag from res.converged"
+flag = m.group(1)
+warn = re.search(r'if \(res\.ok && (\w+)\) setWarnStatus\("tstatus"', html)
+assert warn, "no warning-state branch for the training status"
+assert warn.group(1) == flag, \
+    "the warning branch is gated on %r, not on the convergence flag" % warn.group(1)
+PY
 
 # --- Train-panel parity controls (GUI/CLI parity, 2026-07-19) --------------
 # Learning rate, weight decay, batch/epoch, the stopping conditions, and the
@@ -545,6 +558,19 @@ assert d["converged"] is False, d
 assert d["ceilingExhausted"] is False, d      # cancelled, not ceiling-exhausted
 assert "did NOT converge" in d["output"], d["output"][-400:]
 assert "cancelled" in d["output"], d["output"][-400:]
+PY
+# Both ways of NOT converging reach the page's single warning branch: the
+#    ceiling-exhausted run captured earlier and this cancelled one both report
+#    ok:true with converged:false, differing only in ceilingExhausted (which
+#    selects the wording of the note, not whether the warning appears).
+$PY - <<'PY' || fail "ceiling and cancellation must both present as unconverged"
+import json
+ceil = json.load(open("ceiling.json", encoding="utf-8"))
+canc = json.load(open("status.json", encoding="utf-8"))["result"]
+assert ceil["ok"] is True and canc["ok"] is True, "both are successful operations"
+assert ceil["converged"] is False and canc["converged"] is False, (ceil, canc)
+assert ceil["ceilingExhausted"] is True, ceil
+assert canc["ceilingExhausted"] is False, canc
 PY
 # Stop with nothing running refuses cleanly
 curl -s -X POST -d "" "$URL/api/train/stop" | grep -q '"ok":false' \

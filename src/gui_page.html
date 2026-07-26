@@ -16,8 +16,9 @@ input[type=text] { width: 22rem; } input.num { width: 5.5rem; }
 button { padding: .35rem .9rem; cursor: pointer; }
 .status { margin-left: .8rem; font-size: .9rem; color: #777; }
 .status.ok { color: #1a7f37; } .status.err { color: #b91c1c; }
-/* Succeeded as an operation, but the fit is not valid (ceiling exhausted).
-   Prominent enough not to be mistaken for the green "done" state. */
+/* Succeeded as an operation, but the fit is not valid: no stopping rule fired,
+   whether from ceiling exhaustion or cancellation. Prominent enough not to be
+   mistaken for the green "done" state. */
 .status.warn { color: #92400e; background: #fef3c7; border: 1px solid #f59e0b;
           border-radius: 4px; padding: .15rem .45rem; font-weight: 600; }
 #rocbox { display: none; background: #fff; border: 1px solid #ddd; border-radius: 8px;
@@ -678,18 +679,27 @@ async function pollTraining() {
   $("trainbtn").textContent = "Train";
   const res = j.result;
   if (!res) return; // nothing ever ran
-  // Operation success and fit validity are different facts: a ceiling-exhausted
-  // run succeeded as a request (its weights are kept and resumable) but did NOT
-  // converge, so it must not render as a green "done".
-  if (res.ok && res.ceilingExhausted) setWarnStatus("tstatus", res.message);
+  // Operation success and fit validity are different facts. The warning state
+  // keys on CONVERGENCE, not on any one way of failing to converge: a cancelled
+  // run also succeeded as a request and also produced no fitted model, and
+  // keying on ceilingExhausted alone rendered it green while the report below
+  // said it had not converged. Tested for `=== false` rather than falsiness so a
+  // result that carries no such field can never be painted as a bad fit.
+  const unconverged = (res.converged === false);
+  if (res.ok && unconverged) setWarnStatus("tstatus", res.message);
   else setStatus("tstatus", res.ok, res.message);
   if (res.ok && res.stopReason === "plateau")
     $("errnote").textContent = "Stopped early — the training error plateaued.";
-  if (res.ok && res.ceilingExhausted)
-    $("errnote").textContent = "Training did NOT converge — it stopped at the "
-      + "maximum iteration count, a safety limit rather than a stopping "
-      + "condition. The weights are kept, so you can raise the maximum and "
-      + "continue from here, but this is not yet a fitted model.";
+  // The status is the same for every unconverged run; the note says which one.
+  if (res.ok && unconverged)
+    $("errnote").textContent = res.ceilingExhausted
+      ? "Training did NOT converge — it stopped at the maximum iteration count, "
+        + "a safety limit rather than a stopping condition. The weights are kept, "
+        + "so you can raise the maximum and continue from here, but this is not "
+        + "yet a fitted model."
+      : "Training did NOT converge — it ended before any stopping condition "
+        + "fired (" + res.stopReason + "). The weights are kept and can be "
+        + "trained further, but this is not yet a fitted model.";
   if (res.ok && res.roc) { drawROC(res.roc); renderStats(res.roc); }
   if (res.ok && res.stats) renderFullStats(res.stats);
 }

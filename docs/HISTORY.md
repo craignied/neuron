@@ -2153,3 +2153,20 @@ Carried forward — live items now live in `CLAUDE.md` under "Backlog".
      "**In OBD specifically:**".
   Gates: zero-warning Release build, goldens byte-identical, oracle numerically identical,
   10/10 ctest, smoke green, tools green.
+
+- **2026-07-25 (corrective, second) — the GUI warning keys on convergence, not on one way
+  of failing to converge.** Sol: the page still gated its amber warning on
+  `res.ceilingExhausted`, so a cancelled run (`ok:true, converged:false,
+  ceilingExhausted:false`) rendered GREEN while the report directly beneath it said the run
+  had not converged. The same class of mistake as keying on `ok`: a specific fact standing
+  in for the general one. The page now derives `unconverged = (res.converged === false)` and
+  gates the warning on that; `ceilingExhausted` survives only to choose the wording of the
+  chart note (ceiling vs "ended before any stopping condition fired"). Tested for
+  `=== false` rather than falsiness so a payload without the field can never be painted as
+  a bad fit. Red proof: against the pre-fix page the new smoke assertion fails with *"the
+  page does not derive an unconverged flag from res.converged"*. Smoke now checks the
+  wiring (the warn branch is gated on the convergence flag, parsed out of the page source)
+  AND the contract (the ceiling-exhausted and cancelled payloads captured earlier both
+  report `ok:true` with `converged:false`, differing only in `ceilingExhausted`), so the
+  single branch is proven to cover both. Gates: zero-warning Release build, goldens
+  byte-identical, oracle numerically identical, 10/10 ctest, smoke green, tools green.
