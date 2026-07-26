@@ -217,6 +217,46 @@ curl -s -X POST "$URL/api/train" \
     -d "algorithm=1&maxiter=100&seed=42&autostop=1&autostop_window=1" \
     | grep -q '"ok":false' || fail "autostop_window < 2 should be rejected"
 
+# Ordinary training that ends at the iteration ceiling: the OPERATION succeeds
+#    and the weights stay resumable, but the FIT is not valid and must say so.
+#    ok and convergence are different facts, reported separately so nothing has
+#    to infer one from the other.
+curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=5&seed=42" > ceiling.json
+grep -q '"ok":true' ceiling.json \
+    || fail "a ceiling-limited train is still a successful operation (resumable weights)"
+grep -q '"stopReason":"max_iterations"' ceiling.json || fail "expected a ceiling stop"
+grep -q '"converged":false' ceiling.json \
+    || fail "a ceiling-limited run must report converged:false"
+grep -q '"ceilingExhausted":true' ceiling.json \
+    || fail "a ceiling-limited run must report ceilingExhausted:true"
+# The warning belongs to the ENGINE report, not only the JSON wrapper, so the
+#    CLI transcript, neuron.log and any captured report carry it too. Checked
+#    against the report FIELD, not the whole payload: the wrapper message also
+#    says it, and matching that would pass even with the engine silent.
+$PY - <<'PY' || fail "the engine training report must state that training did not converge"
+import json
+d = json.load(open("ceiling.json", encoding="utf-8"))
+assert "did NOT converge" in d["output"], d["output"][-400:]
+assert "safety limit" in d["output"], d["output"][-400:]
+PY
+# A converged run says so, and prints no such warning (the control).
+curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=20000&seed=42" > converged.json
+grep -q '"converged":true' converged.json \
+    || fail "a run that stops on a real rule must report converged:true"
+grep -q '"ceilingExhausted":false' converged.json \
+    || fail "a converged run must not claim ceiling exhaustion"
+$PY - <<'PY' || fail "a converged run must not print the non-convergence warning"
+import json
+d = json.load(open("converged.json", encoding="utf-8"))
+assert "did NOT converge" not in d["output"], d["output"][-400:]
+PY
+# The page must render ceiling exhaustion as a WARNING state, not the green
+#    "ok" state that res.ok alone would have produced.
+grep -q 'res.ceilingExhausted) setWarnStatus' page.html \
+    || fail "the page must render ceiling exhaustion as a warning, not as ok"
+
 # --- Train-panel parity controls (GUI/CLI parity, 2026-07-19) --------------
 # Learning rate, weight decay, batch/epoch, the stopping conditions, and the
 # print counter are now settable through /api/train, matching the CLI model +
@@ -760,7 +800,7 @@ curl -s -X POST "$URL/api/cv" -d "logistic=1&neural=1&locked_fraction=0.25&indep
 # DLG-1: WITHOUT a declared sampling unit, the locked test still scores + gives point
 #    AUCs, but ordinary DeLong (CI + p) is WITHHELD -- an invalid p is never produced.
 curl -s -X POST "$URL/api/cv" \
-    -d "folds=5&seed=42&maxiter=300&logistic=1&neural=1&neural_obd=0&neural_hidden=4&locked_fraction=0.25" \
+    -d "folds=5&seed=42&maxiter=4000&autostop_tol=0.01&logistic=1&neural=1&neural_obd=0&neural_hidden=4&locked_fraction=0.25" \
     | grep -q '"ok":true' || fail "locked-test CV (no declaration) did not start"
 for i in $(seq 1 120); do curl -s "$URL/api/train/status" > cv_wh.json; grep -q '"running":false' cv_wh.json && break; sleep 0.3; done
 $PY - <<'PY' || fail "locked-test withheld-inference result malformed"
@@ -776,7 +816,7 @@ PY
 
 # Happy path: DECLARE independent rows -> DeLong runs. Default contrast Neural vs Logistic.
 curl -s -X POST "$URL/api/cv" \
-    -d "folds=5&seed=42&maxiter=300&logistic=1&neural=1&neural_obd=0&neural_hidden=4&locked_fraction=0.25&independence=rows" \
+    -d "folds=5&seed=42&maxiter=4000&autostop_tol=0.01&logistic=1&neural=1&neural_obd=0&neural_hidden=4&locked_fraction=0.25&independence=rows" \
     | grep -q '"ok":true' || fail "locked-test CV (declared) did not start"
 for i in $(seq 1 120); do
     curl -s "$URL/api/train/status" > cv_locked.json

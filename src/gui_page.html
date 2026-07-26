@@ -16,6 +16,10 @@ input[type=text] { width: 22rem; } input.num { width: 5.5rem; }
 button { padding: .35rem .9rem; cursor: pointer; }
 .status { margin-left: .8rem; font-size: .9rem; color: #777; }
 .status.ok { color: #1a7f37; } .status.err { color: #b91c1c; }
+/* Succeeded as an operation, but the fit is not valid (ceiling exhausted).
+   Prominent enough not to be mistaken for the green "done" state. */
+.status.warn { color: #92400e; background: #fef3c7; border: 1px solid #f59e0b;
+          border-radius: 4px; padding: .15rem .45rem; font-weight: 600; }
 #rocbox { display: none; background: #fff; border: 1px solid #ddd; border-radius: 8px;
           padding: 1rem; margin-bottom: 1rem; gap: 1.5rem; align-items: flex-start;
           flex-wrap: wrap; }
@@ -524,6 +528,14 @@ function setStatus(id, ok, text) {
   el.textContent = text;
   el.className = "status " + (ok ? "ok" : "err");
 }
+// A third state, between ok and error: the operation succeeded but the FIT is
+// not valid (training hit its iteration ceiling). Green would say "done"; red
+// would say "the request failed". Neither is true, so this reads as a warning.
+function setWarnStatus(id, text) {
+  const el = $(id);
+  el.textContent = text;
+  el.className = "status warn";
+}
 async function api(path, params) {
   const r = await fetch(path, { method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -666,9 +678,18 @@ async function pollTraining() {
   $("trainbtn").textContent = "Train";
   const res = j.result;
   if (!res) return; // nothing ever ran
-  setStatus("tstatus", res.ok, res.message);
+  // Operation success and fit validity are different facts: a ceiling-exhausted
+  // run succeeded as a request (its weights are kept and resumable) but did NOT
+  // converge, so it must not render as a green "done".
+  if (res.ok && res.ceilingExhausted) setWarnStatus("tstatus", res.message);
+  else setStatus("tstatus", res.ok, res.message);
   if (res.ok && res.stopReason === "plateau")
     $("errnote").textContent = "Stopped early — the training error plateaued.";
+  if (res.ok && res.ceilingExhausted)
+    $("errnote").textContent = "Training did NOT converge — it stopped at the "
+      + "maximum iteration count, a safety limit rather than a stopping "
+      + "condition. The weights are kept, so you can raise the maximum and "
+      + "continue from here, but this is not yet a fitted model.";
   if (res.ok && res.roc) { drawROC(res.roc); renderStats(res.roc); }
   if (res.ok && res.stats) renderFullStats(res.stats);
 }

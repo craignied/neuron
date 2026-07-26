@@ -244,30 +244,16 @@ obd::Eligibility obd::classify( Iterative::StopReason stop,
 	if ( !isfinite( score ) || !isfinite( trainErr ) )
 		return NUMERICAL_FAILURE;
 
-	switch ( stop )
-	{
-	// A stopping RULE fired: the fit reached a point it was asked to stop at.
-	case Iterative::STOP_GRADMAX:    // gradient convergence
-	case Iterative::STOP_PLATEAU:    // training-loss plateau
-	case Iterative::STOP_EARLY_STOP: // held-out error demonstrably deteriorated
-	case Iterative::STOP_MIN_ERROR:
-	case Iterative::STOP_CHANGE:
-	case Iterative::STOP_WINDOW:
+	// The convergence question is the ENGINE's, not OBD's -- the training report
+	//    and the CV adapters ask the same predicate, so "converged" cannot mean
+	//    one thing here and another there (rule 6). OBD adds only the reasons a
+	//    SEARCH cares about on top of it.
+	if ( Iterative::converged( stop ) )
 		return ELIGIBLE;
-
-	// The safety ceiling is not a stopping rule. Reaching it means the model
-	//    never converged, so its loss is not a fit to compare.
-	case Iterative::STOP_MAX_ITERATIONS:
-		return INCOMPLETE_CEILING;
-
-	case Iterative::STOP_CANCELLED:
+	if ( stop == Iterative::STOP_CANCELLED )
 		return INCOMPLETE_CANCELLED;
-
-	// A probe budget never governs a real trial, and STOP_NONE means train()
-	//    never ran; neither is a finished fit.
-	default:
-		return INCOMPLETE_CEILING;
-	}
+	// MAX_ITERATIONS, PROBE_BUDGET and NONE all mean the fit never finished.
+	return INCOMPLETE_CEILING;
 }
 
 const char* obd::stopToken( Iterative::StopReason stop, Eligibility e )

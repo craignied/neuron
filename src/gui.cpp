@@ -1096,6 +1096,16 @@ string runTrainingAndBuildResult( bool continued, const string& autoJson,
 			"condition. The weights are kept so you can continue training; raise "
 			"the maximum iterations, or set a stopping condition that can fire.";
 
+	// OPERATION SUCCESS AND FIT VALIDITY ARE DIFFERENT FACTS. The request
+	//    succeeded (ok:true) and the weights are resumable, but whether a
+	//    stopping rule fired is reported separately so no caller -- the page, a
+	//    script, an LLM -- has to infer convergence from ok.
+	bool didConverge = iter ? Iterative::converged( iter->getStopReason() ) : false;
+	bool hitCeiling = ( iter
+		&& iter->getStopReason() == Iterative::STOP_MAX_ITERATIONS );
+	string fitFields = string( ",\"converged\":" ) + ( didConverge ? "true" : "false" )
+		+ ",\"ceilingExhausted\":" + ( hitCeiling ? "true" : "false" );
+
 	lastReport = preamble + cap.text.str(); // downloadable as report.txt
 	lastTrainError = finalError; // baseline for stepwise regression
 
@@ -1105,8 +1115,8 @@ string runTrainingAndBuildResult( bool continued, const string& autoJson,
 	string autoField = autoJson.empty() ? "" : ( ",\"autoAlgo\":" + autoJson );
 
 	return string( "{\"ok\":true,\"message\":\"" ) + jsonEscape( msg.str() )
-		+ "\",\"stopReason\":\"" + stopReason
-		+ "\",\"output\":\"" + jsonEscape( lastReport ) + "\"" + roc
+		+ "\",\"stopReason\":\"" + stopReason + "\"" + fitFields
+		+ ",\"output\":\"" + jsonEscape( lastReport ) + "\"" + roc
 		+ statsField + autoField + "}";
 }
 
@@ -1675,6 +1685,15 @@ struct CvConfig
 	double innerVal = 0.25;       // inner validation fraction for nested OBD
 	obd::Config obd;              // per-fold OBD search (when neuralObd)
 
+	// The plateau auto-stop applies to the PLAIN logistic / fixed-architecture
+	//    neural templates too, not only to the nested-OBD search, when the caller
+	//    asks for it. Without this the only stopping rule those procedures have
+	//    is the shipped gradient limit, which a slowly-converging problem may
+	//    never reach -- and since an unconverged fold is now (correctly) refused,
+	//    the caller would have no way to make a fixed-architecture CV succeed.
+	//    Default OFF, so a request that does not ask is behaviorally unchanged.
+	bool plainAutostop = false;
+
 	// Nested OBD defaults to AUTO: `auto` is a procedure for choosing an
 	//    optimizer, run once per fold on that fold's inner training data alone
 	//    and once more for the locked-development refit. The engine struct's own
@@ -1923,6 +1942,10 @@ string runCvJob( CvConfig c )
 		lg = make_unique< Logistic >();
 		lg->setDataSet( full );
 		lg->setHistory( false ); lg->setLastop( false ); lg->setLogPrint( false );
+		// A reachable stopping rule, when the caller asked for one: the clone
+		//    each fold trains carries this through Iterative::copy.
+		if ( c.plainAutostop )
+			lg->setAutoStop( true, c.obd.plateauTol, c.obd.plateauWindow );
 		util::set_seed( c.seed ); lg->randomize();
 	}
 	if ( c.neural && !c.neuralObd )
@@ -1931,6 +1954,8 @@ string runCvJob( CvConfig c )
 		sp->setDataSet( full );
 		sp->setHidden( c.neuralHidden );
 		sp->setHistory( false ); sp->setLastop( false ); sp->setLogPrint( false );
+		if ( c.plainAutostop )
+			sp->setAutoStop( true, c.obd.plateauTol, c.obd.plateauWindow );
 		util::set_seed( c.seed ); sp->randomize();
 	}
 
@@ -2100,6 +2125,28 @@ string handleCv( const httplib::Request& req )
 	uintParam( "neural_hidden", c.neuralHidden, 1, "neural_hidden must be at least 1" );
 	uintParam( "hidden_max", c.obd.hMax, 1, "hidden_max must be at least 1" );
 	uintParam( "iter_budget", c.obd.iterBudget, 1, "iter_budget must be at least 1" );
+	// The plateau auto-stop, for the nested-OBD search AND (when asked for) the
+	//    plain logistic / fixed-architecture neural templates. Present = the
+	//    caller wants a reachable stopping rule on every procedure in this run.
+	{
+		string t = param( req, "autostop_tol" ), w = param( req, "autostop_window" );
+		if ( !t.empty() )
+		{
+			double v = atof( t.c_str() );
+			if ( !( v > 0 && v < 1 ) )
+				return jsonMsg( false, "autostop_tol must be between 0 and 1" );
+			c.obd.plateauTol = v;
+			c.plainAutostop = true;
+		}
+		if ( !w.empty() )
+		{
+			long v = atol( w.c_str() );
+			if ( v < 2 )
+				return jsonMsg( false, "autostop_window must be at least 2" );
+			c.obd.plateauWindow = ( unsigned ) v;
+			c.plainAutostop = true;
+		}
+	}
 	if ( !bad.empty() ) return jsonMsg( false, bad );
 	// The nested-OBD search grows from hStart (2); hidden_max below it is an empty
 	//    range that would refuse every fold, so reject it up front (bug B2)

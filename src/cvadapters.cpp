@@ -38,7 +38,7 @@ static vector< double > heldoutPredictions( Model& m )
 // Fit a model with its report discarded; return true only if the fit actually
 //    produced held-out guesses. The guess column is poisoned first, so a fit
 //    that never writes it (a singular DFA) is caught rather than read as garbage.
-static bool fitQuietly( Model& m )
+static bool fitQuietly( Model& m, double* finalError = nullptr )
 {
 	TwoSet& te = m.getDataSet().getTestTwoSet();
 	te.setBootstrapResamples( 0 ); // point predictions
@@ -48,8 +48,9 @@ static bool fitQuietly( Model& m )
 	ostream& saved = util::screen();
 	ostringstream discard;
 	util::set_screen( discard );
-	m.train(); // epilogue writes the held-out guesses -- unless the fit failed
+	double err = m.train(); // epilogue writes the guesses -- unless the fit failed
 	util::set_screen( saved );
+	if ( finalError ) *finalError = err;
 
 	if ( n == 0 ) return false;
 	for ( unsigned i = 0; i < n; i++ )
@@ -90,11 +91,34 @@ crossval::Procedure cvadapters::trainProcedure( const Network& templateNet,
 
 		CancelObserver obs; obs.cancel = cancel;
 		clone->setObserver( &obs );
-		bool produced = fitQuietly( *clone );
+		double finalError = 0;
+		bool produced = fitQuietly( *clone, &finalError );
 		clone->setObserver( nullptr );
 
 		if ( cancel && cancel->load() ) { pr.cancelled = true; return pr; }
 		if ( !produced ) { pr.reason = "training produced no predictions"; return pr; }
+
+		// Writing predictions is not the same as having FITTED. A run that ended
+		//    at the iteration ceiling did not converge; its weights are wherever
+		//    the run happened to be, so its held-out predictions are not this
+		//    procedure's answer and must not enter a pooled AUC, a fold mean, or
+		//    a locked-test contrast. Same rule the engine report and OBD use.
+		Iterative::StopReason stop = clone->getStopReason();
+		if ( !isfinite( finalError ) )
+		{
+			pr.reason = "training produced a non-finite error (a diverged fit)";
+			return pr;
+		}
+		if ( !Iterative::converged( stop ) )
+		{
+			pr.reason = string( "training did not converge (" )
+				+ Iterative::stopReasonToken( stop ) + "): it stopped at the "
+				+ to_string( maxIter ) + "-iteration ceiling, which is a safety "
+				"limit, not a stopping condition, so this fold contributes no "
+				"prediction. Raise the per-fold iteration cap, or set a stopping "
+				"condition that can fire.";
+			return pr;
+		}
 
 		pr.ok = true;
 		pr.pred = heldoutPredictions( *clone );

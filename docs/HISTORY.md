@@ -2079,3 +2079,46 @@ Carried forward — live items now live in `CLAUDE.md` under "Backlog".
   failure note so the one-screen table keeps its columns.
   Gates every commit: zero-warning Release build, goldens byte-identical, oracle numerically
   identical, 10/10 ctest, smoke green, tools green.
+
+- **2026-07-25 (follow-up) — the governing rule applied beyond OBD.** Sol accepted the
+  OBD eligibility work and pointed out three places the same rule was not yet honored.
+  All three were reproduced against the current binary before being fixed:
+  1. **Ordinary GUI training rendered the non-convergence warning GREEN**, because the
+     page keyed on `res.ok`. Pre-fix payload: `ok:true`, `stopReason:max_iterations`, and
+     **no `converged` key at all**. Now `/api/train` reports `converged` and
+     `ceilingExhausted` beside `ok` — operation success and fit validity are different
+     facts — and the page renders a distinct amber warning state (`.status.warn`) plus a
+     chart note. The weights stay resumable, which is the point of the state.
+  2. **The warning lived only in the GUI/API wrapper.** Measured: pre-fix the engine's own
+     report field contained no such text while the wrapper message did. The warning now
+     comes from `Iterative::train()`'s epilogue, so the CLI transcript, `neuron.log` and
+     any captured report say it too. Goldens stayed byte-identical and the oracle
+     numerically identical, because every one of those runs converges on `grad_max` —
+     verified before writing the code, not assumed.
+  3. **`cvadapters::trainProcedure` accepted any run that wrote predictions.** The red
+     proof is the worst artifact of the whole session: pre-fix, a 5-fold CV + locked test
+     at `maxiter=300` (nothing converged) reported "5/5 folds fitted" for both procedures,
+     pooled AUCs of 0.466 and 0.490 — below chance — and a **significant** locked-test
+     contrast, ΔAUC −0.381, **DeLong p = 0.005**. A publishable-looking inferential claim
+     manufactured entirely from unconverged fits. Fixed/logistic folds and locked refits
+     now fail on `max_iterations`, cancellation, or a non-finite error, with a reason.
+  **One authoritative predicate** (rule 6): `Iterative::converged(StopReason)` is asked by
+  the training report, `obd::classify`, and the CV adapters, so "converged" cannot mean
+  different things in different layers. `obd::classify` delegates to it — behavior
+  identical, proven by the unchanged OBD tests.
+  **A product gap the rule exposed:** with unconverged folds now refused, fixed-architecture
+  neural and logistic CV had no reachable stopping rule at all — `/api/cv` never parsed
+  `autostop_tol` (measured: a 4-hidden net on lowbwt does not converge at 200,000 iterations
+  with the shipped 1e-6 gradient limit). `autostop_tol`/`autostop_window` are now parsed by
+  `/api/cv` and applied to the plain templates as well as the nested search, default OFF.
+  **Fixture findings, recorded rather than tuned away:** `check_crossval`'s problem was
+  *perfectly separable*, so its logistic MLE does not exist — the coefficients diverge, the
+  gradient never vanishes, and no stopping rule can ever fire. It now carries deterministic
+  class overlap, which is both the honest fixture for a logistic test and the reason the
+  suite can converge at all. Product defaults were not touched.
+  **A harness false alarm worth remembering:** a probe reported "Invalid control character"
+  JSON errors that looked like a real escaping bug in the new engine output. It was `echo`
+  interpreting the escaped `\r\n`; `printf '%s'` showed the payload had been valid all
+  along — the same trap recorded on 2026-07-20. Rule 3 applies to test harnesses too.
+  Gates: zero-warning Release build, goldens byte-identical, oracle numerically identical,
+  10/10 ctest, smoke green, tools green.

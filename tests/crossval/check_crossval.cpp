@@ -8,6 +8,7 @@
 //     problem (watched to FAIL against a procedure that skips training);
 //   - the run is reproducible under a fixed seed.
 
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -38,7 +39,15 @@ void expect( bool ok, const string& what )
 	else { cout << "FAIL - " << what << endl; failures++; }
 }
 
-// A learnable linearly-separable 2-input problem (as in check_obd).
+// A learnable 2-input problem with OVERLAPPING classes: strong signal, but the
+// classes are not perfectly separable. The overlap is deliberate and load-bearing.
+// A perfectly separable fixture has no logistic MLE — the coefficients diverge, the
+// gradient never vanishes and the error decreases forever — so logistic training on
+// it can never satisfy ANY stopping rule and now correctly fails every fold as
+// unconverged. Measured, not assumed: with separable labels, logistic reaches
+// neither a 1e-4 gradient nor a 1e-2 plateau in 4,000 iterations.
+// The perturbation is a deterministic function of the row index, so the fixture
+// stays reproducible without touching the RNG.
 static Matrix< double > learnable( unsigned n )
 {
 	Matrix< double > raw( n, 3 );
@@ -46,8 +55,9 @@ static Matrix< double > learnable( unsigned n )
 	{
 		double x0 = -1.0 + 2.0 * ( ( i * 37 ) % 100 ) / 99.0;
 		double x1 = -1.0 + 2.0 * ( ( i * 53 ) % 100 ) / 99.0;
+		double blur = 0.45 * sin( i * 2.399963 ); // deterministic class overlap
 		raw( i, 0 ) = x0; raw( i, 1 ) = x1;
-		raw( i, 2 ) = ( x0 + x1 > 0 ) ? 1 : 0;
+		raw( i, 2 ) = ( x0 + x1 + blur > 0 ) ? 1 : 0;
 	}
 	return raw;
 }
@@ -80,10 +90,16 @@ int main()
 	tmpl.setHistory( false ); tmpl.setLastop( false ); tmpl.setLogPrint( false );
 	util::set_seed( 2 );
 	tmpl.randomize();
+	// A stopping rule the fixture can actually reach. With only the shipped
+	// gradient limit (1e-6) these runs end at their iteration cap, and an
+	// unconverged fold is now correctly refused -- so the CV mechanics these
+	// cases are about would never be exercised. Measured, not guessed: see the
+	// 2026-07-25 HISTORY entry.
+	tmpl.setMinStop( true ); tmpl.setMinError( 0.12 );
 
 	util::set_seed( 7 );
 	crossval::RunResult r = crossval::run( data, foldId,
-		cvadapters::trainProcedure( tmpl, 400 ) );
+		cvadapters::trainProcedure( tmpl, 4000 ) );
 
 	expect( r.ok, "the CV run completes" );
 	expect( r.folds.size() == 5, "one result per fold" );
@@ -99,9 +115,52 @@ int main()
 	// Reproducibility under a fixed seed.
 	util::set_seed( 7 );
 	crossval::RunResult r2 = crossval::run( data, foldId,
-		cvadapters::trainProcedure( tmpl, 400 ) );
+		cvadapters::trainProcedure( tmpl, 4000 ) );
 	expect( r.oofPrediction == r2.oofPrediction,
 		"the same seed reproduces the out-of-fold predictions" );
+
+	// A fold whose training ends at the ITERATION CEILING did not fit. Writing
+	// held-out predictions is not the same as having converged: the weights are
+	// wherever the run happened to be, so those predictions must not enter the
+	// pooled AUC, a fold mean, or a locked-test contrast. Before trainProcedure
+	// consulted getStopReason() every one of these folds counted as a good fit.
+	// maxIter = 3 guarantees the ceiling fires long before any stopping rule.
+	util::set_seed( 7 );
+	crossval::RunResult rceil = crossval::run( data, foldId,
+		cvadapters::trainProcedure( tmpl, 3 ) );
+	bool everyFoldFailed = ( rceil.ok && rceil.folds.size() == 5 && rceil.validFolds == 0 );
+	bool reasonGiven = true;
+	for ( unsigned i = 0; i < rceil.folds.size(); i++ )
+		if ( rceil.folds[ i ].ok
+			|| rceil.folds[ i ].reason.find( "did not converge" ) == string::npos )
+		{
+			everyFoldFailed = false;
+			reasonGiven = false;
+		}
+	bool nothingPooled = ( rceil.oofTrap < 0 && rceil.pooledN == 0 );
+	for ( unsigned i = 0; i < n; i++ )
+		if ( rceil.oofPrediction[ i ] != -1.0 ) nothingPooled = false;
+	expect( everyFoldFailed && reasonGiven,
+		"a fold whose training hits the iteration ceiling FAILS with a reason, "
+		"instead of contributing an unconverged fit" );
+	expect( nothingPooled,
+		"an unconverged fold contributes no prediction and nothing is pooled" );
+
+	// The locked-test path uses the same adapter, so it inherits the rule: an
+	// unconverged refit is not scored and cannot reach an inference.
+	{
+		util::set_seed( 11 );
+		nsplit::Holdout hc = nsplit::stratifiedHoldout( label, 60 );
+		vector< crossval::ProcedureSpec > cprocs;
+		cprocs.push_back( { "Neural", cvadapters::trainProcedure( tmpl, 3 ) } );
+		crossval::LockedResult lc = crossval::evaluateOnce(
+			data, hc.train, hc.test, cprocs, nullptr, true, 7 );
+		expect( lc.ok && lc.entries.size() == 1 && !lc.entries[ 0 ].ok
+			&& lc.entries[ 0 ].pred.empty()
+			&& lc.entries[ 0 ].reason.find( "did not converge" ) != string::npos,
+			"an unconverged locked-test refit is failed with a reason and "
+			"produces no predictions for inference" );
+	}
 
 	// The DFA adapter (LDFA) over the SAME fold plan -- a different model family
 	// through the same generic runner. DFA is deterministic (no seed), and its
@@ -123,10 +182,11 @@ int main()
 	ltmpl.setHistory( false ); ltmpl.setLastop( false ); ltmpl.setLogPrint( false );
 	util::set_seed( 3 );
 	ltmpl.randomize();
+	ltmpl.setMinStop( true ); tmpl.setMinError( 0.12 ); // likewise: a rule this fixture reaches
 
 	util::set_seed( 7 );
 	crossval::RunResult rlog = crossval::run( data, foldId,
-		cvadapters::trainProcedure( ltmpl, 400 ) );
+		cvadapters::trainProcedure( ltmpl, 40000 ) );
 	bool logAll = true;
 	for ( unsigned i = 0; i < n; i++ )
 		if ( rlog.oofPrediction[ i ] < 0.0 ) logAll = false;
@@ -136,7 +196,7 @@ int main()
 	// The comparison coordinator: two model families over ONE shared fold plan,
 	// so every patient carries a prediction from BOTH -- the paired substrate.
 	vector< crossval::ProcedureSpec > procs;
-	procs.push_back( { "Neural", cvadapters::trainProcedure( tmpl, 400 ) } );
+	procs.push_back( { "Neural", cvadapters::trainProcedure( tmpl, 4000 ) } );
 	procs.push_back( { "LDFA", cvadapters::dfaProcedure( false ) } );
 
 	util::set_seed( 7 );
@@ -164,8 +224,8 @@ int main()
 		// hLock.test = the 60 locked rows; hLock.train = the development rows.
 
 		vector< crossval::ProcedureSpec > lprocs;
-		lprocs.push_back( { "Neural", cvadapters::trainProcedure( tmpl, 400 ) } );
-		lprocs.push_back( { "Logistic", cvadapters::trainProcedure( ltmpl, 400 ) } );
+		lprocs.push_back( { "Neural", cvadapters::trainProcedure( tmpl, 4000 ) } );
+		lprocs.push_back( { "Logistic", cvadapters::trainProcedure( ltmpl, 40000 ) } );
 
 		crossval::LockedResult lr = crossval::evaluateOnce(
 			data, hLock.train, hLock.test, lprocs, nullptr, true /*substreams*/, 7 );
@@ -208,7 +268,7 @@ int main()
 		// are the same whether it runs alone or beside Neural -- the substream is
 		// keyed by NAME, not position. (Watched to FAIL against index-keying.)
 		vector< crossval::ProcedureSpec > lonly;
-		lonly.push_back( { "Logistic", cvadapters::trainProcedure( ltmpl, 400 ) } );
+		lonly.push_back( { "Logistic", cvadapters::trainProcedure( ltmpl, 40000 ) } );
 		crossval::LockedResult lr1 = crossval::evaluateOnce(
 			data, hLock.train, hLock.test, lonly, nullptr, true, 7 );
 		expect( lr1.ok && lr1.entries[ 0 ].pred == lr.entries[ 1 ].pred,
@@ -223,7 +283,7 @@ int main()
 
 		// DLG-5: evaluateOnce defends its row-partition + procedure contract. Each
 		// refusal is watched to FAIL against the un-validated code (rule 2).
-		crossval::ProcedureSpec ok = { "P", cvadapters::trainProcedure( ltmpl, 50 ) };
+		crossval::ProcedureSpec ok = { "P", cvadapters::trainProcedure( ltmpl, 40000 ) };
 		auto onceMsg = [ & ]( const vector< unsigned >& tr, const vector< unsigned >& te,
 			vector< crossval::ProcedureSpec > ps )
 		{ return crossval::evaluateOnce( data, tr, te, ps ).message; };
@@ -254,7 +314,7 @@ int main()
 	// stops on the inner validation set, never the held-out rows), and every row
 	// still gets exactly one out-of-fold prediction.
 	obd::Config ocfg;
-	ocfg.hStart = 2; ocfg.hMax = 4; ocfg.iterBudget = 300;
+	ocfg.hStart = 2; ocfg.hMax = 4; ocfg.iterBudget = 3000;
 	ocfg.sampleEvery = 20; ocfg.algorithm = 0;
 	// A plateau tolerance that CAN fire. With the shipped default (1e-4) neither
 	// gradient convergence, plateau, nor the held-out rise ever fires on this
@@ -493,7 +553,7 @@ int main()
 	vector< crossval::FoldSelection > obdArch;
 	vector< crossval::ProcedureSpec > rprocs;
 	rprocs.push_back( { "LDFA", cvadapters::dfaProcedure( false ), nullptr } );
-	rprocs.push_back( { "Neural", cvadapters::trainProcedure( tmpl, 400 ), nullptr } );
+	rprocs.push_back( { "Neural", cvadapters::trainProcedure( tmpl, 4000 ), nullptr } );
 	rprocs.push_back( { "Neural (OBD)",
 		cvadapters::nestedObdProcedure( ocfg, 0.25, &obdArch ), &obdArch } );
 

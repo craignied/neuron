@@ -65,9 +65,19 @@ public:
 
 	// THE machine-readable name of a stop reason -- one spelling, used by every
 	//    report, JSON payload, and artifact so a caller never meets two names for
-	//    the same outcome (rule 6). A caller that also needs to say whether the
-	//    run counts as a fitted model asks obd::classify, not this.
+	//    the same outcome (rule 6).
 	static const char* stopReasonToken( StopReason r );
+
+	// Did the run end because a stopping RULE fired? This is THE convergence
+	//    predicate for the whole engine: the training report, OBD's trial
+	//    eligibility, and the CV adapters all ask it, so "converged" cannot come
+	//    to mean different things in different layers.
+	//    True for MIN_ERROR / CHANGE / WINDOW / GRADMAX / PLATEAU / EARLY_STOP.
+	//    False for MAX_ITERATIONS (a safety ceiling, not a stopping rule -- the
+	//    weights are wherever the run happened to be), CANCELLED, PROBE_BUDGET
+	//    and NONE. A caller that must also reject a non-finite loss checks that
+	//    separately; a reason alone cannot see the numbers.
+	static bool converged( StopReason r );
 
 	Iterative(); // default constructor
 	virtual ~Iterative(); // destructor

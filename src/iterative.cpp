@@ -34,6 +34,22 @@ const char* Iterative::stopReasonToken( StopReason r )
 	}
 }
 
+bool Iterative::converged( StopReason r )
+{
+	switch ( r )
+	{
+	case STOP_MIN_ERROR:
+	case STOP_CHANGE:
+	case STOP_WINDOW:
+	case STOP_GRADMAX:
+	case STOP_PLATEAU:
+	case STOP_EARLY_STOP:
+		return true;
+	default: // MAX_ITERATIONS, CANCELLED, PROBE_BUDGET, NONE
+		return false;
+	}
+}
+
 // Default destructor
 Iterative::~Iterative() { }
 
@@ -426,6 +442,27 @@ double Iterative::train()
 
 	fileStream << screenStream.str(); // stream line into file stream
 	util::screen() << screenStream.str(); // then print to screen
+
+	// Reaching the iteration ceiling is a FAILURE TO CONVERGE, not a stopping
+	//    condition: the weights are wherever the run happened to be. Say so in
+	//    the authoritative report, so the CLI transcript, neuron.log, a captured
+	//    report and the GUI all carry the same plain statement -- a caller must
+	//    not have to infer it from a JSON field. Runs that end on a real stopping
+	//    rule print nothing here, so a converged transcript is unchanged.
+	if ( stopReason == STOP_MAX_ITERATIONS )
+	{
+		screenStream.str( "" );
+		screenStream << "WARNING: training did NOT converge. It stopped at the "
+			<< "maximum of " << maxIterations << " iterations, which is a safety "
+			<< "limit, not a stopping condition." << endl
+			<< "         The weights are kept, so training can be continued from "
+			<< "here, but this is not a fitted model:" << endl
+			<< "         raise the maximum iterations, or set a stopping "
+			<< "condition that can fire." << endl << endl;
+
+		fileStream << screenStream.str();
+		util::screen() << screenStream.str();
+	}
 
 	// Print warning message if out of bounds error
 	if ( boundsErrorFlag )

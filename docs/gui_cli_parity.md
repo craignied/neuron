@@ -129,6 +129,12 @@ backstop), `algorithm` (1|2|3|auto), `seed`. It is async-only and shares the
 training job (status + stop reach it through the same doors); the winning sized
 network replaces the current model.
 
+`POST /api/train` reports `converged` and `ceilingExhausted` beside `ok`: a run
+that hits the iteration ceiling is a successful *operation* with resumable weights
+but an invalid *fit*, and the page renders it as a warning state rather than the
+green "done". The same statement appears in the engine's own training report, so
+CLI, logs and captured reports carry it too.
+
 `POST /api/cv` params: `folds` (k, ≥2), `seed`, `maxiter` (per-fold cap for
 logistic / fixed-architecture neural), procedure flags `logistic`/`ldfa`/`qdfa`/
 `neural`, `neural_obd` (nested OBD per fold vs a fixed count), `neural_hidden`

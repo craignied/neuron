@@ -426,7 +426,19 @@ completion arrive through the same `GET /api/train/status` (a running OBD adds a
 budget; keep `iter_budget` modest (hundreds to low thousands) and `hidden_max`
 sane. See `docs/obd_plan.md`.
 
-**The ceiling is a safety limit, not a stopping condition.** A trial that ends by
+**The ceiling is a safety limit, not a stopping condition — everywhere, not
+just in OBD.** Ordinary training keeps its weights when it hits `maxiter` (so you
+can continue from them) but reports `converged:false` and `ceilingExhausted:true`
+alongside `ok:true` — **operation success and fit validity are different facts** —
+and the ENGINE report itself (CLI transcript, `neuron.log`, any captured report)
+states plainly that training did not converge. A CV fold or locked-test refit
+whose training ends at the ceiling, is cancelled, or produces a non-finite error
+FAILS: it contributes no prediction and cannot reach a pooled AUC or a DeLong
+contrast. `/api/cv` `autostop_tol`/`autostop_window` apply to the plain logistic
+and fixed-architecture neural procedures as well as the nested-OBD search, which
+is how you give them a stopping rule they can actually reach.
+
+ A trial that ends by
 reaching `iter_budget` did not converge, so OBD will NOT compare its loss, select
 it, or prune from it. The search stops at the first such trial and refuses with
 `ok:false`, `ceilingExhausted:true`, and a message naming the size — the whole
