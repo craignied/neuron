@@ -1183,8 +1183,8 @@ below or in the `docs/` files they cite.
   `Matrix` cell). Sol's two `check_obd` guards are **proven to fail** against the reverted fixes and
   are *reliable* (the scalar test placement-constructs into `0xff`-poisoned storage and reads the raw
   byte — the trick my allocator-reuse `Matrix` test couldn't manage, which is why that vacuous test
-  was dropped). Full account: `docs/nested_obd_nondeterminism_resolution_report.md` +
-  `docs/nested_obd_nondeterminism_handoff.md`. Gates green, **0/110 stress in the shipped config**.
+  was dropped). Full account: `docs/nested_obd_nondeterminism_resolution_report.md`. Gates green,
+  **0/110 stress in the shipped config**.
   **Lesson (rule 3, again): a fix that only *reduces* a flake and is heap-layout-sensitive is a
   suspect, not a cure — the real one is binary.** **Next: `/api/cv` + the GUI panel.**
 

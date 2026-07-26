@@ -76,9 +76,8 @@ The tests avoid relying on the original low-probability cross-process flake.
 
 ### 4. Update documentation
 
-`docs/nested_obd_nondeterminism_handoff.md` now begins with a resolution
-section documenting the measured cause, the fixes, and the regression-test
-proof.
+This report records the measured cause, the fixes, and the regression-test
+proof. The superseded investigation handoff was removed after resolution.
 
 (The `SimpleProp::growHidden()` comment was briefly changed to “zero-initializes”
 to match the Matrix value-init, then changed back to “garbage-fills” when that
