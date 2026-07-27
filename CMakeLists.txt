@@ -134,3 +134,19 @@ add_executable(check_crossval
 target_include_directories(check_crossval PRIVATE src)
 target_link_libraries(check_crossval PRIVATE GSL::gsl GSL::gslcblas)
 add_test(NAME crossval_runner COMMAND check_crossval)
+
+# Unit test: stopping conditions are evaluated independently of REPORTING
+# CADENCE (2026-07-26). Iterative::train() used to recalculate the maximum
+# absolute gradient only inside the print block, so logarithmic vs linear
+# printing moved the stopping iteration -- and a ceiling landing between the
+# real crossing and the next print point reported a false failure to converge.
+# A scripted Iterative double pins the crossing; seeded SimpleProp runs pin
+# real-model invariance across all three optimizers (GSL is linked for those).
+add_executable(check_gradcadence
+    tests/iterative/check_gradcadence.cpp
+    src/simpleprop.cpp src/bareprop.cpp src/backprop.cpp src/logistic.cpp
+    src/network.cpp src/iterative.cpp src/model.cpp src/dataset.cpp src/split.cpp
+    src/twoset.cpp src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
+target_include_directories(check_gradcadence PRIVATE src)
+target_link_libraries(check_gradcadence PRIVATE GSL::gsl GSL::gslcblas)
+add_test(NAME iterative_grad_cadence COMMAND check_gradcadence)

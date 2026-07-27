@@ -270,6 +270,44 @@ assert warn.group(1) == flag, \
     "the warning branch is gated on %r, not on the convergence flag" % warn.group(1)
 PY
 
+# Reporting cadence must not change the FIT (2026-07-26). The print counter is
+#    a presentation setting; it may change how many rows come back and nothing
+#    else. It used to change everything: the gradient was recalculated only
+#    inside the block that PRINTS a row, so the stopping rule compared a value
+#    cached at the last printed iteration. converged.json above is the same
+#    seeded logistic under the default LOGARITHMIC counter; run it again
+#    printing every iteration and require the same endpoint. The engine test
+#    (tests/iterative) pins the mechanism -- this pins the API surface, where
+#    the print counter is a user-facing control on the training panel.
+curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
+curl -s -X POST "$URL/api/train" \
+    -d "algorithm=1&maxiter=20000&seed=42&logprint=0&printcount=1" > cadence_linear.json
+$PY - <<'PY' || fail "the printing schedule must not change the fit"
+import json, re
+def load(name):
+    d = json.load(open(name, encoding="utf-8"))
+    out = d["output"]
+    m = re.search(r"Total iterations = (\d+)", out)
+    assert m, "no iteration count in " + name
+    err = re.search(r"error in the training set = (\S+)\.", out)
+    assert err, "no final training error in " + name
+    rows = len(re.findall(r"^ +\d+ +\d\.\d+e[+-]\d+ ", out, re.M))
+    return d, int(m.group(1)), err.group(1), rows
+logd, logit, logerr, logrows = load("converged.json")       # logarithmic (default)
+lind, linit, linerr, linrows = load("cadence_linear.json")  # every iteration
+# The comparison only means something if the two schedules really did print
+#    differently and the run really did stop on the gradient rule past the
+#    dense head of the logarithmic schedule -- otherwise it would hold with the
+#    bug present and guard nothing.
+assert logd["stopReason"] == "grad_max", logd["stopReason"]
+assert linrows > logrows, (linrows, logrows)
+assert logit > 10, logit
+assert logit == linit, ("the stopping iteration moved with the print counter", logit, linit)
+assert logerr == linerr, ("the final error moved with the print counter", logerr, linerr)
+assert logd["stopReason"] == lind["stopReason"]
+assert logd["converged"] is True and lind["converged"] is True
+PY
+
 # --- Train-panel parity controls (GUI/CLI parity, 2026-07-19) --------------
 # Learning rate, weight decay, batch/epoch, the stopping conditions, and the
 # print counter are now settable through /api/train, matching the CLI model +

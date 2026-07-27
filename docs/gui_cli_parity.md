@@ -87,11 +87,22 @@ statistical/trapezoidal, 2 minimum data, 3 return); the GUI dropped the
 | (new) Plateau auto-stop tol / window | Auto-stop checkbox + tol/window fields | `POST /api/train` `autostop`,`autostop_tol`,`autostop_window` | ✅ |
 | 4 Batch/epoch on/off (forced ON for logistic, as the CLI forces it) | Batch/epoch toggle | `POST /api/train` `batch_epoch=` | ✅ |
 | 5 Weight decay (on/off + λ) | Weight-decay toggle + λ field | `POST /api/train` `weight_decay=`,`decay=` | ✅ |
-| 6 Print counter (log / linear) | Print-counter select + count | `POST /api/train` `logprint=`,`printcount=` | ✅ |
+| 6 Print counter (log / linear) | Print-counter select + count | `POST /api/train` `logprint=`,`printcount=` | ✅ (presentation only — see note) |
 | (train-time) Algorithm (GD/CGD/Shanno/auto) | Algorithm select | `POST /api/train` `algorithm=` | ✅ |
 | 7 Train model | Train button | `POST /api/train` | ✅ |
 | 7/8 Save network + guesses after training | § Session files → Network / guesses | `GET /api/save/{network,train_guesses,test_guesses}` | ✅ |
 | 9 Stepwise regression | § Stepwise regression panel | `POST /api/regress` | ✅ |
+
+**Note on the print counter (2026-07-26).** It is a *presentation* control in
+both interfaces and nothing more: stopping conditions are evaluated every
+iteration, independently of the printing schedule, so the same seed and
+parameters give the same stopping iteration, weights and predictions under
+logarithmic or linear printing. That had to be made true — until 2026-07-26 the
+maximum absolute gradient was recalculated only inside the block that printed a
+row, so this control silently chose the fit. `tests/gui/smoke.sh` asserts the
+invariant on `/api/train`; `tests/iterative/check_gradcadence.cpp` pins the
+engine mechanism. Anything added to either interface that reads a value only
+when it is about to be displayed is the same bug.
 
 ## DFA submenu
 

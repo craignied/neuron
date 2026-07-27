@@ -311,7 +311,13 @@ API refuses otherwise, as the CLI does), `weight_decay=` + `decay=`,
 `errwindow=`, `gradmax=` — each applied **only when present** (omitting a
 field keeps the model's current value; a present-but-empty stopping condition
 disables it), which is how "stop, then continue from the held weights with new
-parameters" works. `POST /api/dfa` `type=linear|quadratic` runs a standalone
+parameters" works. **`logprint`/`printcount` change only how much output you
+get back — never the fit.** Stopping conditions are evaluated every iteration,
+independently of the printing schedule, so the same seed and parameters give
+the same stopping iteration, weights and predictions whether you print every
+iteration or logarithmically. (That was a real defect until 2026-07-26: the
+gradient was recalculated only when a row was printed, so switching the print
+counter moved the endpoint. `tests/iterative/check_gradcadence.cpp` guards it.) `POST /api/dfa` `type=linear|quadratic` runs a standalone
 discriminant analysis — captured report plus, on 1-output data, ROC curves and
 the statistics object; it does not disturb the trained model — and its guesses
 save via `GET /api/save/dfa_train_guesses` / `dfa_test_guesses`.

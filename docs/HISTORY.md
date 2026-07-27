@@ -2170,3 +2170,81 @@ Carried forward — live items now live in `CLAUDE.md` under "Backlog".
   report `ok:true` with `converged:false`, differing only in `ceilingExhausted`), so the
   single branch is proven to cover both. Gates: zero-warning Release build, goldens
   byte-identical, oracle numerically identical, 10/10 ctest, smoke green, tools green.
+
+- **2026-07-26 — legacy bug #10: a stopping condition that depended on the print counter.**
+  Sol read the report from Craig's live Civic Choice GUI walkthrough (binary logistic,
+  3,300/1,200/1,500, canonical batch/epoch, seed 42, ceiling 20,000, gradient limit 1e-6,
+  logarithmic printing) and noticed the run had stopped at *exactly* 20,000 — both a
+  logarithmic print point and the safety ceiling. The fit was valid (the printed gradient
+  was 4.43e-07) but the coincidence was not. **`Iterative::train()` recalculated the
+  maximum absolute gradient only inside the block that PRINTS an iteration row**, then
+  compared that cached value against `gradMaxLimit` on every iteration. A presentation
+  setting therefore chose the fit: with logarithmic printing the engine looked at the
+  gradient at 1..10, 20, 30, 100, 200, ... and was blind in between; a crossing in a gap
+  waited for the next print point, and a ceiling landing in a gap reported a **false**
+  failure to converge. Switching the print counter changed the stopping iteration, the
+  final weights, the predictions, and whether OBD/CV would accept the fit — the same class
+  of defect as the convergence contract itself (2026-07-25): a fact about *reporting*
+  standing in for a fact about the *model*.
+  - **The fix is four lines.** `gradMaxValue = getGradMax()` moved out of the print
+    conditional to immediately after `trainSet()`, guarded by `gradMaxFlag` (which arms
+    both the rule and the printed column, so a run with gradient stopping off does no
+    extra work and stays bit-identical), and **outside** `#ifndef REGRESS_DEBUG` — under
+    that switch the value was never refreshed at all, so the rule could not fire. The
+    print block now *reads* the value it used to compute: one evaluation per iteration,
+    and the printed row can no longer disagree with the decision beside it. Checked
+    against all three optimizers: canonical (`trainingType 0`) packs `stackG` inside
+    `Network::getGradMax()`, which nothing else reads in that mode; CGD and Shanno return
+    the `currGradMax` their own step already maintains, so neither acquired a side effect.
+  - **Red proof, `tests/iterative/check_gradcadence.cpp` (new, `ctest` case 11), 24 failing
+    assertions against the pre-fix engine.** A scripted `Iterative` double (training is a
+    counter, the gradient crosses on call 17) isolates the mechanism from every numerical
+    property of a real model: printing every iteration stopped on call 17 having queried
+    the gradient 17 times, logarithmic ran on to call 21 and queried it 11 times. With a
+    ceiling at 18, logarithmic ended `max_iterations` — the gradient it was asked to stop
+    at had been reached on call 17 and never looked at. Then seeded `SimpleProp` clones,
+    same starting weights (asserted, via the untrained forward pass, so a cadence failure
+    can never be mistaken for an RNG divergence), stopping iteration by schedule
+    (every / logarithmic / linear-1000): canonical **304 / 400 / 1000**, CGD
+    **308 / 400 / 1000**, Shanno **119 / 200 / 1000** — three different fitted models per
+    optimizer, chosen by a display setting, Shanno's coarse run doing 8x the work. The
+    gradient limits are *measured* (whole traces dumped) so each crossing falls strictly
+    between two log print points; a limit that landed on one would make the comparison
+    hold with the bug present and guard nothing, so the fixture asserts that premise too.
+  - **All three goldens re-blessed, with the endpoint change proven rather than accepted.**
+    Every one had stopped at a logarithmic print point — 90,000 (xor), 200,000 x3
+    (regress's stepwise runs), 2,000 (binormal) — which is the bug's signature. Two
+    binaries were built (pre-fix and post-fix) and run against each other: the **pre-fix**
+    engine, forced to look every iteration by setting the print counter to linear-1, is
+    **byte-identical** to the **post-fix** engine on the original logarithmic script, in
+    all three transcripts, every statistic and weight. New endpoints 82,172 / 128,662 /
+    128,690 / 130,026 / 1,301. So the new numbers are exactly what the old code computed
+    when allowed to see the gradient, and the old ones were the print schedule. (First
+    attempt at this proof came out off-by-one on the stepwise runs, because the variant
+    script switched the counter *after* the initial train and the stepwise regressions
+    therefore started from different weights — switching it before the first train made
+    the match exact. Worth recording: an almost-matching proof is not a proof.) The
+    downstream numbers move in the 5th-6th significant digit; one stepwise likelihood-ratio
+    `Chi-square` on a degenerate 4-exemplar subnetwork went 7.02e-12 → -1.46e-08, both
+    roundoff around zero (its two errors agree to 7 digits at ln 2) — noise, not a finding.
+  - **The oracle now diverges, correctly, and the exclusion is self-verifying.**
+    `verify_oracle.sh` loads `xor_net.txt` — a network that is *already* converged (gradient
+    9.06e-08 < 1e-6) — with eta 0. The right answer is to stop at iteration 0. The oracle
+    cannot: iteration 0 is not a logarithmic print point, so it never looks, takes a no-op
+    step, prints its row at iteration 1 and only then notices. The iteration row, "Total
+    iterations" and the stop message are excluded (the message's float precision is
+    inherited from whatever last formatted the stream, so printing a row changes its
+    spelling — `1.0e-06` vs `1.000000e-06`; cosmetic, left alone), and **both sides are
+    asserted**: 3.0 must stop at 0, the oracle must show 1, so the exclusion cannot quietly
+    start hiding something else. Because eta is 0 every statistic that follows is
+    identical, which is what makes this a demonstration rather than a re-blessing. Proven
+    to fail against the pre-fix binary.
+  - **Smoke** gained the same invariant at the API surface, where `logprint`/`printcount`
+    is a user-facing control: the seeded logistic must reach the same iteration and the
+    same final error under both schedules, guarded by assertions that the schedules really
+    printed differently and that the run really stopped on the gradient rule. Pre-fix it
+    fails with *"the stopping iteration moved with the print counter", 2000 vs 1344*.
+  - No new public parameter; no tolerance touched; no ceiling raised. Gates: zero-warning
+    Release build, 11/11 ctest, goldens byte-identical (re-blessed, above), tools green,
+    smoke green, oracle green. `AGENTS.md` and `docs/gui_cli_parity.md` now state plainly
+    that the print counter is presentation only — a promise that had to be made true first.

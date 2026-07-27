@@ -186,13 +186,12 @@ Stop if maximum absolute gradient decreases below 1e-06
          60000     1.323509e-02   3.657607e-06       100.0
          70000     1.323492e-02   2.038222e-06       100.0
          80000     1.323486e-02   1.135458e-06       100.0
-         90000     1.323485e-02   6.325147e-07       100.0
 The maximum absolute gradient became lower than 1.0e-06.
 
-Total iterations = 90000
+Total iterations = 82172
 
-Final X-entropy error in the training set = 2.752137e-03.
-Log likelihood = -1.100855e-02
+Final X-entropy error in the training set = 2.752231e-03.
+Log likelihood = -1.100892e-02
 
 Training set:
 -------------
@@ -212,7 +211,7 @@ Cannot calculate ROC statistically, not enough data points (10)
 By trapezoidal method, ROC area = 1.000000
 95% CI = 1.000000 - 1.000000 (SE = 0.000000, Hanley-McNeil)
 Kolmogorov-Smirnov goodness of fit D = 1, p = 0.0970269
-Pearson X2 = 0.0110271 (n = 4; no valid p at the individual level - see Hosmer-Lemeshow)
+Pearson X2 = 0.0110275 (n = 4; no valid p at the individual level - see Hosmer-Lemeshow)
 Hosmer-Lemeshow goodness of fit p = Could not calculate Hosmer-Lemeshow goodness of fit: fewer exemplars than Hosmer-Lemeshow groups (10)
 
 Would you like to save this model (yes/no)? 

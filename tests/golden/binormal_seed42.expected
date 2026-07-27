@@ -220,15 +220,14 @@ Stop if maximum absolute gradient decreases below 1e-06
            800     6.047150e-01   3.829727e-05        69.0        66.0
            900     6.047149e-01   1.847104e-05        69.0        66.0
           1000     6.047149e-01   8.909789e-06        69.0        66.0
-          2000     6.047149e-01   6.082011e-09        69.0        66.0
 The maximum absolute gradient became lower than 1.0e-06.
 
-Total iterations = 2000
+Total iterations = 1301
 
 Final X-entropy error in the training set = 6.047149e-01.
 Log likelihood = -8.586952e+01
-Final X-entropy error in the test set = 5.677562e-01.
-Log likelihood = -2.668454e+01
+Final X-entropy error in the test set = 5.677575e-01.
+Log likelihood = -2.668460e+01
 
 Training set:
 -------------
@@ -252,8 +251,8 @@ Operating points fitted = 128
 By trapezoidal method, ROC area = 0.604940
 95% CI = 0.502031 - 0.707848 (SE = 0.052504, Hanley-McNeil)
 Kolmogorov-Smirnov goodness of fit D = 0.258349, p = 0.0281866
-Pearson X2 = 142.494 (n = 142; no valid p at the individual level - see Hosmer-Lemeshow)
-Hosmer-Lemeshow goodness of fit p = 0.0759705
+Pearson X2 = 142.493 (n = 142; no valid p at the individual level - see Hosmer-Lemeshow)
+Hosmer-Lemeshow goodness of fit p = 0.0759743
 
 Test set:
 ---------
@@ -277,17 +276,17 @@ Operating points fitted = 31
 By trapezoidal method, ROC area = 0.760417
 95% CI = 0.602531 - 0.918302 (SE = 0.080554, Hanley-McNeil)
 Kolmogorov-Smirnov goodness of fit D = 0.554167, p = 0.00202862
-Pearson X2 = 40.9182 (n = 47; no valid p at the individual level - see Hosmer-Lemeshow)
-Hosmer-Lemeshow goodness of fit p = 0.196283
+Pearson X2 = 40.9184 (n = 47; no valid p at the individual level - see Hosmer-Lemeshow)
+Hosmer-Lemeshow goodness of fit p = 0.196276
 
    Input:       Beta weight:     Std Err:    Wald p(W!=0):
 -----------    -------------   ------------  -------------
-          0        -0.300760       0.477510           0.53
-          1         -1.04926       0.658765           0.11
-          2       -0.0511790       0.229057           0.82
-          3         0.156844       0.351178           0.66
-          4        0.0778022       0.433775           0.86
-y-intercept         -1.08258       0.397513         0.0065
+          0        -0.300771       0.477509           0.53
+          1         -1.04919       0.658759           0.11
+          2       -0.0511838       0.229057           0.82
+          3         0.156832       0.351177           0.66
+          4        0.0778122       0.433774           0.86
+y-intercept         -1.08255       0.397511         0.0065
 
 B matrix maximum eigenvalue = 0.43
          minimum eigenvalue = 0.014

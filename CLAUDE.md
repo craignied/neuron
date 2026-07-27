@@ -192,7 +192,7 @@ logistic, LDFA / QDFA, RegressNet stepwise. Statistics: exact non-parametric tra
 AUC and binormal Az (least-squares z-ROC fit via fitexy over distinct operating points),
 stratified bootstrap CI plus Hanley-McNeil, Kolmogorov-Smirnov, Pearson X² (statistic
 only — see settled decisions), Hosmer-Lemeshow Ĉ on 10 fixed deciles, Wald tests,
-condition number. **Nine legacy bugs** were found and fixed during the reanimation; each
+condition number. **Ten legacy bugs** were found and fixed during the reanimation; each
 is written up in HISTORY with the measurement that proved it.
 
 **Interfaces.** The CLI menus are **frozen** but fully working — they remain the
@@ -207,7 +207,9 @@ size early-stopped at its held-out minimum — no size trains to completion). **
 the iteration ceiling is a failure to converge, never a stopping condition:** a trial that
 ends at `max_iterations` is ineligible, so OBD refuses loudly instead of comparing
 unfinished fits, and ordinary training warns. Nested OBD inside CV takes its optimizer
-from `/api/cv algorithm=` (default auto, probed independently per fold).
+from `/api/cv algorithm=` (default auto, probed independently per fold). **Stopping
+conditions are evaluated every iteration, independently of reporting cadence** — the
+print counter is presentation only (legacy bug #10, 2026-07-26).
 
 **Splitting and evaluation.** `src/split.{h,cpp}` owns the index-level cube: outcome-
 stratified holdout, outcome × covariate strata (quantile-binned, Hamilton apportionment),
@@ -221,7 +223,7 @@ decisions).
 
 **The gates, run at the end of every piece of work** (all currently green): zero-warning
 Release build → `tests/golden/run_golden.sh` byte-identical (3 transcripts: `xor_seed42`,
-`regress_seed42`, `binormal_seed42`) → `ctest` (10 tests) → `tests/gui/smoke.sh` →
+`regress_seed42`, `binormal_seed42`) → `ctest` (11 tests) → `tests/gui/smoke.sh` →
 `tests/oracle/verify_oracle.sh` numerically identical → live `neuron --gui` click-through
 for anything that adds a control → the SEER acceptance run for splitter work. CI runs the
 build, goldens, ctest, smoke, and the Python tools on macOS/Linux/Windows.
@@ -277,6 +279,13 @@ Re-proposing one is rework, not initiative. Full reasoning at the cited HISTORY 
   at 0.01 the same search stops far too early and gives 1 unit at AUC 0.53. A refusal is
   more informative than a model produced by a tolerance chosen to silence it. Raise the
   ceiling or use `algorithm=auto`. → HISTORY 2026-07-25.
+- **Reporting cadence may change output VOLUME; it may never change optimization or fit
+  validity.** The print counter is presentation only. Do not "solve" a stopping problem by
+  choosing a denser print schedule, and never compute a quantity a stopping rule depends
+  on inside a block that runs only when something is displayed — that was legacy bug #10,
+  where logarithmic vs linear printing chose the fit (canonical stopped at 304 / 400 /
+  1000 on one fixture) and a ceiling between print points reported a false failure to
+  converge. → HISTORY 2026-07-26; `tests/iterative/check_gradcadence.cpp`.
 - **Palm/iPhone exporters stay dead**; the HTML calculator lives on as
   `tools/neuron2web.py`. Python tooling is **stdlib-only** — no pip, no venv, enforced by
   CI on all three OSes.
@@ -420,6 +429,19 @@ file, and the session entry in `docs/HISTORY.md` all land in the same commits.
   an experimental candidate. Slot in as trainingType 3+ in `Network::engine` dispatch;
   `autoalgo::pick` iterates the extended list automatically; batch-only methods force
   `batchEpochFlag` like the CGD/Shanno probes. → HISTORY, ROADMAP 2 Phase 5.
+- **Automated neural-network restarts for initialization-sensitive local minima.**
+  Craig's pre-3.0 manual practice was to rerandomize a network with two or more hidden
+  nodes when a long run appeared trapped in a poor local error minimum. Automatic
+  stopping answers only whether ONE run finished; a small gradient can certify a
+  converged but suboptimal basin. A future multi-start procedure could train deterministic
+  random restarts, reject every unconverged start, select only by validation error (never
+  test error), and report stability across starts. This is distinct from `algorithm=auto`,
+  which compares optimizers from a common starting point. **Do not choose restart counts,
+  improvement tolerances, or stopping policy yet:** we have not measured how often
+  materially different basins occur, and nested OBD/CV would multiply the cost by folds ×
+  architectures × restarts. First measure incidence and cost on representative small and
+  large datasets; then consider an adaptive minimum/maximum restart policy with
+  deterministic RNG substreams keyed by procedure/fold/architecture/restart.
 - **OBD metric: stop on loss, select on AUC.** OBD early-stops and scores on held-out
   *error* today. At low prevalence both accuracy and loss are majority-dominated while AUC
   is prevalence-robust, so keep loss as the cheap smooth trigger but score each size by

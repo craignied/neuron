@@ -159,7 +159,11 @@ double Iterative::train()
 	double setError = -1, // error through training set, if method returns -1,
 	                      //    something is wrong
 		lastError = setError, // placeholder for last iteration's error value
-		gradMaxValue = 1e10; // maximum absolute gradient value (initialized to huge)
+		gradMaxValue = 1e10; // maximum absolute gradient of the iteration just
+		                     //    finished; refreshed every iteration when the
+		                     //    rule is armed (see below). The huge initial
+		                     //    value is only a belt-and-braces guard against
+		                     //    stopping before a single iteration has run.
 
 	boundsErrorFlag = false; // new training resets bounds error flag
 
@@ -252,6 +256,31 @@ double Iterative::train()
 	{
 		setError = trainSet(); // train once through training set, return set error
 
+		// THE CURRENT maximum absolute gradient, of the iteration just finished.
+		//    It is calculated HERE, once, on every iteration -- not inside the
+		//    printing block below, where it lived until 2026-07-26.
+		//
+		//    STOPPING CONDITIONS ARE EVALUATED INDEPENDENTLY OF REPORTING
+		//    CADENCE. Reporting may change how much output a run produces; it
+		//    must never change the optimization or the validity of the fit.
+		//    With the calculation inside the print block, the check below
+		//    compared a value cached at the last PRINTED iteration: logarithmic
+		//    printing checks at 1..10, then 20, then 30, so a crossing in
+		//    between stayed invisible until the next printed iteration, and a
+		//    ceiling landing in that gap reported a false failure to converge.
+		//    Switching linear/logarithmic printing, or changing printcount,
+		//    moved the stopping iteration, the final weights, the predictions,
+		//    and whether OBD/CV would accept the fit (tests/iterative).
+		//
+		//    Guarded by gradMaxFlag, which arms both the rule and the printed
+		//    column: a run with gradient stopping off does no extra work and is
+		//    bit-identical to one before this existed (the goldens' rule). It
+		//    sits OUTSIDE the REGRESS_DEBUG guard because a stopping rule is not
+		//    debug output -- under that switch the value was never refreshed at
+		//    all, so the rule could not fire.
+		if ( gradMaxFlag )
+			gradMaxValue = getGradMax();
+
 #ifndef REGRESS_DEBUG
 		// Print if print counter reached, first condition tests linear print counter,
 		//    second condition tests logarithmic print counter
@@ -268,13 +297,13 @@ double Iterative::train()
 			screenStream << setw( 15 ) << setfill( ' ' ) << setprecision( 6 )
 				<< setError;
 
-			// If grad max is to be output
+			// If grad max is to be output -- the SAME value the stop check
+			//    below uses, calculated once above. Never recalculate it here:
+			//    a printed row that disagrees with the decision it accompanies
+			//    is a report of a run that did not happen.
 			if ( gradMaxFlag )
-			{
-				gradMaxValue = getGradMax();
 				screenStream << setw( 15 ) << setfill( ' ' ) << setprecision( 6 )
 					<< gradMaxValue;
-			}
 
 			if ( theData.getDiscrete() ) // if outputs are discrete
 				classAccuracy( screenStream ); // add entries for class accuracy
