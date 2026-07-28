@@ -696,6 +696,47 @@ for setname, s in (d.get("stats") or {}).items():
         sys.exit(1)
 PY
 
+# --- The condition number uses EVERY eigenvalue (2026-07-27) ----------------
+# computeCondNum built its eigenvalue vector from the half-open range
+#    [&e[0], &e[dimension-1]) -- which is dimension-1 elements, so the LAST
+#    eigenvalue was dropped from every condition number the engine ever
+#    reported. The decisive case is a 2-parameter model (one input + bias):
+#    one eigenvalue survives, so the maximum and the minimum are the same
+#    number and the condition number is exactly 1 -- a perfectly conditioned
+#    model, reported for data that is nothing of the kind. Measured pre-fix on
+#    the 1-input logistic below: maxEig = minEig = 0.047, cond = 1.0.
+$PY - <<'PY'
+import random
+random.seed(5)
+with open("onein.set", "w", newline="\n") as f:
+    for _ in range(600):
+        x = random.uniform(-0.9, 0.9)
+        p = 1 / (1 + pow(2.718281828, -(2.0 * x)))
+        f.write("%.6f %s \n" % (x, "1" if random.random() < p else "0"))
+PY
+curl -s -X POST "$URL/api/load" -d "mode=train&path=onein.set" \
+    | grep -q '1 inputs' || fail "load the single-input condition-number fixture"
+curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=20000&seed=42" > cond2.json
+$PY - <<'PY' || fail "the condition number must use every eigenvalue"
+import json, re
+d = json.load(open("cond2.json", encoding="utf-8"))
+o = d["output"]
+m = re.search(r"B matrix maximum eigenvalue = (\S+)\n\s+minimum eigenvalue = (\S+)\n"
+              r"Condition number = (\S+)", o)
+assert m, o[-600:]
+hi, lo, cond = (float(x.rstrip(".")) for x in m.groups())
+# A 2-parameter model has TWO eigenvalues. If only one is consumed they
+#    collapse and the ratio is exactly 1.
+assert hi != lo, "max and min eigenvalue are identical: an eigenvalue was dropped"
+assert cond > 1.0, "condition number is %r; a 2-parameter B is not perfectly conditioned" % cond
+# The reported ratio must be the reported eigenvalues' ratio
+assert abs(cond - hi / lo) < 0.05 * cond, (cond, hi, lo)
+# ... and the JSON diagnostic must agree with the report
+assert abs(d["stats"]["logistic"]["condNumber"] - cond) < 0.05 * cond, \
+    (d["stats"]["logistic"]["condNumber"], cond)
+PY
+
 # --- Plateau auto-stop (ROADMAP 2 Phase 3) ---------------------------------
 # On the low-birth-weight logistic (loaded above), an aggressive plateau
 #    detector must stop the run early, reporting stopReason "plateau" and the

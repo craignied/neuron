@@ -697,31 +697,19 @@ void Network::computeCondNum()
 	//    condition number. This is not hypothetical: forward stepwise regression
 	//    begins by training a BASELINE network with every input removed, and on
 	//    a logistic model that baseline reaches here with dimension 0 --
-	//    gsl_vector_alloc( 0 ) yields nothing usable and gsl_vector_ptr( eval, 0 )
-	//    then dereferences null, segfaulting the whole process (the GUI server
-	//    included). Forward regression crashed neuron this way from the GUI; it
-	//    survived unnoticed because every test and golden ran only the REVERSE
-	//    direction, which never builds an empty network.
+	//    gsl_vector_alloc( 0 ) yields nothing usable and the eigenvalue read
+	//    that followed dereferenced null, segfaulting the whole process (the
+	//    GUI server included). Forward regression crashed neuron this way from
+	//    the GUI; it survived unnoticed because every test and golden ran only
+	//    the REVERSE direction, which never builds an empty network.
+	//    dimension 1 needs no special case: the loop below copies its single
+	//    eigenvalue and the ratio is 1, which is the right answer for a
+	//    one-parameter model (and NaN if that eigenvalue is 0, a singular B).
 	if ( dimension == 0 )
 	{
 		condMaxEig = condMinEig = condNum
 			= numeric_limits< double >::quiet_NaN();
 		return; // not a number, and reported as such (jnum -> JSON null)
-	}
-
-	// A ONE-parameter model does have a condition number -- it is 1, the only
-	//    eigenvalue over itself. It is special-cased rather than sent through
-	//    the GSL path below because the vector built there is a HALF-OPEN range
-	//    ending at the last eigenvalue, so a single-eigenvalue B would yield an
-	//    empty vector and maxabs/minabs on nothing. The 1x1 eigenvalue is just
-	//    the element itself, so no solver is needed.
-	if ( dimension == 1 )
-	{
-		condMaxEig = condMinEig = fabs( B( 0, 0 ) );
-		// A zero eigenvalue is a singular B: the ratio is undefined, not 1
-		condNum = condMaxEig > 0 ? 1.0
-			: numeric_limits< double >::quiet_NaN();
-		return;
 	}
 
 	// Create a gsl matrix from our matrix--begin function is cautioned to use but
@@ -737,11 +725,30 @@ void Network::computeCondNum()
 	// Calculate eigen values
 	gsl_eigen_symm( &m.matrix, eval, w );
 
-	// Create vector< double > from gsl vector
-	vector< double > eigenv( gsl_vector_ptr( eval, 0 ), gsl_vector_ptr( eval, dimension - 1 ) );
+	// Copy out ALL `dimension` eigenvalues.
+	//
+	//    This was built as the iterator range [ &e[0], &e[dimension-1] ) --
+	//    half-open, ending AT the last eigenvalue, so it held dimension-1 of
+	//    them and the last was silently discarded from every condition number
+	//    the engine ever reported. At dimension 2 the effect is total: one
+	//    eigenvalue survives, maximum and minimum become the same number, and
+	//    the condition number is exactly 1 -- a perfectly conditioned model,
+	//    reported for data that is nothing of the kind.
+	//
+	//    An indexed copy rather than a corrected pointer range: forming an
+	//    iterator one past the end of a GSL vector means reaching for an
+	//    address the library does not promise, to save a loop that costs
+	//    nothing at these sizes.
+	vector< double > eigenv;
+	eigenv.reserve( dimension );
+	for ( unsigned i = 0; i < dimension; i++ )
+		eigenv.push_back( gsl_vector_get( eval, i ) );
 
-	// Free workspace
+	// Free workspace AND the eigenvalue vector -- eval was allocated above and
+	//    never released, leaking one vector per condition number computed
+	//    (every logistic training report, every OBD trial that reports one)
 	gsl_eigen_symm_free( w );
+	gsl_vector_free( eval );
 
 	condMaxEig = maxabs( eigenv );
 	condMinEig = minabs( eigenv );

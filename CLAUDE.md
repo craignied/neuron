@@ -237,12 +237,13 @@ stay untouched during selection. **Legacy bug #11** fixed with it: a null derefe
 `Network::computeCondNum()` on a degenerate B matrix segfaulted the process on every forward
 stepwise run (and on any reverse pass that shrank the model to one input).
 
-**Open work** is the three remaining ROADMAP 4 items under "What remains" below, plus one
-**open question for Craig**: `Network::computeCondNum()` builds its eigenvalue vector from a
-half-open range ending at the LAST eigenvalue, so every condition number the engine has ever
-reported was computed over `dimension - 1` of its `dimension` eigenvalues. Deliberately NOT
-changed — it moves published statistics for every logistic model and needs its own measurement
-and re-bless. → HISTORY 2026-07-27.
+**The condition number** now uses every eigenvalue. It had been computed over `dimension - 1` of
+`dimension` — a half-open range ending at the last one — which collapsed a 2-parameter model to a
+condition number of exactly 1 and was silently correct elsewhere only when the discarded eigenvalue
+happened not to be extremal. Fixed in its own commit, with no golden re-bless required. The leaked
+`gsl_vector` went with it. → HISTORY 2026-07-27.
+
+**Open work** is the three remaining ROADMAP 4 items under "What remains" below.
 
 ## Settled decisions — do not reopen
 

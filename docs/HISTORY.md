@@ -1491,6 +1491,35 @@ below or in the `docs/` files they cite.
   Gates: zero-warning Release build, goldens byte-identical (re-blessed regress only, no further
   move), 12/12 ctest, smoke green (+18 stepwise assertions), oracle numerically identical, tools.
 
+  **The condition number used all but its last eigenvalue (2026-07-27, follow-up commit).** Found
+  while guarding the `computeCondNum` crash above; deliberately deferred out of the stepwise commit
+  because it changes a published statistic. `Network::computeCondNum` built its eigenvalue vector
+  from the half-open iterator range `[ &e[0], &e[dimension-1] )` — `dimension-1` elements, so the
+  LAST eigenvalue was silently discarded from every condition number the engine has ever reported.
+  Craig's call: fix it; a known-misleading diagnostic is not preserved because old reports contain it.
+  - **The decisive case is a 2-parameter model** (one input + bias): one eigenvalue survives, so the
+    maximum and the minimum are the same number and the condition number is exactly **1** — a
+    perfectly conditioned model, reported for data that is nothing of the kind. Measured on a seeded
+    600-row single-predictor logistic: **0.047 / 0.047 / 1.0 → 0.21 / 0.047 / 4.4**. That is the red
+    test (`tests/gui/smoke.sh`), watched to fail for exactly that reason.
+  - **On every larger fixture measured, nothing changed at all** — low-birth-weight (6 parameters)
+    0.47 / 0.0092 / 51, Civic Choice (15 parameters) 2.98e+09 / 0.0153 / 1.95e+11, and the
+    `binormal_seed42` golden 0.43 / 0.014 / 30, all byte-identical before and after. `gsl_eigen_symm`
+    does not order its output, and on these matrices the discarded eigenvalue simply happened not to
+    be extremal. **The error was therefore data-dependent, not systematic** — silent wherever the
+    dropped eigenvalue was interior, total wherever it was the maximum or the minimum. Nothing about
+    the old numbers was safe; they were lucky.
+  - Fixed with an indexed copy of all `dimension` values (`gsl_vector_get`), not a corrected pointer
+    range: forming an iterator one past a GSL vector reaches for an address the library does not
+    promise. `eval` is now freed — `gsl_vector_alloc` had no matching `gsl_vector_free`, leaking one
+    vector per condition number computed. The `dimension == 1` special case added with the crash
+    guard is gone: with the range correct, the general path gives 1 for a one-parameter model, and
+    NaN for a singular B, without a special case. `dimension == 0` still returns NaN.
+  - **NO re-bless was needed.** All three golden transcripts stayed byte-identical, which is also the
+    proof that training, coefficients, Wald rows, predictions and ROC statistics are untouched: the
+    only thing this change can move is the condition number, and on the golden fixture even that did
+    not move. 12/12 ctest, oracle identical, tools, smoke green.
+
 
 ---
 
