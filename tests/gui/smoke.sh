@@ -97,20 +97,525 @@ curl -s -X POST "$URL/api/randomize" -d "" \
 curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=100000&seed=42" \
     | grep -q '"ok":true' || fail "train after randomize"
 
-# Stepwise regression on the trained network (XOR: 2 inputs -> 2 variables)
+# --- Stepwise regression ----------------------------------------------------
+# The fixture is the low-birth-weight logistic (5 inputs -> 5 variables), NOT
+#    XOR, because every candidate subnetwork here genuinely converges on
+#    grad_max in ~2000 iterations. XOR cannot serve: dropping either input
+#    leaves a 1-input network being asked to learn XOR, which sits at ln 2
+#    (0.693) with 50% accuracy and a gradient that never reaches 1e-6, so the
+#    candidate runs to the ceiling. That is a real refusal, not a fixture
+#    nuisance -- and until the convergence rule below was enforced, this suite's
+#    happy path was quietly comparing that unfinished fit and passing.
+cp ../../../docs/datasets/low-birth-weight/lowbwt2-2train.txt .
+curl -s -X POST "$URL/api/load" -d "mode=train&path=lowbwt2-2train.txt" \
+    | grep -q '"ok":true' || fail "load low-birth-weight for stepwise"
+curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=2000&seed=42" > reg_train.json
+grep -q '"stopReason":"grad_max"' reg_train.json \
+    || fail "the stepwise fixture's own fit must converge before it is regressed"
 curl -s -X POST "$URL/api/regress" \
-    --data-urlencode "structure=0;1" \
+    --data-urlencode "structure=0;1;2;3;4" \
     --data-urlencode "direction=reverse" \
     --data-urlencode "threshold=0.05" > regress.json
 grep -q '"ok":true' regress.json || fail "regress endpoint"
 grep -q 'Reverse regressing' regress.json || fail "no regression report"
-# Untrained-model guard: a fresh model must refuse regression
-curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=3" > /dev/null
+# The ANALYSIS RESULT must be visible where the user ran it (2026-07-27). The
+#    server has always returned the full stepwise report in `output` -- and the
+#    page threw it away, rendering only j.message ("reverse stepwise regression
+#    complete"). The comment above the server's return even claimed the output
+#    was "shown on the page": it described intent, not behavior. A user's only
+#    route to their own result was to find and read neuron.log.
+#    The control (output is nonempty) passes pre-fix; the page assertions below
+#    are the ones that fail, so this block proves the RENDERING, not the API.
+$PY - <<'PY' || fail "the regression report must come back nonempty (control)"
+import json
+d = json.load(open("regress.json", encoding="utf-8"))
+assert d["output"].strip(), "the server sent no stepwise report at all"
+assert "p-value" in d["output"], d["output"][-400:]
+PY
+$PY - <<'PY' || fail "the page must render the stepwise report in a persistent pane"
+import re
+html = open("page.html", encoding="utf-8").read()
+# A destination element that survives after the run, like the DFA pane
+assert re.search(r'<pre id="regressout"', html), \
+    "no persistent stepwise results pane on the page"
+# ... and regress() must actually put the report INTO it. Keying on the
+#     assignment (not merely the element's presence) is what fails pre-fix.
+# ... and the page must actually put the report INTO it. Keying on the
+#     assignment (not merely the element's presence) is what fails pre-fix.
+assert re.search(r'\$\("regressout"\)\.textContent\s*=\s*\w+\.output', html), \
+    "the page never renders the stepwise output; it discards the report"
+PY
+# The forward direction over the same grouped structure must complete too --
+#    both directions carry the same convergence and result contracts.
+curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=2000&seed=42" > /dev/null
 curl -s -X POST "$URL/api/regress" \
-    --data-urlencode "structure=0;1" --data-urlencode "direction=reverse" \
+    --data-urlencode "structure=0;1;2,3;4" \
+    --data-urlencode "direction=forward" \
+    --data-urlencode "threshold=0.05" > regress_fwd.json
+grep -q '"ok":true' regress_fwd.json || fail "forward stepwise regression"
+grep -q 'Forward regressing' regress_fwd.json || fail "no forward regression report"
+# A grouped variable must never be split: variable 2 is nodes 2 AND 3 together
+grep -q 'node(s) 2 3' regress_fwd.json || fail "grouped variable was not kept intact"
+
+# Untrained-model guard: a fresh model must refuse regression
+curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
+curl -s -X POST "$URL/api/regress" \
+    --data-urlencode "structure=0;1;2;3;4" --data-urlencode "direction=reverse" \
     --data-urlencode "threshold=0.05" | grep -q '"ok":false' \
     || fail "regress should refuse an untrained model"
-# Re-train so the later save checks still have a trained network
+# An UNCONVERGED CANDIDATE CANNOT ENTER SELECTION (2026-07-27). Stepwise used
+#    train()'s return value directly and checked nothing, so a candidate that
+#    merely ran out of iteration ceiling produced a chi-square and a p-value
+#    indistinguishable from a finished fit -- the one engine path still exempt
+#    from the convergence rule that OBD, CV and ordinary training all obey.
+#    The candidate clone inherits the trained model's configuration through the
+#    established copy path, so training the ORIGINAL at a tiny ceiling is what
+#    puts every candidate at that same ceiling.
+#    It must FAIL the analysis, not skip the candidate: a pass selects the
+#    largest p-value among all candidates, so dropping one silently changes
+#    which variable wins.
+curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=3&seed=42" > ceil_train.json
+grep -q '"converged":false' ceil_train.json \
+    || fail "the tiny-ceiling setup run was supposed to NOT converge"
+curl -s -X POST "$URL/api/regress" \
+    --data-urlencode "structure=0;1;2;3;4" --data-urlencode "direction=reverse" \
+    --data-urlencode "threshold=0.05" > regress_ceiling.json
+$PY - <<'PY' || fail "a ceiling-exhausted candidate must stop the stepwise analysis"
+import json, re
+d = json.load(open("regress_ceiling.json", encoding="utf-8"))
+assert d["ok"] is False, d                       # the analysis failed
+out, msg = d.get("output", ""), d["message"]
+assert "max_iterations" in msg, msg              # named, machine-readable reason
+assert "did not converge" in msg, msg
+# The candidate is identified by its conceptual variable AND its input nodes
+assert re.search(r"variable \d+ = node\(s\)", msg), msg
+assert "not a finished fit" in out, out[-500:]
+assert "iterations, which is not a stopping condition" in out, out[-500:]
+# No statistic may be produced for the rejected candidate, and no variable may
+#    be selected out of the incomplete pass
+assert "no variable is selected" in out, out[-500:]
+tail = out[out.index("STOPPING:"):]
+assert "Chi-square" not in tail and "p = " not in tail, tail
+assert "the largest was variable" not in out, out[-500:]
+# ... and the user is told how to proceed
+assert "Raise the maximum iterations" in out, out[-500:]
+PY
+# THE REJECTED CANDIDATE ITSELF MUST BE IN THE AUDIT TRAIL (Sol, 2026-07-27).
+#    recordCandidate() ran AFTER requireConvergedFit(), which throws -- so the
+#    one candidate a reader most needs, the fit that stopped the analysis, was
+#    the only one missing. A first-candidate ceiling failure reported
+#    fitsCompleted:1 and candidates:[].
+$PY - <<'PY' || fail "the candidate that failed must appear in the audit trail"
+import json
+d = json.load(open("regress_ceiling.json", encoding="utf-8"))
+sw = d["stepwise"]
+c = sw["candidates"]
+assert c, "the failing candidate was dropped from the audit trail"
+bad = [x for x in c if not x["converged"]]
+assert bad, "no unconverged candidate recorded, yet the analysis failed"
+x = bad[-1]
+assert x["stopReason"] == "max_iterations", x
+# It contributes NO statistic: a rejected fit is recorded, never compared
+assert x["p"] is None, x
+assert x["g2"] is None, x
+# The count and the trail agree with each other
+assert sw["fitsCompleted"] == len(c), (sw["fitsCompleted"], len(c))
+# An analysis that failed did not reach a decision, and must say so rather
+#    than returning an empty finalVariables that reads as "kept nothing"
+assert sw["complete"] is False, sw
+PY
+# The partial audit trail survives the refusal: the candidates that DID complete
+#    before the failure are still in the report the page renders.
+$PY - <<'PY' || fail "the partial audit trail must survive a failed stepwise run"
+import json
+d = json.load(open("regress_ceiling.json", encoding="utf-8"))
+assert "Reverse regressing" in d["output"], d["output"][:300]
+assert "Variable structure:" in d["output"], d["output"][:300]
+PY
+
+# CANDIDATE FITS MUST NOT EVALUATE THE TEST SET (2026-07-27). Every candidate
+#    refit ran train()'s full reporting epilogue, which re-derived the
+#    classification tables, the ROC fit and a 2000-resample bootstrap over the
+#    TEST set. Wilks selection reads the TRAINING likelihood and consumes none
+#    of it. Beyond being a large avoidable cost, it meant model selection
+#    repeatedly evaluated the set that is supposed to stay untouched until a
+#    procedure has been chosen.
+#    Needs a dataset WITH a test set, so the bootstrap would actually run: the
+#    mode=train fixture above has none, and would prove nothing.
+curl -s -X POST "$URL/api/load" -d "mode=raw&path=lowbwt2-2train.txt&fraction=0.25&seed=1" \
+    | grep -q '"ok":true' || fail "load low-birth-weight split for the quiet-candidate proof"
+curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=2000&seed=42" > quiet_train.json
+# The control: the ORDINARY training run above is unaffected -- it still
+#    produces the full report including the test-set bootstrap. Only candidate
+#    refits go quiet, so this must remain true.
+$PY - <<'PY' || fail "an ordinary training run must still report its test statistics"
+import json
+o = json.load(open("quiet_train.json", encoding="utf-8"))["output"]
+assert "Test set" in o, o[-600:]
+assert "bootstrap resamples" in o, o[-600:]
+PY
+curl -s -X POST "$URL/api/regress" \
+    --data-urlencode "structure=0;1;2;3;4" --data-urlencode "direction=reverse" \
+    --data-urlencode "threshold=0.05" > quiet_regress.json
+$PY - <<'PY' || fail "candidate refits must not evaluate or bootstrap the test set"
+import json
+d = json.load(open("quiet_regress.json", encoding="utf-8"))
+assert d["ok"], d["message"]
+o = d["output"]
+# Not one candidate may have touched the held-out set
+assert "bootstrap resamples" not in o, "a candidate refit ran the ROC bootstrap"
+assert "Test set" not in o, "a candidate refit reported test-set statistics"
+assert "Classification accuracy" not in o, "a candidate refit reported accuracy"
+# ... nor emitted the training-run narration nobody consumes
+assert "I'm running an iterative model" not in o, "candidate refits still narrate"
+assert "Total iterations" not in o, "candidate refits still print their epilogue"
+# What the analysis DOES report is unchanged and complete: every candidate's
+#    comparison, and the selection built from it
+assert "Removing variable(s)" in o, o[:400]
+assert "Chi-square = " in o, o[:400]
+assert o.count("p = ") >= 5, o.count("p = ")
+assert "p-values of all removed variables" in o, o[-400:]
+PY
+
+# WILKS NEEDS LOG LIKELIHOODS, AND THE ORIGINAL IS NOT OURS TO MUTATE (Sol,
+#    2026-07-27). Both directions used to call netPtr->setXEerror() on the
+#    USER'S trained model. That mutated a model stepwise is supposed to treat
+#    as read-only, and it did not even achieve what it looked like: e_in, the
+#    prior error every first-pass comparison is made against, was captured from
+#    the original fit and stayed in THAT fit's objective. So an LMS-trained
+#    network had candidates training under cross-entropy while their baseline
+#    error was least-mean-squares, and G2 = 2N(Esub - Efull) subtracted two
+#    different objectives and called the result a chi-square. Logistic is
+#    cross-entropy by construction, which is why the walkthrough never saw it.
+curl -s -X POST "$URL/api/load" -d "mode=train&path=lowbwt2-2train.txt" >/dev/null
+curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=3&errfunc=lms" \
+    | grep -q 'LMS' || fail "could not build an LMS-trained network"
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=300&seed=42" >/dev/null
+curl -s -X POST "$URL/api/regress" \
+    --data-urlencode "structure=0;1;2;3;4" --data-urlencode "direction=reverse" \
+    --data-urlencode "threshold=0.05" > lms_regress.json
+$PY - <<'PY' || fail "stepwise must refuse an LMS fit rather than mix objectives"
+import json
+d = json.load(open("lms_regress.json", encoding="utf-8"))
+assert d["ok"] is False, d
+m = d["message"]
+assert "cross-entropy" in m, m
+assert "least-mean-squares" in m or "least mean squares" in m, m
+PY
+# ... and it must have left the user's model exactly as it found it: still LMS,
+#     still trained, still usable. (Pre-fix, the refused analysis had
+#     already flipped the model's error function underneath the user.)
+curl -s "$URL/api/stats" | grep -q '"ok":true' \
+    || fail "the model must remain usable after a refused regression"
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=1&seed=42" > lms_after.json
+$PY - <<'PY' || fail "stepwise must not change the original model's error function"
+import json
+o = json.load(open("lms_after.json", encoding="utf-8"))["output"]
+assert "LMS error" in o, o[:600]
+assert "X-entropy error" not in o, o[:600]
+PY
+
+# --- Asynchronous stepwise regression (2026-07-27) --------------------------
+# Stepwise is many training runs, so it must behave like the other long engine
+#    jobs. It used to be a single blocking POST that showed "regressing…" for
+#    the whole operation with no progress, no Stop and no way to tell whether
+#    it was still advancing.
+#
+# Blocking and async must agree exactly (same seed, same configuration): async
+#    is the same call on a worker thread, so merely observing it must not change
+#    RNG state, candidate order, p-values or the selection. Run on the fast
+#    low-birth-weight logistic, whose candidates all converge.
+curl -s -X POST "$URL/api/load" -d "mode=train&path=lowbwt2-2train.txt" >/dev/null
+curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=2000&seed=42" > /dev/null
+curl -s -X POST "$URL/api/regress" \
+    --data-urlencode "structure=0;1;2;3;4" --data-urlencode "direction=reverse" \
+    --data-urlencode "threshold=0.05" > sw_block.json
+curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=2000&seed=42" > /dev/null
+curl -s -X POST "$URL/api/regress" \
+    --data-urlencode "structure=0;1;2;3;4" --data-urlencode "direction=reverse" \
+    --data-urlencode "threshold=0.05" -d "async=1" \
+    | grep -q '"ok":true' || fail "async stepwise did not start"
+for i in $(seq 1 240); do
+    curl -s "$URL/api/train/status" > sw_async.json
+    grep -q '"running":false' sw_async.json && break
+    sleep 0.3
+done
+grep -q '"running":false' sw_async.json || fail "async stepwise never completed"
+$PY - <<'PY' || fail "async and blocking stepwise must produce identical results"
+import json
+b = json.load(open("sw_block.json", encoding="utf-8"))
+a = json.load(open("sw_async.json", encoding="utf-8"))["result"]
+assert b["ok"] and a["ok"], (b["message"], a["message"])
+assert b["stepwise"] == a["stepwise"], (b["stepwise"], a["stepwise"])
+assert b["output"] == a["output"], "the reports differ between blocking and async"
+# The structured result must actually carry a selection, or this proves nothing
+assert b["stepwise"]["path"], b["stepwise"]
+assert b["stepwise"]["fitsCompleted"] > 0, b["stepwise"]
+PY
+
+# Progress, the busy contract and a real Stop. TWO SHORT async runs rather than
+#    one long one: since candidate refits went quiet they are fast, so the whole
+#    analysis is ~1.5 s and a test that waited for several progress states
+#    before sending Stop could race the run to completion (measured: it did --
+#    "no training in progress").
+$PY - <<'PYEOF'
+import random
+random.seed(11)
+def rows(n):
+    for _ in range(n):
+        x = [random.uniform(-0.9, 0.9) for _ in range(6)]
+        z = 1.2 * x[0] - 0.9 * x[1] + 0.6 * x[2] + 0.05 * x[3]
+        p = 1 / (1 + pow(2.718281828, -z))
+        yield " ".join("%.6f" % v for v in x) + " " \
+            + ("1" if random.random() < p else "0") + " \n"
+with open("sw_slow.set", "w", newline="\n") as f:
+    f.writelines(rows(4000))
+PYEOF
+curl -s -X POST "$URL/api/load" -d "mode=train&path=sw_slow.set" \
+    | grep -q '"ok":true' || fail "load the async stepwise fixture"
+curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=20000&seed=42" > sw_setup.json
+grep -q '"converged":true' sw_setup.json \
+    || fail "the async stepwise fixture's own fit must converge"
+
+# RUN 1 -- observed to completion: progress must advance, and the busy contract
+#    must hold while it owns the engine.
+curl -s -X POST "$URL/api/regress" \
+    --data-urlencode "structure=0;1;2;3;4;5" --data-urlencode "direction=reverse" \
+    --data-urlencode "threshold=0.05" -d "async=1" > sw_start.json
+grep -q '"ok":true' sw_start.json || fail "async stepwise did not start"
+# It returned BEFORE finishing -- that is the whole point of async
+curl -s "$URL/api/train/status" | grep -q '"running":true' \
+    || fail "status should say running right after an async stepwise start"
+swbusy=$(curl -s -w '\n%{http_code}' -X POST "$URL/api/model" -d "type=logistic")
+echo "$swbusy" | grep -q '"busy":true' || fail "no busy flag while stepwise runs"
+echo "$swbusy" | tail -1 | grep -q '409' || fail "stepwise busy refusal should be HTTP 409"
+curl -s -X POST "$URL/api/regress" \
+    --data-urlencode "structure=0;1;2;3;4;5" --data-urlencode "direction=reverse" \
+    --data-urlencode "threshold=0.05" -d "async=1" \
+    | grep -q '"busy":true' || fail "a second stepwise start must be refused"
+: > sw_progress.txt
+for i in $(seq 1 400); do
+    curl -s "$URL/api/train/status" >> sw_progress.txt
+    echo >> sw_progress.txt
+    grep -q '"running":false' sw_progress.txt && break
+    sleep 0.1
+done
+grep -q '"running":false' sw_progress.txt || fail "async stepwise never completed"
+$PY - <<'PYEOF' || fail "stepwise progress must advance and be internally consistent"
+import json
+states = []
+for line in open("sw_progress.txt", encoding="utf-8"):
+    line = line.strip()
+    if not line: continue
+    s = json.loads(line).get("stepwise")
+    if s: states.append(s)
+assert states, "no stepwise progress was ever published"
+distinct = [s for i, s in enumerate(states) if i == 0 or s != states[i - 1]]
+assert len(distinct) >= 2, "progress never advanced: %r" % distinct
+# Completed fits only ever go up
+fits = [s["fitsCompleted"] for s in states]
+assert fits == sorted(fits), fits
+# The candidate accounting agrees with the structure that was submitted: six
+#    conceptual variables, each a single input node, and a candidate index that
+#    never exceeds the count of candidates in its own pass
+for s in states:
+    assert s["direction"] == "reverse", s
+    assert 1 <= s["candidate"] <= s["candidatesThisStep"], s
+    assert s["candidatesThisStep"] == 6 - s["step"], s
+    assert s["inputs"] == [s["variable"]], s
+    assert s["phase"], s
+PYEOF
+
+# THE COMPLETED CANDIDATE REPORTS HOW IT ENDED (Sol, 2026-07-27). Progress was
+#    announced only BEFORE each fit, so the completed count lagged by one and
+#    the last candidate stayed labelled "training" with no convergence status
+#    anywhere -- which the spec requires. It has to be a STICKY field, not a
+#    transient phase: a finished announcement is superseded by the next
+#    candidate's starting announcement within microseconds, so a poller could
+#    never observe it otherwise.
+$PY - <<'PYEOF' || fail "progress must report each finished candidate's status"
+import json
+states = []
+for line in open("sw_progress.txt", encoding="utf-8"):
+    line = line.strip()
+    if not line: continue
+    s = json.loads(line).get("stepwise")
+    if s: states.append(s)
+done = [s["lastCompleted"] for s in states if s.get("lastCompleted")]
+assert done, "no completed-candidate status was ever published"
+for s in done:
+    assert s["stopReason"], s
+    assert isinstance(s["converged"], bool), s
+    assert isinstance(s["variable"], int), s
+# Every candidate converges on this fixture
+assert all(s["converged"] for s in done), [s for s in done if not s["converged"]]
+# The completed count must not lag: any state carrying a completed candidate's
+#    status must already count it
+assert all(s["fitsCompleted"] >= 1 for s in states if s.get("lastCompleted")), states
+PYEOF
+
+# RUN 2 -- stopped as soon as it is running. Stop must reach the candidate
+#    training at that moment and end the job promptly; it must not merely
+#    relabel work that ran to completion.
+curl -s -X POST "$URL/api/regress" \
+    --data-urlencode "structure=0;1;2;3;4;5" --data-urlencode "direction=reverse" \
+    --data-urlencode "threshold=0.05" -d "async=1" \
+    | grep -q '"ok":true' || fail "second async stepwise did not start"
+curl -s "$URL/api/train/status" | grep -q '"running":true' \
+    || fail "the run to be stopped was not running"
+curl -s -X POST -d "" "$URL/api/train/stop" | grep -q '"ok":true' \
+    || fail "stop did not accept during stepwise"
+stopped=0
+for i in $(seq 1 60); do
+    curl -s "$URL/api/train/status" > sw_cancel.json
+    grep -q '"running":false' sw_cancel.json && { stopped=$i; break; }
+    sleep 0.5
+done
+[ "$stopped" != 0 ] || fail "cancelled stepwise never stopped"
+$PY - <<'PYEOF' || fail "a stopped stepwise must report cancellation and keep its audit trail"
+import json
+d = json.load(open("sw_cancel.json", encoding="utf-8"))["result"]
+assert d["cancelled"] is True, d
+assert "cancelled" in d["message"], d["message"]
+# It stopped inside an incomplete pass, so it selected nothing from that pass
+assert "no variable is selected" in d["output"], d["output"][-500:]
+# ... and whatever it did finish is still there: a cancelled run keeps its
+#     partial audit trail rather than throwing the work away
+assert "Reverse regressing" in d["output"], d["output"][:200]
+# It really was cut short: 18 candidate fits (6+5+4+3) is the complete reverse
+#    structure for six variables, so a "Stop" that let everything finish would
+#    land on 18 here
+assert d["stepwise"]["fitsCompleted"] < 18, d["stepwise"]
+# A cancelled analysis reached no decision, and says so rather than returning
+#    an empty finalVariables that would read as "the procedure kept nothing"
+assert d["stepwise"]["complete"] is False, d["stepwise"]
+# The cancelled candidate is itself in the trail, with its reason -- it is the
+#    one that stopped the run, so leaving it out would hide the explanation
+c = d["stepwise"]["candidates"]
+assert c, "the cancelled candidate was dropped from the audit trail"
+assert c[-1]["converged"] is False, c[-1]
+assert c[-1]["stopReason"] == "cancelled", c[-1]
+assert c[-1]["p"] is None, c[-1]
+assert d["stepwise"]["fitsCompleted"] == len(c), (d["stepwise"]["fitsCompleted"], len(c))
+PYEOF
+# The user's trained model is untouched by a stepwise run, cancelled or not --
+#    stepwise is a standalone analysis over clones. It must still be usable.
+curl -s "$URL/api/stats" | grep -q '"ok":true' \
+    || fail "the trained model must survive a cancelled stepwise run"
+# Stop with nothing running refuses cleanly
+curl -s -X POST -d "" "$URL/api/train/stop" | grep -q '"ok":false' \
+    || fail "stop should refuse when no stepwise is running"
+
+# A STOP MUST NOT POISON THE NEXT RUN (Sol, 2026-07-27). job.cancel is a
+#    process-global latch that only an async START cleared, and blocking
+#    regression installs the same cancel observer -- so immediately after the
+#    cancelled run above, a BLOCKING regression cancelled its own first
+#    candidate before training an iteration, and reported a failure the user
+#    never asked for. This is the exact sequence a walkthrough performs: try
+#    Stop, then run the analysis for real.
+curl -s -X POST "$URL/api/regress" \
+    --data-urlencode "structure=0;1;2;3;4;5" --data-urlencode "direction=reverse" \
+    --data-urlencode "threshold=0.05" > after_stop.json
+$PY - <<'PY' || fail "a blocking regression after a Stop must run normally"
+import json
+d = json.load(open("after_stop.json", encoding="utf-8"))
+assert d["ok"] is True, d["message"]
+assert d["cancelled"] is False, d
+assert d["stepwise"]["fitsCompleted"] > 1, d["stepwise"]
+assert "cancelled" not in d["output"], d["output"][-400:]
+PY
+
+# STALE PROGRESS MUST NOT FOLLOW A LATER JOB (Sol, 2026-07-27). The stepwise
+#    object is cleared by every job start, so a subsequent plain training run
+#    reports no stepwise accounting -- exactly as a plain train reports no obd
+#    phase. Without the clear, /api/train/status attached the finished
+#    stepwise progress to whatever ran next.
+curl -s -X POST "$URL/api/model" -d "type=logistic" >/dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=200&seed=42&async=1" >/dev/null
+for i in $(seq 1 120); do
+    curl -s "$URL/api/train/status" > post_sw_status.json
+    grep -q '"running":false' post_sw_status.json && break
+    sleep 0.3
+done
+grep -q '"stepwise":' post_sw_status.json \
+    && fail "a plain train must not carry stale stepwise progress"
+
+# THE COMPLETED CANDIDATE REPORTS HOW IT ENDED (Sol, 2026-07-27). Progress was
+#    announced only BEFORE each fit, so the completed count lagged by one and
+#    the last candidate stayed labelled "training" until the result replaced
+#    it -- with no convergence status anywhere, which the spec requires.
+$PY - <<'PY' || fail "progress must report each finished candidate's status"
+import json
+states = []
+for line in open("sw_progress.txt", encoding="utf-8"):
+    line = line.strip()
+    if not line: continue
+    s = json.loads(line).get("stepwise")
+    if s: states.append(s)
+# The status of the last COMPLETED candidate must persist while the next one
+#    trains -- a finished announcement is superseded within microseconds, so a
+#    transient phase could never be observed by a poller.
+done = [s["lastCompleted"] for s in states if s.get("lastCompleted")]
+assert done, "no completed-candidate status was ever published"
+for s in done:
+    assert s["stopReason"], s
+    assert isinstance(s["converged"], bool), s
+    assert isinstance(s["variable"], int), s
+# On this fixture every candidate converges
+assert all(s["converged"] for s in done), [s for s in done if not s["converged"]]
+# The completed count must not lag: once a candidate has finished, any state
+#    carrying its status must already count it
+withDone = [s for s in states if s.get("lastCompleted")]
+assert all(s["fitsCompleted"] >= 1 for s in withDone), withDone
+PY
+
+# THE STRUCTURED RESULT IS THE AUDIT TRAIL (Sol, 2026-07-27). It used to carry
+#    only the winning path and the final variables, so a consumer could not see
+#    what was considered, what the comparison was, or how each fit ended
+#    without parsing the prose report.
+$PY - <<'PY' || fail "the structured result must carry every candidate considered"
+import json
+d = json.load(open("after_stop.json", encoding="utf-8"))
+sw = d["stepwise"]
+c = sw["candidates"]
+assert c, "no candidate audit trail"
+# Six variables, so the first pass considers six candidates, numbered 1..6
+first = [x for x in c if x["step"] == 0]
+assert len(first) == 6, first
+assert sorted(x["candidate"] for x in first) == list(range(1, 7)), first
+for x in c:
+    for k in ("variable", "inputs", "priorError", "error", "df", "g2", "p",
+              "converged", "stopReason", "iterations", "selected"):
+        assert k in x, (k, x)
+    assert x["inputs"], x            # the full input group, never empty
+    # 0 is a legitimate count: dropping a null variable leaves the subnetwork
+    #    at the trained optimum, so the gradient rule fires on the first check
+    assert isinstance(x["iterations"], int) and x["iterations"] >= 0, x
+    assert x["stopReason"], x
+# Exactly one candidate per completed pass wins it, and the winners are the
+#    selection path in order
+won = [x for x in c if x["selected"]]
+assert [x["variable"] for x in won] == [p["variable"] for p in sw["path"]], (won, sw["path"])
+# A run that reached a decision says so, and then finalVariables is a claim
+#    about the procedure's result rather than about how far it got
+assert sw["complete"] is True, sw
+assert sw["finalVariables"], sw
+# Retained + removed must together account for every variable offered
+assert sorted(sw["finalVariables"] + [p["variable"] for p in sw["path"]]) == list(range(6)), sw
+PY
+
+# Restore the XOR SimpleProp the save checks below expect (the stepwise section
+#    above deliberately moved the engine onto the low-birth-weight logistic)
+curl -s -X POST "$URL/api/load" -d "mode=train&path=xor_discrete.set" \
+    | grep -q '"ok":true' || fail "reload XOR after regress"
+curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=3" > /dev/null
 curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=100000&seed=42" \
     | grep -q '"ok":true' || fail "re-train after regress"
 

@@ -1380,6 +1380,117 @@ below or in the `docs/` files they cite.
   Gates every fix: zero-warning build, goldens byte-identical, oracle identical, 10/10 ctest, smoke
   green, **live in-browser** drive of the Sampling-unit dropdown (declared → CI+p; the debt cleared).
 
+  **Stepwise regression: visible results, async progress, fit validity, and legacy bug #11
+  (2026-07-27).** Found in Craig's live Civic Choice GUI walkthrough: reverse grouped stepwise showed
+  only `regressing…` for the whole operation and then produced **no result on the page at all**.
+  Spec: `stepwise_async_results_spec.md`. Four defects, each with a red proof watched to fail against
+  the pre-fix binary.
+  - **The report was computed, returned, and thrown away.** `handleRegress` had always sent the full
+    selection report as JSON `output`; `gui_page.html::regress()` rendered only `j.message`. The
+    comment above the server's return said the output was "shown on the page" — it described intent,
+    not behavior, and a user's only route to their own analysis was to find and read `neuron.log`.
+    Now a persistent `<pre id="regressout">` pane, rendered on failure and cancellation too.
+  - **Candidate fits were exempt from the convergence contract.** `RegressNet` consumed
+    `netCopyPtr->train()`'s return value at three call sites and checked nothing — no `StopReason`,
+    no finiteness. A candidate that merely exhausted its iteration ceiling produced a chi-square and
+    a p-value indistinguishable from a finished fit. It now **fails the analysis** at that candidate
+    (variable + node group + stop reason + iterations + remediation), never skips it: a pass selects
+    by comparing ALL its candidates, so dropping one does not leave a gap, it changes which variable
+    wins. `smoke.sh`'s own happy-path stepwise had been comparing an unfinished fit for as long as it
+    existed — XOR minus either input is a 1-input net asked to learn XOR, stuck at ln 2 with a
+    gradient that never reaches 1e-6. The fixture moved to the low-birth-weight logistic, whose
+    candidates genuinely converge on `grad_max`.
+  - **LEGACY BUG #11 — forward stepwise segfaulted the process.** `Network::computeCondNum()`
+    dereferenced null on a degenerate B matrix. Forward regression begins by training a baseline with
+    every input removed, so `dimension` is 0, `gsl_vector_alloc(0)` yields nothing usable and
+    `gsl_vector_ptr(eval,0)` reads address 0 — killing the GUI server. It survived unnoticed because
+    every test and golden ran only the REVERSE direction. Reverse reaches it too, whenever a pass
+    shrinks the model to a single input. Guarded at `dimension < 2`, reported as "not available"
+    rather than three `nan`s. **Proven pre-existing: the stashed, rebuilt pre-fix binary crashes
+    identically.** Found because the spec required exercising both directions.
+    *Adjacent, NOT fixed, needs Craig's call:* line 709 builds the eigenvalue vector from the
+    half-open range `[&e[0], &e[dimension-1])`, i.e. `dimension-1` elements — **the last eigenvalue
+    has always been dropped from every condition number the engine reports.** Fixing it changes
+    published statistics for every logistic model and needs its own measurement and re-bless.
+  - **Every candidate refit ran a 2000-resample bootstrap on the TEST set.** `train()`'s reporting
+    epilogue re-derived classification tables, the ROC fit and the bootstrap for each candidate;
+    Wilks selection reads the TRAINING likelihood and consumes none of it. Beyond cost, model
+    selection was repeatedly evaluating the set that must stay untouched until a procedure is chosen.
+    New runtime `Iterative::setQuiet()` (default OFF; **output only** — it must never guard a
+    calculation a stopping rule depends on, which was legacy bug #10, so the gradient calculation
+    stays outside every reporting guard). Measured on the 189-row low-birth-weight split:
+    **1.01 s → 0.15 s, 70,209 → 3,997 output bytes, 24 test-set bootstraps → 0**, identical
+    p-values and selection.
+  - **Async.** `POST /api/regress&async=1` validates synchronously, then runs on the worker through
+    the existing train-job doors; status carries a `stepwise` object (direction, step, candidate of
+    candidatesThisStep, fitsCompleted, variable + full input group, phase). Progress comes from a
+    structured engine callback, never from scraping `util::screen()`. Stop installs an observer on
+    every candidate clone, so it reaches the subnetwork training NOW — a cancelled candidate ends as
+    `STOP_CANCELLED`, which is not convergence, so it stops the analysis through the same door an
+    unfinished fit does. Only the current pass's candidate count is published; the threshold may end
+    the procedure first, so no wall-clock estimate is offered. Both modes also return a structured
+    result (`path` in selection order, `finalVariables`).
+  **The golden re-bless is attributable to ONE change.** Items 1–3 + #11 landed with all three
+  transcripts byte-identical; the quiet path then moved `regress_seed42` alone, and diffing the way
+  the harness does (stripping the wall-clock line from both sides) gives **273 deletions and 0
+  insertions** — every surviving line, including every `Chi-square` and `p =`, byte-identical, which
+  is what proves the selection did not move. `xor_seed42` and `binormal_seed42` untouched, proving
+  quiet is off by default.
+  **Sol reviewed the shipped work the same day and found seven more; all verified against the
+  source before acting (rule 3), then fixed with red proofs (rule 2).** Three were HIGH:
+  - **A Stop poisoned the next run.** `job.cancel` is a process-global latch cleared only by an
+    async START, and blocking regression installs the same cancel observer — so a blocking
+    `/api/regress` immediately after any cancelled run killed its own first candidate and reported a
+    failure nobody asked for. That is exactly the walkthrough sequence (try Stop, then run it for
+    real). Measured pre-fix: `ok:false, cancelled:true, fitsCompleted:1`. Blocking TRAIN was never
+    affected — it installs no observer — so this was introduced by the async work, not inherited.
+  - **`quietFlag` was "not copied" by OMISSION.** `Iterative`'s copy constructor calls `copy()`
+    without running the default constructor, so a member `copy()` never touches holds stack
+    contents, not `false`. Every clone in the engine goes through that path — autoalgo probes, OBD
+    trials, CV fold models — any of which could have come up quiet and silently discarded its whole
+    report. Stepwise masked it by calling `setQuiet(true)` explicitly, so the one caller that cared
+    always got the right answer. Same failure as the uninitialised `Model::errorType` behind the
+    nested-OBD flake. Now written as `quietFlag = false;` beside `observerPtr = nullptr;`, with
+    `tests/iterative/check_quietcopy.cpp` (ctest 11 → 12) — whose assignment case fails
+    deterministically pre-fix; its placement-new-over-dirtied-memory cases passed even pre-fix,
+    which is precisely the point about undefined behaviour and is documented in the test.
+  - **Stepwise mutated the original and could mix objectives.** Both directions called
+    `netPtr->setXEerror()` on the user's trained model. That mutated a model stepwise is supposed to
+    treat as read-only — and it did not achieve what it looked like: `e_in`, the baseline every
+    first-pass comparison is made against, was captured from the ORIGINAL fit and stayed in that
+    fit's objective, so an LMS-trained network had candidates training under cross-entropy against a
+    least-mean-squares baseline and `G2 = 2N(Esub - Efull)` subtracted two different objectives.
+    Logistic is cross-entropy by construction, which is why the walkthrough never saw it. Now
+    `requireCrossEntropySource()` refuses an LMS fit and the original is never touched.
+  Also: `job.stepwise` was not cleared by the train/OBD/CV job starts, so finished stepwise progress
+  followed a later run (reproduced); progress was announced only BEFORE each fit, so the completed
+  count lagged and no candidate ever reported how it ended — now a sticky `lastCompleted`, because a
+  finished announcement is superseded within microseconds and a poller could never catch it as a
+  transient phase; the structured result carried only the winning path, and now carries every
+  candidate considered with errors, df, Wilks, p, stop reason and iterations; and the `dimension < 2`
+  condition-number guard wrongly discarded the valid 1×1 case (condition number 1), now special-cased
+  without touching the multi-parameter path.
+  One measurement changed a test rather than the code: the quiet-candidate speedup made the async
+  fixture finish in ~1.5 s, so the Stop test had been racing the run to completion (observed: "no
+  training in progress"). Split into two short runs — one observed to completion, one stopped as soon
+  as it reports running — with `fitsCompleted < 18` asserting the analysis really was cut short.
+  **Sol's second pass found three more, all real.** (a) `recordCandidate()` ran AFTER
+  `requireConvergedFit()`, which throws — so the audit trail documented as "every candidate
+  considered" omitted precisely the candidate that ended the analysis. Measured pre-fix on a
+  first-candidate ceiling failure: `fitsCompleted:1`, `candidates:[]`. The record is now written
+  before the eligibility check, with `g2`/`p` null (a rejected fit is recorded, never compared), and
+  `fitsCompleted == len(candidates)` is asserted. Same for a cancelled candidate, whose recorded
+  stop reason is now the explanation of why the run ended. (b) `finalVariables` was assigned only
+  after the outer loop, so any exception left it empty — reading as "the procedure kept nothing"
+  rather than "the procedure never got that far". Now maintained after each completed pass, and
+  qualified by a new `complete` flag; without the flag the two claims are indistinguishable.
+  (c) `RegressNet::copy()` repeated the exact `quietFlag` mistake — `candidateObserver` and
+  `fitsCompleted` left indeterminate, stale callback/result state carried through assignment.
+  Latent (no copy call sites today) but fixed by explicit reset, because the class comment promises
+  that state is not copied.
+  Gates: zero-warning Release build, goldens byte-identical (re-blessed regress only, no further
+  move), 12/12 ctest, smoke green (+18 stepwise assertions), oracle numerically identical, tools.
+
 
 ---
 

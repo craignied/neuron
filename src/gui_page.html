@@ -335,8 +335,11 @@ point.</span></div>
 </div>
 <div class="row"><span class="status">Groups of input nodes make one variable:
 semicolons separate variables, commas join nodes, hyphens give ranges. The
-network must be trained first; the regression report is written to neuron.log
-beside your data.</span></div>
+network must be trained first. The full selection report appears below and stays
+there; it is also appended to neuron.log beside your data when dataset history
+logging is on. This is a standalone analysis &mdash; it does not disturb the
+trained model above.</span></div>
+<pre id="regressout" style="display:none;overflow:auto;max-height:24em"></pre>
 </fieldset>
 
 <fieldset>
@@ -1042,14 +1045,74 @@ function renderFullStats(st) {
   $("scards").innerHTML = cards;
   $("statsbox").style.display = cards ? "block" : "none";
 }
+// Stepwise regression: async like OBD and CV, because it is many training runs
+// (one per candidate per pass) and a green "regressing…" label for the whole
+// operation told the user nothing about what was happening or how far along it
+// was. Results flow back through /api/train/status.
+let regressing = false, regressStart = 0;
 async function regress() {
-  $("regressbtn").disabled = true;
-  setStatus("rstatus", true, "regressing…");
-  try {
-    const j = await api("/api/regress", { structure: $("structure").value,
-      direction: $("rdir").value, threshold: $("pthreshold").value });
+  if (regressing) { // the button reads "Stop"
+    const j = await api("/api/train/stop", {});
     setStatus("rstatus", j.ok, j.message);
-  } finally { $("regressbtn").disabled = false; }
+    return;
+  }
+  const j = await api("/api/regress", { structure: $("structure").value,
+    direction: $("rdir").value, threshold: $("pthreshold").value, async: 1 });
+  if (!j.ok) { setStatus("rstatus", false, j.message); return; }
+  regressing = true;
+  regressStart = Date.now();
+  $("regressbtn").textContent = "Stop";
+  setStatus("rstatus", true, "regressing…");
+  pollRegress();
+}
+async function pollRegress() {
+  let j;
+  try { j = await (await fetch("/api/train/status")).json(); }
+  catch (e) { setTimeout(pollRegress, 1000); return; }
+  if (j.running) {
+    const s = j.stepwise;
+    let msg = "starting up";
+    if (s) {
+      // An honest, advancing account: which pass, which candidate of how many
+      //    in THIS pass (the only count that is exactly knowable -- the
+      //    threshold may end the procedure before later passes happen), and
+      //    the running total of fits. Deliberately no wall-clock estimate:
+      //    candidate subnetworks train for very different lengths.
+      const el = Math.round((Date.now() - regressStart) / 1000);
+      // "finished" marks the announcement made after a fit returns, so the
+      //    last completed candidate reports how it ended instead of sitting
+      //    at "training" until the whole run is over.
+      const d = s.lastCompleted;
+      const what = d
+        ? " · last done: variable " + d.variable + " "
+          + (d.converged ? "converged (" + d.stopReason + ")"
+                         : "DID NOT CONVERGE (" + d.stopReason + ")")
+        : "";
+      msg = s.direction + " · pass " + (s.step + 1) + " · candidate "
+        + s.candidate + " of " + s.candidatesThisStep
+        + " · variable " + s.variable + " (node" + (s.inputs.length > 1 ? "s" : "")
+        + " " + s.inputs.join(",") + ") · " + s.fitsCompleted + " fits done · "
+        + el + "s" + what;
+    }
+    setStatus("rstatus", true, msg);
+    setTimeout(pollRegress, 400); return;
+  }
+  regressing = false;
+  $("regressbtn").textContent = "Run regression";
+  const res = j.result;
+  if (!res) { setStatus("rstatus", false, "the regression produced no result"); return; }
+  // A cancelled run is a warning state, not a green success: it stopped in an
+  //    incomplete pass, so it selected nothing.
+  if (res.cancelled) setWarnStatus("rstatus", res.message);
+  else setStatus("rstatus", res.ok, res.message);
+  // The analysis result belongs where the user asked for it, and it stays
+  //    there. Rendered on FAILURE and CANCELLATION too: a run that stopped
+  //    partway still carries every candidate it did evaluate, and that audit
+  //    trail is how the user sees where the procedure stopped and why.
+  if (res.output) {
+    $("regressout").style.display = "block";
+    $("regressout").textContent = res.output;
+  }
 }
 // Discriminant function analysis: linear or quadratic on the loaded dataset.
 async function runDFA() {

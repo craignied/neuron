@@ -6,6 +6,7 @@
 #include "stdafx.h" // For MSVC, must be first!
 
 #include <gsl/gsl_eigen.h>  // GSL eigenvalue routines
+#include <limits>           // quiet_NaN: a degenerate B matrix has no condition number
 
 #include "network.h"
 
@@ -692,6 +693,37 @@ void Network::computeCondNum()
 	//    routines (G Bansal Aug 2003)
 	unsigned dimension = B.rows(); // easier on the eyes
 
+	// A model with no estimated parameters has no B matrix and therefore no
+	//    condition number. This is not hypothetical: forward stepwise regression
+	//    begins by training a BASELINE network with every input removed, and on
+	//    a logistic model that baseline reaches here with dimension 0 --
+	//    gsl_vector_alloc( 0 ) yields nothing usable and gsl_vector_ptr( eval, 0 )
+	//    then dereferences null, segfaulting the whole process (the GUI server
+	//    included). Forward regression crashed neuron this way from the GUI; it
+	//    survived unnoticed because every test and golden ran only the REVERSE
+	//    direction, which never builds an empty network.
+	if ( dimension == 0 )
+	{
+		condMaxEig = condMinEig = condNum
+			= numeric_limits< double >::quiet_NaN();
+		return; // not a number, and reported as such (jnum -> JSON null)
+	}
+
+	// A ONE-parameter model does have a condition number -- it is 1, the only
+	//    eigenvalue over itself. It is special-cased rather than sent through
+	//    the GSL path below because the vector built there is a HALF-OPEN range
+	//    ending at the last eigenvalue, so a single-eigenvalue B would yield an
+	//    empty vector and maxabs/minabs on nothing. The 1x1 eigenvalue is just
+	//    the element itself, so no solver is needed.
+	if ( dimension == 1 )
+	{
+		condMaxEig = condMinEig = fabs( B( 0, 0 ) );
+		// A zero eigenvalue is a singular B: the ratio is undefined, not 1
+		condNum = condMaxEig > 0 ? 1.0
+			: numeric_limits< double >::quiet_NaN();
+		return;
+	}
+
 	// Create a gsl matrix from our matrix--begin function is cautioned to use but
 	//    here we need the value as double*
 	gsl_matrix_view m = gsl_matrix_view_array( B.begin(), dimension, dimension );
@@ -721,6 +753,16 @@ void Network::computeCondNum()
 void Network::reportCondNum( ostream& outputStream )
 {
 	computeCondNum(); // fills condMaxEig / condMinEig / condNum
+
+	// A degenerate B matrix (a model with no estimated parameters, e.g. forward
+	//    stepwise's empty baseline network) has no eigenvalues to report. Say so
+	//    rather than printing "nan" three times.
+	if ( !std::isfinite( condNum ) )
+	{
+		outputStream << "Condition number = not available (the model has no "
+			<< "estimated parameters, or its B matrix is singular)" << endl;
+		return;
+	}
 
 	// Output results
 	// outputStream << "Eigenvalues are: " << eigenv << endl; // for debugging

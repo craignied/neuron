@@ -15,7 +15,8 @@ Iterative::Iterative() : maxIterations ( 1000000 ), printCount ( 1000 ),
 	changeStopFlag ( false ), gradMaxFlag ( true ), autoStopFlag ( false ),
 	logPrintFlag ( true ), boundsErrorFlag ( false ), minError ( 1e-30 ),
 	delta ( 1e-16 ), gradMaxLimit ( 1e-6 ), autoStopTol ( 1e-4 ),
-	autoStopWindow ( 100 ), observerPtr ( nullptr ), stopReason ( STOP_NONE ) { }
+	autoStopWindow ( 100 ), observerPtr ( nullptr ), quietFlag ( false ),
+	stopReason ( STOP_NONE ) { }
 
 const char* Iterative::stopReasonToken( StopReason r )
 {
@@ -92,6 +93,15 @@ void Iterative::copy( const Iterative& rhs )
 	// Deliberately NOT copied: a clone (RegressNet's working copies, the
 	//    coming autoalgo probes) must never drive its original's observer
 	observerPtr = nullptr;
+	// Likewise not copied -- and "not copied" has to be WRITTEN, not omitted.
+	//    The copy constructor calls this without running the default
+	//    constructor first, so a member left untouched here holds an
+	//    indeterminate value, not false. Omitting it would let an autoalgo
+	//    probe, an OBD trial or a CV clone silently suppress its entire
+	//    reporting epilogue depending on what was on the stack. That is the
+	//    same failure as the uninitialised Model::errorType scalar behind the
+	//    nested-OBD flake; a clone starts audible and says so explicitly.
+	quietFlag = false;
 }
 
 // Sets the maximum number of iterations through training set
@@ -184,6 +194,13 @@ double Iterative::train()
 #ifndef REGRESS_DEBUG
 	fileStream.str( "" ); // just in case, reset file stream
 
+	// A quiet run (a stepwise candidate refit) skips the whole run header.
+	//    Note what is NOT skipped: everything below the reporting blocks --
+	//    the training loop, every stopping rule, and the gradient calculation
+	//    the gradient rule reads. Quiet changes what a run SAYS, never what it
+	//    computes or where it stops.
+	if ( !quietFlag )
+	{
 	screenStream << "I'm running an iterative model:" <<'\r'<< endl;
 	outputHeader( screenStream ); // output the header identifying the model object
 
@@ -249,6 +266,7 @@ double Iterative::train()
 
 	// Format the ostream
 	screenStream << setiosflags( ios::showpoint | ios::right );
+	} // end of the run header (skipped entirely by a quiet run)
 #endif
 
 	// Iterate to maximum number of iterations
@@ -284,8 +302,11 @@ double Iterative::train()
 #ifndef REGRESS_DEBUG
 		// Print if print counter reached, first condition tests linear print counter,
 		//    second condition tests logarithmic print counter
-		if ( ( !logPrintFlag && iteration % printCount == 0 ) || ( logPrintFlag
-			&& ( iteration == logCounter ) ) )
+		//    A quiet run prints no rows at all. This is a REPORTING condition
+		//    only: the gradient above is already calculated, and every stop
+		//    check below runs regardless (legacy bug #10).
+		if ( !quietFlag && ( ( !logPrintFlag && iteration % printCount == 0 )
+			|| ( logPrintFlag && ( iteration == logCounter ) ) ) )
 		{
 			screenStream.str( "" ); // reset screen stream
 
@@ -337,8 +358,14 @@ double Iterative::train()
 				screenStream << "The error became lower than " << minError
 					<< "." << endl;
 
-				fileStream << screenStream.str(); // stream line into file stream
-				util::screen() << screenStream.str(); // then print to screen
+				// A quiet run says nothing at all -- not even why it stopped.
+				//    Its caller reports the stop reason itself, from
+				//    getStopReason(), which this does not touch.
+				if ( !quietFlag )
+				{
+					fileStream << screenStream.str(); // stream line into file stream
+					util::screen() << screenStream.str(); // then print to screen
+				}
 
 				stopReason = STOP_MIN_ERROR;
 				break;
@@ -355,8 +382,14 @@ double Iterative::train()
 				screenStream << "The change in error became lower than " << delta
 					<< "." << endl;
 
-				fileStream << screenStream.str(); // stream line into file stream
-				util::screen() << screenStream.str(); // then print to screen
+				// A quiet run says nothing at all -- not even why it stopped.
+				//    Its caller reports the stop reason itself, from
+				//    getStopReason(), which this does not touch.
+				if ( !quietFlag )
+				{
+					fileStream << screenStream.str(); // stream line into file stream
+					util::screen() << screenStream.str(); // then print to screen
+				}
 
 				stopReason = STOP_CHANGE;
 				break;
@@ -380,8 +413,14 @@ double Iterative::train()
 					screenStream << "The error increased over the window width of "
 						<< window << "." << endl;
 
-					fileStream << screenStream.str(); // stream line into file stream
-					util::screen() << screenStream.str(); // then print to screen
+					// A quiet run says nothing at all -- not even why it stopped.
+					//    Its caller reports the stop reason itself, from
+					//    getStopReason(), which this does not touch.
+					if ( !quietFlag )
+					{
+						fileStream << screenStream.str(); // stream line into file stream
+						util::screen() << screenStream.str(); // then print to screen
+					}
 
 					stopReason = STOP_WINDOW;
 					break;
@@ -406,8 +445,14 @@ double Iterative::train()
 					<< resetiosflags( ios::fixed ) << setiosflags( ios::scientific )
 					<< gradMaxLimit << "." << endl;
 
-				fileStream << screenStream.str(); // stream line into file stream
-				util::screen() << screenStream.str(); // then print to screen
+				// A quiet run says nothing at all -- not even why it stopped.
+				//    Its caller reports the stop reason itself, from
+				//    getStopReason(), which this does not touch.
+				if ( !quietFlag )
+				{
+					fileStream << screenStream.str(); // stream line into file stream
+					util::screen() << screenStream.str(); // then print to screen
+				}
 
 				stopReason = STOP_GRADMAX;
 				break;
@@ -426,8 +471,14 @@ double Iterative::train()
 			screenStream << "The error plateaued over a window of "
 				<< autoStopWindow << " iterations." << endl;
 
-			fileStream << screenStream.str(); // stream line into file stream
-			util::screen() << screenStream.str(); // then print to screen
+			// A quiet run says nothing at all -- not even why it stopped.
+			//    Its caller reports the stop reason itself, from
+			//    getStopReason(), which this does not touch.
+			if ( !quietFlag )
+			{
+				fileStream << screenStream.str(); // stream line into file stream
+				util::screen() << screenStream.str(); // then print to screen
+			}
 
 			stopReason = STOP_PLATEAU;
 			break;
@@ -453,8 +504,14 @@ double Iterative::train()
 			else
 				screenStream << "Training was stopped by request." << endl;
 
-			fileStream << screenStream.str(); // stream line into file stream
-			util::screen() << screenStream.str(); // then print to screen
+			// A quiet run says nothing at all -- not even why it stopped.
+			//    Its caller reports the stop reason itself, from
+			//    getStopReason(), which this does not touch.
+			if ( !quietFlag )
+			{
+				fileStream << screenStream.str(); // stream line into file stream
+				util::screen() << screenStream.str(); // then print to screen
+			}
 
 			stopReason = why;
 			break;
@@ -464,6 +521,18 @@ double Iterative::train()
 	screenStream.str( "" ); // reset screen stream
 
 #ifndef REGRESS_DEBUG
+	// The whole epilogue is reporting, and a quiet run skips all of it. This is
+	//    where the cost lives: reportAccuracy() below re-derives the
+	//    classification tables, the ROC fit and a 2000-resample bootstrap over
+	//    the TEST set. Stepwise regression called it once per candidate
+	//    subnetwork and used none of it -- Wilks selection reads the TRAINING
+	//    error, which train() has already returned. Skipping it cannot change
+	//    the fit: the weights are final, and the bootstrap draws from the
+	//    reserved i_resample stream, so it can never perturb weight init or
+	//    splits (a settled decision that this relies on).
+	if ( quietFlag )
+		return setError;
+
 	// Print number of iterations and elapsed time
 	unsigned elapsed_time = time( 0 ) - start;
 	screenStream << endl << "Total iterations = " << iteration << endl <<

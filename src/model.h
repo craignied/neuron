@@ -46,6 +46,10 @@ public:
 	// Set output error function
 	void setLMSerror(); // least mean squared
 	void setXEerror(); // X-entropy
+	// Which one is in force. A caller whose MATH depends on the objective --
+	//    Wilks' generalized likelihood ratio needs log likelihoods, so it needs
+	//    cross-entropy -- has to be able to ask instead of assuming or forcing.
+	bool getXEerror() const { return errorType; }
 
 	// Outputs a header to ostream describing the architecture of the model
 	virtual void outputHeader( ostream& ) = 0; // pure virtual

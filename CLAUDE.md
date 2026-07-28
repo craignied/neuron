@@ -228,8 +228,21 @@ Release build → `tests/golden/run_golden.sh` byte-identical (3 transcripts: `x
 for anything that adds a control → the SEER acceptance run for splitter work. CI runs the
 build, goldens, ctest, smoke, and the Python tools on macOS/Linux/Windows.
 
-**Open work** is the three remaining ROADMAP 4 items under "What remains" below. There is
-no known defect outstanding.
+**Stepwise regression** (2026-07-27) runs like the other long jobs: `/api/regress&async=1` with
+structured progress, a Stop that reaches the candidate training at that moment, and a persistent
+results pane (the report was previously computed, returned, and discarded by the page). Candidate
+refits obey the convergence contract and are **quiet** — no per-candidate classification tables,
+ROC fit or test-set bootstrap, which was both a large cost and a repeated look at a set that must
+stay untouched during selection. **Legacy bug #11** fixed with it: a null dereference in
+`Network::computeCondNum()` on a degenerate B matrix segfaulted the process on every forward
+stepwise run (and on any reverse pass that shrank the model to one input).
+
+**Open work** is the three remaining ROADMAP 4 items under "What remains" below, plus one
+**open question for Craig**: `Network::computeCondNum()` builds its eigenvalue vector from a
+half-open range ending at the LAST eigenvalue, so every condition number the engine has ever
+reported was computed over `dimension - 1` of its `dimension` eigenvalues. Deliberately NOT
+changed — it moves published statistics for every logistic model and needs its own measurement
+and re-bless. → HISTORY 2026-07-27.
 
 ## Settled decisions — do not reopen
 
@@ -279,6 +292,30 @@ Re-proposing one is rework, not initiative. Full reasoning at the cited HISTORY 
   at 0.01 the same search stops far too early and gives 1 unit at AUC 0.53. A refusal is
   more informative than a model produced by a tolerance chosen to silence it. Raise the
   ceiling or use `algorithm=auto`. → HISTORY 2026-07-25.
+- **An audit trail records a candidate BEFORE judging it, and a partial result says it is
+  partial.** The entry that matters most is the one that failed, so anything written after an
+  eligibility check that throws is missing exactly when it is needed; and a result assembled only
+  at the end of a loop reports "nothing" instead of "incomplete" when an exception exits early.
+  Record first with the statistic null, maintain per-pass state as it settles, and ship an explicit
+  completeness flag. → HISTORY 2026-07-27 (Sol review).
+- **"Not copied" must be WRITTEN in `copy()`, never left out.** A copy constructor that delegates
+  to a `copy()` utility does NOT run the default constructor first, so any member `copy()` omits
+  holds indeterminate memory. `Iterative::copy` assigns `observerPtr = nullptr` and
+  `quietFlag = false` explicitly for this reason; a new non-copied member does the same.
+  → HISTORY 2026-07-27 (Sol review); `tests/iterative/check_quietcopy.cpp`.
+- **Stepwise regression requires a cross-entropy source fit and never mutates the model.** Wilks'
+  GLRT compares log likelihoods; the baseline error comes from the ORIGINAL fit, so converting the
+  model afterwards mixes objectives instead of fixing them. Refuse an LMS fit; do not call
+  `setXEerror()` on a user's model. → HISTORY 2026-07-27 (Sol review).
+- **A quiet fit is a silent fit, never a different one.** `Iterative::setQuiet()` suppresses the
+  run header, the per-iteration rows and the whole epilogue for fits whose output nobody consumes
+  (stepwise candidate refits). It is OUTPUT ONLY: it may never guard a calculation a stopping rule
+  reads — the gradient calculation stays outside every reporting guard (legacy bug #10's sibling).
+  Default OFF, so an ordinary run is bit-identical to one before it existed. → HISTORY 2026-07-27.
+- **Stepwise candidate fits obey the convergence contract, and an unconverged candidate FAILS the
+  analysis rather than being skipped.** A pass selects by comparing all its candidates, so dropping
+  one silently changes which variable wins. Do not "fix" a refusal by loosening tolerances or
+  raising ceilings to make a fixture pass. → HISTORY 2026-07-27.
 - **Reporting cadence may change output VOLUME; it may never change optimization or fit
   validity.** The print counter is presentation only. Do not "solve" a stopping problem by
   choosing a denser print schedule, and never compute a quantity a stopping rule depends

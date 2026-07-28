@@ -132,6 +132,32 @@ public:
 	void setObserver( Observer* obs ) { observerPtr = obs; }
 	Observer* getObserver() { return observerPtr; }
 	StopReason getStopReason() { return stopReason; }
+	// How many iterations the last train() ran. A caller that has to explain
+	//    WHY it is rejecting a fit needs the count alongside the reason ("ended
+	//    as max_iterations after 2000 iterations"); the number was previously
+	//    reachable only by parsing the printed report.
+	unsigned getIterations() { return iteration; }
+
+	// A QUIET run produces no narration: no run header, no per-iteration rows,
+	//    and no epilogue (elapsed time, convergence warning, accuracy report,
+	//    last-operation file, history append). It exists for fits whose OUTPUT
+	//    nobody consumes -- stepwise regression's candidate subnetworks, where
+	//    only the training error and the stop reason feed the Wilks comparison,
+	//    while the epilogue was re-deriving classification tables, ROC fits and
+	//    a 2000-resample bootstrap on the TEST set for every candidate. That is
+	//    both a large avoidable cost and a repeated look at a set that is
+	//    supposed to be untouched during model selection.
+	//
+	//    QUIET AFFECTS OUTPUT ONLY. It must never guard a calculation a
+	//    stopping rule depends on -- that was legacy bug #10, where the maximum
+	//    gradient was computed inside the block that PRINTS a row, so the print
+	//    schedule chose the model. The gradient calculation deliberately sits
+	//    outside every reporting guard for exactly this reason; keep it there.
+	//    Default OFF, so an ordinary run is bit-identical to one before this
+	//    existed (the goldens' rule). NOT copied: a clone must not inherit
+	//    silence by accident -- callers that want a quiet candidate say so.
+	void setQuiet( const bool flag ) { quietFlag = flag; }
+	bool getQuiet() { return quietFlag; }
 
 	// Specifies the type of print counter, and if applicable, its value
 	void setLogPrint( const bool flag ) { logPrintFlag = flag; } // sets if log printing used
@@ -182,6 +208,7 @@ protected:
 	static const unsigned autoStopPatience = 3; // consecutive strikes to stop
 
 	Observer* observerPtr; // non-owning; see setObserver
+	bool quietFlag; // suppress ALL narration; see setQuiet. Output only.
 	StopReason stopReason; // why the last train() ended
 
 	// Copy utility

@@ -91,7 +91,7 @@ statistical/trapezoidal, 2 minimum data, 3 return); the GUI dropped the
 | (train-time) Algorithm (GD/CGD/Shanno/auto) | Algorithm select | `POST /api/train` `algorithm=` | ✅ |
 | 7 Train model | Train button | `POST /api/train` | ✅ |
 | 7/8 Save network + guesses after training | § Session files → Network / guesses | `GET /api/save/{network,train_guesses,test_guesses}` | ✅ |
-| 9 Stepwise regression | § Stepwise regression panel | `POST /api/regress` | ✅ |
+| 9 Stepwise regression | § Stepwise regression panel (+ persistent results pane, live progress, Stop) | `POST /api/regress` (+ `async=1`, `GET /api/train/status` → `stepwise`, `POST /api/train/stop`) | ✅ (GUI beyond CLI: async + progress + Stop) |
 
 **Note on the print counter (2026-07-26).** It is a *presentation* control in
 both interfaces and nothing more: stopping conditions are evaluated every

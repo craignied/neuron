@@ -150,3 +150,14 @@ add_executable(check_gradcadence
 target_include_directories(check_gradcadence PRIVATE src)
 target_link_libraries(check_gradcadence PRIVATE GSL::gsl GSL::gslcblas)
 add_test(NAME iterative_grad_cadence COMMAND check_gradcadence)
+
+# A clone must never inherit the quiet flag -- "not copied" implemented as an
+# explicit assignment, not as an omission that reads indeterminate memory.
+add_executable(check_quietcopy
+    tests/iterative/check_quietcopy.cpp
+    src/simpleprop.cpp src/bareprop.cpp src/backprop.cpp src/logistic.cpp
+    src/network.cpp src/iterative.cpp src/model.cpp src/dataset.cpp src/split.cpp
+    src/twoset.cpp src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
+target_include_directories(check_quietcopy PRIVATE src)
+target_link_libraries(check_quietcopy PRIVATE GSL::gsl GSL::gslcblas)
+add_test(NAME iterative_quiet_copy COMMAND check_quietcopy)

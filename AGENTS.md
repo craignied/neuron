@@ -409,8 +409,67 @@ join nodes, hyphens give ranges) — a direction (reverse drops the least
 significant variable at a time, forward adds the most significant), and a
 p-value threshold. It refits subnetworks with each variable removed/added
 and reports the Wilks-GLRT p-values, the engine's classic input-selection
-tool. The network must be trained first; output appears in the report pane
-and, with history logging on, is appended to `neuron.log`.
+tool. The network must be trained first. The full selection report is
+rendered in a **persistent results pane below the panel** and, with history
+logging on, is also appended to `neuron.log`. The trained model is not
+disturbed — stepwise is a standalone analysis over clones.
+
+Like OBD and CV it runs **asynchronously**: `POST /api/regress` with
+`async=1` validates, starts the job and returns at once, and progress +
+result come back through the same doors (`GET /api/train/status`,
+`POST /api/train/stop` — send an explicit empty body). The status carries a
+`stepwise` object naming the direction, the pass (`step`), `candidate` of
+`candidatesThisStep`, `fitsCompleted`, and the conceptual `variable` with
+its full `inputs` node group. Only the candidate count in the CURRENT pass
+is reported: the threshold may end the procedure before later passes run, so
+there is no wall-clock estimate. **Stop** reaches the candidate training at
+that moment; the run then reports `cancelled` and keeps its partial audit
+trail. Blocking mode (no `async`) is unchanged and returns the identical
+result. Both modes also return a structured `stepwise` result: `threshold`,
+`fitsCompleted`, the `path` of (variable, p) in selection order, and
+`finalVariables`.
+
+The status also carries `lastCompleted` — the variable, `converged` and
+`stopReason` of the most recently finished candidate. It is sticky, persisting
+while the next candidate trains, because a finished candidate is superseded
+within microseconds and a poller would otherwise never see it. Both modes
+return a `candidates` array in the structured result: every candidate
+considered, in order, with its input group, prior and subnetwork errors,
+degrees of freedom, Wilks statistic, p-value, convergence, stop reason,
+iterations, and whether it won its pass. It is built as the run proceeds and
+each candidate is recorded **before** its eligibility is judged, so a failed or
+cancelled analysis includes the very candidate that ended it — with its stop
+reason, and with `g2`/`p` null, because a rejected fit is recorded but never
+compared. `fitsCompleted` always equals the length of `candidates`.
+
+The result also carries **`complete`**: false when an unconverged candidate or
+a cancellation ended the analysis early. `finalVariables` reports what the
+*completed* passes settled, maintained per pass rather than only at the end, so
+`complete:false` with a non-empty list means "this is how far it got" while
+`complete:true` means "this is the procedure's result". Check the flag before
+reading the list as a conclusion.
+
+**Stepwise requires a cross-entropy fit and never mutates the model.** Wilks'
+GLRT compares log likelihoods, so `/api/regress` refuses an LMS-trained network
+rather than converting it. (It used to call `setXEerror()` on the user's model:
+that mutated a model stepwise treats as read-only, and it did not even work —
+the baseline error every first-pass comparison uses was captured from the
+original fit and stayed least-mean-squares, so `G2 = 2N(Esub - Efull)`
+subtracted two different objectives. Logistic is cross-entropy by construction,
+which is why this was invisible until an LMS network was tried.)
+
+Two rules govern candidate fits. **Every candidate must converge**
+(`Iterative::converged`, finite error) before its error may enter a Wilks
+comparison; if one does not, the analysis FAILS at that candidate naming it,
+its stop reason and its iterations, rather than skipping it — a pass selects
+by comparing all its candidates, so silently dropping one biases which
+variable wins. And **candidate refits are quiet**: they produce no training
+narration and, crucially, no classification tables, ROC fit or test-set
+bootstrap. Wilks selection reads the training likelihood; re-deriving
+held-out statistics for every candidate was both a large avoidable cost and
+a repeated look at a set that must stay untouched during model selection
+(measured on the 189-row low-birth-weight split: 1.01 s → 0.15 s, 24
+2000-resample bootstraps → 0, identical p-values and selection).
 
 The GUI also sizes the hidden layer automatically — **OBD** (`POST /api/obd`,
 the "OBD hidden-layer sizing" panel). It grows a SimpleProp's hidden layer while

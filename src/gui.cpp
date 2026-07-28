@@ -98,6 +98,12 @@ struct TrainJob
 	string obdPhase;
 	unsigned obdHidden = 0;
 
+	// Stepwise-regression progress as a ready-made JSON object body (empty =
+	//    not a stepwise run). Kept as its OWN field rather than reusing the obd
+	//    object: a caller must never have to read "hidden" and guess it means a
+	//    candidate variable.
+	string stepwise;
+
 	// Append one decimated (iteration, train, test) sample. Guards its own
 	//    mutex, so callers must NOT already hold progressMutex.
 	void pushSample( unsigned iteration, double trainError, double testError )
@@ -157,6 +163,19 @@ struct GuiObserver : Iterative::Observer
 		}
 		return !job.cancel.load();
 	}
+};
+
+// Carries a Stop request into whichever candidate subnetwork is training right
+//    now. It samples nothing: each candidate restarts its own error curve from
+//    iteration 0, so a single error-vs-iteration chart across a stepwise run
+//    would be a sawtooth of unrelated fits. The progress a user actually needs
+//    is the candidate accounting, which the engine pushes separately.
+//    whyStopped() is left at the base default (STOP_CANCELLED) -- that IS what
+//    happened, and a cancelled fit is not convergence, so it stops the analysis
+//    through the same door an unfinished fit does.
+struct StepwiseCancelObserver : Iterative::Observer
+{
+	bool onIteration( unsigned, double ) override { return !job.cancel.load(); }
 };
 
 // The engine's stop reason as a JSON-friendly name. These tokens are the
@@ -1371,6 +1390,7 @@ string handleTrain( const httplib::Request& req )
 		job.result.clear();
 		job.obdPhase.clear(); // a plain train reports no obd phase
 		job.obdHidden = 0;
+		job.stepwise.clear(); // nor any stepwise candidate accounting
 	}
 	job.cancel = false;
 	job.running = true;
@@ -1420,6 +1440,10 @@ string handleTrainStatus()
 	if ( !job.obdPhase.empty() )
 		out << ",\"obd\":{\"phase\":\"" << jsonEscape( job.obdPhase )
 			<< "\",\"hidden\":" << job.obdHidden << "}";
+	// Stepwise runs report their candidate accounting; absent for every other
+	//    kind of job, so its presence identifies the run
+	if ( !job.stepwise.empty() )
+		out << ",\"stepwise\":" << job.stepwise;
 	out << ",\"result\":" << ( job.result.empty() ? "null" : job.result )
 		<< "}";
 	return out.str();
@@ -1655,6 +1679,7 @@ string handleObd( const httplib::Request& req )
 		job.result.clear();
 		job.obdPhase.clear();
 		job.obdHidden = 0;
+		job.stepwise.clear(); // a stale stepwise object must not follow this run
 	}
 	job.cancel = false;
 	job.running = true;
@@ -2336,6 +2361,7 @@ string handleCv( const httplib::Request& req )
 		job.iters.clear(); job.trainErr.clear(); job.testErr.clear();
 		job.keepEvery = 1; job.sampleCounter = 0;
 		job.result.clear(); job.obdPhase.clear(); job.obdHidden = 0;
+		job.stepwise.clear(); // a stale stepwise object must not follow this run
 	}
 	job.cancel = false;
 	job.running = true;
@@ -2351,6 +2377,158 @@ string handleCv( const httplib::Request& req )
 	} );
 
 	return jsonMsg( true, "cross-validation started" );
+}
+
+// The whole stepwise analysis, run identically in blocking and async mode so
+//    the two cannot drift: async is the SAME call on a worker thread, with a
+//    progress callback and a cancel observer attached. Returns the response
+//    JSON. The caller must own the engine.
+string runRegressJob( Network* net, const vector< vector< unsigned > >& defs,
+	const string& direction, double threshold )
+{
+	RegressNet regressionObj;
+	regressionObj.setNetwork( net, lastTrainError );
+	regressionObj.setInputStructure( defs ); // already validated by the caller
+	regressionObj.setThreshold( threshold ); // no stdin prompt in the GUI
+
+	// Publish each candidate as the engine reaches it. Structured facts from
+	//    the procedure itself -- never scraped from the report's prose.
+	StepwiseCancelObserver cancelObserver;
+	regressionObj.setObserver( &cancelObserver );
+
+	// The most recently COMPLETED candidate, kept alongside the one currently
+	//    training. A finished announcement is followed by the next candidate's
+	//    starting announcement within microseconds, so a status poller would
+	//    essentially never observe it as a transient phase -- the spec asks for
+	//    the last completed candidate's convergence status, which has to
+	//    PERSIST while the next one trains. Captured by reference: the callback
+	//    is only ever invoked from inside this function's regress call.
+	string lastDone;
+	regressionObj.setProgress( [ &lastDone ]( const RegressNet::Progress& p )
+	{
+		ostringstream s;
+		s << "{\"direction\":\"" << jsonEscape( p.direction )
+			<< "\",\"step\":" << p.step
+			<< ",\"candidate\":" << p.candidate
+			<< ",\"candidatesThisStep\":" << p.candidatesThisStep
+			<< ",\"fitsCompleted\":" << p.fitsCompleted
+			<< ",\"variable\":" << p.variable
+			<< ",\"inputs\":[";
+		for ( unsigned i = 0; i < p.inputs.size(); i++ )
+			s << ( i ? "," : "" ) << p.inputs[ i ];
+		s << "],\"phase\":\"" << jsonEscape( p.phase ) << "\""
+			<< ",\"finished\":" << ( p.finished ? "true" : "false" );
+
+		// A finished announcement updates the sticky record of the last
+		//    completed candidate, which then rides along with every subsequent
+		//    poll until the next candidate finishes
+		if ( p.finished )
+		{
+			ostringstream d;
+			d << "{\"variable\":" << p.variable
+				<< ",\"converged\":" << ( p.converged ? "true" : "false" )
+				<< ",\"stopReason\":\"" << jsonEscape( p.stopReason ) << "\"}";
+			lastDone = d.str();
+		}
+		if ( !lastDone.empty() )
+			s << ",\"lastCompleted\":" << lastDone;
+		s << "}";
+
+		lock_guard< mutex > lock( job.progressMutex );
+		job.stepwise = s.str();
+	} );
+
+	Capture cap;
+	bool ok = true;
+	string message;
+	try
+	{
+		if ( direction == "reverse" )
+			regressionObj.reverse_regress();
+		else
+			regressionObj.forward_regress();
+		message = direction + " stepwise regression complete";
+	}
+	catch ( const RegressNet::RegressNetErr& e )
+	{
+		ok = false;
+		message = e.what();
+	}
+
+	// A cancelled run is reported as cancelled, not as a mysterious failure --
+	//    the user asked for it. The candidate that was training ended as
+	//    STOP_CANCELLED, which is not convergence, so the analysis stopped
+	//    there and no variable was selected from the incomplete pass.
+	bool cancelled = job.cancel.load();
+
+	ostringstream out;
+	out << "{\"ok\":" << ( ok ? "true" : "false" )
+		<< ",\"message\":\"" << jsonEscape( cancelled
+			? direction + " stepwise regression cancelled" : message )
+		<< "\",\"cancelled\":" << ( cancelled ? "true" : "false" )
+		<< ",\"output\":\"" << jsonEscape( cap.text.str() ) << "\"";
+
+	// The structured result, so a consumer never has to parse the prose. The
+	//    partial path is included on failure and cancellation too: it is the
+	//    audit trail of what the procedure did manage to establish.
+	out << ",\"stepwise\":{\"direction\":\"" << jsonEscape( direction )
+		<< "\",\"threshold\":" << jnum( threshold )
+		<< ",\"fitsCompleted\":" << regressionObj.getFitsCompleted();
+
+	// EVERY candidate considered, in order, with the comparison that was made
+	//    and how the fit ended. This is the auditable record: a consumer never
+	//    has to parse the prose to reconstruct the analysis, and because it is
+	//    built as the run proceeds it survives a failure or a cancel and shows
+	//    exactly how far the procedure got.
+	out << ",\"candidates\":[";
+	const vector< RegressNet::Candidate >& cands = regressionObj.getCandidates();
+	for ( unsigned i = 0; i < cands.size(); i++ )
+	{
+		const RegressNet::Candidate& c = cands[ i ];
+		out << ( i ? "," : "" ) << "{\"step\":" << c.step
+			<< ",\"candidate\":" << c.candidate
+			<< ",\"variable\":" << c.variable
+			<< ",\"inputs\":[";
+		for ( unsigned k = 0; k < c.inputs.size(); k++ )
+			out << ( k ? "," : "" ) << c.inputs[ k ];
+		out << "],\"priorError\":" << jnum( c.priorError )
+			<< ",\"error\":" << jnum( c.error )
+			<< ",\"df\":" << c.df
+			<< ",\"g2\":" << jnum( c.G2 )
+			<< ",\"p\":" << jnum( c.p )
+			<< ",\"converged\":" << ( c.converged ? "true" : "false" )
+			<< ",\"stopReason\":\"" << jsonEscape( c.stopReason ) << "\""
+			<< ",\"iterations\":" << c.iterations
+			<< ",\"selected\":" << ( c.selected ? "true" : "false" ) << "}";
+	}
+	out << "]";
+
+	out << ",\"path\":[";
+	const vector< pair< double, unsigned > >& path
+		= regressionObj.getSelectionPath();
+	for ( unsigned i = 0; i < path.size(); i++ )
+		out << ( i ? "," : "" ) << "{\"variable\":" << path[ i ].second
+			<< ",\"p\":" << jnum( path[ i ].first ) << "}";
+	out << "]";
+
+	// finalVariables reports what the COMPLETED passes settled, and `complete`
+	//    says whether the procedure reached a decision at all. Without the
+	//    flag, an empty list on a run that failed in its first pass reads as
+	//    "the procedure kept nothing" rather than "the procedure never got
+	//    that far" -- two very different claims.
+	out << ",\"complete\":"
+		<< ( regressionObj.getComplete() ? "true" : "false" )
+		<< ",\"finalVariables\":[";
+	const vector< unsigned >& fin = regressionObj.getFinalVariables();
+	for ( unsigned i = 0; i < fin.size(); i++ )
+		out << ( i ? "," : "" ) << fin[ i ];
+	out << "]}}";
+
+	// Note: the training report (lastReport, the Report download) is left
+	//    intact, and the trained model is untouched -- stepwise is a standalone
+	//    analysis over clones. When history logging is on the report is also
+	//    appended to neuron.log in the workspace.
+	return out.str();
 }
 
 string handleRegress( const httplib::Request& req )
@@ -2388,38 +2566,67 @@ string handleRegress( const httplib::Request& req )
 	if ( variable_defs.empty() )
 		return jsonMsg( false, "variable structure parsed to nothing" );
 
-	RegressNet regressionObj;
-	regressionObj.setNetwork( net, lastTrainError );
-	try
+	// Validate the structure against the network HERE, synchronously, so a bad
+	//    request fails in the caller's own response even in async mode -- a job
+	//    must never be started only to die of something knowable up front.
 	{
-		regressionObj.setInputStructure( variable_defs );
-	}
-	catch ( const RegressNet::RegressNetErr& e )
-	{
-		return jsonMsg( false, e.what() );
-	}
-	regressionObj.setThreshold( threshold ); // no stdin prompt in the GUI
-
-	Capture cap;
-	try
-	{
-		if ( direction == "reverse" )
-			regressionObj.reverse_regress();
-		else
-			regressionObj.forward_regress();
-	}
-	catch ( const RegressNet::RegressNetErr& e )
-	{
-		return string( "{\"ok\":false,\"message\":\"" ) + jsonEscape( e.what() )
-			+ "\",\"output\":\"" + jsonEscape( cap.text.str() ) + "\"}";
+		RegressNet validate;
+		validate.setNetwork( net, lastTrainError );
+		try
+		{
+			validate.setInputStructure( variable_defs );
+		}
+		catch ( const RegressNet::RegressNetErr& e )
+		{
+			return jsonMsg( false, e.what() );
+		}
 	}
 
-	// Note: the training report (lastReport, the Report download) is left
-	//    intact; the regression output is shown on the page and, when history
-	//    logging is on, also appended to neuron.log in the workspace.
-	return string( "{\"ok\":true,\"message\":\"" )
-		+ jsonEscape( direction + " stepwise regression complete" )
-		+ "\",\"output\":\"" + jsonEscape( cap.text.str() ) + "\"}";
+	// Asynchronous mode: validation above has already happened synchronously,
+	//    so a bad request still fails fast and in the caller's own response.
+	//    Everything past this point is the run itself.
+	if ( param( req, "async" ) == "1" )
+	{
+		if ( job.worker.joinable() )
+			job.worker.join(); // reap the previous, finished run's thread
+
+		{
+			lock_guard< mutex > lock( job.progressMutex );
+			job.iters.clear();
+			job.trainErr.clear();
+			job.testErr.clear();
+			job.keepEvery = 1;
+			job.sampleCounter = 0;
+			job.result.clear();
+			job.obdPhase.clear();
+			job.obdHidden = 0;
+			job.stepwise.clear();
+		}
+		job.cancel = false;
+		job.running = true;
+
+		job.worker = thread( [ net, variable_defs, direction, threshold ]
+		{
+			string result = runRegressJob( net, variable_defs, direction,
+				threshold );
+			{
+				lock_guard< mutex > lock( job.progressMutex );
+				job.result = result; // publish BEFORE running goes false
+			}
+			job.running = false;
+		} );
+
+		return jsonMsg( true, direction + " stepwise regression started" );
+	}
+
+	// Blocking mode still installs the cancel observer (runRegressJob is ONE
+	//    implementation for both modes), and job.cancel is a process-global
+	//    latch that only an async START clears. So a Stop from an earlier async
+	//    run would still be set here and cancel this run's very first candidate
+	//    before it trained an iteration. Clear it: nothing can be cancelling a
+	//    run that has not begun.
+	job.cancel = false;
+	return runRegressJob( net, variable_defs, direction, threshold );
 }
 
 // Produce one session artifact as a file in the workspace (the server's
