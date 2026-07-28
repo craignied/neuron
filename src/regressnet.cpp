@@ -470,6 +470,7 @@ void RegressNet::reverse_regress()
 		}
 
 		analysisComplete = true; // the loop ran to a decision, not an exception
+		report_summary( "Reverse", "removed" );
 	}
 
 	netCopyPtr.reset(); // get rid of copy of Network object for subnetworks
@@ -691,6 +692,7 @@ void RegressNet::forward_regress()
 		}
 
 		analysisComplete = true; // the loop ran to a decision, not an exception
+		report_summary( "Forward", "added" );
 	}
 
 	netCopyPtr.reset(); // get rid of copy of Network object for subnetworks
@@ -725,6 +727,47 @@ void RegressNet::requireCrossEntropySource()
 		<< "this model was trained with least-mean-squares error. Retrain it "
 		<< "with the cross-entropy output error function, then regress.";
 	throw RegressNetErr( errorOut.str().c_str() );
+}
+
+// The closing summary of a completed analysis. The selection result was
+//    previously reachable only from the API's structured `finalVariables`, or
+//    by reading the p-value table and working out which variables were absent
+//    from it -- the report answered "what happened" but never "what did I end
+//    up with". This states it, in the ENGINE report, so the GUI results pane,
+//    the CLI transcript and neuron.log all carry the same sentence rather than
+//    each interface having to compose its own.
+//
+//    Only a COMPLETED analysis reaches here: both callers invoke this after
+//    their selection loop reaches a decision, and every failure path throws out
+//    of the loop first. A run that stopped early therefore prints no final
+//    variable set, which is the point -- it does not have one, and an empty
+//    list presented as a conclusion would claim the procedure kept nothing.
+void RegressNet::report_summary( const string& direction, const string& verb )
+{
+	out << endl << direction << " stepwise regression complete." << endl;
+
+	// The path, in the order the procedure actually took it
+	out << "Variables " << verb << ", in order: ";
+	if ( selectionPath.empty() )
+		out << "none";
+	else
+		for ( unsigned i = 0; i < selectionPath.size(); i++ )
+			out << ( i ? ", " : "" ) << selectionPath[ i ].second;
+	out << endl;
+
+	// ... and what the model ended with. "retained" and "selected" are not
+	//     interchangeable: reverse KEEPS what it never removed, forward ADMITS
+	//     what it added, and a reader must not have to infer which run this was.
+	out << "Final " << ( direction == "Reverse" ? "retained" : "selected" )
+		<< " variables: ";
+	if ( finalVariables.empty() )
+		out << "none";
+	else
+		for ( unsigned i = 0; i < finalVariables.size(); i++ )
+			out << ( i ? ", " : "" ) << finalVariables[ i ];
+	out << endl;
+
+	report( out ); // output to screen & history file
 }
 
 // A candidate subnetwork's error may enter the Wilks comparison only if the fit

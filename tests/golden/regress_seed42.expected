@@ -289,6 +289,10 @@ Variable:     p-value:
         0  1.423146e-01
         1  1.000000e+00
 
+Reverse stepwise regression complete.
+Variables removed, in order: 0, 1
+Final retained variables: none
+
 ( 1 ) Specify variables
 ( 2 ) Stepwise reverse regression
 ( 3 ) Stepwise forward regression

@@ -1492,6 +1492,22 @@ approach are all below or in the `docs/` files they cite.
   no further move), 12/12 ctest, smoke green (+18 stepwise assertions), oracle numerically
   identical, tools. The required live stepwise browser click-through remained pending.
 
+  **The stepwise report now states its own result (2026-07-27, after Codex's browser
+  click-through).** The click-through passed progress, Stop, the cancellation audit trail, the
+  stale-cancellation recovery, completion and report persistence, and found one gap: the API
+  returned `complete:true` and `finalVariables:[0,1,3,4,8]`, but the report a human reads ended at
+  the p-value table — it answered "what happened" and never "what did I end up with", leaving the
+  reader to work out which variables were ABSENT from the removal table. Added in the ENGINE report
+  rather than the page, so the GUI pane, the CLI transcript and neuron.log carry one sentence
+  instead of each interface composing its own: direction, the path in order, and "Final retained
+  variables" (reverse) / "Final selected variables" (forward) — the two are not interchangeable and
+  a reader must not have to infer which run it was. Printed ONLY on a completed analysis; every
+  failure path throws out of the selection loop first, so a failed or cancelled run prints no final
+  set, and smoke asserts that absence as well as the presence. Red-proven (the forward assertion
+  failed against the pre-summary binary, showing the report ending at the p-value table).
+  `regress_seed42` re-blessed: **+4 lines, 0 removed**, the summary block alone; the XOR fixture
+  removes both variables, so it also exercises the empty case ("none").
+
   **The condition number used all but its last eigenvalue (2026-07-27, follow-up commit).** Found
   while guarding the `computeCondNum` crash above; deliberately deferred out of the stepwise commit
   because it changes a published statistic. `Network::computeCondNum` built its eigenvalue vector

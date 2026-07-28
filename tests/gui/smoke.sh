@@ -158,6 +158,19 @@ grep -q '"ok":true' regress_fwd.json || fail "forward stepwise regression"
 grep -q 'Forward regressing' regress_fwd.json || fail "no forward regression report"
 # A grouped variable must never be split: variable 2 is nodes 2 AND 3 together
 grep -q 'node(s) 2 3' regress_fwd.json || fail "grouped variable was not kept intact"
+# The forward direction states its own result, in its own words
+$PY - <<'PY' || fail "a forward run must state its final SELECTED variables"
+import json, re
+d = json.load(open("regress_fwd.json", encoding="utf-8"))
+o = d["output"]
+assert "Forward stepwise regression complete." in o, o[-500:]
+assert "Variables added, in order:" in o, o[-500:]
+m = re.search(r"Final selected variables: (.+)", o)
+assert m, o[-500:]
+assert [int(x) for x in m.group(1).split(",")] == d["stepwise"]["finalVariables"], \
+    (m.group(1), d["stepwise"]["finalVariables"])
+assert "Final retained variables:" not in o, o[-500:]
+PY
 
 # Untrained-model guard: a fresh model must refuse regression
 curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
@@ -202,6 +215,12 @@ assert "Chi-square" not in tail and "p = " not in tail, tail
 assert "the largest was variable" not in out, out[-500:]
 # ... and the user is told how to proceed
 assert "Raise the maximum iterations" in out, out[-500:]
+# An analysis that never reached a decision must NOT present a final variable
+#    set: it does not have one, and printing an empty or partial list as a
+#    conclusion would claim a result the procedure never produced.
+assert "Final retained variables:" not in out, out[-500:]
+assert "Final selected variables:" not in out, out[-500:]
+assert "stepwise regression complete." not in out, out[-500:]
 PY
 # THE REJECTED CANDIDATE ITSELF MUST BE IN THE AUDIT TRAIL (Sol, 2026-07-27).
 #    recordCandidate() ran AFTER requireConvergedFit(), which throws -- so the
@@ -496,6 +515,9 @@ assert d["stepwise"]["fitsCompleted"] < 18, d["stepwise"]
 # A cancelled analysis reached no decision, and says so rather than returning
 #    an empty finalVariables that would read as "the procedure kept nothing"
 assert d["stepwise"]["complete"] is False, d["stepwise"]
+# ... and a cancelled run likewise presents no final variable set
+assert "Final retained variables:" not in d["output"], d["output"][-400:]
+assert "stepwise regression complete." not in d["output"], d["output"][-400:]
 # The cancelled candidate is itself in the trail, with its reason -- it is the
 #    one that stopped the run, so leaving it out would hide the explanation
 c = d["stepwise"]["candidates"]
@@ -581,7 +603,7 @@ PY
 #    what was considered, what the comparison was, or how each fit ended
 #    without parsing the prose report.
 $PY - <<'PY' || fail "the structured result must carry every candidate considered"
-import json
+import json, re
 d = json.load(open("after_stop.json", encoding="utf-8"))
 sw = d["stepwise"]
 c = sw["candidates"]
@@ -609,6 +631,21 @@ assert sw["complete"] is True, sw
 assert sw["finalVariables"], sw
 # Retained + removed must together account for every variable offered
 assert sorted(sw["finalVariables"] + [p["variable"] for p in sw["path"]]) == list(range(6)), sw
+# THE VISIBLE REPORT MUST STATE THE RESULT (Codex click-through, 2026-07-27).
+#    The structured result carried finalVariables all along, but the report a
+#    human actually reads ended at the p-value table: it answered "what
+#    happened" and never "what did I end up with". A reader had to work out
+#    which variables were ABSENT from the removal table.
+o = d["output"]
+assert "Reverse stepwise regression complete." in o, o[-500:]
+assert "Variables removed, in order:" in o, o[-500:]
+m = re.search(r"Final retained variables: (.+)", o)
+assert m, o[-500:]
+# ... and it must agree with the structured result, not merely exist
+assert [int(x) for x in m.group(1).split(",")] == sw["finalVariables"], \
+    (m.group(1), sw["finalVariables"])
+# "retained" and "selected" are not interchangeable: this was a reverse run
+assert "Final selected variables:" not in o, o[-500:]
 PY
 
 # Restore the XOR SimpleProp the save checks below expect (the stepwise section

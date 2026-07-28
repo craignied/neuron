@@ -442,6 +442,14 @@ cancelled analysis includes the very candidate that ended it — with its stop
 reason, and with `g2`/`p` null, because a rejected fit is recorded but never
 compared. `fitsCompleted` always equals the length of `candidates`.
 
+The report itself ends with a completion summary — direction, the selection
+path in order, and **"Final retained variables"** (reverse) or **"Final
+selected variables"** (forward), or `none`. It is written by the engine, so the
+GUI results pane, the CLI transcript and `neuron.log` all carry the same
+sentence. Only a completed analysis prints it: a run that failed or was
+cancelled has no final set, and an empty list shown as a conclusion would claim
+a result the procedure never produced.
+
 The result also carries **`complete`**: false when an unconverged candidate or
 a cancellation ended the analysis early. `finalVariables` reports what the
 *completed* passes settled, maintained per pass rather than only at the end, so

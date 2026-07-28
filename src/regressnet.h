@@ -178,6 +178,13 @@ private:
 	//    cross-entropy. Throws otherwise; never mutates the original.
 	void requireCrossEntropySource();
 
+	// The closing summary of a COMPLETED analysis: direction, that it
+	//    completed, the selection path in order, and the variables the
+	//    procedure ended with. Called only after the selection loop reaches a
+	//    decision, so an analysis that failed or was cancelled never prints a
+	//    final variable set -- it has none to report.
+	void report_summary( const string& direction, const string& verb );
+
 	// Define stepwise regression table type, p-value first, followed by variable number
 	typedef multimap< double, unsigned, less< double > > ptable;
 	
