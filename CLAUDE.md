@@ -227,8 +227,10 @@ Release build → `tests/golden/run_golden.sh` byte-identical (3 transcripts: `x
 `tests/oracle/verify_oracle.sh` numerically identical → live `neuron --gui` click-through
 for anything that adds a control → the SEER acceptance run for splitter work. CI runs the
 build, goldens, ctest, smoke, and the Python tools on macOS/Linux/Windows.
-The automated gates are currently green; the live stepwise-regression click-through is
-still pending.
+The automated gates are currently green. The live stepwise-regression click-through is
+complete: reverse progress/Stop/cancellation and immediate rerun passed; Craig accepted
+the forward progress and final selected-variable summary; and the original logistic
+model retrained normally afterward, confirming that stepwise left it usable.
 
 **Stepwise regression** (2026-07-27) runs like the other long jobs: `/api/regress&async=1` with
 structured progress, a Stop that reaches the candidate training at that moment, and a persistent
