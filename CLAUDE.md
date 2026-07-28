@@ -192,8 +192,8 @@ logistic, LDFA / QDFA, RegressNet stepwise. Statistics: exact non-parametric tra
 AUC and binormal Az (least-squares z-ROC fit via fitexy over distinct operating points),
 stratified bootstrap CI plus Hanley-McNeil, Kolmogorov-Smirnov, Pearson X² (statistic
 only — see settled decisions), Hosmer-Lemeshow Ĉ on 10 fixed deciles, Wald tests,
-condition number. **Ten legacy bugs** were found and fixed during the reanimation; each
-is written up in HISTORY with the measurement that proved it.
+condition number. **Eleven numbered legacy bugs** were found and fixed during the
+reanimation; each is written up in HISTORY with the measurement that proved it.
 
 **Interfaces.** The CLI menus are **frozen** but fully working — they remain the
 authoritative feature list rule 5 measures the GUI against. `neuron --gui` (embedded
@@ -221,12 +221,14 @@ locked-test layer (`src/delong.{h,cpp}`) scores procedures once on rows held ent
 of CV and compares a prespecified contrast — **inference is opt-in** (see settled
 decisions).
 
-**The gates, run at the end of every piece of work** (all currently green): zero-warning
+**The gates, run at the end of every piece of work**: zero-warning
 Release build → `tests/golden/run_golden.sh` byte-identical (3 transcripts: `xor_seed42`,
-`regress_seed42`, `binormal_seed42`) → `ctest` (11 tests) → `tests/gui/smoke.sh` →
+`regress_seed42`, `binormal_seed42`) → `ctest` (12 tests) → `tests/gui/smoke.sh` →
 `tests/oracle/verify_oracle.sh` numerically identical → live `neuron --gui` click-through
 for anything that adds a control → the SEER acceptance run for splitter work. CI runs the
 build, goldens, ctest, smoke, and the Python tools on macOS/Linux/Windows.
+The automated gates are currently green; the live stepwise-regression click-through is
+still pending.
 
 **Stepwise regression** (2026-07-27) runs like the other long jobs: `/api/regress&async=1` with
 structured progress, a Stop that reaches the candidate training at that moment, and a persistent

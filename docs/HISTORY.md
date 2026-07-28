@@ -15,9 +15,9 @@ last, in the house style (findings first, measurements over stories). `CLAUDE.md
 readable. If you find yourself adding a fourth paragraph of narrative to `CLAUDE.md`, it
 belongs here instead.
 
-The nine legacy bugs, the ROC/Wickens reconciliation, the H-L and Pearson forensics, the
-nested-OBD nondeterminism hunt, and the reasoning behind every rejected approach are all
-below or in the `docs/` files they cite.
+The eleven numbered legacy bugs, the ROC/Wickens reconciliation, the H-L and Pearson
+forensics, the nested-OBD nondeterminism hunt, and the reasoning behind every rejected
+approach are all below or in the `docs/` files they cite.
 
 ---
 
@@ -1404,14 +1404,14 @@ below or in the `docs/` files they cite.
     dereferenced null on a degenerate B matrix. Forward regression begins by training a baseline with
     every input removed, so `dimension` is 0, `gsl_vector_alloc(0)` yields nothing usable and
     `gsl_vector_ptr(eval,0)` reads address 0 — killing the GUI server. It survived unnoticed because
-    every test and golden ran only the REVERSE direction. Reverse reaches it too, whenever a pass
-    shrinks the model to a single input. Guarded at `dimension < 2`, reported as "not available"
-    rather than three `nan`s. **Proven pre-existing: the stashed, rebuilt pre-fix binary crashes
-    identically.** Found because the spec required exercising both directions.
-    *Adjacent, NOT fixed, needs Craig's call:* line 709 builds the eigenvalue vector from the
-    half-open range `[&e[0], &e[dimension-1])`, i.e. `dimension-1` elements — **the last eigenvalue
-    has always been dropped from every condition number the engine reports.** Fixing it changes
-    published statistics for every logistic model and needs its own measurement and re-bless.
+    every test and golden ran only the REVERSE direction. Reverse reaches it too whenever a pass
+    shrinks the model to one input. The final guard treats only dimension 0 as unavailable;
+    dimension 1 now follows the corrected general eigenvalue path and reports 1 unless singular.
+    **Proven pre-existing: the stashed, rebuilt pre-fix binary crashes identically.** Found because
+    the spec required exercising both directions.
+    *Adjacent issue, initially deferred:* the eigenvalue vector's half-open range dropped its last
+    value. Craig subsequently chose to fix it in the focused follow-up recorded below; measurement
+    showed data-dependent impact and required no golden re-bless.
   - **Every candidate refit ran a 2000-resample bootstrap on the TEST set.** `train()`'s reporting
     epilogue re-derived classification tables, the ROC fit and the bootstrap for each candidate;
     Wilks selection reads the TRAINING likelihood and consumes none of it. Beyond cost, model
@@ -1488,8 +1488,9 @@ below or in the `docs/` files they cite.
   `fitsCompleted` left indeterminate, stale callback/result state carried through assignment.
   Latent (no copy call sites today) but fixed by explicit reset, because the class comment promises
   that state is not copied.
-  Gates: zero-warning Release build, goldens byte-identical (re-blessed regress only, no further
-  move), 12/12 ctest, smoke green (+18 stepwise assertions), oracle numerically identical, tools.
+  Automated gates: zero-warning Release build, goldens byte-identical (re-blessed regress only,
+  no further move), 12/12 ctest, smoke green (+18 stepwise assertions), oracle numerically
+  identical, tools. The required live stepwise browser click-through remained pending.
 
   **The condition number used all but its last eigenvalue (2026-07-27, follow-up commit).** Found
   while guarding the `computeCondNum` crash above; deliberately deferred out of the stepwise commit

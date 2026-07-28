@@ -27,11 +27,11 @@
 // regardless of what memory happened to contain.
 //
 // NOTE ON PRE-FIX BEHAVIOUR. Reading an uninitialised bool is undefined, so a
-// pre-fix binary is not guaranteed to FAIL this test -- it is guaranteed to be
-// unpredictable, which is the defect. To make the pre-fix failure observable
-// rather than a matter of luck, the clones below are constructed over memory
-// deliberately dirtied with a nonzero pattern first; on the pre-fix build that
-// is what a fresh clone reads.
+// pre-fix binary is not guaranteed to FAIL the placement-new cases below --
+// it is guaranteed to be unpredictable, which is the defect. Dirtied memory is
+// a useful stress case, not a deterministic red proof: those cases happened to
+// pass on the measured pre-fix build. Case 4 is deterministic because assignment
+// starts with a known-quiet target and copy() must explicitly reset it.
 
 #include <cstdio>
 #include <cstdlib>
@@ -58,8 +58,9 @@ int main()
 		check( !fresh.getQuiet(), "a fresh model is audible" );
 	}
 
-	// 2. A clone of an AUDIBLE model is audible -- over dirtied memory, so a
-	//    build that never assigns the flag reads the dirt.
+	// 2. A clone of an AUDIBLE model is audible. Dirtied placement memory
+	//    stresses the omitted-initialisation path but, under undefined
+	//    behaviour, is not guaranteed to expose it on a pre-fix build.
 	{
 		alignas( SimpleProp ) unsigned char buf[ sizeof( SimpleProp ) ];
 		memset( buf, 0xFF, sizeof buf ); // every bool-sized byte reads true
