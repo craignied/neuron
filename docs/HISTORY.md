@@ -1548,8 +1548,98 @@ hypothesis). Where a plan and the shipped code disagree, the code and the status
 
 ### ROADMAP 4 — the plan as executed (phases 1–4)
 
-The rationale ("Why") that still governs splitter design stays in `CLAUDE.md`; what
-follows is the phase-by-phase plan and the record of executing it.
+The rationale ("Why") **still governs splitter design** — it moved here from `CLAUDE.md`
+on 2026-07-28, once all four phases had shipped, so that the constitution carries the
+live work rather than the argument for finished work. Read it before extending the
+splitter, the fold plans, or the diagnostic. What follows it is the phase-by-phase plan
+and the record of executing it.
+
+#### Why (the rationale — moved from CLAUDE.md 2026-07-28, unchanged but for one tense)
+
+**The problem.** `DataSet::randomize` (`dataset.cpp:690`) was the engine's only train/test
+splitter. It does one thing — an **outcome-stratified single holdout** — with two
+independent O(n²) hot spots:
+1. `nvec::random_positions` (`vector_ops.cpp:32`) is a *rejection* shuffle that rescans
+   from index 0 on every collision; on a class of m rows it is O(m²), dominated by the
+   tail (the last elements collide against a nearly-full set).
+2. The zeros/ones partition and the train/test sets are built by repeated
+   `Matrix::addrow` (`dataset.cpp:732–734`, `760–772`), each append reallocating and
+   copying a growing matrix — O(n²) total (~10^10 element copies at SEER scale).
+
+Neither bit at the repo's historical sizes (hundreds to a few thousand rows). **The next
+dataset is 226,679 rows** (SEER prostate-cancer 5-year mortality), where both are
+catastrophic. The splitter must be rebuilt.
+
+**Why *general*, not a SEER fix.** Craig's call (2026-07-22): the rebuild targets a
+splitter general over prevalence, feature types, and data structure, **with SEER as the
+acceptance test.** SEER earns that role by stressing every axis at once:
+- **Rare events** — 2.96% prevalence (6,705 / 226,679). Accuracy is useless (always-negative
+  = 97%); the split must protect the positives.
+- **Clumped positives** — events are not spread across covariate space: **M1 (metastatic)
+  disease is 2.2% of the cohort but 40% of all deaths** (54% event rate); Gleason 8–10 is
+  14.5% of the cohort but 68% of deaths. Outcome-stratification alone does not *guarantee*
+  a rare decisive subgroup is proportionally represented.
+- **Clustering** — the four socioeconomic inputs are *area-level* (shared within a county):
+  ~612 distinct areas, mean 370 patients, one with 20,364. Patients within an area are not
+  independent, which raises whether the same area may appear in both train and test.
+- **Scale** — 226k rows (the O(n²) killer above).
+- **Mixed types** — 7 continuous inputs + 15 binary indicators; a stratum built from a
+  continuous column must be quantile-binned.
+
+**If the general splitter handles SEER, it handles almost anything** — that is the design
+discipline; SEER is the standing acceptance test at every phase.
+
+**What "representative" means, precisely.** A test set is representative when the held-out
+estimate is a low-bias, low-variance estimate of population performance. The binding
+constraint here is NOT row count — with 6,705 positives even a 10% holdout gives a
+Hanley-McNeil AUC SE ≈ 0.013, and 25% gives ≈ 0.006–0.009, so the headline AUC is precise
+at any sensible fraction. The real questions are (a) do rare decisive subgroups land
+proportionally, (b) can a single draw be trusted, (c) which population — new patients from
+*known* areas (standard split) or *unseen* areas (grouped split). Those three map exactly
+onto the three design axes below.
+
+**The design — a small principled family, not one method** (sklearn's `model_selection`
+is the reference taxonomy; we own the useful subset in the class layer, zero
+dependencies). The mechanism is **parameterized; the policy is the user's** — we do NOT
+bake in "stratify on M-stage"; M-stage is one instance of "stratify on outcome × a named
+covariate," and area is one instance of "a group key." Three axes:
+- **Stratify axis:** none → outcome → outcome × named strata (continuous columns quantile-binned).
+- **Group axis:** none → group-aware (a cluster key that may not straddle the split).
+- **Estimator axis:** single holdout → three-way (train/val/test) → k-fold → repeated k-fold.
+
+**The two places generality is actually won or lost** (both forced by SEER):
+1. **Stratify × group do not compose exactly.** Once a whole county lands in test its
+   outcome mix is fixed — you cannot both keep groups intact and perfectly balance
+   outcome. This is **stratified-group k-fold**, a greedy bin-packing approximation
+   (assign each group to the fold currently most under-quota for its outcome mass;
+   Sechidis, Tsoumakas & Vlahavas 2011). It is the one approximate part, and SEER (rare
+   events *and* clustering) is exactly the case that needs it.
+2. **Degeneracy is first-class.** A general tool routinely meets a class smaller than k,
+   an empty outcome×stratum cell, a group larger than a fold, a requested test count
+   above a class size. SEER produces these the moment you cross outcome × M1 × a rare
+   race category. One documented ladder — refuse / warn-and-collapse-the-stratum / clamp —
+   applied uniformly, replacing the scattered ad-hoc refusals in today's `randomize`.
+
+**The common foundation** (identical for every cell of the cube, and the fix for the
+O(n²) code): per-stratum **index vectors → partial Fisher-Yates on indices via
+`util::i_random`** (the same `rng` stream splits already ride — NOT the reserved
+`i_resample` bootstrap stream; uniform up to `i_random`'s negligible modulo bias;
+O(m)) **→ one `Matrix::includerows` gather**
+(already in the class layer, rule 4; O(n), one allocation per output set). k-fold folds
+fall out of the same shuffled indices for free.
+
+**One deliverable elevated to first-class: a split-diagnostic report** — per output set /
+fold: n, outcome counts + rate; per named stratum: counts; group-leakage count (must be 0
+when grouping); continuous-covariate means train-vs-test. Printed via `util::screen()`
+(capturable → GUI). This is how representativeness becomes *verifiable* on any dataset
+rather than trusted — on SEER it is how you confirm the M1 positives actually landed
+proportionally.
+
+**Scope boundary.** neuron is a discrete-outcome engine, so "general" means general over
+datasets with a discrete (or quantile-binnable) outcome and arbitrary inputs — not over
+arbitrary ML tasks. SEER sits comfortably inside that scope. Bonus: the continuous-column
+binning that strata need also yields continuous-*outcome* stratification for the
+regression path, a corner today's splitter refuses outright.
 
 #### What (the plan)
 
