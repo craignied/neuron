@@ -309,10 +309,12 @@ double Network::sampleTestError( unsigned stride )
 	//    loaded, so model/architecture selection never touches the test set (the
 	//    no-leakage invariant); with no validation set it falls back to the test
 	//    set -- the pre-4c behavior, so every existing run is unchanged.
-	bool useVal = theData.valLoaded();
-
-	if ( ( useVal ? false : !theData.testLoaded() ) || theData.getOutput() != 1 )
+	//    DataSet::monitorSet() IS that rule; asking it here is what keeps the
+	//    sampler and every label that names the monitored set in agreement.
+	DataSet::MonitorSet which = theData.monitorSet();
+	if ( which == DataSet::MONITOR_NONE )
 		return -1; // nothing to sample
+	bool useVal = ( which == DataSet::MONITOR_VALIDATION );
 
 	if ( stride < 1 )
 		stride = 1;

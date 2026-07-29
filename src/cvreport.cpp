@@ -58,6 +58,26 @@ string fmtTime( double seconds )
 	return os.str();
 }
 
+// The rows the FOLD PLAN actually covered, and how many of them carried the
+//    outcome. Read from the Comparison -- the object that knows which rows it
+//    folded -- and NEVER from PlanInfo, whose n/events describe the whole dataset
+//    for the Tier-1 summary line.
+//
+//    With a locked test those are two different sets: CV folds the development
+//    rows while the dataset totals include the locked rows too. Taking the
+//    fold-plan counts from PlanInfo printed "(development rows only) ... n = 6000"
+//    directly above five folds of 900 rows each -- a header contradicting the
+//    table beneath it, and the wrong number to check the fold sizes against
+//    (2026-07-29). Deriving them here makes that contradiction impossible rather
+//    than merely correcting the one caller that got it wrong.
+void planCounts( const crossval::Comparison& cmp, unsigned& n, unsigned& events )
+{
+	n = ( unsigned ) cmp.outcome.size();
+	events = 0;
+	for ( unsigned r = 0; r < cmp.outcome.size(); r++ )
+		if ( cmp.outcome[ r ] ) events++;
+}
+
 // --- procedure-level summaries (no model-family knowledge) -------------------
 
 // Mean and sample sd of a procedure's per-fold (exact) AUCs, valid folds only.
@@ -406,10 +426,13 @@ string cvreport::tier2( const crossval::Comparison& cmp, const PlanInfo& info,
 {
 	ostringstream os;
 	os << "Cross-validation detail\n";
+	// The fold plan's own counts, from the rows it covered (see planCounts) --
+	//    not the dataset totals, which with a locked test describe a larger set.
+	unsigned planN = 0, planEvents = 0;
+	planCounts( cmp, planN, planEvents );
 	os << "Fold plan: " << ( info.foldPlan.empty() ? "(unspecified)" : info.foldPlan )
 		<< "   k = " << cmp.k;
-	if ( info.n ) os << "   n = " << info.n;
-	if ( info.events ) os << "   events = " << info.events;
+	if ( planN ) os << "   n = " << planN << "   events = " << planEvents;
 	os << "\n";
 
 	for ( unsigned p = 0; p < cmp.entries.size(); p++ )
@@ -588,7 +611,12 @@ vector< cvreport::ArtifactResult > cvreport::writeArtifacts(
 	const crossval::Comparison& cmp, const PlanInfo& info, const string& dir,
 	const LockedInfo& locked )
 {
-	unsigned n = ( unsigned ) cmp.outcome.size();
+	// The fold plan's own counts. n and events are ONE fact about ONE set of rows,
+	//    so they come from the same place (see planCounts): cv_run.json's n was
+	//    already the folded count while its events came from PlanInfo, which with a
+	//    locked test meant a row count and an event count describing different sets.
+	unsigned n = 0, planEvents = 0;
+	planCounts( cmp, n, planEvents );
 	vector< ArtifactResult > results;
 
 	// cv_predictions.csv -- one row per exemplar, one column per procedure.
@@ -657,7 +685,7 @@ vector< cvreport::ArtifactResult > cvreport::writeArtifacts(
 		f << "{\n";
 		f << "  \"software\": " << jsonStr( NEURON_PACKAGE_STRING ) << ",\n";
 		f << "  \"n\": " << n << ",\n";
-		f << "  \"events\": " << info.events << ",\n";
+		f << "  \"events\": " << planEvents << ",\n";
 		f << "  \"k\": " << cmp.k << ",\n";
 		f << "  \"foldPlan\": " << jsonStr( info.foldPlan ) << ",\n";
 		f << "  \"procedures\": [\n";

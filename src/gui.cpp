@@ -104,6 +104,52 @@ struct TrainJob
 	//    candidate variable.
 	string stepwise;
 
+	// Cross-validation progress -- its own field for the same reason (2026-07-29).
+	//    A four-procedure, five-fold nested-OBD run is the most expensive thing the
+	//    GUI does and used to show one unchanging phase word for its whole
+	//    duration. The engine fields below are set from crossval::Progress and,
+	//    for the inner architecture search, from obd::ProgressFn; handleTrainStatus
+	//    renders them. Guarded by progressMutex like everything else here.
+	string cvStage;       // "cross-validation" | "locked-test evaluation"; "" = not a CV run
+	string cvProcedure;   // the procedure now fitting
+	unsigned cvProcIndex = 0, cvProcCount = 0, cvProcDone = 0;
+	unsigned cvFold = 0, cvK = 0, cvFoldsDone = 0;
+	// The nested OBD search inside the CURRENT fold. Cleared whenever the fold or
+	//    procedure changes, so a finished fold's last trial can never be displayed
+	//    as the next fold's progress.
+	string cvInnerPhase;
+	unsigned cvInnerHidden = 0;
+
+	// Reset every CV progress field. One place, so a new field cannot be added
+	//    and then left stale by a path that clears the others (the reason
+	//    "not copied" is written out rather than omitted -- HISTORY 2026-07-27).
+	void clearCvProgress()
+	{
+		cvStage.clear(); cvProcedure.clear();
+		cvProcIndex = cvProcCount = cvProcDone = 0;
+		cvFold = cvK = cvFoldsDone = 0;
+		cvInnerPhase.clear(); cvInnerHidden = 0;
+	}
+
+	// Clear every per-run field before a new job starts, so nothing from the last
+	//    run can be read as this one's. Train, OBD, CV and stepwise each used to
+	//    do this by hand, which meant a new progress field had to be remembered in
+	//    four places -- and the one that forgot would publish stale progress rather
+	//    than none. Callers must hold progressMutex (they already did).
+	void resetForNewRun()
+	{
+		iters.clear();
+		trainErr.clear();
+		testErr.clear();
+		keepEvery = 1;
+		sampleCounter = 0;
+		result.clear();
+		obdPhase.clear();
+		obdHidden = 0;
+		stepwise.clear();
+		clearCvProgress();
+	}
+
 	// Append one decimated (iteration, train, test) sample. Guards its own
 	//    mutex, so callers must NOT already hold progressMutex.
 	void pushSample( unsigned iteration, double trainError, double testError )
@@ -825,7 +871,12 @@ string handleLoad( const httplib::Request& req )
 	dfaPtr.reset();   // and any prior discriminant analysis
 	lastTrainError = -1; // and any prior training
 
-	return jsonMsg( true, msg.str() );
+	// Which held-out set a training monitor will watch, from the engine's own rule
+	//    (DataSet::monitorSet) -- so the page LABELS its live and OBD charts with
+	//    the set that is actually monitored instead of assuming "test". Sent on the
+	//    load response because that is when the answer changes.
+	return string( "{\"ok\":true,\"message\":\"" ) + jsonEscape( msg.str() )
+		+ "\",\"monitor\":\"" + dataPtr->monitorSetName() + "\"}";
 }
 
 // Parse a hidden-layer spec: comma-separated positive integers ("5" or "5,3").
@@ -1135,6 +1186,9 @@ string runTrainingAndBuildResult( bool continued, const string& autoJson,
 
 	return string( "{\"ok\":true,\"message\":\"" ) + jsonEscape( msg.str() )
 		+ "\",\"stopReason\":\"" + stopReason + "\"" + fitFields
+		// The held-out set the live error chart sampled, named by the engine rule
+		//    (DataSet::monitorSet) so the legend matches what was watched.
+		+ ",\"monitor\":\"" + dataPtr->monitorSetName() + "\""
 		+ ",\"output\":\"" + jsonEscape( lastReport ) + "\"" + roc
 		+ statsField + autoField + "}";
 }
@@ -1382,15 +1436,7 @@ string handleTrain( const httplib::Request& req )
 
 	{
 		lock_guard< mutex > lock( job.progressMutex );
-		job.iters.clear();
-		job.trainErr.clear();
-		job.testErr.clear();
-		job.keepEvery = 1;
-		job.sampleCounter = 0;
-		job.result.clear();
-		job.obdPhase.clear(); // a plain train reports no obd phase
-		job.obdHidden = 0;
-		job.stepwise.clear(); // nor any stepwise candidate accounting
+		job.resetForNewRun(); // a plain train reports no OBD/CV/stepwise progress
 	}
 	job.cancel = false;
 	job.running = true;
@@ -1444,6 +1490,27 @@ string handleTrainStatus()
 	//    kind of job, so its presence identifies the run
 	if ( !job.stepwise.empty() )
 		out << ",\"stepwise\":" << job.stepwise;
+	// Cross-validation runs report the repetition grid: which stage, which
+	//    procedure of how many, which outer fold of k, and -- when a nested
+	//    architecture search is running inside the current fold -- its phase and
+	//    hidden-node trial. Absent for every other kind of job. "inner" is present
+	//    only while a nested search is actually reporting, so its absence means
+	//    "no nested search here", never "a search at hidden 0".
+	if ( !job.cvStage.empty() )
+	{
+		out << ",\"cv\":{\"stage\":\"" << jsonEscape( job.cvStage ) << "\""
+			<< ",\"procedure\":\"" << jsonEscape( job.cvProcedure ) << "\""
+			<< ",\"procedureIndex\":" << job.cvProcIndex
+			<< ",\"procedureCount\":" << job.cvProcCount
+			<< ",\"completedProcedures\":" << job.cvProcDone
+			<< ",\"fold\":" << job.cvFold
+			<< ",\"folds\":" << job.cvK
+			<< ",\"completedFolds\":" << job.cvFoldsDone;
+		if ( !job.cvInnerPhase.empty() )
+			out << ",\"inner\":{\"phase\":\"" << jsonEscape( job.cvInnerPhase )
+				<< "\",\"hidden\":" << job.cvInnerHidden << "}";
+		out << "}";
+	}
 	out << ",\"result\":" << ( job.result.empty() ? "null" : job.result )
 		<< "}";
 	return out.str();
@@ -1518,6 +1585,12 @@ string runObdJob( const obd::Config& cfg )
 			job.obdPhase = phase;
 			job.obdHidden = hidden;
 		}
+		// A phase can be announced with NO measurement (the optimizer probe, which
+		//    reports before anything has been fitted and passes -1 for both errors).
+		//    That is a status, not a sample: plotting it would put a -1 error on the
+		//    chart. The phase above is still published, so the status line moves.
+		if ( trainErr < 0 )
+			return;
 		if ( iteration < lastIter ) // a new size's training began
 			iterOffset += lastIter;
 		lastIter = iteration;
@@ -1587,6 +1660,10 @@ string runObdJob( const obd::Config& cfg )
 		+ ",\"optimizer\":\"" + ( r.algorithm == 0 ? "Canonical"
 			: r.algorithm == 1 ? "CGD" : r.algorithm == 2 ? "Shanno" : "unknown" )
 		+ "\",\"optimizerAuto\":" + ( r.autoSelected ? "true" : "false" )
+		// The held-out set the search actually scored on, from the engine's rule
+		//    -- the size-search chart's legend is drawn from this, so it can never
+		//    call a validation-guided selection a test-set one.
+		+ ",\"monitor\":\"" + dataPtr->monitorSetName() + "\""
 		+ ",\"obd\":{\"selectedHidden\":" + to_string( r.selectedHidden )
 		+ ",\"trials\":" + trials.str()
 		+ ",\"history\":" + jsonObdHistory( r.history ) + "}"
@@ -1671,15 +1748,7 @@ string handleObd( const httplib::Request& req )
 
 	{
 		lock_guard< mutex > lock( job.progressMutex );
-		job.iters.clear();
-		job.trainErr.clear();
-		job.testErr.clear();
-		job.keepEvery = 1;
-		job.sampleCounter = 0;
-		job.result.clear();
-		job.obdPhase.clear();
-		job.obdHidden = 0;
-		job.stepwise.clear(); // a stale stepwise object must not follow this run
+		job.resetForNewRun();
 	}
 	job.cancel = false;
 	job.running = true;
@@ -1984,6 +2053,42 @@ string runCvJob( CvConfig c )
 		util::set_seed( c.seed ); sp->randomize();
 	}
 
+	// --- Progress plumbing (2026-07-29) ------------------------------------
+	//
+	// Two independent callbacks, composed HERE rather than in the engine: CV
+	//    reports the repetition grid it owns (stage, procedure, fold), and the
+	//    nested architecture search reports the trial it owns (phase, hidden
+	//    nodes). Neither layer learns about the other -- crossval never hears the
+	//    word "OBD", and OBD never hears the word "fold".
+	crossval::ProgressFn cvProgress = []( const crossval::Progress& p )
+	{
+		lock_guard< mutex > lock( job.progressMutex );
+		// A change of fold or procedure retires the inner trial: the search that
+		//    was at "prune, 7 hidden" belongs to the fold that just ended, and
+		//    showing it against the next one would be a lie about live work.
+		if ( job.cvFold != p.fold || job.cvProcedure != p.procedure )
+		{
+			job.cvInnerPhase.clear();
+			job.cvInnerHidden = 0;
+		}
+		job.cvStage = ( p.stage == crossval::Progress::LOCKED_EVALUATION )
+			? "locked-test evaluation" : "cross-validation";
+		job.cvProcedure = p.procedure;
+		job.cvProcIndex = p.procIndex;
+		job.cvProcCount = p.procCount;
+		job.cvProcDone = p.completedProcedures;
+		job.cvFold = p.fold;
+		job.cvK = p.k;
+		job.cvFoldsDone = p.completedFolds;
+	};
+	obd::ProgressFn innerProgress = []( const char* phase, unsigned hidden,
+		unsigned, double, double )
+	{
+		lock_guard< mutex > lock( job.progressMutex );
+		job.cvInnerPhase = phase;
+		job.cvInnerHidden = hidden;
+	};
+
 	// Assemble the procedure specs given an arch sink, so CV and the locked-test
 	//    evaluation each get their OWN sink (CV's records a size per fold; the
 	//    locked one records the single frozen fit's size).
@@ -2000,7 +2105,8 @@ string runCvJob( CvConfig c )
 		{
 			if ( c.neuralObd )
 				ps.push_back( { "Neural (OBD)",
-					cvadapters::nestedObdProcedure( c.obd, c.innerVal, archSink ), archSink } );
+					cvadapters::nestedObdProcedure( c.obd, c.innerVal, archSink,
+						innerProgress ), archSink } );
 			else
 				ps.push_back( { "Neural", cvadapters::trainProcedure( *sp, c.maxIter ), nullptr } );
 		}
@@ -2012,12 +2118,16 @@ string runCvJob( CvConfig c )
 	if ( procs.empty() )
 		return jsonMsg( false, "select at least one procedure to compare" );
 
-	// Feed the status poll a coarse phase (which procedure is running). compare()
-	//    has no per-fold hook, so this is procedure-granular, not fold-granular.
+	// The coarse phase the page has always shown, kept because it is the one line
+	//    that stays true for the whole stage; the structured cv block beside it
+	//    carries the detail (fold n/k, procedure, nested trial).
 	{
 		lock_guard< mutex > lock( job.progressMutex );
 		job.obdPhase = "cross-validating";
 		job.obdHidden = 0;
+		job.cvStage = "cross-validation"; // published before the first fold reports
+		job.cvProcCount = ( unsigned ) procs.size();
+		job.cvK = c.k;
 	}
 
 	util::set_seed( c.seed );
@@ -2026,7 +2136,7 @@ string runCvJob( CvConfig c )
 	//    Deterministic per-(procedure,fold) substreams (bug B11): a procedure's CV
 	//    result is invariant to which other procedures are compared and their order.
 	crossval::Comparison cmp = crossval::compare( *cvData, foldId, procs, &job.cancel,
-		true /* substreams */, c.seed );
+		true /* substreams */, c.seed, cvProgress );
 	if ( cmp.cancelled )
 		return string( "{\"ok\":false,\"cancelled\":true,\"message\":\"" )
 			+ jsonEscape( cmp.message.empty() ? "cancelled" : cmp.message ) + "\"}";
@@ -2041,12 +2151,17 @@ string runCvJob( CvConfig c )
 		{
 			lock_guard< mutex > lock( job.progressMutex );
 			job.obdPhase = "locked-test evaluation";
+			// The stage changed: nothing from the CV grid describes this pass.
+			//    evaluateOnce folds nothing, so fold/k go to 0 rather than keeping
+			//    the last fold number of the last procedure.
+			job.clearCvProgress();
+			job.cvStage = "locked-test evaluation";
 		}
 		vector< crossval::FoldSelection > lockedArchSink;
 		vector< crossval::ProcedureSpec > lprocs = assemble( &lockedArchSink );
 		util::set_seed( c.seed );
 		crossval::LockedResult lr = crossval::evaluateOnce( data, devRows, lockedRows,
-			lprocs, &job.cancel, true /* substreams */, c.seed );
+			lprocs, &job.cancel, true /* substreams */, c.seed, cvProgress );
 		if ( lr.cancelled )
 			return string( "{\"ok\":false,\"cancelled\":true,\"message\":\"" )
 				+ jsonEscape( lr.message.empty() ? "cancelled" : lr.message ) + "\"}";
@@ -2358,10 +2473,7 @@ string handleCv( const httplib::Request& req )
 		job.worker.join();
 	{
 		lock_guard< mutex > lock( job.progressMutex );
-		job.iters.clear(); job.trainErr.clear(); job.testErr.clear();
-		job.keepEvery = 1; job.sampleCounter = 0;
-		job.result.clear(); job.obdPhase.clear(); job.obdHidden = 0;
-		job.stepwise.clear(); // a stale stepwise object must not follow this run
+		job.resetForNewRun();
 	}
 	job.cancel = false;
 	job.running = true;
@@ -2592,15 +2704,7 @@ string handleRegress( const httplib::Request& req )
 
 		{
 			lock_guard< mutex > lock( job.progressMutex );
-			job.iters.clear();
-			job.trainErr.clear();
-			job.testErr.clear();
-			job.keepEvery = 1;
-			job.sampleCounter = 0;
-			job.result.clear();
-			job.obdPhase.clear();
-			job.obdHidden = 0;
-			job.stepwise.clear();
+			job.resetForNewRun();
 		}
 		job.cancel = false;
 		job.running = true;

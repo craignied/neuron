@@ -42,9 +42,15 @@ crossval::Procedure dfaProcedure( bool quadratic );
 //    When selections is non-null, each fold that produced a model appends what it
 //    chose (hidden units AND the optimizer it ran on) in fold order -- the
 //    selection metadata the CV report summarizes. A failed fold appends nothing.
+//
+//    progress (may be null) is the INNER search's own callback, forwarded to
+//    obd::run: it reports the phase and hidden-node trial inside the current fold.
+//    CV's own ProgressFn reports the fold; this reports what is happening within
+//    it, and a caller composes the two. The runner never learns about OBD to do it.
 crossval::Procedure nestedObdProcedure( const obd::Config& cfg,
 	double innerValFraction,
-	vector< crossval::FoldSelection >* selections = nullptr );
+	vector< crossval::FoldSelection >* selections = nullptr,
+	obd::ProgressFn progress = nullptr );
 
 } // namespace cvadapters
 

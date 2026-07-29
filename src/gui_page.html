@@ -21,6 +21,20 @@ button { padding: .35rem .9rem; cursor: pointer; }
    mistaken for the green "done" state. */
 .status.warn { color: #92400e; background: #fef3c7; border: 1px solid #f59e0b;
           border-radius: 4px; padding: .15rem .45rem; font-weight: 600; }
+/* The panel's primary action, always its LAST row, after every choice the panel
+   offers -- a Run button in the first row invites acting before the form is
+   finished. The rule and the separator are one thing so the anchor is visible.
+   A Run button that becomes Stop stays here; the anchor never moves. */
+.row.action { border-top: 1px solid #eee; margin-top: .5rem; padding-top: .7rem; }
+.op { font-size: 1.2rem; font-weight: 600; margin: 0 .3rem 0 -.6rem; }
+/* Result provenance banner over the ROC/statistics panels */
+#provbox { display: none; background: #eef2ff; border: 1px solid #c7d2fe;
+          border-radius: 8px 8px 0 0; border-bottom: none; padding: .55rem .9rem;
+          font-size: .9rem; color: #3730a3; margin-bottom: 0; }
+#provbox b { color: #1e1b4b; }
+/* Where the CV report ends and the current model's own panels begin */
+#cvscope { display: none; margin-top: .8rem; padding-top: .7rem;
+          border-top: 1px solid #eee; font-size: .9rem; color: #52514e; }
 #rocbox { display: none; background: #fff; border: 1px solid #ddd; border-radius: 8px;
           padding: 1rem; margin-bottom: 1rem; gap: 1.5rem; align-items: flex-start;
           flex-wrap: wrap; }
@@ -219,7 +233,7 @@ table.coef th { background: #f4f6fb; } table.coef td.name { text-align: left; }
     </div>
   </span>
 </div>
-<div class="row">
+<div class="row action">
   <button onclick="loadData()">Load dataset</button><span class="status" id="dstatus"></span>
 </div>
 </fieldset>
@@ -246,12 +260,15 @@ table.coef th { background: #f4f6fb; } table.coef td.name { text-align: left; }
     type="checkbox" id="log_lastop" checked> Log last op</label>
   <label title="Append each operation to the neuron.log history"><input
     type="checkbox" id="log_history" checked> Log history</label>
-  <button onclick="setModel()">Create model</button><span class="status" id="mstatus"></span>
 </div>
-<div class="row">
-  <label title="Resume a saved network; its type is read from the file's first line">Load
-    saved network <input type="file" id="netfile"></label>
+<div class="row"><span class="status">Or resume a previous session instead of
+building a new model &mdash; the saved file's first line carries its type:</span>
+  <label title="Resume a saved network; its type is read from the file's first line">Saved
+    network <input type="file" id="netfile"></label>
   <button onclick="loadNetwork()">Load network</button>
+</div>
+<div class="row action">
+  <button onclick="setModel()">Create model</button><span class="status" id="mstatus"></span>
 </div>
 </fieldset>
 
@@ -267,9 +284,6 @@ table.coef th { background: #f4f6fb; } table.coef td.name { text-align: left; }
   <label>Max iterations <input class="num" type="number" id="maxiter" value="20000"
     min="1"></label>
   <label>Seed <input class="num" type="number" id="seed" placeholder="clock"></label>
-  <button id="randbtn" onclick="randomizeWeights()">Randomize weights</button>
-  <button id="trainbtn" onclick="train()">Train</button>
-  <span class="status" id="tstatus"></span>
 </div>
 <div class="row">
   <label title="Automatic learning-rate selection (forces batch/epoch on)"><input
@@ -315,6 +329,11 @@ so clicking it again continues for more iterations &mdash; change any parameter
 above and Train again to continue from those weights with the new settings.
 Randomize weights (with the seed, if set) to start over from a fresh random
 point.</span></div>
+<div class="row action">
+  <button id="randbtn" onclick="randomizeWeights()">Randomize weights</button>
+  <button id="trainbtn" onclick="train()">Train</button>
+  <span class="status" id="tstatus"></span>
+</div>
 </fieldset>
 
 <fieldset>
@@ -330,8 +349,6 @@ point.</span></div>
   </select></label>
   <label>p-value <input class="num" type="number" id="pthreshold"
     value="0.05" min="0" max="1" step="0.01"></label>
-  <button id="regressbtn" onclick="regress()">Run regression</button>
-  <span class="status" id="rstatus"></span>
 </div>
 <div class="row"><span class="status">Groups of input nodes make one variable:
 semicolons separate variables, commas join nodes, hyphens give ranges. The
@@ -339,6 +356,10 @@ network must be trained first. The full selection report appears below and stays
 there; it is also appended to neuron.log beside your data when dataset history
 logging is on. This is a standalone analysis &mdash; it does not disturb the
 trained model above.</span></div>
+<div class="row action">
+  <button id="regressbtn" onclick="regress()">Run regression</button>
+  <span class="status" id="rstatus"></span>
+</div>
 <pre id="regressout" style="display:none;overflow:auto;max-height:24em"></pre>
 </fieldset>
 
@@ -349,24 +370,32 @@ trained model above.</span></div>
     <option value="linear">Linear (LDFA)</option>
     <option value="quadratic">Quadratic (QDFA)</option>
   </select></label>
-  <button onclick="runDFA()">Run DFA</button>
   <button onclick="saveFile('dfa_train_guesses')">DFA train guesses</button>
   <button onclick="saveFile('dfa_test_guesses')">DFA test guesses</button>
-  <span class="status" id="dfastatus"></span>
 </div>
 <div class="row"><span class="status">Discriminant analysis on the loaded
 dataset (needs a discrete outcome). It is a standalone analysis &mdash; it does
-not disturb the trained model above. Results appear below and in the ROC/stats
-panels.</span></div>
+not disturb the trained model above. Results appear below, and in the ROC/stats
+panels labelled as this analysis rather than as the current model.</span></div>
+<div class="row action">
+  <button onclick="runDFA()">Run DFA</button>
+  <span class="status" id="dfastatus"></span>
+</div>
 <pre id="dfaout" style="display:none;overflow:auto;max-height:24em"></pre>
 </fieldset>
 
 <fieldset>
 <legend>4c &mdash; OBD hidden-layer sizing</legend>
+<div class="row"><span class="status"><b>This search sizes ONE hidden layer: it
+chooses how many NODES that layer has.</b> It never adds a second layer, and the
+counts below are node counts, not layer counts. (For more than one hidden layer,
+give several comma-separated numbers in the Model panel above.)</span></div>
 <div class="row">
-  <label>Start hidden <input class="num" type="number" id="obd_hstart" value="2"
+  <label title="Node count the search starts from -- the number of nodes in the single hidden layer, not a number of layers">Starting
+    hidden nodes <input class="num" type="number" id="obd_hstart" value="2"
     min="1"></label>
-  <label>Max hidden <input class="num" type="number" id="obd_hmax" value="30"
+  <label title="Largest hidden-node count the search may grow to, in the same single hidden layer">Maximum
+    hidden nodes <input class="num" type="number" id="obd_hmax" value="30"
     min="1"></label>
   <label>Iteration budget <input class="num" type="number" id="obd_budget"
     value="2000" min="1"></label>
@@ -378,20 +407,26 @@ panels.</span></div>
   </select></label>
   <label>Seed <input class="num" type="number" id="obd_seed"
     placeholder="clock"></label>
-  <button id="obdbtn" onclick="runObd()">Run OBD</button>
-  <span class="status" id="obdstatus"></span>
 </div>
 <div class="row">
   <label title="How far the held-out error may rise above its minimum before a size is judged to be overtraining">Overtrain tol
     <input class="num" type="number" id="obd_tol" step="any" value="0.02"></label>
-  <label title="Sizes without a held-out improvement before growth stops">Grow patience
+  <label title="Node counts tried without a held-out improvement before growth stops">Grow patience
     <input class="num" type="number" id="obd_grow" value="2" min="1"></label>
 </div>
-<div class="row"><span class="status">Grows the hidden layer while a larger net
-lowers the held-out error &mdash; watching for overtraining by validation early
-stopping, so no size trains to completion &mdash; then prunes back by saliency.
-Needs a training/test split. It replaces the model above with the sized, trained
-network; the size-vs-error search appears in the chart below.</span></div>
+<div class="row"><span class="status">Adds hidden NODES while a larger net lowers
+the held-out error &mdash; watching for overtraining by validation early
+stopping, so no size trains to completion &mdash; then prunes nodes back by
+saliency. The chart's sequence (2&rarr;3&rarr;4&rarr;5&rarr;4) is the order sizes
+were tried, growing then pruning. Needs a held-out set: with a validation set
+loaded the search is scored on <b>validation</b> and the test set stays untouched
+for final evaluation; with only a train/test split it falls back to scoring on
+the test set. It replaces the model above with the sized, trained network; the
+size-vs-error search appears in the chart below.</span></div>
+<div class="row action">
+  <button id="obdbtn" onclick="runObd()">Run OBD</button>
+  <span class="status" id="obdstatus"></span>
+</div>
 </fieldset>
 
 <fieldset>
@@ -401,8 +436,6 @@ network; the size-vs-error search appears in the chart below.</span></div>
   <label>Seed <input class="num" type="number" id="cv_seed" value="42"></label>
   <label>Max iterations <input class="num" type="number" id="cv_maxiter" value="500"
     min="1" title="Per-fold training cap for logistic / fixed-architecture neural"></label>
-  <button id="cvbtn" onclick="runCv()">Run cross-validation</button>
-  <span class="status" id="cvstatus"></span>
 </div>
 <div class="row">
   <span class="status">Compare:</span>
@@ -410,12 +443,14 @@ network; the size-vs-error search appears in the chart below.</span></div>
   <label><input type="checkbox" id="cv_ldfa"> LDFA</label>
   <label><input type="checkbox" id="cv_qdfa"> QDFA</label>
   <label><input type="checkbox" id="cv_neural" checked> Neural network</label>
-  <label title="Run the OBD hidden-layer search inside each fold (nested); off = a fixed hidden count"><input type="checkbox" id="cv_neural_obd" checked> &mdash; with nested OBD</label>
+  <label title="Run the OBD hidden-layer search inside each fold (nested); off = a fixed hidden-node count. Like the standalone search, it sizes ONE hidden layer -- it chooses how many nodes that layer has and never adds a layer."><input type="checkbox" id="cv_neural_obd" checked> &mdash; with nested OBD</label>
 </div>
 <div class="row">
-  <label>Fixed hidden (when OBD off) <input class="num" type="number" id="cv_neural_hidden"
+  <label title="Used only when nested OBD is OFF: the fixed number of nodes in the single hidden layer">Fixed
+    hidden nodes (when OBD off) <input class="num" type="number" id="cv_neural_hidden"
     value="5" min="1"></label>
-  <label>OBD max hidden <input class="num" type="number" id="cv_hidden_max" value="8"
+  <label title="Largest hidden-node count the nested search may grow to inside a fold, in its single hidden layer -- a node count, not a layer count">OBD
+    maximum hidden nodes <input class="num" type="number" id="cv_hidden_max" value="8"
     min="1"></label>
   <label>OBD iteration budget <input class="num" type="number" id="cv_iter_budget"
     value="500" min="1"></label>
@@ -436,18 +471,26 @@ network; the size-vs-error search appears in the chart below.</span></div>
   <label title="Set aside an untouched, outcome-stratified locked test set (0 = none). Each procedure is refit on the development rows and scored once on the locked test; DeLong then compares the areas. The locked test never enters CV, OBD, or tuning.">Locked-test fraction
     <input class="num" type="number" id="cv_locked_fraction" value="0" step="0.05"
     min="0" max="0.9"></label>
-  <label title="The prespecified DeLong contrast, AUC(primary) - AUC(reference), on the locked test. Default = Neural vs Logistic when both are selected.">Contrast
+  <span class="status">Contrast &mdash;</span>
+  <label title="The procedure under test. The prespecified DeLong contrast is AUC(primary) - AUC(reference) on the locked test, so a POSITIVE difference favors this one. Default = Neural vs Logistic when both are selected.">Primary
     <select id="cv_primary">
       <option value="">primary (auto)</option>
       <option value="neural">neural</option><option value="logistic">logistic</option>
       <option value="ldfa">ldfa</option><option value="qdfa">qdfa</option>
-    </select>
+    </select></label>
+  <span class="op">&minus;</span>
+  <label title="The procedure the primary is measured against. It is SUBTRACTED, so a positive difference favors the primary.">Reference
     <select id="cv_reference">
       <option value="">reference (auto)</option>
       <option value="neural">neural</option><option value="logistic">logistic</option>
       <option value="ldfa">ldfa</option><option value="qdfa">qdfa</option>
     </select></label>
 </div>
+<!-- The roles and the subtraction direction stay visible AFTER a selection is
+     made. They used to live only in the placeholder option text, so choosing
+     real values erased them and the row read "Contrast neural logistic" with no
+     way to tell which was subtracted from which (2026-07-29). -->
+<div class="row"><span class="status" id="cv_contrast_note"></span></div>
 <div class="row">
   <label title="DeLong assumes INDEPENDENT test observations. Declare the sampling unit so the AUC confidence intervals and the contrast p-value are only produced when independence is justified. Leave unspecified to get predictions and point AUCs without inference. 'Clustered' (e.g. shared county) is a follow-on and cannot be selected yet.">Sampling unit
     <select id="cv_independence">
@@ -471,11 +514,22 @@ you declare the sampling unit as independent rows &mdash; ordinary DeLong assume
 independent observations, which a mechanical row holdout does not establish (on
 clustered data, e.g. shared county, it would be invalid). Without the declaration
 you still get predictions and point AUCs; clustered inference is a follow-on.</span></div>
+<div class="row action">
+  <button id="cvbtn" onclick="runCv()">Run cross-validation</button>
+  <span class="status" id="cvstatus"></span>
+</div>
 </fieldset>
 
 <fieldset>
 <legend>5 &mdash; Session files</legend>
-<div class="row">
+<!-- This panel has no configuration to place an action after: every button IS
+     an action, and they are peers. The explanation leads, so the reading order
+     is still "what these do, then do it". -->
+<div class="row"><span class="status" id="sstatus">Each file is written into
+the working directory where neuron was started, and downloaded by your
+browser. Network + scaling factors are what tools/neuron2web.py needs to
+deploy the model; training/test sets and guesses document the run.</span></div>
+<div class="row action">
   <button onclick="saveFile('network')">Network</button>
   <button onclick="saveFile('scales')">Scaling factors</button>
   <button onclick="saveFile('train_set')">Training set</button>
@@ -484,16 +538,15 @@ you still get predictions and point AUCs; clustered inference is a follow-on.</s
   <button onclick="saveFile('test_guesses')">Test guesses</button>
   <button onclick="saveFile('report')">Report</button>
 </div>
-<div class="row"><span class="status" id="sstatus">Each file is written into
-the working directory where neuron was started, and downloaded by your
-browser. Network + scaling factors are what tools/neuron2web.py needs to
-deploy the model; training/test sets and guesses document the run.</span></div>
 </fieldset>
 
+<!-- Both green series are the HELD-OUT MONITOR, which is the validation set when
+     one is loaded and the test set otherwise. The legends are filled in by
+     setMonitorLabels() from the server's own answer, never from a guess here. -->
 <div id="errbox">
   <h3>Training error</h3>
   <div class="legend"><span class="sw" style="background:#2a78d6"></span>training set
-    <span class="sw" style="background:#008300"></span>test set (sampled)
+    <span class="sw" style="background:#008300"></span><span id="errlegend">held-out set (sampled)</span>
     <span id="errnote"></span></div>
   <div id="errwrap"><canvas id="errc" width="880" height="240"></canvas>
     <div id="errtip"></div></div>
@@ -501,7 +554,7 @@ deploy the model; training/test sets and guesses document the run.</span></div>
 <div id="obdbox">
   <h3>OBD size search</h3>
   <div class="legend"><span class="sw" style="background:#2a78d6"></span>training error
-    <span class="sw" style="background:#008300"></span>test error (the score)
+    <span class="sw" style="background:#008300"></span><span id="obdlegend">held-out error (the score)</span>
     <span id="obdnote"></span></div>
   <div id="obdwrap"><canvas id="obdc" width="880" height="240"></canvas>
     <div id="obdtip"></div></div>
@@ -511,12 +564,22 @@ deploy the model; training/test sets and guesses document the run.</span></div>
   <pre id="cvtier1"></pre>
   <pre id="cvtier2"></pre>
   <div id="cvfiles"></div>
+  <div id="cvscope">Everything above is the cross-validation comparison. It is a
+    standalone procedure comparison and did <b>not</b> change the current model:
+    any ROC curve and statistics below belong to the model named there, not to
+    this report.</div>
 </div>
+<!-- Result provenance (2026-07-29). These panels show whatever analysis last
+     produced curves and statistics, and cross-validation renders its report
+     directly ABOVE them without replacing the current model -- so the two were
+     read as one result. Every producer now names itself here, and a standalone
+     analysis says it did not become the current model. -->
+<div id="provbox"></div>
 <div id="rocbox">
   <canvas id="roc" width="440" height="440"></canvas>
   <div id="rocstats"></div>
 </div>
-<div id="statsbox"><h2>Statistics</h2><div class="scards" id="scards"></div></div>
+<div id="statsbox"><h2 id="statshead">Statistics</h2><div class="scards" id="scards"></div></div>
 
 <p class="foot">neuron GUI &mdash; local only (127.0.0.1). The full run log is
 written to neuron.log beside your data and is downloadable above as the Report;
@@ -546,6 +609,42 @@ async function api(path, params) {
     body: new URLSearchParams(params).toString() });
   return r.json();
 }
+// Name the held-out set the green series actually is. The SERVER decides which
+// set the monitor samples (DataSet::monitorSet: validation when one is loaded,
+// else test) and sends the answer as "monitor" on the load, train and OBD
+// responses — this only prints it. The rule is deliberately not duplicated here:
+// the legends said "test set" unconditionally, which claimed a three-way split
+// was tuning on the untouched test set while the engine was watching validation.
+function setMonitorLabels(monitor) {
+  if (!monitor || monitor === "none") return; // nothing held out to name
+  const val = (monitor === "validation");
+  $("errlegend").textContent = val
+    ? "validation set (sampled — what selection watches)"
+    : "test set (sampled — no validation set loaded)";
+  $("obdlegend").textContent = val
+    ? "validation error (the score)"
+    : "test error (the score — no validation set loaded)";
+}
+// Say what the ROC and Statistics panels below are showing, and which operation
+// produced them. Cross-validation renders its own report directly above these
+// panels without replacing the current model, so an unlabelled panel showing the
+// previous standalone model read as part of the CV result.
+//   op       — the operation that produced these numbers
+//   standalone — true for an analysis that did NOT become the current model
+//                (a DFA), so the panel never claims to be the current model.
+function setProvenance(op, standalone) {
+  const when = new Date().toLocaleTimeString();
+  $("provbox").style.display = "block";
+  $("provbox").innerHTML = standalone
+    ? `<b>${op}</b> — a standalone analysis. These curves and statistics are its `
+      + `own; the current model is unchanged and was not replaced. `
+      + `<span class="ci">${when}</span>`
+    : `<b>Current model</b> — produced by ${op}. `
+      + `<span class="ci">${when}</span>`;
+  $("statshead").textContent = standalone
+    ? "Statistics — " + op + " (standalone)"
+    : "Statistics — current model (" + op + ")";
+}
 $("mode").onchange = () => {
   const raw = $("mode").value === "raw";
   $("fracbox").style.display = raw ? "" : "none";
@@ -555,6 +654,24 @@ $("mode").onchange = () => {
 $("mtype").onchange = () => {
   $("nnopts").style.display = $("mtype").value === "simpleprop" ? "" : "none";
 };
+// Keep the contrast's ROLES and its subtraction DIRECTION visible after a choice
+// is made. They used to be carried only by the two placeholder options, so
+// selecting real values erased them: the row read "Contrast neural logistic",
+// with nothing to say which was subtracted from which (2026-07-29). The API has
+// always had unambiguous primary/reference fields — this was presentation only.
+function updateContrastNote() {
+  const nice = { neural: "Neural", logistic: "Logistic", ldfa: "LDFA", qdfa: "QDFA" };
+  const p = $("cv_primary").value, r = $("cv_reference").value;
+  const pn = p ? nice[p] : "primary", rn = r ? nice[r] : "reference";
+  const auto = (!p || !r) ? " (auto = Neural &minus; Logistic when both are compared)" : "";
+  $("cv_contrast_note").innerHTML =
+    `ΔAUC = <b>Primary (${pn})</b> &minus; <b>Reference (${rn})</b>${auto}. `
+    + `A <b>positive</b> ΔAUC favors the primary procedure; a negative one favors `
+    + `the reference. Reported on the locked test only.`;
+}
+$("cv_primary").onchange = updateContrastNote;
+$("cv_reference").onchange = updateContrastNote;
+updateContrastNote();
 async function loadData() {
   if (!$("file").files.length) {
     setStatus("dstatus", false, "choose a data file first");
@@ -578,6 +695,9 @@ async function loadData() {
   const r = await fetch("/api/load", { method: "POST", body: fd });
   const j = await r.json();
   setStatus("dstatus", j.ok, j.message);
+  // The split just changed, so which held-out set the monitor watches may have
+  // changed with it — relabel the charts before anything can be drawn on them.
+  if (j.ok) setMonitorLabels(j.monitor);
 }
 async function setModel() {
   const j = await api("/api/model", { type: $("mtype").value,
@@ -703,8 +823,10 @@ async function pollTraining() {
       : "Training did NOT converge — it ended before any stopping condition "
         + "fired (" + res.stopReason + "). The weights are kept and can be "
         + "trained further, but this is not yet a fitted model.";
+  setMonitorLabels(res.monitor);
   if (res.ok && res.roc) { drawROC(res.roc); renderStats(res.roc); }
   if (res.ok && res.stats) renderFullStats(res.stats);
+  if (res.ok && (res.roc || res.stats)) setProvenance("Train", false);
 }
 // OBD hidden-layer sizing: async like training, sharing the same status/stop
 // doors. While it runs, the realtime error chart shows the CURRENT size's
@@ -747,12 +869,18 @@ async function pollObd() {
   const res = j.result;
   if (!res) return;
   setStatus("obdstatus", res.ok, res.message);
+  setMonitorLabels(res.monitor);
   if (res.ok && res.obd) {
     $("obdbox").style.display = "block";
     drawObd(res.obd, res.selectedHidden);
   }
   if (res.ok && res.roc) { drawROC(res.roc); renderStats(res.roc); }
   if (res.ok && res.stats) renderFullStats(res.stats);
+  // OBD adopts the sized network, so these panels ARE the current model.
+  if (res.ok && (res.roc || res.stats))
+    setProvenance("OBD hidden-layer sizing (standalone), "
+      + res.selectedHidden + " hidden node" + (res.selectedHidden === 1 ? "" : "s"),
+      false);
 }
 
 // Cross-validation: async like OBD, results flow back through /api/train/status.
@@ -778,13 +906,51 @@ async function runCv() {
   setStatus("cvstatus", true, "cross-validating…");
   pollCv();
 }
+// The status line for a live cross-validation, built from the structured cv
+// object the engine publishes (crossval::Progress for the repetition grid,
+// obd::ProgressFn for the architecture search inside the current fold). A
+// four-procedure five-fold nested run used to show one unchanging phase word for
+// its entire duration; this names the procedure, the fold, and the trial that is
+// costing the time right now. Nothing is scraped from report prose.
+function cvProgressText(cv) {
+  if (!cv || !cv.stage) return "starting up";
+  const parts = [];
+  if (cv.stage === "locked-test evaluation") {
+    // The locked pass folds nothing — it refits each procedure once on the
+    // development rows and scores it once, so there is no fold to report.
+    parts.push("locked-test evaluation");
+    if (cv.procedure)
+      parts.push("refitting " + cv.procedure
+        + (cv.procedureCount ? " (" + cv.procedureIndex + " of " + cv.procedureCount + ")" : ""));
+    if (cv.procedureCount)
+      parts.push(cv.completedProcedures + "/" + cv.procedureCount + " procedures done");
+  } else {
+    parts.push("cross-validating");
+    if (cv.procedure)
+      parts.push(cv.procedure
+        + (cv.procedureCount ? " (" + cv.procedureIndex + " of " + cv.procedureCount + ")" : ""));
+    // fold 0 means no fold is running — the event that reports the finished
+    // comparison. Printing "fold 0 of 5" would name a fold that does not exist.
+    if (cv.fold) {
+      parts.push("fold " + cv.fold + " of " + cv.folds);
+      parts.push(cv.completedFolds + "/" + cv.folds + " folds done");
+    } else if (cv.procedureCount) {
+      parts.push(cv.completedProcedures + "/" + cv.procedureCount + " procedures done");
+    }
+  }
+  // The nested architecture search inside the CURRENT fold, when one is running.
+  // Absent means no nested search here — never "a search at zero nodes".
+  if (cv.inner && cv.inner.phase)
+    parts.push("nested OBD " + cv.inner.phase + ", " + cv.inner.hidden
+      + " hidden node" + (cv.inner.hidden === 1 ? "" : "s"));
+  return parts.join(" · ");
+}
 async function pollCv() {
   let j;
   try { j = await (await fetch("/api/train/status")).json(); }
   catch (e) { setTimeout(pollCv, 1000); return; }
   if (j.running) {
-    const ph = j.obd && j.obd.phase ? j.obd.phase : "starting up";
-    setStatus("cvstatus", true, "running… (" + ph + ")");
+    setStatus("cvstatus", true, "running… (" + cvProgressText(j.cv) + ")");
     setTimeout(pollCv, 500); return;
   }
   cving = false;
@@ -801,6 +967,11 @@ async function pollCv() {
     if (warnings.length) note += (note ? "\n" : "") + "⚠ " + warnings.join("\n⚠ ");
     $("cvfiles").textContent = note;
     $("cvfiles").style.color = warnings.length ? "#a05a00" : "#52514e";
+    // CV is standalone: it did NOT replace the current model, whose ROC and
+    // statistics are still on screen directly below this report. Say so where
+    // the two meet, because that adjacency is exactly what made them look like
+    // one result.
+    $("cvscope").style.display = "block";
   }
 }
 // The size search: training and held-out error at each size the search tried,
@@ -1127,6 +1298,11 @@ async function runDFA() {
   }
   if (j.ok && j.roc) { drawROC(j.roc); renderStats(j.roc); }
   if (j.ok && j.stats) renderFullStats(j.stats);
+  // A DFA never becomes the current model (the engine keeps it separate), so the
+  // panels must not claim to be one — they are this analysis's own numbers.
+  if (j.ok && (j.roc || j.stats))
+    setProvenance(($("dfatype").value === "quadratic" ? "Quadratic" : "Linear")
+      + " discriminant function analysis", true);
 }
 function drawROC(roc) {
   $("rocbox").style.display = "flex";

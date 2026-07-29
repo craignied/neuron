@@ -494,6 +494,15 @@ test-error rise; the plateau detector saves its remaining budget), `algorithm`
 (1|2|3|auto — `auto` probes once and keeps the choice), `seed`. It is **async-only**: the call returns at once, and progress +
 completion arrive through the same `GET /api/train/status` (a running OBD adds an
 `obd:{phase,hidden}` field) and `POST /api/train/stop` doors as async training.
+The phase is `"probing optimizers"` (algorithm `auto` only, announced once before
+anything is fitted), then `"grow"` / `"prune"` / `"final"`. **The probe phase is
+reported because it is wall-clock budgeted per candidate optimizer and can be the
+largest single part of a search's elapsed time** — on a five-fold nested run over
+189 rows it was ~11 s of 13 s, and reporting nothing there made a working search
+look hung. It carries no measurement (iteration 0, both errors `-1`): it is a
+status, never a chart sample. The success result also carries
+`monitor:"validation"|"test"|"none"` — the held-out set the search actually scored
+on, from the engine's own rule, so a caller labels its chart instead of assuming.
 **Cost:** an OBD run is many training runs — roughly `iter_budget` × (sizes grown
 + pruned) iterations, though early stopping usually ends each size well under the
 budget; keep `iter_budget` modest (hundreds to low thousands) and `hidden_max`
@@ -553,12 +562,37 @@ ceiling is a **failed fold**: it contributes no prediction, no architecture and 
 optimizer metadata, its reason is printed per fold, and the pooled AUC reads `n/a`
 rather than an average over whatever happened to fit. It is **async-only** and a **standalone analysis** — it does
 NOT touch the current model — and reaches completion through the same
-`GET /api/train/status` (a running CV adds `obd:{phase:"cross-validating"}`) and
-`POST /api/train/stop` doors. The result carries a **three-tier report**: `cv.tier1`
+`GET /api/train/status` and `POST /api/train/stop` doors.
+
+**A running CV publishes structured progress** in a top-level `cv` object (added
+2026-07-29; the coarse `obd:{phase:"cross-validating"}` field is still sent
+alongside it). It is assembled from two independent engine callbacks and is never
+scraped from report text:
+
+```
+cv: { stage: "cross-validation" | "locked-test evaluation",
+      procedure, procedureIndex, procedureCount, completedProcedures,
+      fold, folds, completedFolds,
+      inner: { phase, hidden } }      // only while a nested search is running
+```
+
+`crossval::ProgressFn` supplies the repetition grid (the runner fills fold/k, the
+coordinator stamps the procedure identity onto it) and `obd::ProgressFn` supplies
+the architecture trial inside the current fold; the GUI composes them. **CV never
+learns what OBD is and OBD never learns what a fold is.** Read the fields
+literally: `inner` ABSENT means no nested search is running (never "a search at
+zero nodes"), `fold: 0` means no fold is running — the locked-test stage folds
+nothing, and the comparison-complete event names neither fold nor procedure.
+`inner` is stale-proof: it is cleared whenever the fold or procedure changes.
+
+The result carries a **three-tier report**: `cv.tier1`
 (a one-screen headline table — AUC-per-fold mean ± sd, which is DESCRIPTIVE spread
 across dependent folds, **not** a confidence interval — plus a prespecified
 descriptive contrast and the OBD architecture-selection frequency), `cv.tier2`
-(per-fold AUC/sens/spec detail), and `cv.files` (the paths of `cv_predictions.csv`
+(per-fold AUC/sens/spec detail — **its fold-plan header's `n` and `events` are the
+rows the fold plan COVERED**, which with a locked test are the development rows,
+not the dataset totals Tier 1 reports; the same two numbers are `cv_run.json`'s
+`n` and `events`), and `cv.files` (the paths of `cv_predictions.csv`
 / `cv_metrics.csv` / `cv_run.json`, written beside your data — the paired
 out-of-fold substrate, never printed). `cv.files` lists ONLY files that were fully
 written; if any could not be (unwritable dir, full disk) the run still succeeds with

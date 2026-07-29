@@ -74,6 +74,33 @@ public:
 	Matrix< double >& getValMatrix() { return ValSetData; }
 	unsigned getNumVal() { return ValSetData.rows(); }
 
+	// WHICH held-out set a training monitor samples -- Network::sampleTestError,
+	//    OBD's early-stopping score, and the GUI's live chart all watch the same
+	//    one. The rule: the validation set when one is loaded, else the test set
+	//    (the two-way fallback), and neither when there is nothing to sample.
+	//
+	//    Stated ONCE, here, because two kinds of caller need it and they must not
+	//    disagree: the samplers act on it, and displays NAME it. The GUI chart
+	//    legends were hard-coded to "test set" and so announced that a three-way
+	//    split was being tuned on the untouched test set while the engine was
+	//    correctly watching validation (2026-07-29). A legend that re-derives the
+	//    rule is a second implementation of it, and this one drifted.
+	enum MonitorSet { MONITOR_NONE, MONITOR_VALIDATION, MONITOR_TEST };
+	MonitorSet monitorSet()
+	{
+		if ( nOutput != 1 ) return MONITOR_NONE; // the monitor is 1-output only
+		if ( valLoadedFlag ) return MONITOR_VALIDATION;
+		if ( testLoadedFlag ) return MONITOR_TEST;
+		return MONITOR_NONE;
+	}
+	// The same fact as a word, for reports, JSON and chart legends.
+	const char* monitorSetName()
+	{
+		MonitorSet m = monitorSet();
+		return m == MONITOR_VALIDATION ? "validation"
+			: m == MONITOR_TEST ? "test" : "none";
+	}
+
 	// Accessors for number input, output nodes
 	void setInput( const unsigned ); // set the number of input nodes
 	void setOutput( const unsigned ); // set the number of output nodes

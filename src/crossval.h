@@ -95,6 +95,38 @@ using Procedure = function< ProcResult( DataSet& foldData,
 	const vector< unsigned >& trainRows, const vector< unsigned >& testRows,
 	const atomic< bool >* cancel ) >;
 
+// Where a long comparison currently IS -- structured, so a caller reports real
+//    progress instead of scraping report prose or inventing a coarse phase
+//    (2026-07-29: a four-procedure, five-fold nested-OBD run showed only
+//    "cross-validating" for its whole duration).
+//
+//    Each layer fills ONLY what it knows (rule 6): the runner knows folds, the
+//    coordinator knows procedures, and neither knows what happens INSIDE a fold --
+//    a nested architecture search reports its own trials through its own callback
+//    (obd::ProgressFn), which the caller composes with this. CV never learns about
+//    OBD to say where it is.
+struct Progress {
+	// Which of the two repetition stages is running. LOCKED_EVALUATION is the
+	//    final refit-and-score pass on the untouched locked test set, which folds
+	//    nothing -- so fold and k are 0 there, and a display must not invent them.
+	enum Stage { CROSS_VALIDATION, LOCKED_EVALUATION };
+	Stage stage = CROSS_VALIDATION;
+
+	string procedure;                // the procedure now fitting
+	unsigned procIndex = 0;          // its 1-based position, 0 before any starts
+	unsigned procCount = 0;          // procedures in this comparison
+	unsigned completedProcedures = 0;// procedures finished, this stage
+
+	unsigned fold = 0;               // 1-based outer fold; 0 = not folding
+	unsigned k = 0;                  // folds in the plan; 0 in a locked evaluation
+	unsigned completedFolds = 0;     // folds finished within THIS procedure
+};
+
+// Called on the thread running the search (the GUI's worker), like
+//    obd::ProgressFn -- a callback that touches shared buffers guards them itself.
+//    May be null everywhere; a null callback costs one branch per fold.
+using ProgressFn = function< void( const Progress& ) >;
+
 // Run ONE procedure over a fold plan. data must be a rawLoaded, discrete,
 //    1-output DataSet; foldId[ r ] is raw row r's fold ( 0 .. k-1 ), e.g. from
 //    nsplit::kFold. Every row is held out exactly once. cancel (may be null) is
@@ -107,9 +139,12 @@ using Procedure = function< ProcResult( DataSet& foldData,
 //    isolation lives inside CV; it uses util::set_seed at controlled points and
 //    adds no new RNG mechanism. With substreams false the ambient RNG is used
 //    (the caller seeds once), preserving the standalone-run behavior.
+//    progress (may be null) is called BEFORE each fold's procedure runs, and once
+//    more when the last fold finishes, carrying only what the runner knows: the
+//    fold number, k, and how many folds have completed.
 RunResult run( DataSet& data, const vector< unsigned >& foldId, Procedure proc,
 	const atomic< bool >* cancel = nullptr, bool substreams = false,
-	unsigned seed = 0 );
+	unsigned seed = 0, ProgressFn progress = nullptr );
 
 // What a procedure CHOSE inside one fold, recorded by the procedure about
 //    itself. CV does not interpret this -- it carries it so the report can
@@ -207,10 +242,12 @@ struct LockedResult {
 //    mechanism sees only the row-index partition, so an indivisible-group locked
 //    split slots in later without changing it. Substream/seed isolate each
 //    procedure's fit by NAME (bug B11), as in compare().
+//    progress (may be null) reports Stage LOCKED_EVALUATION and which procedure is
+//    being refit and scored; it folds nothing, so fold and k stay 0.
 LockedResult evaluateOnce( DataSet& data, const vector< unsigned >& trainRows,
 	const vector< unsigned >& testRows, const vector< ProcedureSpec >& procs,
 	const atomic< bool >* cancel = nullptr, bool substreams = false,
-	unsigned seed = 0 );
+	unsigned seed = 0, ProgressFn progress = nullptr );
 
 // The comparison coordinator: run each procedure over the SAME fold plan and
 //    collect the results, so the procedures stay paired. It owns coordination
@@ -221,9 +258,11 @@ LockedResult evaluateOnce( DataSet& data, const vector< unsigned >& trainRows,
 //    are compared and in what order
 //    -- comparison membership/ordering is a presentation choice, not an input to
 //    a procedure's fit. Pass the same seed used to build the shared fold plan.
+//    progress (may be null) receives every one of the runner's fold events with
+//    the procedure identity stamped on it, so one callback sees the whole grid.
 Comparison compare( DataSet& data, const vector< unsigned >& foldId,
 	const vector< ProcedureSpec >& procs, const atomic< bool >* cancel = nullptr,
-	bool substreams = false, unsigned seed = 0 );
+	bool substreams = false, unsigned seed = 0, ProgressFn progress = nullptr );
 
 } // namespace crossval
 

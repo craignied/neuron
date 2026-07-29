@@ -1537,6 +1537,80 @@ approach are all below or in the `docs/` files they cite.
     only thing this change can move is the condition number, and on the golden fixture even that did
     not move. 12/12 ctest, oracle identical, tools, smoke green.
 
+**2026-07-29 — the live cross-validation walkthrough's seven GUI findings.** Craig's
+first full CV session (5 folds, 4 procedures, nested OBD, locked test) produced a batch
+of interface defects recorded in `gui_notes.md`. Each was verified against source before
+anything was changed, and each fix was proved red against the previous binary
+(`git stash push -- src/`, rebuild, run, `git stash pop`, **rebuild again**).
+
+  - **The Tier-2 metadata defect was real, and worse than the screenshot showed.** Craig
+    saw a fold-plan header reading `(development rows only) ... n = 6000 events = 2567`
+    above five folds of 900 rows. Reproduced on the low-birth-weight set (189 rows, 47
+    locked): the header said `n = 189 events = 59` over five folds of ~28, and
+    `cv_run.json` was **internally inconsistent** — `"n": 142` (correct, the folded rows)
+    beside `"events": 59` (the whole dataset). A row count and an event count describing
+    different sets of rows, in the machine-readable artifact.
+    *Fixed at the owner.* `PlanInfo::n/events` are the whole-dataset totals the Tier-1
+    summary reports and are correct there; the fold plan's counts now come from the
+    `Comparison` — the object that knows which rows it folded — through one helper both
+    the Tier-2 header and `cv_run.json` call. The header, the artifact and the per-fold
+    rows agree by construction rather than by a caller remembering to subtract. The
+    header's doc comment says not to add a "development n" field for a caller to fill in.
+  - **Structured CV progress, composed at the GUI rather than in the engine.**
+    `crossval::run`/`compare`/`evaluateOnce` take an optional `crossval::ProgressFn`
+    carrying the repetition grid (the runner fills fold/k; the coordinator stamps the
+    procedure identity onto the runner's events), and `cvadapters::nestedObdProcedure`
+    forwards an `obd::ProgressFn` into the inner search. The GUI composes the two.
+    **CV never learns what OBD is and OBD never learns what a fold is** — the alternative,
+    a CV-side "nested phase" field, would have put model knowledge in the runner.
+    `GET /api/train/status` gains a top-level `cv` object; absence is meaningful and
+    documented (`inner` absent = no nested search, never "a search at zero nodes";
+    `fold: 0` = no fold running, which is what the locked stage and the
+    comparison-complete event report).
+  - **A measurement changed the design.** The first working version reported nested detail
+    in **3 of ~330 status samples (under 1%)**. The cause was not the plumbing: with
+    `algorithm=auto`, `autoalgo::pick` is wall-clock budgeted at 750 ms per candidate
+    optimizer and reported nothing, so ~11 s of a 13 s five-fold run was silent probing.
+    OBD now announces a `"probing optimizers"` phase before it starts — **97%** of samples
+    carry live detail after the change, and the same silence in the *standalone* OBD panel
+    (which had shown "starting up" for that interval) went with it. The probe carries no
+    measurement (iteration 0, both errors -1) and is explicitly **not** pushed to the chart:
+    it is a status, not a sample. Reporting an invisible phase was a better fix than
+    polling harder.
+  - **The monitored held-out set is now named once, in the class layer.** The chart legends
+    were hard-coded to "test set" while `Network::sampleTestError` correctly watched
+    validation on a three-way split — the GUI was announcing that selection tuned on the
+    untouched test set. `DataSet::monitorSet()` (validation when loaded, else test, else
+    none) is the single statement of the rule; `sampleTestError` asks it instead of
+    re-deriving it, and `/api/load`, `/api/train` and `/api/obd` return
+    `monitor:"validation"|"test"|"none"` so the page prints the engine's answer. A legend
+    written in JavaScript would have been a second implementation of the rule, and that is
+    exactly how the first one drifted.
+  - **Two "not the current model" claims, one of them new.** Craig asked whether the ROC
+    panel below the CV report was the CV neural result; it was the standalone OBD model
+    (0.810) sitting under CV's locked refit (0.812). The panels now carry a provenance
+    banner naming the producing operation, and the CV report ends with an explicit scope
+    note. Building it surfaced the same defect in a case the finding did not mention:
+    **a DFA renders into those panels but never becomes `modelPtr`**, so labelling its
+    output "Current model" would have been a new false claim. It declares itself standalone.
+  - **Primary-action placement is enforced structurally, not by review.** All eight panels
+    end with a `div.row.action`; `smoke.sh` asserts it for every fieldset in the served
+    page, and that there is exactly one such row. Two panels needed a judgment call, both
+    recorded in `gui_notes.md`: Model has two entry points (its resume-a-session row keeps
+    its own button, after its own choice), and Session files has no configuration at all
+    (its explanation moved above seven peer save actions).
+  - **The in-browser check could not be done here** — no Chrome connection this session, so
+    the page was verified statically: HTML/JS parse clean, all 90 `$("id")` references
+    resolve against the page's 119 ids, and the progress renderer was executed under node
+    against the real payload shapes. That last check earned its keep: the
+    comparison-complete event rendered "fold 0 of 5", naming a fold that was not running.
+    The live click-through remains Craig's checkpoint under the walkthrough protocol.
+  - Gates: clean zero-warning Release build, goldens byte-identical (3 transcripts, no
+    re-bless), 12/12 ctest, tools, oracle numerically identical, and `smoke.sh` **three
+    consecutive times** — the CV-progress assertions sample a live run, so they were
+    checked for flakiness on purpose, and the exhaustive event grid was pinned in
+    `check_crossval` where every event can be observed instead of sampled.
+
 
 ---
 

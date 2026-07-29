@@ -46,6 +46,75 @@ done
 grep -q 'algorithm: \$("cv_algorithm").value' page.html \
     || fail "the CV panel does not submit its optimizer choice"
 
+# --- Page structure and terminology (live walkthrough findings, 2026-07-29) ---
+# These are presentation contracts a user's reading of the page depends on, so
+# they are asserted against the served page rather than trusted to review.
+$PY - <<'PY' || fail "page structure/terminology contract broken"
+import re, sys
+html = open("page.html", encoding="utf-8").read()
+def need(cond, why):
+    if not cond:
+        print("FAIL:", why, file=sys.stderr); sys.exit(1)
+
+# (1) Every panel's PRIMARY ACTION is its LAST row. A Run/Create/Load button in
+#     the first row invites acting before the form is finished (Craig's GUI-wide
+#     rule). Checked structurally, for every fieldset, so a new panel cannot
+#     quietly reintroduce the pattern.
+panels = re.findall(r'<fieldset>(.*?)</fieldset>', html, re.S)
+need(len(panels) >= 8, f"expected the full panel set, found {len(panels)}")
+for body in panels:
+    legend = re.search(r'<legend>(.*?)</legend>', body).group(1)
+    rows = re.findall(r'<div class="row([^"]*)"', body)
+    need(rows, f"panel {legend!r} has no rows")
+    need("action" in rows[-1], f"panel {legend!r} does not end with its action row")
+    # and nothing after the action row may be another control-bearing row
+    need("action" not in " ".join(rows[:-1]),
+         f"panel {legend!r} has more than one action row")
+
+# (2) OBD controls name their UNIT. "Start hidden 2" was read as two hidden
+#     LAYERS; OBD sizes the node count of ONE hidden layer.
+obd = re.search(r'<legend>4c.*?</fieldset>', html, re.S).group(0)
+need("Starting\n    hidden nodes" in obd or "Starting hidden nodes" in obd
+     or re.search(r'Starting\s+hidden nodes', obd), "OBD start control not named in nodes")
+need(re.search(r'Maximum\s+hidden nodes', obd), "OBD max control not named in nodes")
+need("Start hidden <" not in obd and "Max hidden <" not in obd,
+     "the old ambiguous OBD labels are still present")
+need("sizes ONE hidden layer" in obd, "the OBD panel does not state it sizes one hidden layer")
+need("never adds a second layer" in obd, "the OBD panel does not deny adding layers")
+
+# (3) The same wording reaches the NESTED-OBD controls in the CV panel.
+cv = re.search(r'<legend>4d.*?</fieldset>', html, re.S).group(0)
+need(re.search(r'OBD\s+maximum hidden nodes', cv), "CV nested-OBD max is not named in nodes")
+need(re.search(r'Fixed\s+hidden nodes', cv), "CV fixed hidden is not named in nodes")
+need("never adds a layer" in cv, "the CV nested-OBD control does not deny adding layers")
+
+# (4) The contrast keeps its ROLES and subtraction DIRECTION after selection --
+#     they used to live only in the placeholder text, which selection erased.
+need('id="cv_contrast_note"' in cv, "no persistent contrast-direction note")
+need("updateContrastNote" in html, "the contrast note is never updated")
+need("Primary (${pn})" in html and "Reference (${rn})" in html,
+     "the contrast note does not name both roles from the current selection")
+need("positive" in html and "favors the primary" in html,
+     "the contrast note does not say which direction favors the primary")
+
+# (5) Chart legends are FILLED IN from the server's answer, never hard-coded --
+#     with a validation set loaded they must not claim the test set was watched.
+need('id="errlegend"' in html and 'id="obdlegend"' in html,
+     "chart legends are not addressable, so they cannot be made validation-aware")
+need("setMonitorLabels" in html, "no monitor-aware legend function")
+need(">test set (sampled)" not in html and ">test error (the score)" not in html,
+     "a hard-coded test-set legend is still present")
+
+# (6) Result provenance: the ROC/statistics panels name what produced them, and
+#     a standalone analysis says it did not become the current model.
+need('id="provbox"' in html and "setProvenance" in html, "no result-provenance banner")
+need('id="cvscope"' in html, "the CV report does not scope itself away from the panels below")
+for op in ["Train", "OBD hidden-layer sizing (standalone)", "discriminant function analysis"]:
+    need(f'setProvenance("{op}' in html or f"setProvenance((" in html,
+         f"no provenance set for {op}")
+print("page structure/terminology ok")
+PY
+
 # No inputs/outputs given: the server derives them from the file's columns
 #    (xor_discrete.set is 2 inputs + 1 output) — the page relies on this
 load1=$(curl -s -X POST "$URL/api/load" -d "mode=train&path=xor_discrete.set")
@@ -1531,6 +1600,154 @@ echo "$rareResp" | grep -q '"ok":false' || fail "DLG-3: too few dev events for k
 echo "$rareResp" | grep -q "5-fold development" || fail "DLG-3 refusal must name the fold count and counts"
 # reload the working dataset for anything after
 curl -s -X POST "$URL/api/load" -d "mode=raw&path=lowbwt2-2train.txt&fraction=0.25&seed=1" >/dev/null
+
+# --- The monitored held-out set is NAMED by the engine (2026-07-29) ----------
+# The GUI's live chart and the OBD size search watch the VALIDATION set when one
+# is loaded and the test set otherwise (DataSet::monitorSet). The page labels its
+# charts from this answer instead of re-deriving the rule -- the legends were
+# hard-coded to "test set" and so announced that a three-way split was being
+# tuned on the untouched test set. Both arms are exercised.
+twoway=$(curl -s -X POST "$URL/api/load" -d "mode=raw&path=lowbwt2-2train.txt&fraction=0.25&seed=1")
+echo "$twoway" | grep -q '"monitor":"test"' \
+    || fail "a two-way split must report the TEST set as the monitored set"
+curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=2" >/dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=20000&seed=42" > mon_two.json
+grep -q '"monitor":"test"' mon_two.json \
+    || fail "a two-way training run must name the test set as its monitor"
+
+threeway=$(curl -s -X POST "$URL/api/load" \
+    -d "mode=raw&path=lowbwt2-2train.txt&fraction=0.25&val_fraction=0.25&seed=1")
+echo "$threeway" | grep -q '"monitor":"validation"' \
+    || fail "a three-way split must report the VALIDATION set as the monitored set"
+echo "$threeway" | grep -q 'validation exemplars' \
+    || fail "the three-way load did not actually create a validation set"
+curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=2" >/dev/null
+curl -s -X POST "$URL/api/obd" \
+    -d "hidden_start=2&hidden_max=3&iter_budget=20000&algorithm=1&seed=42" \
+    | grep -q '"ok":true' || fail "three-way OBD did not start"
+for i in $(seq 1 300); do
+    curl -s "$URL/api/train/status" > obd_val.json
+    grep -q '"running":false' obd_val.json && break
+    sleep 0.2
+done
+$PY - <<'PY' || fail "three-way OBD did not name validation as the scored set"
+import json
+r = json.load(open("obd_val.json", encoding="utf-8"))["result"]
+assert r["ok"], r.get("message")
+# The size search early-stops and SCORES on validation here, so the chart legend
+# built from this must say validation -- not test, which is untouched.
+assert r["monitor"] == "validation", r["monitor"]
+PY
+
+# --- Structured cross-validation progress (2026-07-29) ----------------------
+# A four-procedure, five-fold nested-OBD run used to publish one unchanging phase
+# word ("cross-validating") for its entire duration. The status poll now carries
+# the repetition grid from the coordinator/runner (crossval::Progress) and the
+# architecture trial from the nested search (obd::ProgressFn) -- composed, never
+# scraped from report prose. Polled tightly for the whole run, then the union of
+# what was seen is asserted, so this does not race one particular instant.
+curl -s -X POST "$URL/api/load" -d "mode=raw&path=lowbwt2-2train.txt&fraction=0&seed=1" >/dev/null
+curl -s -X POST "$URL/api/cv" \
+    -d "folds=5&seed=42&maxiter=4000&autostop_tol=0.01&logistic=1&neural=1&neural_obd=1&hidden_max=4&iter_budget=1500&inner_val=0.25&algorithm=auto&locked_fraction=0.25&independence=rows" \
+    | grep -q '"ok":true' || fail "progress-instrumented CV did not start"
+: > cv_prog.ndjson
+for i in $(seq 1 4000); do
+    curl -s "$URL/api/train/status" > cv_prog_last.json
+    $PY -c "
+import json,sys
+d = json.load(open('cv_prog_last.json', encoding='utf-8'))
+cv = d.get('cv')
+if cv: print(json.dumps(cv))
+" >> cv_prog.ndjson 2>/dev/null
+    grep -q '"running":false' cv_prog_last.json && break
+done
+grep -q '"running":false' cv_prog_last.json || fail "instrumented CV never completed"
+$PY - <<'PY' || fail "cross-validation published no usable structured progress"
+import json
+seen = [json.loads(l) for l in open("cv_prog.ndjson", encoding="utf-8") if l.strip()]
+assert seen, "no cv progress object was ever published"
+
+cvs = [s for s in seen if s["stage"] == "cross-validation"]
+lks = [s for s in seen if s["stage"] == "locked-test evaluation"]
+assert cvs, "the cross-validation stage never reported"
+assert lks, "the locked-test evaluation stage never reported"
+
+# The repetition grid: both procedures named, folds inside 1..k, k reported.
+#    This is SAMPLED progress from a running job, so it asserts what polling can
+#    reliably see -- that the counters are live and advance. The exhaustive grid
+#    (every procedure x every fold, in order, completedFolds reaching k) is pinned
+#    deterministically in check_crossval, which observes every event instead of
+#    sampling; asserting a specific transient here would only be a flaky test.
+names = {s["procedure"] for s in cvs if s["procedure"]}
+assert "Logistic" in names and "Neural (OBD)" in names, names
+assert all(s["folds"] == 5 for s in cvs), "k was not reported as 5"
+assert all(1 <= s["fold"] <= 5 for s in cvs if s["fold"]), "a fold outside 1..k"
+assert len({s["fold"] for s in cvs}) > 1, "the fold counter never advanced"
+assert max(s["completedFolds"] for s in cvs) >= 1, "completed folds never advanced"
+assert all(s["completedFolds"] < s["folds"] or s["fold"] == s["folds"] for s in cvs), \
+    "completed folds ran past k"
+assert all(s["procedureCount"] == 2 for s in cvs if s["procedureCount"]), cvs[0]
+
+# The nested architecture search inside the CURRENT fold. Its absence means "no
+# nested search running", never "a search at zero nodes" -- so when present the
+# phase must be a real one and the node count nonzero.
+inner = [s["inner"] for s in cvs if s.get("inner")]
+assert inner, "the nested OBD search never reported a trial"
+assert all(i["phase"] in ("probing optimizers", "grow", "prune", "final")
+           for i in inner), inner[:3]
+assert all(i["hidden"] >= 1 for i in inner), inner[:3]
+# The optimizer probe is wall-clock budgeted per candidate and can dominate a
+# fold's elapsed time; with algorithm=auto it must be visible, not silence.
+assert any(i["phase"] == "probing optimizers" for i in inner), \
+    "the auto-optimizer probe inside a fold reported nothing"
+# Only the nested-OBD procedure may report inner trials -- Logistic has none.
+assert all(s["procedure"] == "Neural (OBD)" for s in cvs if s.get("inner")), \
+    "a non-nested procedure reported an architecture trial"
+
+# The locked pass folds NOTHING: it refits once on the development rows and
+# scores once, so it must not invent a fold number.
+assert all(s["fold"] == 0 and s["folds"] == 0 for s in lks), lks[:3]
+assert {s["procedure"] for s in lks if s["procedure"]} == {"Logistic", "Neural (OBD)"}, lks
+print("structured CV progress ok:", len(seen), "samples")
+PY
+
+# --- Tier 2's fold-plan counts describe the rows it FOLDED (2026-07-29) ------
+# With a locked test the Tier-2 header says "(development rows only)" and used to
+# print the whole dataset's n and events beside fold rows a quarter that size.
+$PY - <<'PY' || fail "Tier-2 development counts disagree with the fold plan"
+import json, re
+d = json.load(open("cv_prog_last.json", encoding="utf-8"))["result"]
+cv, lk = d["cv"], d["cv"]["locked"]
+t1, t2 = cv["tier1"], cv["tier2"]
+
+# Tier 1 is about the DATASET and correctly reports its totals.
+total = int(re.search(r"(\d+) exemplars", t1).group(1))
+totalEvents = int(re.search(r"(\d+) events", t1).group(1))
+
+# Tier 2's fold-plan header is about the rows the plan covered.
+m = re.search(r"Fold plan: (.*?)\s+k = (\d+)\s+n = (\d+)\s+events = (\d+)", t2)
+assert m, t2[:300]
+plan, k, n, events = m.group(1), int(m.group(2)), int(m.group(3)), int(m.group(4))
+assert "development rows only" in plan, plan
+# Development = everything the locked test did not take. Both counts, not just n:
+# n was already the folded count while events came from the dataset totals, so a
+# row count and an event count described different sets of rows.
+assert n == total - lk["n"], f"development n {n} != total {total} - locked {lk['n']}"
+assert events == totalEvents - lk["events"], \
+    f"development events {events} != total {totalEvents} - locked {lk['events']}"
+assert n != total and events != totalEvents, \
+    "the fixture has no locked test, so this proves nothing"
+
+# ...and it must agree with the per-fold rows printed directly beneath it.
+folds = [int(x) for x in re.findall(r"^\s+(?:\d+)\s+(\d+)\s", t2, re.M)]
+assert folds, t2[:400]
+assert sum(folds[:k]) == n, f"fold rows sum to {sum(folds[:k])}, header says {n}"
+
+# The machine-readable artifact carries the same two numbers.
+run = json.load(open("cv_run.json", encoding="utf-8"))
+assert run["n"] == n and run["events"] == events, (run["n"], run["events"], n, events)
+print(f"Tier 2 development counts ok: n={n} events={events} locked={lk['n']} total={total}")
+PY
 
 # --- Per-action audit log (every user action logged, 2026-07-19) -----------
 # Every GUI action lands in neuron_actions.log beside the data, timestamped,

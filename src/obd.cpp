@@ -313,6 +313,15 @@ obd::Result obd::run( DataSet& data, const Config& cfg,
 	result.autoSelected = ( cfg.algorithm < 0 );
 	if ( cfg.algorithm < 0 ) // auto
 	{
+		// Say that the probe is happening. It is a wall-clock-budgeted experiment
+		//    per candidate optimizer, so on a nested run it can dominate the fold's
+		//    whole elapsed time -- and it reported nothing, leaving a long search
+		//    looking idle (measured 2026-07-29: ~11 s of a 13 s five-fold nested
+		//    run was silent probing). The phase belongs to OBD, which owns its
+		//    phases; a caller cannot infer it. No iteration or error is available
+		//    yet, so the numeric fields say "not sampled" (-1) rather than 0.
+		if ( progress )
+			progress( "probing optimizers", cfg.hStart, 0, -1, -1 );
 		util::set_screen( discard );
 		autoalgo::Result pick = autoalgo::pick( *net, 750, cancel );
 		util::set_screen( screen );

@@ -157,9 +157,10 @@ crossval::Procedure cvadapters::dfaProcedure( bool quadratic )
 }
 
 crossval::Procedure cvadapters::nestedObdProcedure( const obd::Config& cfg,
-	double innerValFraction, vector< crossval::FoldSelection >* selections )
+	double innerValFraction, vector< crossval::FoldSelection >* selections,
+	obd::ProgressFn progress )
 {
-	return [ cfg, innerValFraction, selections ]( DataSet& foldData,
+	return [ cfg, innerValFraction, selections, progress ]( DataSet& foldData,
 		const vector< unsigned >& trainRows,
 		const vector< unsigned >& testRows,
 		const atomic< bool >* cancel ) -> ProcResult
@@ -201,11 +202,13 @@ crossval::Procedure cvadapters::nestedObdProcedure( const obd::Config& cfg,
 		foldData.getTestTwoSet().setBootstrapResamples( 0 );
 
 		// Run the OBD architecture search on THIS fold, its whole report discarded;
-		//    cancel stops it promptly.
+		//    cancel stops it promptly. progress (when the caller wired one) carries
+		//    the phase and hidden-node trial out of the search -- the only view a
+		//    long nested run has of what it is doing inside the current fold.
 		ostream& saved = util::screen();
 		ostringstream discard;
 		util::set_screen( discard );
-		obd::Result r = obd::run( foldData, cfg, nullptr, cancel );
+		obd::Result r = obd::run( foldData, cfg, progress, cancel );
 		util::set_screen( saved );
 
 		if ( r.cancelled ) { pr.cancelled = true; return pr; }

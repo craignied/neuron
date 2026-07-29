@@ -685,6 +685,192 @@ int main()
 	if ( !didPostOpen )
 		expect( true, "post-open write-failure path skipped (no /dev/full here)" );
 
+	// Structured progress (2026-07-29). A long comparison used to publish one
+	// unchanging phase word for its whole duration, because compare() had no
+	// per-fold hook. It has one now, and this observes EVERY event -- no sampling,
+	// so the whole grid can be pinned exactly rather than approximately.
+	//
+	// Layering is part of the contract (rule 6): the runner fills fold/k, the
+	// coordinator stamps procedure identity onto the runner's events, and NEITHER
+	// knows what happens inside a fold. So this also checks that a fold event
+	// always carries both halves.
+	{
+		vector< crossval::Progress > seen;
+		crossval::ProgressFn record = [ &seen ]( const crossval::Progress& p )
+		{
+			seen.push_back( p );
+		};
+
+		vector< crossval::ProcedureSpec > pprocs;
+		pprocs.push_back( { "LDFA", cvadapters::dfaProcedure( false ), nullptr } );
+		pprocs.push_back( { "QDFA", cvadapters::dfaProcedure( true ), nullptr } );
+
+		util::set_seed( 7 );
+		crossval::Comparison pc = crossval::compare( data, foldId, pprocs, nullptr,
+			false, 0, record );
+		expect( pc.ok, "the instrumented comparison still completes normally" );
+
+		// Every (procedure, fold) cell is announced, in order, BEFORE its fit -- a
+		// display must name the fold that is costing time NOW, not the last one
+		// that finished. Each procedure therefore reports (fold, completedFolds)
+		// = (1,0) (2,1) (3,2) (4,3) (5,4), then (5,5) when its last fold is done.
+		unsigned at = 0;
+		bool gridOk = true;
+		for ( unsigned p = 0; p < 2 && gridOk; p++ )
+		{
+			for ( unsigned f = 0; f <= 5 && gridOk; f++, at++ )
+			{
+				if ( at >= seen.size() ) { gridOk = false; break; }
+				const crossval::Progress& e = seen[ at ];
+				// the sixth event of each procedure is its completion: fold k, k done
+				unsigned wantFold = ( f == 5 ) ? 5 : f + 1;
+				if ( e.stage != crossval::Progress::CROSS_VALIDATION ) gridOk = false;
+				if ( e.procedure != pprocs[ p ].name ) gridOk = false;
+				if ( e.procIndex != p + 1 || e.procCount != 2 ) gridOk = false;
+				if ( e.completedProcedures != p ) gridOk = false;
+				if ( e.fold != wantFold || e.k != 5 ) gridOk = false;
+				if ( e.completedFolds != f ) gridOk = false;
+			}
+		}
+		expect( gridOk,
+			"every (procedure, fold) cell is announced in order, before its fit" );
+
+		// The comparison's own completion event is about the COMPARISON, so it
+		// names no fold and no procedure -- a fold number here would be one a
+		// display could not attribute to anything.
+		expect( at < seen.size() && seen[ at ].completedProcedures == 2
+			&& seen[ at ].procedure.empty() && seen[ at ].fold == 0,
+			"the final event reports the finished comparison, naming no fold" );
+
+		// The counters finish: a caller's completed-fold and completed-procedure
+		// totals reach k and the procedure count, rather than stopping one short.
+		unsigned maxFolds = 0, maxProcs = 0;
+		for ( unsigned i = 0; i < seen.size(); i++ )
+		{
+			if ( seen[ i ].completedFolds > maxFolds ) maxFolds = seen[ i ].completedFolds;
+			if ( seen[ i ].completedProcedures > maxProcs )
+				maxProcs = seen[ i ].completedProcedures;
+		}
+		expect( maxFolds == 5 && maxProcs == 2,
+			"the completed-fold and completed-procedure counts reach their totals" );
+
+		// A fold event always carries BOTH layers' facts -- the runner's fold and
+		// the coordinator's procedure. Half an event is a display that cannot say
+		// what is running.
+		bool bothHalves = true;
+		for ( unsigned i = 0; i < seen.size(); i++ )
+			if ( seen[ i ].fold && seen[ i ].procedure.empty() ) bothHalves = false;
+		expect( bothHalves, "a fold event never arrives without its procedure identity" );
+
+		// A null callback is the default and must change nothing at all.
+		util::set_seed( 7 );
+		crossval::Comparison qc = crossval::compare( data, foldId, pprocs );
+		bool same = ( qc.ok == pc.ok && qc.entries.size() == pc.entries.size() );
+		for ( unsigned i = 0; same && i < qc.entries.size(); i++ )
+			same = ( qc.entries[ i ].result.oofTrap == pc.entries[ i ].result.oofTrap );
+		expect( same, "observing a comparison does not change its result" );
+
+		// The locked-test pass folds NOTHING. It must say so (fold and k zero)
+		// rather than carry the last fold number of the CV stage.
+		vector< crossval::Progress > lseen;
+		crossval::ProgressFn lrecord = [ &lseen ]( const crossval::Progress& p )
+		{
+			lseen.push_back( p );
+		};
+		vector< unsigned > lTrain, lTest;
+		for ( unsigned r = 0; r < n; r++ ) ( r % 5 == 0 ? lTest : lTrain ).push_back( r );
+		util::set_seed( 7 );
+		crossval::LockedResult plr = crossval::evaluateOnce( data, lTrain, lTest,
+			pprocs, nullptr, false, 0, lrecord );
+		expect( plr.ok, "the instrumented locked evaluation still completes normally" );
+
+		bool lockedOk = ( lseen.size() >= 2 );
+		for ( unsigned i = 0; i < lseen.size(); i++ )
+		{
+			if ( lseen[ i ].stage != crossval::Progress::LOCKED_EVALUATION ) lockedOk = false;
+			if ( lseen[ i ].fold != 0 || lseen[ i ].k != 0 ) lockedOk = false;
+		}
+		expect( lockedOk,
+			"the locked-test stage reports itself and invents no fold number" );
+		expect( lseen.size() >= 2 && lseen[ 0 ].procedure == "LDFA"
+			&& lseen[ 1 ].procedure == "QDFA",
+			"the locked-test stage names each procedure as it is refit" );
+	}
+
+	// The fold plan's OWN counts (2026-07-29). With a locked test the Comparison
+	// covers the DEVELOPMENT rows only, and the Tier-2 header says so in words --
+	// "(development rows only)". Its n and events must therefore be the rows the
+	// fold plan actually covers, not the whole dataset's totals: a header that
+	// reads "development rows only ... n = 250" beside five folds of 47 rows each
+	// is a self-contradiction, and it is the DEVELOPMENT number a reader needs to
+	// check the fold sizes against. PlanInfo carries the whole-dataset totals for
+	// the Tier-1 summary (which is about the dataset, and is correct), so this is
+	// pinned by giving PlanInfo deliberately DIFFERENT (whole-dataset) values and
+	// requiring the fold-plan header to ignore them.
+	//
+	// Watched to FAIL against reading info.n / info.events here (the shipped
+	// behavior until this test): the header printed 250 / the full event count.
+	{
+		// A locked-test shaped run: fold the development rows only, exactly as the
+		// GUI's CV job does (raw.includerows -> a dev-only DataSet -> kFold).
+		vector< unsigned > devLabel( n );
+		for ( unsigned r = 0; r < n; r++ ) devLabel[ r ] = rc.outcome[ r ];
+		util::set_seed( 7 );
+		nsplit::Holdout hd = nsplit::stratifiedHoldout( devLabel, n / 4 );
+
+		DataSet devData = data;
+		Matrix< double > devRaw = data.getRawMatrix().includerows( hd.train );
+		devData.setRawMatrix( devRaw );
+
+		Matrix< double >& draw = devData.getRawMatrix();
+		unsigned nDev = draw.rows(), devOut = draw.cols() - 1, devEvents = 0;
+		vector< unsigned > dLabel( nDev );
+		for ( unsigned r = 0; r < nDev; r++ )
+		{
+			dLabel[ r ] = ( draw( r, devOut ) != 0 ) ? 1u : 0u;
+			devEvents += dLabel[ r ];
+		}
+		util::set_seed( 7 );
+		vector< unsigned > devFold = nsplit::kFold( dLabel, 5 );
+
+		vector< crossval::ProcedureSpec > dprocs;
+		dprocs.push_back( { "LDFA", cvadapters::dfaProcedure( false ), nullptr } );
+		util::set_seed( 7 );
+		crossval::Comparison dc = crossval::compare( devData, devFold, dprocs );
+		expect( dc.ok && dc.outcome.size() == nDev,
+			"a development-only comparison folds the development rows only" );
+
+		// PlanInfo carries the WHOLE-dataset totals (what Tier 1 reports) -- they
+		// differ from the development counts, which is the point.
+		cvreport::PlanInfo dinfo;
+		dinfo.n = n; dinfo.events = events; // whole dataset: 250 rows
+		dinfo.foldPlan = "outcome-stratified 5-fold, seed 7 (development rows only)";
+		expect( nDev != n && devEvents != events,
+			"the fixture's development counts really do differ from the dataset totals" );
+
+		string dt2 = cvreport::tier2( dc, dinfo );
+		string wantN = "n = " + to_string( nDev );
+		string wantE = "events = " + to_string( devEvents );
+		expect( dt2.find( wantN ) != string::npos && dt2.find( wantE ) != string::npos,
+			"Tier 2's fold-plan header reports the DEVELOPMENT rows it folded" );
+		expect( dt2.find( "n = " + to_string( n ) ) == string::npos
+			&& dt2.find( "events = " + to_string( events ) ) == string::npos,
+			"Tier 2's fold-plan header does NOT reuse the whole-dataset totals" );
+
+		// The same fact in the machine-readable artifact: cv_run.json's n and
+		// events describe the fold plan, so they must agree with each other and
+		// with the per-fold rows. n was already the folded count; events was not.
+		cvreport::writeArtifacts( dc, dinfo, "." );
+		string runJson;
+		{
+			ifstream jf( "./cv_run.json" );
+			ostringstream all; all << jf.rdbuf(); runJson = all.str();
+		}
+		expect( runJson.find( "\"n\": " + to_string( nDev ) ) != string::npos
+			&& runJson.find( "\"events\": " + to_string( devEvents ) ) != string::npos,
+			"cv_run.json's n and events both describe the rows the fold plan covered" );
+	}
+
 	// Locked-test rendering (report piece). Build a LockedInfo by hand (the DeLong
 	// wiring lives in the GUI job) and confirm: the pure-CV render is UNCHANGED when
 	// locked.has is false (the default arg), and the locked render adds the AUC(test)

@@ -32,10 +32,18 @@ namespace cvreport {
 
 // The descriptive context a Comparison does not carry: what the run WAS. Every
 //    field is optional and appears in the report only when set.
+//
+//    n / events describe the WHOLE DATASET -- the Tier-1 summary line, which is
+//    about the data the run was performed on. They are NOT the fold plan's counts:
+//    with a locked test the Comparison covers the development rows only, and the
+//    fold-plan header and cv_run.json derive their n / events from the Comparison
+//    itself rather than from here (2026-07-29). Do not reintroduce a "development
+//    n" field for a caller to fill in -- the object that folded the rows is the
+//    one that knows how many there were.
 struct PlanInfo {
 	string dataset;    // a label for the header (e.g. "lowbwt"); "" hides it
-	unsigned n = 0;    // total exemplars
-	unsigned events = 0; // outcome-1 count
+	unsigned n = 0;    // total exemplars in the dataset (Tier 1 summary)
+	unsigned events = 0; // outcome-1 count in the dataset (Tier 1 summary)
 	string foldPlan;   // how the folds were built (e.g. "outcome-stratified, seed 42")
 	string primary;    // prespecified primary procedure name (for the contrast line)
 	string reference;  // the procedure it is contrasted against

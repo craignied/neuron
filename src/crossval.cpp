@@ -93,7 +93,7 @@ crossval::Metrics crossval::metricsFor( const vector< unsigned >& outcome,
 
 crossval::RunResult crossval::run( DataSet& data,
 	const vector< unsigned >& foldId, Procedure proc, const atomic< bool >* cancel,
-	bool substreams, unsigned seed )
+	bool substreams, unsigned seed, ProgressFn progress )
 {
 	RunResult res;
 
@@ -150,8 +150,23 @@ crossval::RunResult crossval::run( DataSet& data,
 	//    ROC, so a failed fold is never silently averaged in.
 	vector< unsigned > pooledRows;
 
+	// Fold-level progress. The runner reports only what repetition knows -- which
+	//    fold, of how many, and how many are behind it. Announced BEFORE the fit so
+	//    a display names the fold that is currently costing the time, not the one
+	//    that just finished.
+	Progress prog;
+	prog.stage = Progress::CROSS_VALIDATION;
+	prog.k = k;
+
 	for ( unsigned f = 0; f < k; f++ )
 	{
+		if ( progress )
+		{
+			prog.fold = f + 1;
+			prog.completedFolds = f;
+			progress( prog );
+		}
+
 		if ( cancel && cancel->load() )
 		{
 			res.cancelled = true;
@@ -220,6 +235,15 @@ crossval::RunResult crossval::run( DataSet& data,
 		res.validFolds++;
 	}
 
+	// Every fold is behind us: report the finished grid before the pooled scoring,
+	//    so a caller's "completed folds" reaches k rather than stopping at k-1.
+	if ( progress )
+	{
+		prog.fold = k;
+		prog.completedFolds = k;
+		progress( prog );
+	}
+
 	// Pooled out-of-fold ROC over the rows that got a real prediction only.
 	Metrics pooled = metricsFor( res.outcome, res.oofPrediction, pooledRows );
 	res.oofAz = pooled.az; res.oofTrap = pooled.trap;
@@ -232,7 +256,7 @@ crossval::RunResult crossval::run( DataSet& data,
 crossval::LockedResult crossval::evaluateOnce( DataSet& data,
 	const vector< unsigned >& trainRows, const vector< unsigned >& testRows,
 	const vector< ProcedureSpec >& procs, const atomic< bool >* cancel,
-	bool substreams, unsigned seed )
+	bool substreams, unsigned seed, ProgressFn progress )
 {
 	LockedResult lr;
 
@@ -258,8 +282,23 @@ crossval::LockedResult crossval::evaluateOnce( DataSet& data,
 	for ( unsigned i = 0; i < testRows.size(); i++ )
 		lr.outcome[ i ] = ( raw( testRows[ i ], outCol ) != 0 ) ? 1u : 0u;
 
+	// The locked evaluation folds NOTHING -- it refits each procedure once on the
+	//    development rows and scores it once. fold and k stay 0 so a display cannot
+	//    invent a fold number for a pass that has none.
+	Progress prog;
+	prog.stage = Progress::LOCKED_EVALUATION;
+	prog.procCount = ( unsigned ) procs.size();
+
 	for ( unsigned p = 0; p < procs.size(); p++ )
 	{
+		if ( progress )
+		{
+			prog.procedure = procs[ p ].name;
+			prog.procIndex = p + 1;
+			prog.completedProcedures = p;
+			progress( prog );
+		}
+
 		if ( cancel && cancel->load() )
 		{
 			lr.cancelled = true; lr.message = "cancelled"; return lr;
@@ -311,13 +350,21 @@ crossval::LockedResult crossval::evaluateOnce( DataSet& data,
 		lr.entries.push_back( e );
 	}
 
+	// Every procedure refit and scored.
+	if ( progress )
+	{
+		prog.completedProcedures = ( unsigned ) procs.size();
+		progress( prog );
+	}
+
 	lr.ok = true;
 	return lr;
 }
 
 crossval::Comparison crossval::compare( DataSet& data,
 	const vector< unsigned >& foldId, const vector< ProcedureSpec >& procs,
-	const atomic< bool >* cancel, bool substreams, unsigned seed )
+	const atomic< bool >* cancel, bool substreams, unsigned seed,
+	ProgressFn progress )
 {
 	Comparison c;
 
@@ -329,13 +376,34 @@ crossval::Comparison crossval::compare( DataSet& data,
 
 	for ( unsigned i = 0; i < procs.size(); i++ )
 	{
+		// Stamp the procedure identity onto whatever the runner reports about
+		//    folds. Each layer fills only its own fields (rule 6): the runner does
+		//    not know what a procedure is, and the coordinator does not know which
+		//    fold is running until the runner says so.
+		ProgressFn relay;
+		if ( progress )
+		{
+			string name = procs[ i ].name;
+			unsigned index = i + 1, count = ( unsigned ) procs.size();
+			relay = [ progress, name, index, count ]( const Progress& p )
+			{
+				Progress q = p;
+				q.procedure = name;
+				q.procIndex = index;
+				q.procCount = count;
+				q.completedProcedures = index - 1;
+				progress( q );
+			};
+		}
+
 		// The coordinator owns coordination -- including timing each procedure
 		//    (rule 6). It does not train, select, or know the model family. Each
 		//    procedure gets its own substream base ( keyed by procedure index ), so
 		//    its result never depends on which OTHER procedures are in the run.
 		chrono::steady_clock::time_point t0 = chrono::steady_clock::now();
 		RunResult rr = run( data, foldId, procs[ i ].proc, cancel,
-			substreams, substreams ? mixSeed( seed, hashName( procs[ i ].name ) ) : 0 );
+			substreams, substreams ? mixSeed( seed, hashName( procs[ i ].name ) ) : 0,
+			relay );
 		chrono::steady_clock::time_point t1 = chrono::steady_clock::now();
 
 		if ( rr.cancelled )
@@ -363,6 +431,25 @@ crossval::Comparison crossval::compare( DataSet& data,
 	c.k = 0;
 	for ( unsigned r = 0; r < foldId.size(); r++ )
 		if ( foldId[ r ] + 1 > c.k ) c.k = foldId[ r ] + 1;
+
+	// The whole grid is behind us. Reported so a caller's completed-procedure
+	//    count reaches the total rather than stopping one short -- the relay above
+	//    can only ever say "index - 1 finished", because from inside a procedure
+	//    that is all that is true.
+	//
+	//    This event is about the COMPARISON, not about any fold or procedure, so
+	//    it names none: fold, completedFolds and procedure stay empty. Carrying a
+	//    fold number here would hand a display a fold with no procedure to
+	//    attribute it to.
+	if ( progress )
+	{
+		Progress done;
+		done.stage = Progress::CROSS_VALIDATION;
+		done.procCount = ( unsigned ) procs.size();
+		done.completedProcedures = ( unsigned ) procs.size();
+		done.k = c.k;
+		progress( done );
+	}
 
 	c.ok = true;
 	return c;

@@ -30,7 +30,12 @@ namespace obd {
 // One iteration's progress during the search, for a realtime chart. testErr < 0
 //    means test error was not sampled on this iteration. Called on whatever
 //    thread runs the search (the GUI's worker), so a GUI callback must guard its
-//    own buffers. phase is "grow", "prune", or "final".
+//    own buffers. phase is "probing optimizers", "grow", "prune", or "final".
+//    The probe phase (algorithm auto only) is announced ONCE, before any training
+//    begins, with iteration 0 and both errors -1: nothing has been fitted yet, and
+//    a caller must not plot those as a sample. It is reported because it is
+//    wall-clock budgeted per candidate optimizer and can be the largest single
+//    part of a search's elapsed time -- silence there reads as a hung run.
 using ProgressFn = std::function< void( const char* phase, unsigned hidden,
 	unsigned iteration, double trainErr, double testErr ) >;
 

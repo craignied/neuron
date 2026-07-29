@@ -180,7 +180,7 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   Mac Studio SSH-push note). Created 2026-07-11; push freely on session handoff.
 - **Memory:** enrolled in `~/code/claude-memory/` as `neuron-3.0` (2026-07-11).
 
-## Where things stand (2026-07-24)
+## Where things stand (2026-07-29)
 
 Present tense, rewritten each session — **not** a log. The dated record is
 `docs/HISTORY.md`.
@@ -211,6 +211,28 @@ from `/api/cv algorithm=` (default auto, probed independently per fold). **Stopp
 conditions are evaluated every iteration, independently of reporting cadence** — the
 print counter is presentation only (legacy bug #10, 2026-07-26).
 
+**Long runs report what they are doing, structurally.** Training, OBD, stepwise and CV all
+run async through the same `/api/train/status` + `/api/train/stop` doors, each publishing
+its own progress object — never a phase word standing in for an hour of work. CV's
+(2026-07-29) is composed from two independent engine callbacks: `crossval::ProgressFn`
+carries the repetition grid (runner fills fold/k, coordinator stamps procedure identity)
+and `obd::ProgressFn` carries the architecture trial inside the current fold. **CV never
+learns what OBD is and OBD never learns what a fold is** — the GUI composes them. Absence
+is meaningful: no `inner` means no nested search, `fold: 0` means no fold is running.
+OBD announces its `"probing optimizers"` phase because `algorithm=auto` spends most of a
+nested run there (measured: ~11 s of 13 s, under 1% of samples carrying detail before,
+97% after).
+
+**The GUI says what it is showing.** Every panel's primary action is its last row, after
+all its choices, with the status beside it (`smoke.sh` asserts this for every fieldset).
+OBD's controls are named in **nodes** and the panel states it sizes one hidden layer.
+Chart legends print `DataSet::monitorSet()`'s answer — validation when one is loaded, else
+test — rather than re-deriving the rule in JavaScript, which is how they came to claim a
+three-way split was tuning on the untouched test set. The ROC/Statistics panels name the
+operation that produced them, and a standalone analysis (DFA, CV) says it did not become
+the current model. The CV contrast keeps `Primary (X) − Reference (Y)` and its sign
+convention visible after selection.
+
 **Splitting and evaluation.** `src/split.{h,cpp}` owns the index-level cube: outcome-
 stratified holdout, outcome × covariate strata (quantile-binned, Hamilton apportionment),
 group-aware (indivisible clusters), stratified k-fold, and three-way train/validation/test.
@@ -231,6 +253,11 @@ The automated gates are currently green. The live stepwise-regression click-thro
 complete: reverse progress/Stop/cancellation and immediate rerun passed; Craig accepted
 the forward progress and final selected-variable summary; and the original logistic
 model retrained normally afterward, confirming that stepwise left it usable.
+**Awaiting a live click-through:** the 2026-07-29 GUI batch (panel action placement,
+OBD node-count labels, validation-aware legends, CV progress, contrast direction, result
+provenance). Its automated gates are green and `smoke.sh` passed three consecutive times
+— the CV-progress assertions sample a live run, so flakiness was checked deliberately —
+but no browser session was available to drive the page.
 
 **Stepwise regression** (2026-07-27) runs like the other long jobs: `/api/regress&async=1` with
 structured progress, a Stop that reaches the candidate training at that moment, and a persistent
@@ -328,6 +355,36 @@ Re-proposing one is rework, not initiative. Full reasoning at the cited HISTORY 
   where logarithmic vs linear printing chose the fit (canonical stopped at 304 / 400 /
   1000 on one fixture) and a ceiling between print points reported a false failure to
   converge. → HISTORY 2026-07-26; `tests/iterative/check_gradcadence.cpp`.
+- **A displayed fact is derived from the object that owns it, never copied by a caller.**
+  Tier 2's fold-plan header printed `(development rows only) ... n = 6000` from
+  `PlanInfo`, whose n is the whole dataset, and `cv_run.json` shipped `"n": 142` beside
+  `"events": 59` — a row count and an event count describing different sets of rows. The
+  fold plan's counts now come from the `Comparison`, which knows which rows it folded. Do
+  NOT add a "development n" field for a caller to fill in; that is the same defect with a
+  longer name. → HISTORY 2026-07-29.
+- **A rule with two kinds of consumer is stated ONCE, in the class layer.** Which held-out
+  set a monitor watches is `DataSet::monitorSet()`: samplers act on it and displays name
+  it. The chart legends were a second implementation in JavaScript, hard-coded to "test
+  set", and so announced that a three-way split was tuning on the untouched test set while
+  the engine correctly watched validation. Do not re-derive it in a caller. → HISTORY
+  2026-07-29.
+- **Progress reporting composes callbacks; it never teaches one layer about another.** CV
+  publishes fold/procedure through `crossval::ProgressFn`, the nested search publishes its
+  trial through `obd::ProgressFn`, and the GUI joins them. A "nested phase" field on
+  `crossval::Progress` would put model knowledge in the runner. Absence stays meaningful:
+  no `inner` means no nested search, `fold: 0` means no fold is running — never a
+  fabricated zero. → HISTORY 2026-07-29.
+- **A phase that costs wall-clock time must report itself, even when it has nothing to
+  plot.** `algorithm=auto`'s optimizer probe was ~11 s of a 13 s nested run and reported
+  nothing, so under 1% of status samples carried any detail; announcing a
+  `"probing optimizers"` phase took it to 97%. The probe carries no measurement
+  (iteration 0, errors -1) and must NOT be pushed to the chart — it is a status, not a
+  sample. Polling harder is not the fix for a silent phase. → HISTORY 2026-07-29.
+- **A panel that renders someone else's numbers says whose they are.** The ROC/Statistics
+  panels name the operation that produced them; DFA and CV declare themselves standalone
+  because neither becomes `modelPtr`. Never label a standalone analysis "current model",
+  and never let CV's report sit above an unlabelled panel from a different fit. → HISTORY
+  2026-07-29.
 - **Palm/iPhone exporters stay dead**; the HTML calculator lives on as
   `tools/neuron2web.py`. Python tooling is **stdlib-only** — no pip, no venv, enforced by
   CI on all three OSes.
