@@ -138,6 +138,26 @@ Usage: neuron [--seed N] [--gui [--no-browser]] [--version]
 If a source directory was copied or moved with an existing `build/` directory, remove
 that build directory before configuring again. CMake caches absolute source paths.
 
+## Start with the illustrated GUI walkthrough
+
+The
+**[Civic Choice walkthrough](docs/datasets/civic-choice/WALKTHROUGH.md)**
+is the fastest way to see the complete neuron workflow. It uses one reproducible,
+explicitly fictional synthetic dataset to show how to:
+
+- prepare mixed numeric and categorical data;
+- make an honest training/validation/test split;
+- fit and interpret a logistic baseline;
+- perform grouped stepwise variable selection;
+- size a neural network with validation-guided OBD; and
+- compare logistic regression, LDFA, QDFA, and a neural procedure with nested
+  cross-validation and an untouched locked test.
+
+[![Completed neuron cross-validation comparison for the Civic Choice walkthrough](docs/datasets/civic-choice/images/14-cv-comparison-complete.jpg)](docs/datasets/civic-choice/WALKTHROUGH.md)
+
+*Civic Choice is fictional synthetic demonstration data. It describes no real
+voters or political behavior and is not a tool for political targeting.*
+
 ## Data and experiment files
 
 The engine works with numeric datasets whose outcome is the final column. The

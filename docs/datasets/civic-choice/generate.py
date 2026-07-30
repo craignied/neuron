@@ -145,7 +145,9 @@ def main():
     rng = random.Random(args.seed)
     output = Path(args.output)
     with output.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
+        # Keep the committed fixture byte-identical on every platform. The
+        # repository normalizes text files to LF, so the generator must too.
+        writer = csv.writer(handle, lineterminator="\n")
         writer.writerow(
             (
                 "age",
