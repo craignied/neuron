@@ -23,6 +23,7 @@
 #include <memory>
 #include <mutex>
 #include <ctime>
+#include <set>
 #include <sstream>
 #include <thread>
 
@@ -1801,11 +1802,12 @@ struct CvConfig
 	//    sampling unit (a row holdout does not by itself establish independence).
 	unsigned lockedN = 0;         // locked-test size (0 = pure CV, no locked test)
 	string primary, reference;    // the prespecified DeLong contrast (internal names)
-	// The declared sampling unit (DLG-1). Ordinary DeLong is produced ONLY when the
-	//    user consciously declares independent-row observations; empty = not declared
-	//    (score + point AUCs, but inference withheld). "cluster" is reserved for the
-	//    coming clustered estimator and must never fall back to ordinary DeLong.
-	string independence;          // "" (unspecified) | "rows" | "cluster"
+	// The declared sampling unit (DLG-1), as a TYPE rather than a magic string
+	//    (DLG-8). Inference is produced ONLY when the declared unit and the achieved
+	//    partition method permit it -- evaldesign::chooseInference is the one place
+	//    that decides, so a "cluster" declaration can never fall back to ordinary
+	//    DeLong by a caller forgetting a branch.
+	evaldesign::SamplingUnit unit = evaldesign::SamplingUnit::Unspecified;
 };
 
 // The whole comparison on the worker thread: build an outcome-stratified k-fold
@@ -1818,7 +1820,8 @@ struct CvConfig
 //    and the prespecified contrast AUC(primary) - AUC(reference) when both are
 //    present AND fitted. DeLong assumes independent locked-test rows (see delong.h).
 static cvreport::LockedInfo buildLockedInfo( const crossval::LockedResult& lr,
-	const CvConfig& c )
+	const CvConfig& c, const evaldesign::Partition& split,
+	const vector< unsigned >& rowGroup, unsigned nGroups )
 {
 	cvreport::LockedInfo L;
 	L.has = true;
@@ -1827,21 +1830,28 @@ static cvreport::LockedInfo buildLockedInfo( const crossval::LockedResult& lr,
 	for ( unsigned i = 0; i < lr.outcome.size(); i++ ) L.events += lr.outcome[ i ];
 	L.testRows = lr.testRows;
 	L.outcome = lr.outcome;
+	L.split = split;
+	L.unit = c.unit;
 
-	// The sampling unit governs whether ordinary DeLong is produced at all (DLG-1).
-	//    A mechanically generated row holdout is NOT independent unless the user says
-	//    the observations are independent -- so inference runs only for "rows".
-	//    "cluster" is reserved for the coming clustered estimator: until it lands we
-	//    withhold inference rather than fall back to an invalid ordinary DeLong.
-	bool declaredRows = ( c.independence == "rows" );
-	bool declaredCluster = ( c.independence == "cluster" );
-	L.splitPlan = "outcome-stratified row holdout, seed " + to_string( c.seed );
-	L.samplingUnit = declaredRows ? "row (declared independent)"
-		: declaredCluster ? "cluster" : "unspecified";
-	L.independenceStatus = declaredRows ? "declared: independent rows" : "not declared";
+	// Cluster identity, gathered by RAW ROW so it can never be reconstructed from
+	//    a position after materialization. Empty rowGroup = an ungrouped design,
+	//    and the empty cluster vector says exactly that (absence is meaningful).
+	//    nClusters counts the groups PRESENT IN THE LOCKED SAMPLE -- the number of
+	//    independent units a clustered estimator would actually have.
+	if ( !rowGroup.empty() && nGroups )
+	{
+		L.cluster.resize( lr.testRows.size() );
+		set< unsigned > present;
+		for ( unsigned i = 0; i < lr.testRows.size(); i++ )
+		{
+			L.cluster[ i ] = rowGroup[ lr.testRows[ i ] ];
+			present.insert( L.cluster[ i ] );
+		}
+		L.nClusters = ( unsigned ) present.size();
+	}
 
-	// Point AUCs (and, if independence is declared, the covariance) over the entries
-	//    that produced predictions -- paired on the same rows.
+	// Point AUCs (and, if the design permits inference, the covariance) over the
+	//    entries that produced predictions -- paired on the same rows.
 	vector< vector< double > > preds;
 	vector< int > idx( lr.entries.size(), -1 ); // entry -> column in the DeLong result
 	for ( unsigned e = 0; e < lr.entries.size(); e++ )
@@ -1852,12 +1862,16 @@ static cvreport::LockedInfo buildLockedInfo( const crossval::LockedResult& lr,
 		}
 	delong::Result dr = delong::analyze( lr.outcome, preds );
 
-	L.inferenceRan = declaredRows && dr.ok;
-	L.inferenceMethod = declaredRows
-		? ( dr.ok ? "DeLong (ordinary, independent rows)"
-			: "none (locked test too sparse: " + dr.reason + ")" )
-		: declaredCluster ? "none (clustered inference is a follow-on)"
-		: "none (sampling unit not declared independent)";
+	// ONE decision (DLG-8): the declared sampling unit plus the ACHIEVED partition
+	//    method decide which estimator may run. A mechanically generated row holdout
+	//    is not independent unless the caller says the observations are; a
+	//    group-disjoint design forbids ordinary DeLong outright; a cluster
+	//    declaration waits for the clustered estimator rather than falling back.
+	evaldesign::InferenceChoice choice = evaldesign::chooseInference( c.unit,
+		split.method, dr.ok, dr.reason );
+	L.inference = choice.method;
+	L.inferenceReason = choice.reason;
+	const bool inferenceRan = L.inferenceRan();
 
 	for ( unsigned e = 0; e < lr.entries.size(); e++ )
 	{
@@ -1879,10 +1893,10 @@ static cvreport::LockedInfo buildLockedInfo( const crossval::LockedResult& lr,
 		else if ( dr.ok )
 		{
 			// The point AUC is available whether or not inference was declared; the
-			//    95% CI (Wald DeLong) only when it was.
+			//    95% CI (Wald DeLong) only when an estimator actually ran.
 			delong::Interval iv = delong::interval( dr, ( unsigned ) idx[ e ] );
 			col.hasAuc = true; col.auc = iv.auc;
-			if ( declaredRows ) { col.hasCi = true; col.lo = iv.lo; col.hi = iv.hi; }
+			if ( inferenceRan ) { col.hasCi = true; col.lo = iv.lo; col.hi = iv.hi; }
 		}
 		else col.note = "AUC not computable: " + dr.reason;
 		L.columns.push_back( col );
@@ -1905,11 +1919,11 @@ static cvreport::LockedInfo buildLockedInfo( const crossval::LockedResult& lr,
 			ct.note = "a contrast procedure has no point AUC on the locked test";
 		else
 		{
-			// The point difference is always available; the DeLong p only when
-			//    independence is declared.
+			// The point difference is always available; the p only when the design
+			//    permitted an estimator AND that estimator produced a valid contrast.
 			ct.hasDelta = true;
 			ct.delta = dr.auc[ idx[ pe ] ] - dr.auc[ idx[ re ] ];
-			if ( declaredRows )
+			if ( L.inference == evaldesign::AucInference::DeLongIndependent )
 			{
 				delong::Contrast dc = delong::contrast( dr,
 					( unsigned ) idx[ pe ], ( unsigned ) idx[ re ] );
@@ -1924,8 +1938,7 @@ static cvreport::LockedInfo buildLockedInfo( const crossval::LockedResult& lr,
 				}
 			}
 			else
-				ct.note = declaredCluster ? "clustered inference is a follow-on"
-					: "sampling unit not declared independent";
+				ct.note = choice.reason; // the SAME reason the design layer gave
 		}
 	}
 	return L;
@@ -1937,10 +1950,18 @@ static string lockedJson( const cvreport::LockedInfo& L )
 {
 	ostringstream j;
 	j << "{\"n\":" << L.n << ",\"events\":" << L.events
-		<< ",\"samplingUnit\":\"" << jsonEscape( L.samplingUnit ) << "\""
-		<< ",\"independenceStatus\":\"" << jsonEscape( L.independenceStatus ) << "\""
-		<< ",\"inferenceMethod\":\"" << jsonEscape( L.inferenceMethod ) << "\""
-		<< ",\"inferenceRan\":" << ( L.inferenceRan ? "true" : "false" )
+		<< ",\"samplingUnit\":\"" << jsonEscape( L.samplingUnitText() ) << "\""
+		<< ",\"independenceStatus\":\"" << jsonEscape( L.independenceText() ) << "\""
+		<< ",\"inferenceMethod\":\"" << jsonEscape( L.inferenceText() ) << "\""
+		<< ",\"inferenceRan\":" << ( L.inferenceRan() ? "true" : "false" )
+		// Why no estimator ran, and how many independent units the design has.
+		//    A page can now SAY the reason instead of guessing it from the method
+		//    string, and 0 clusters means an ungrouped design, not "unknown".
+		<< ",\"inferenceReason\":\"" << jsonEscape( L.inferenceReason ) << "\""
+		<< ",\"clusters\":" << L.nClusters
+		<< ",\"splitMethod\":\""
+		<< jsonEscape( evaldesign::partitionMethodName( L.split.method ) ) << "\""
+		<< ",\"splitPlan\":\"" << jsonEscape( L.splitPlanText() ) << "\""
 		<< ",\"areas\":[";
 	for ( unsigned i = 0; i < L.columns.size(); i++ )
 	{
@@ -2000,11 +2021,27 @@ string runCvJob( CvConfig c )
 	vector< unsigned > devRows, lockedRows;
 	DataSet devData;              // built (dev-only Raw) only when locked
 	DataSet* cvData = &data;      // the dataset CV folds
+
+	// The structured description of the locked split (DLG-8). It is filled by the
+	//    code that PERFORMS the split, so the report cannot describe a design that
+	//    was not run; a group-aware locked holdout will set method/groupColumns
+	//    here and everything downstream follows without a second decision.
+	evaldesign::Partition lockedSplit;
+	lockedSplit.method = evaldesign::PartitionMethod::OutcomeStratified;
+	lockedSplit.seed = c.seed;
+
+	// Per-RAW-ROW group identity, empty while no CV request builds groups. Kept at
+	//    this scope because the locked columns are gathered by raw row index.
+	vector< unsigned > rowGroup;
+	unsigned nGroups = 0;
+
 	if ( locked )
 	{
 		util::set_seed( c.seed );
 		nsplit::Holdout h = nsplit::stratifiedHoldout( label, c.lockedN );
 		devRows = h.train; lockedRows = h.test;
+		lockedSplit.nRequested = c.lockedN;
+		lockedSplit.nAchieved = ( unsigned ) lockedRows.size();
 		Matrix< double > devRaw = raw.includerows( devRows );
 		devData = data;                 // copy config (inputs/outputs/discrete)
 		devData.setRawMatrix( devRaw );  // dev-only Raw; CV never sees the locked rows
@@ -2168,16 +2205,19 @@ string runCvJob( CvConfig c )
 		if ( !lr.ok )
 			return jsonMsg( false, lr.message.empty()
 				? "locked-test evaluation failed" : lr.message );
-		lockedInfo = buildLockedInfo( lr, c );
+		lockedInfo = buildLockedInfo( lr, c, lockedSplit, rowGroup, nGroups );
 	}
 
 	// Report: Tier 1 + Tier 2 as text, Tier 3 written beside the data.
 	cvreport::PlanInfo info;
 	info.n = n;
 	info.events = events;
-	info.foldPlan = "outcome-stratified " + to_string( c.k ) + "-fold, seed "
-		+ to_string( c.seed )
-		+ ( locked ? " (development rows only)" : string() );
+	// The fold plan, structured: the report derives its sentence from this rather
+	//    than being handed one (DLG-8), so the two can never disagree.
+	info.folds.method = evaldesign::PartitionMethod::OutcomeStratified;
+	info.folds.seed = c.seed;
+	info.folds.k = c.k;
+	info.folds.developmentOnly = locked;
 	if ( !locked && c.neural && c.logistic )
 	{
 		info.primary = c.neuralObd ? "Neural (OBD)" : "Neural";
@@ -2414,15 +2454,15 @@ string handleCv( const httplib::Request& req )
 	//    ordinary DeLong. "cluster" is reserved for the coming clustered estimator.
 	{
 		string ind = param( req, "independence" );
-		for ( unsigned i = 0; i < ind.size(); i++ ) ind[ i ] = tolower( ind[ i ] );
-		if ( ind == "cluster" )
+		evaldesign::SamplingUnit u;
+		if ( !evaldesign::parseSamplingUnit( ind, u ) )
+			return jsonMsg( false, "independence (sampling unit) must be 'rows' "
+				"(independent observations) or unset" );
+		if ( u == evaldesign::SamplingUnit::Cluster )
 			return jsonMsg( false, "clustered locked-test inference is not yet available "
 				"(a follow-on). Omit the sampling unit to get predictions and point "
 				"AUCs without ordinary DeLong, which would be invalid on clustered data." );
-		if ( !ind.empty() && ind != "rows" )
-			return jsonMsg( false, "independence (sampling unit) must be 'rows' "
-				"(independent observations) or unset" );
-		c.independence = ind;
+		c.unit = u;
 	}
 
 	// The prespecified DeLong contrast. Tokens (logistic|ldfa|qdfa|neural) resolve to

@@ -144,6 +144,25 @@ Written via `util::run_path` (beside the data, like `neuron.log`):
 - **`cv_run.json`** — fold plan, seed, procedures, per-fold timings, failures, software version,
   and per-procedure `arch` / `optimizer` / `optimizerAuto` arrays (positionally paired: a fold
   appears in all three or in none).
+- **`cv_locked_predictions.csv`** (with a locked test) — `row`[`,cluster`]`,outcome`, then one
+  prediction column per procedure. The `cluster` column appears **only** for a grouped design;
+  its absence means ungrouped, not unknown. Cluster ids are joined **by position** with the
+  locked rows, so a length or range defect refuses the whole file rather than emitting a
+  mis-joined column — a cluster id off by one row silently re-labels which patients are
+  correlated with which.
+
+**The design is machine-readable, not only prose (DLG-8).** `cv_run.json` carries
+`foldDesign` and `lockedTest.splitDesign` objects — `method`, `seed`, `k`, the 1-based
+`strataColumns` / `strataBins` / `groupColumns`, `groups`, `developmentOnly`,
+`requested` vs `achieved` size, `leakage`, `refusal`, `warnings` — beside the human
+sentence, which is *derived from the same fields*. A consumer must never have to parse
+the sentence, and a report can no longer describe a design that was not run. The
+`lockedTest` block adds `clusters` (independent units present in the locked sample; 0 =
+ungrouped) and `inferenceReason` (why no estimator ran — an undeclared sampling unit, a
+locked test too sparse to estimate a covariance, and a design that forbids the estimator
+are three distinct facts). Which estimator a (declared sampling unit × achieved
+partition method) pair permits is decided in **one** function, `evaldesign::chooseInference`
+— not re-derived by the handler, the renderer, and the JSON writer.
 
 ## Ordering & per-interface rendering (same Tier-1 content, one source)
 

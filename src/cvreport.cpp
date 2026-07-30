@@ -9,11 +9,72 @@
 #include <functional>
 #include <iomanip>
 #include <map>
+#include <set>
 #include <sstream>
 
 #include "version.h"
 
 using namespace std;
+
+// --- derived design text (DLG-8) --------------------------------------------
+//
+// The report DESCRIBES a design; it does not author one. Every line below is a
+//    projection of the structured fields, composed in evaldesign so the wording
+//    has exactly one source (rule 6). A caller can no longer hand the report a
+//    sentence that contradicts what it ran.
+
+string cvreport::PlanInfo::foldPlanText() const
+{
+	return folds.k ? evaldesign::describeFolds( folds ) : string();
+}
+
+string cvreport::LockedInfo::splitPlanText() const
+{
+	return evaldesign::describeHoldout( split );
+}
+
+string cvreport::LockedInfo::samplingUnitText() const
+{
+	return evaldesign::samplingUnitName( unit );
+}
+
+string cvreport::LockedInfo::independenceText() const
+{
+	return evaldesign::independenceStatus( unit );
+}
+
+string cvreport::LockedInfo::inferenceText() const
+{
+	return evaldesign::inferenceText( inference, inferenceReason );
+}
+
+string cvreport::LockedInfo::clusterError() const
+{
+	if ( cluster.empty() )
+		return nClusters ? "cluster count reported without per-row cluster ids"
+			: string();
+
+	if ( cluster.size() != testRows.size() )
+		return "cluster ids (" + to_string( cluster.size() ) + ") do not pair with "
+			"the locked-test rows (" + to_string( testRows.size() ) + ")";
+
+	set< unsigned > seen;
+	for ( unsigned i = 0; i < cluster.size(); i++ )
+	{
+		if ( nClusters && cluster[ i ] >= nClusters )
+			return "cluster id " + to_string( cluster[ i ] ) + " is out of range for "
+				+ to_string( nClusters ) + " clusters";
+		seen.insert( cluster[ i ] );
+	}
+	// The locked sample need not contain every group in the dataset, but it can
+	//    never contain MORE distinct ids than the design says exist.
+	if ( nClusters && seen.size() > nClusters )
+		return "more distinct cluster ids than the declared cluster count";
+	if ( !nClusters )
+		return "per-row cluster ids without a cluster count";
+
+	return "";
+}
 
 namespace {
 
@@ -235,6 +296,40 @@ string jnumOrNull( double x ) // a finite non-negative number, or JSON null
 	return s.empty() ? "null" : s;
 }
 
+string uintArray( const vector< unsigned >& v )
+{
+	string s = "[";
+	for ( unsigned i = 0; i < v.size(); i++ )
+		s += ( i ? ", " : "" ) + to_string( v[ i ] );
+	return s + "]";
+}
+
+// The structured partition design, machine-readable (DLG-8). A consumer can now
+//    read WHAT was done -- method, keys, achieved counts, leakage -- instead of
+//    parsing the human sentence beside it, which is the defect this replaces.
+//    Optional parts appear as empty arrays / zeros, never as absent keys, so a
+//    reader never has to distinguish "not applicable" from "forgot to write it".
+string partitionJson( const evaldesign::Partition& p )
+{
+	string s = "{ \"method\": "
+		+ jsonStr( evaldesign::partitionMethodName( p.method ) )
+		+ ", \"seed\": " + to_string( p.seed )
+		+ ", \"k\": " + to_string( p.k )
+		+ ", \"strataColumns\": " + uintArray( p.strataColumns )
+		+ ", \"strataBins\": " + to_string( p.strataBins )
+		+ ", \"groupColumns\": " + uintArray( p.groupColumns )
+		+ ", \"groups\": " + to_string( p.nGroups )
+		+ ", \"developmentOnly\": " + ( p.developmentOnly ? "true" : "false" )
+		+ ", \"requested\": " + to_string( p.nRequested )
+		+ ", \"achieved\": " + to_string( p.nAchieved )
+		+ ", \"leakage\": " + to_string( p.leakage )
+		+ ", \"refusal\": " + jsonStr( p.refusal )
+		+ ", \"warnings\": [";
+	for ( unsigned i = 0; i < p.warnings.size(); i++ )
+		s += ( i ? ", " : "" ) + jsonStr( p.warnings[ i ] );
+	return s + "] }";
+}
+
 // --- locked-test helpers ----------------------------------------------------
 
 // The locked column for a procedure, matched by NAME (column order is free).
@@ -298,12 +393,12 @@ string cvreport::tier1( const crossval::Comparison& cmp, const PlanInfo& info,
 		os << " \xC2\xB7 " << info.events << " events (" << pct.str() << "%)";
 	}
 	os << "\n";
-	if ( !info.foldPlan.empty() ) os << " Folds: " << info.foldPlan << "\n";
+	if ( !info.foldPlanText().empty() ) os << " Folds: " << info.foldPlanText() << "\n";
 	if ( L )
 	{
 		os << " Locked test: " << locked.n << " rows";
 		if ( locked.n ) os << " (" << locked.events << " events)";
-		if ( !locked.splitPlan.empty() ) os << "; " << locked.splitPlan;
+		if ( !locked.splitPlanText().empty() ) os << "; " << locked.splitPlanText();
 		os << "\n";
 	}
 	os << rule( COLS, "\xE2\x95\x90" ) << "\n";
@@ -311,7 +406,7 @@ string cvreport::tier1( const crossval::Comparison& cmp, const PlanInfo& info,
 	os << " " << padRight( "Procedure", wName ) << padRight( "AUC (CV)", wAuc );
 	// The CI only appears when inference was declared; otherwise the column is the
 	//    point AUC alone (DLG-1).
-	if ( L ) os << padRight( locked.inferenceRan ? "AUC (test) [95% CI]"
+	if ( L ) os << padRight( locked.inferenceRan() ? "AUC (test) [95% CI]"
 		: "AUC (test)", wTest );
 	os << padRight( "Arch", wArch ) << "Time" << "\n";
 	os << " " << rule( COLS - 1, "\xE2\x94\x80" ) << "\n";
@@ -336,20 +431,23 @@ string cvreport::tier1( const crossval::Comparison& cmp, const PlanInfo& info,
 		const LockedContrast& c = locked.contrast;
 		os << " Primary contrast (prespecified): " << c.primary
 			<< " \xE2\x88\x92 " << c.reference << "\n";
+		// The estimator NAMES ITSELF here: a clustered p must never be printed as
+		//    "DeLong p" (they are different estimators with different assumptions).
+		const string method = evaldesign::inferenceShortName( locked.inference );
 		if ( c.degenerate )
 			os << "   Locked test: equal areas \xE2\x80\x94 no testable difference.\n";
 		else if ( c.separated )
 			os << "   Locked test: \xCE\x94" << "AUC = "
 				<< ( c.delta >= 0 ? "+" : "" ) << fixed3( c.delta )
-				<< ", deterministic separation (DeLong p \xE2\x89\x88 0)  \xE2\x86\x92  "
-				"significant.\n";
+				<< ", deterministic separation (" << method
+				<< " p \xE2\x89\x88 0)  \xE2\x86\x92  significant.\n";
 		else
 		{
 			ostringstream pv;
 			pv << setiosflags( ios::fixed ) << setprecision( 3 ) << c.p;
 			os << "   Locked test: \xCE\x94" << "AUC = "
 				<< ( c.delta >= 0 ? "+" : "" ) << fixed3( c.delta )
-				<< ", DeLong p = " << pv.str() << "  \xE2\x86\x92  "
+				<< ", " << method << " p = " << pv.str() << "  \xE2\x86\x92  "
 				<< ( c.significant ? "significant" : "not significant" ) << "\n";
 		}
 	}
@@ -401,15 +499,20 @@ string cvreport::tier1( const crossval::Comparison& cmp, const PlanInfo& info,
 			os << "   optimizer: " << opt << ".\n";
 	}
 
-	// The one standing caveat, always.
-	if ( L && locked.inferenceRan )
+	// The one standing caveat, always. When inference was withheld the caveat
+	//    states the ACTUAL reason (DLG-8): it used to assert "the sampling unit was
+	//    not declared independent" even when the unit HAD been declared and the
+	//    locked test was merely too sparse to estimate a covariance.
+	if ( L && locked.inferenceRan() )
 		os << " CV \xC2\xB1 is descriptive spread across dependent folds, not a CI; "
-			"the inferential\n comparison is on the locked test set (DeLong, which "
-			"assumes the declared\n independent-row sampling unit).\n";
+			"the inferential\n comparison is on the locked test set ("
+			<< evaldesign::inferenceShortName( locked.inference )
+			<< ", which assumes the declared\n "
+			<< evaldesign::samplingUnitPhrase( locked.unit ) << " sampling unit).\n";
 	else if ( L )
 		os << " CV \xC2\xB1 is descriptive spread across dependent folds, not a CI; "
-			"ordinary DeLong is\n withheld because the sampling unit was not declared "
-			"independent -- point AUCs\n above are descriptive.\n";
+			"AUC inference is\n withheld -- " << locked.inferenceReason
+			<< ".\n Point AUCs above are descriptive.\n";
 	else
 		os << " CV \xC2\xB1 is descriptive spread across dependent folds, not a CI; "
 			"this run performs no\n inferential comparison -- locked-test inference is "
@@ -430,7 +533,8 @@ string cvreport::tier2( const crossval::Comparison& cmp, const PlanInfo& info,
 	//    not the dataset totals, which with a locked test describe a larger set.
 	unsigned planN = 0, planEvents = 0;
 	planCounts( cmp, planN, planEvents );
-	os << "Fold plan: " << ( info.foldPlan.empty() ? "(unspecified)" : info.foldPlan )
+	os << "Fold plan: "
+		<< ( info.foldPlanText().empty() ? "(unspecified)" : info.foldPlanText() )
 		<< "   k = " << cmp.k;
 	if ( planN ) os << "   n = " << planN << "   events = " << planEvents;
 	os << "\n";
@@ -514,17 +618,17 @@ string cvreport::tier2( const crossval::Comparison& cmp, const PlanInfo& info,
 		os << "\nLocked-test evaluation (each procedure refit on the development set "
 			"by its\nown rule, scored once on the untouched locked test)\n";
 		os << "Locked test: " << locked.n << " rows, " << locked.events << " events";
-		if ( !locked.splitPlan.empty() ) os << "   " << locked.splitPlan;
+		if ( !locked.splitPlanText().empty() ) os << "   " << locked.splitPlanText();
 		os << "\n";
-		// Design metadata: what the inference assumes (DLG-1).
-		os << "  sampling unit: "
-			<< ( locked.samplingUnit.empty() ? "unspecified" : locked.samplingUnit )
-			<< "   independence: "
-			<< ( locked.independenceStatus.empty() ? "not declared" : locked.independenceStatus )
-			<< "\n";
-		os << "  inference: "
-			<< ( locked.inferenceMethod.empty() ? "none" : locked.inferenceMethod ) << "\n";
-		os << "  procedure         AUC(test)   " << ( locked.inferenceRan ? "95% CI"
+		// Design metadata: what the inference assumes (DLG-1), derived from the
+		//    structured design rather than repeated as prose (DLG-8). The cluster
+		//    line appears only for a grouped design -- absence is meaningful.
+		os << "  sampling unit: " << locked.samplingUnitText()
+			<< "   independence: " << locked.independenceText() << "\n";
+		if ( locked.nClusters )
+			os << "  clusters in the locked sample: " << locked.nClusters << "\n";
+		os << "  inference: " << locked.inferenceText() << "\n";
+		os << "  procedure         AUC(test)   " << ( locked.inferenceRan() ? "95% CI"
 			: "(no CI -- inference withheld)" ) << "\n";
 		for ( unsigned i = 0; i < locked.columns.size(); i++ )
 		{
@@ -555,21 +659,30 @@ string cvreport::tier2( const crossval::Comparison& cmp, const PlanInfo& info,
 			else if ( c.degenerate )
 				os << "  (equal areas: no testable difference)\n";
 			else if ( c.separated )
-				os << "  (deterministic separation, DeLong p ~ 0: significant)\n";
+				os << "  (deterministic separation, "
+					<< evaldesign::inferenceShortName( locked.inference )
+					<< " p ~ 0: significant)\n";
 			else
 			{
 				ostringstream pv;
 				pv << setiosflags( ios::fixed ) << setprecision( 4 ) << c.p;
-				os << ", DeLong two-sided p = " << pv.str()
+				os << ", " << evaldesign::inferenceShortName( locked.inference )
+					<< " two-sided p = " << pv.str()
 					<< "  (" << ( c.significant ? "significant" : "not significant" )
 					<< ")\n";
 			}
 		}
 		else if ( !locked.contrast.note.empty() )
 			os << "  Prespecified contrast: " << locked.contrast.note << "\n";
-		os << "  DeLong assumes independent test observations; it does not apply to "
-			"clustered\n  test data (e.g. shared county) -- cluster-aware inference "
-			"is a follow-on.\n";
+		// The standing scope note for whichever estimator this design permits.
+		if ( locked.inference == evaldesign::AucInference::ObuchowskiClustered )
+			os << "  Clustered inference treats the cluster, not the row, as the "
+				"independent\n  sampling unit; the point areas remain patient-row "
+				"Mann-Whitney areas.\n";
+		else
+			os << "  DeLong assumes independent test observations; it does not apply to "
+				"clustered\n  test data (e.g. shared county) -- cluster-aware inference "
+				"is a follow-on.\n";
 	}
 	return os.str();
 }
@@ -687,7 +800,8 @@ vector< cvreport::ArtifactResult > cvreport::writeArtifacts(
 		f << "  \"n\": " << n << ",\n";
 		f << "  \"events\": " << planEvents << ",\n";
 		f << "  \"k\": " << cmp.k << ",\n";
-		f << "  \"foldPlan\": " << jsonStr( info.foldPlan ) << ",\n";
+		f << "  \"foldPlan\": " << jsonStr( info.foldPlanText() ) << ",\n";
+		f << "  \"foldDesign\": " << partitionJson( info.folds ) << ",\n";
 		f << "  \"procedures\": [\n";
 		for ( unsigned p = 0; p < cmp.entries.size(); p++ )
 		{
@@ -728,14 +842,19 @@ vector< cvreport::ArtifactResult > cvreport::writeArtifacts(
 		{
 			f << ",\n  \"lockedTest\": {\n";
 			f << "    \"n\": " << locked.n << ", \"events\": " << locked.events << ",\n";
-			f << "    \"splitPlan\": " << jsonStr( locked.splitPlan ) << ",\n";
+			f << "    \"splitPlan\": " << jsonStr( locked.splitPlanText() ) << ",\n";
 			// Structured design metadata -- ordinary DeLong assumes independent test
 			//    observations; these say whether that was DECLARED and what inference
 			//    (if any) ran, replacing the old hardcoded independenceAssumed=true.
-			f << "    \"samplingUnit\": " << jsonStr( locked.samplingUnit ) << ",\n";
-			f << "    \"independenceStatus\": " << jsonStr( locked.independenceStatus ) << ",\n";
-			f << "    \"inferenceMethod\": " << jsonStr( locked.inferenceMethod ) << ",\n";
-			f << "    \"inferenceRan\": " << ( locked.inferenceRan ? "true" : "false" ) << ",\n";
+			//    The prose fields stay for compatibility; splitDesign is the machine
+			//    form, and inferenceReason says WHY when no estimator ran (DLG-8).
+			f << "    \"samplingUnit\": " << jsonStr( locked.samplingUnitText() ) << ",\n";
+			f << "    \"independenceStatus\": " << jsonStr( locked.independenceText() ) << ",\n";
+			f << "    \"inferenceMethod\": " << jsonStr( locked.inferenceText() ) << ",\n";
+			f << "    \"inferenceRan\": " << ( locked.inferenceRan() ? "true" : "false" ) << ",\n";
+			f << "    \"inferenceReason\": " << jsonStr( locked.inferenceReason ) << ",\n";
+			f << "    \"clusters\": " << locked.nClusters << ",\n";
+			f << "    \"splitDesign\": " << partitionJson( locked.split ) << ",\n";
 			f << "    \"areas\": [";
 			for ( unsigned i = 0; i < locked.columns.size(); i++ )
 			{
@@ -788,25 +907,38 @@ vector< cvreport::ArtifactResult > cvreport::writeArtifacts(
 				&& locked.columns[ p ].pred.size() != locked.testRows.size() )
 				consistent = false;
 
-		if ( !consistent )
+		// Cluster identity is joined by POSITION like everything else here, so a
+		//    length or id defect would silently re-label which patients are
+		//    correlated with which -- refuse the whole file instead (DLG-8).
+		const string clusterBad = locked.clusterError();
+		const bool hasCluster = !locked.cluster.empty();
+
+		if ( !consistent || !clusterBad.empty() )
 		{
 			ArtifactResult r;
 			r.name = "cv_locked_predictions.csv";
 			r.path = ( dir.empty() ? string() : dir + "/" ) + r.name;
-			r.error = "locked-test rows, outcomes, and predictions have inconsistent "
-				"lengths (not written)";
+			r.error = consistent ? clusterBad + " (not written)"
+				: "locked-test rows, outcomes, and predictions have inconsistent "
+					"lengths (not written)";
 			results.push_back( r );
 		}
 		else
 			results.push_back( writeOne( dir, "cv_locked_predictions.csv", [&]( ostream& f )
 			{
-				f << "row,outcome";
+				// The cluster column appears ONLY for a grouped design: an
+				//    ungrouped run's file stays byte-identical to before.
+				f << "row";
+				if ( hasCluster ) f << ",cluster";
+				f << ",outcome";
 				for ( unsigned p = 0; p < locked.columns.size(); p++ )
 					f << "," << csv( locked.columns[ p ].name );
 				f << "\n";
 				for ( unsigned i = 0; i < locked.testRows.size(); i++ )
 				{
-					f << locked.testRows[ i ] << "," << locked.outcome[ i ];
+					f << locked.testRows[ i ];
+					if ( hasCluster ) f << "," << locked.cluster[ i ];
+					f << "," << locked.outcome[ i ];
 					for ( unsigned p = 0; p < locked.columns.size(); p++ )
 					{
 						const LockedColumn& c = locked.columns[ p ];

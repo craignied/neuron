@@ -2569,3 +2569,59 @@ Carried forward — live items now live in `CLAUDE.md` under "Backlog".
     Release build, 11/11 ctest, goldens byte-identical (re-blessed, above), tools green,
     smoke green, oracle green. `AGENTS.md` and `docs/gui_cli_parity.md` now state plainly
     that the print counter is presentation only — a promise that had to be made true first.
+
+**2026-07-30 — DLG-8: the evaluation design becomes a type.** ROADMAP 4's remaining work
+(group-aware CV folds, cluster-aware locked-test inference) needs one question answered
+mechanically — *does this design permit this inference?* — and the shipped locked-test
+layer could not answer it. The design was four strings and a bool the GUI wrote by hand
+(`samplingUnit` / `independenceStatus` / `inferenceMethod` / `inferenceRan`), so nothing
+stopped a caller describing a group-disjoint split as an "outcome-stratified row holdout",
+and nothing could *ask* the report whether ordinary DeLong was admissible. `src/evaldesign.{h,cpp}`
+now owns the vocabulary — `SamplingUnit`, `AucInference`, `PartitionMethod`, and a
+`Partition` describing one partitioning act — and every displayed string is derived from
+it. The report describes a design; it no longer authors one.
+
+  - **The inference decision has ONE home.** `evaldesign::chooseInference( unit, method,
+    estimable, reason )` returns the estimator a declared sampling unit and an *achieved*
+    partition method permit, plus the reason when the answer is none. It encodes the
+    settled rules in one readable place: silence is never a declaration of independence;
+    a `cluster` declaration refuses rather than falling back; and — new, and unreachable
+    from HTTP until the grouped CV path lands — **declaring independent rows over a
+    group-disjoint design is refused**, because grouping prevents leakage and does not
+    make rows independent. The order matters: a design that forbids an estimator is
+    refused *before* asking whether the data could support one, so a sparse clustered test
+    never reports "too sparse" and thereby implies DeLong would otherwise have run.
+  - **A withheld inference now states the actual reason.** The Tier-1 caveat asserted
+    "ordinary DeLong is withheld because the sampling unit was not declared independent"
+    for *every* refusal — including a run where the unit **had** been declared and the
+    locked test was simply too sparse to estimate a covariance. Two different facts with
+    two different remedies, reported as one. The caveat now prints `inferenceReason`, and
+    `cv.locked` / `cv_run.json` carry it too. This is the only rendered wording that
+    changed; the declared-inference Tier 1 and the whole pure-CV path are byte-identical
+    (verified against the regenerated smoke artifacts).
+  - **Cluster identity is threaded by RAW ROW, and validated before it is written.**
+    `LockedInfo` gains `cluster[]` (parallel to `testRows`) and `nClusters` — the groups
+    present *in the locked sample*, which is the number of independent units a clustered
+    estimator would actually have. It is gathered as `rowGroup[ testRows[ i ] ]`, never
+    reconstructed after materialization, and `crossval` is **not** taught what a cluster
+    is: `LockedResult` already returns row identity, so the policy layer joins it (rule 6
+    — the plan listed `crossval::LockedResult` in the threading path; going through
+    `testRows` reaches the same place without pushing a design concern into the
+    repetition mechanism). `cv_locked_predictions.csv` gains a `cluster` column **only**
+    for a grouped design, and `clusterError()` refuses the whole file on a length or range
+    defect — a cluster id off by one row silently re-labels which patients are correlated.
+  - **The design reaches the artifacts as structure.** `cv_run.json` gains `foldDesign`
+    and `lockedTest.splitDesign` (method, seed, `k`, 1-based strata/group columns, bins,
+    group count, `developmentOnly`, requested-vs-achieved, leakage, refusal, warnings)
+    beside the prose, which is derived from the same fields. Every previously shipped key
+    is unchanged and byte-identical.
+  - **Proven red, three ways** (rule 2). Sabotage 1: let `chooseInference` ignore the
+    partition method → *"a grouped design cannot reach ordinary DeLong, whatever is
+    declared"* fails. Sabotage 2: skip `clusterError()` at the artifact gate → *"cv_locked_predictions.csv
+    is refused when cluster identity is malformed"* fails. Sabotage 3: drop
+    `developmentOnly` from the fold plan the GUI publishes → smoke's *"Tier-2 development
+    counts disagree with the fold plan"* fails. Each was restored and the full chain rerun.
+  - Gates: zero-warning Release build, 12/12 ctest, goldens byte-identical, smoke green,
+    oracle numerically identical. No API parameter and no GUI control changed, so
+    `docs/gui_cli_parity.md` is unaffected; `AGENTS.md` and
+    `docs/evaluation_report_spec.md` record the new artifact fields.

@@ -594,7 +594,9 @@ int main()
 		"the coordinator carries the fold plan and every procedure's results" );
 
 	cvreport::PlanInfo info;
-	info.n = n; info.foldPlan = "outcome-stratified, seed 7";
+	info.n = n;
+	info.folds.method = evaldesign::PartitionMethod::OutcomeStratified;
+	info.folds.seed = 7; info.folds.k = 5;
 	unsigned events = 0;
 	for ( unsigned r = 0; r < n; r++ ) if ( rc.outcome[ r ] ) events++;
 	info.events = events;
@@ -844,7 +846,8 @@ int main()
 		// differ from the development counts, which is the point.
 		cvreport::PlanInfo dinfo;
 		dinfo.n = n; dinfo.events = events; // whole dataset: 250 rows
-		dinfo.foldPlan = "outcome-stratified 5-fold, seed 7 (development rows only)";
+		dinfo.folds.method = evaldesign::PartitionMethod::OutcomeStratified;
+		dinfo.folds.seed = 7; dinfo.folds.k = 5; dinfo.folds.developmentOnly = true;
 		expect( nDev != n && devEvents != events,
 			"the fixture's development counts really do differ from the dataset totals" );
 
@@ -884,11 +887,11 @@ int main()
 
 		cvreport::LockedInfo lk;
 		lk.has = true; lk.n = 40; lk.events = 12;
-		lk.splitPlan = "outcome-stratified row holdout, seed 7";
-		lk.inferenceRan = true; // independence declared -> CIs + contrast p render
-		lk.samplingUnit = "row (declared independent)";
-		lk.independenceStatus = "declared: independent rows";
-		lk.inferenceMethod = "DeLong (ordinary, independent rows)";
+		lk.split.method = evaldesign::PartitionMethod::OutcomeStratified;
+		lk.split.seed = 7;
+		// Independence declared AND permitted by the design -> CIs + contrast p
+		lk.unit = evaldesign::SamplingUnit::Row;
+		lk.inference = evaldesign::AucInference::DeLongIndependent;
 		lk.testRows = { 3, 7, 11, 15 };            // raw ids (identity)
 		lk.outcome  = { 0, 1, 0, 1 };
 		for ( unsigned p = 0; p < rc.entries.size(); p++ )
@@ -966,9 +969,9 @@ int main()
 		// the caveat says inference was withheld. (Watched to FAIL if the layer emitted
 		// a CI/p without the declaration.)
 		cvreport::LockedInfo lk3 = lk;
-		lk3.inferenceRan = false;
-		lk3.samplingUnit = "unspecified"; lk3.independenceStatus = "not declared";
-		lk3.inferenceMethod = "none (sampling unit not declared independent)";
+		lk3.unit = evaldesign::SamplingUnit::Unspecified;
+		lk3.inference = evaldesign::AucInference::None;
+		lk3.inferenceReason = "sampling unit not declared independent";
 		for ( unsigned i = 0; i < lk3.columns.size(); i++ ) lk3.columns[ i ].hasCi = false;
 		lk3.contrast.hasInference = false; lk3.contrast.significant = false;
 		lk3.contrast.note = "sampling unit not declared independent";
@@ -977,8 +980,138 @@ int main()
 			&& wt1.find( "[95% CI]" ) == string::npos           // no CI header
 			&& wt1.find( "DeLong p" ) == string::npos           // no p
 			&& wt1.find( "inference unavailable" ) != string::npos
-			&& wt1.find( "withheld because the sampling unit was not declared" ) != string::npos,
+			&& wt1.find( "withheld -- sampling unit not declared independent" ) != string::npos,
 			"undeclared sampling unit: point AUC shown, DeLong CI/p WITHHELD with an explanation" );
+
+		// DLG-8: the withheld-inference caveat states the ACTUAL reason. Before the
+		// design became structured this line asserted "the sampling unit was not
+		// declared independent" for EVERY refusal -- including a run where the unit
+		// HAD been declared and the locked test was merely too sparse to estimate a
+		// covariance, which is a different fact with a different remedy.
+		cvreport::LockedInfo lk4 = lk3;
+		lk4.unit = evaldesign::SamplingUnit::Row;
+		lk4.inferenceReason = "locked test too sparse: fewer than two positives";
+		lk4.contrast.note = lk4.inferenceReason; // the layer passes the SAME reason on
+		string st1 = cvreport::tier1( rc, info, lk4 );
+		expect( st1.find( "locked test too sparse" ) != string::npos
+			&& st1.find( "sampling unit not declared" ) == string::npos,
+			"a sparse locked test says so, not that the sampling unit was undeclared" );
+
+		// DLG-8: a grouped design REFUSES ordinary DeLong even when the caller
+		// declares independent rows -- grouping stops leakage, it does not make rows
+		// independent. The decision has ONE home, so the report cannot disagree
+		// with the handler about it. Watched to FAIL against returning
+		// DeLongIndependent for a StratifiedGroup partition.
+		{
+			evaldesign::InferenceChoice ok = evaldesign::chooseInference(
+				evaldesign::SamplingUnit::Row,
+				evaldesign::PartitionMethod::OutcomeStratified, true, "" );
+			evaldesign::InferenceChoice grouped = evaldesign::chooseInference(
+				evaldesign::SamplingUnit::Row,
+				evaldesign::PartitionMethod::StratifiedGroup, true, "" );
+			evaldesign::InferenceChoice clustered = evaldesign::chooseInference(
+				evaldesign::SamplingUnit::Cluster,
+				evaldesign::PartitionMethod::StratifiedGroup, true, "" );
+			evaldesign::InferenceChoice sparse = evaldesign::chooseInference(
+				evaldesign::SamplingUnit::Row,
+				evaldesign::PartitionMethod::OutcomeStratified, false, "one class" );
+			expect( ok.method == evaldesign::AucInference::DeLongIndependent
+				&& ok.reason.empty(),
+				"declared independent rows over a row-wise split permit ordinary DeLong" );
+			expect( grouped.method == evaldesign::AucInference::None
+				&& grouped.reason.find( "group-disjoint" ) != string::npos,
+				"a grouped design cannot reach ordinary DeLong, whatever is declared" );
+			expect( clustered.method == evaldesign::AucInference::None
+				&& clustered.reason.find( "follow-on" ) != string::npos,
+				"a clustered sampling unit refuses rather than falling back to DeLong" );
+			expect( sparse.method == evaldesign::AucInference::None
+				&& sparse.reason.find( "one class" ) != string::npos,
+				"an unestimable locked test reports the estimator's own reason" );
+		}
+
+		// DLG-8: cluster identity is joined by POSITION, so a length or id defect
+		// would silently re-label which patients are correlated. The artifact
+		// writer must REFUSE the file rather than emit a mis-joined column.
+		// Watched to FAIL against writing the CSV without validating.
+		{
+			cvreport::LockedInfo g = lk;
+			g.split.method = evaldesign::PartitionMethod::StratifiedGroup;
+			g.split.groupColumns = { 2 };
+			g.unit = evaldesign::SamplingUnit::Cluster;
+			g.inference = evaldesign::AucInference::None;
+			g.inferenceReason = "clustered inference is a follow-on";
+			g.cluster = { 4, 4, 9, 9 };  // four locked rows, two counties
+			g.nClusters = 2;
+			expect( !g.clusterError().empty(),
+				"cluster ids outside the declared cluster count are rejected" );
+
+			g.cluster = { 0, 0, 1, 1 };
+			expect( g.clusterError().empty(),
+				"well-formed cluster identity passes validation" );
+
+			cvreport::LockedInfo bad = g;
+			bad.cluster.pop_back();      // one id short of the locked rows
+			expect( !bad.clusterError().empty(),
+				"a cluster vector that does not pair with the locked rows is rejected" );
+
+			vector< cvreport::ArtifactResult > gfiles =
+				cvreport::writeArtifacts( rc, info, ".", bad );
+			bool refused = false;
+			for ( unsigned i = 0; i < gfiles.size(); i++ )
+				if ( gfiles[ i ].name == "cv_locked_predictions.csv" )
+					refused = !gfiles[ i ].ok;
+			expect( refused,
+				"cv_locked_predictions.csv is refused when cluster identity is malformed" );
+
+			// A grouped design writes the cluster column; an ungrouped one does not
+			// (absence is meaningful, and the ungrouped file stays as it was).
+			cvreport::writeArtifacts( rc, info, ".", g );
+			string ghead;
+			{ ifstream lf( "./cv_locked_predictions.csv" ); getline( lf, ghead ); }
+			expect( ghead.rfind( "row,cluster,outcome", 0 ) == 0,
+				"a grouped locked test writes a cluster column, joined per row" );
+
+			cvreport::writeArtifacts( rc, info, ".", lk );
+			string uhead;
+			{ ifstream lf( "./cv_locked_predictions.csv" ); getline( lf, uhead ); }
+			expect( uhead.rfind( "row,outcome", 0 ) == 0,
+				"an ungrouped locked test writes no cluster column" );
+
+			// The design reaches the machine-readable artifact as STRUCTURE, not
+			// only as prose: a consumer can read the method and the group columns.
+			cvreport::PlanInfo ginfo = info;
+			ginfo.folds.method = evaldesign::PartitionMethod::StratifiedGroup;
+			ginfo.folds.groupColumns = { 2 };
+			ginfo.folds.nGroups = 37;
+			cvreport::writeArtifacts( rc, ginfo, ".", g );
+			string gj;
+			{
+				ifstream jf( "./cv_run.json" );
+				ostringstream all; all << jf.rdbuf(); gj = all.str();
+			}
+			expect( gj.find( "\"foldDesign\"" ) != string::npos
+				&& gj.find( "\"groupColumns\": [2]" ) != string::npos
+				&& gj.find( "\"groups\": 37" ) != string::npos,
+				"cv_run.json carries the fold design as structure, not only as prose" );
+			expect( gj.find( "\"splitDesign\"" ) != string::npos
+				&& gj.find( "\"clusters\": 2" ) != string::npos
+				&& gj.find( "\"inferenceReason\": \"clustered inference is a follow-on\"" )
+					!= string::npos,
+				"cv_run.json's locked block carries the split design, cluster count, and refusal reason" );
+
+			// JSON escaping reaches the structured strings too (B13): a warning or
+			// refusal is general text and must not break the file.
+			cvreport::PlanInfo einfo = info;
+			einfo.folds.warnings.push_back( "quote \" and \\ backslash" );
+			cvreport::writeArtifacts( rc, einfo, ".", lk );
+			string ej;
+			{
+				ifstream jf( "./cv_run.json" );
+				ostringstream all; all << jf.rdbuf(); ej = all.str();
+			}
+			expect( ej.find( "quote \\\" and \\\\ backslash" ) != string::npos,
+				"structured design strings are JSON-escaped in cv_run.json" );
+		}
 	}
 
 	if ( failures == 0 )

@@ -612,7 +612,8 @@ each procedure is **refit on the development rows by its own prespecified rule**
 the dev rows — no forced full-dev refit), and scored **once** on the untouched
 locked test. `cv.locked` carries per-procedure **point AUCs** and predictions;
 `cv_locked_predictions.csv` (raw row id, outcome, one column per procedure — the
-auditable pairing, written whenever predictions exist) joins the Tier-3 files.
+auditable pairing, written whenever predictions exist; a `cluster` column follows
+the row id **only** for a grouped design) joins the Tier-3 files.
 **Inference is OPT-IN (this is the guardrail).** Ordinary DeLong assumes
 *independent* test observations, which a mechanical row holdout does not establish
 — so the AUC 95% CIs and the contrast *p* are produced **only when you declare the
@@ -626,7 +627,15 @@ follow-on; when it lands, `cluster` will route to a clustered estimator and must
 two-sided *p* → significant/not at 0.05; a *deterministic separation* of areas
 reports p≈0, and *equal areas* report "no testable difference"); `cv.locked`
 adds the CIs and the signed contrast (`delta` = AUC(primary) − AUC(reference)) plus
-`samplingUnit`/`independenceStatus`/`inferenceMethod`/`inferenceRan` metadata. The
+`samplingUnit`/`independenceStatus`/`inferenceMethod`/`inferenceRan` metadata. When
+inference is withheld, `inferenceReason` states **why** — an undeclared sampling
+unit, a locked test too sparse to estimate a covariance, and a design that forbids
+the estimator are three different facts with different remedies, and the report
+names the one that applied. `cv.locked` also carries `splitMethod`/`splitPlan` and
+`clusters` (0 = an ungrouped design, not "unknown"); `cv_run.json` carries the same
+design as **structure** in `foldDesign` and `lockedTest.splitDesign` (method, seed,
+`k`, the 1-based strata/group columns, group count, achieved-vs-requested size,
+leakage, warnings, refusal) rather than only as the prose beside it. The
 contrast is set with `primary`/`reference` tokens (`logistic`|`ldfa`|`qdfa`|
 `neural`) which **must name selected procedures** (an unselected one is a
 validation error, never a silent default); absent, it defaults to neural vs

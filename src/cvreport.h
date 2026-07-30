@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "crossval.h"
+#include "evaldesign.h"
 
 using namespace std;
 
@@ -44,9 +45,15 @@ struct PlanInfo {
 	string dataset;    // a label for the header (e.g. "lowbwt"); "" hides it
 	unsigned n = 0;    // total exemplars in the dataset (Tier 1 summary)
 	unsigned events = 0; // outcome-1 count in the dataset (Tier 1 summary)
-	string foldPlan;   // how the folds were built (e.g. "outcome-stratified, seed 42")
+	// How the folds were built -- STRUCTURED (DLG-8), not prose a caller wrote.
+	//    The displayed line is derived from it (foldPlanText); k == 0 means no
+	//    plan was described and the report says so.
+	evaldesign::Partition folds;
 	string primary;    // prespecified primary procedure name (for the contrast line)
 	string reference;  // the procedure it is contrasted against
+
+	// The one-line fold plan, derived. "" when no plan was described.
+	string foldPlanText() const;
 };
 
 // The locked-test inference results (ROADMAP 4 Phase 4). A policy layer above the
@@ -89,20 +96,51 @@ struct LockedContrast {
 struct LockedInfo {
 	bool has = false;
 	unsigned n = 0, events = 0;    // locked-test size and event count
-	string splitPlan;              // how the locked test was formed (free text)
-	// Structured design metadata (DLG-1): ordinary DeLong assumes INDEPENDENT test
+
+	// The DESIGN, structured (DLG-8). Ordinary DeLong assumes INDEPENDENT test
 	//    observations, which a mechanically generated row holdout does not
-	//    establish. Inference (CIs / p) is produced ONLY when the user has declared
-	//    an independent-rows sampling unit; otherwise the layer still scores and
-	//    reports point AUCs, but withholds ordinary DeLong. These fields say which.
-	bool inferenceRan = false;     // DeLong CIs / p were produced
-	string samplingUnit;           // "row" (declared independent) / "unspecified"
-	string independenceStatus;     // "declared: independent rows" / "not declared"
-	string inferenceMethod;        // "DeLong (ordinary)" / "none (...)"
+	//    establish; inference runs only when the caller declares a sampling unit
+	//    the achieved partition method permits. These are the source of truth --
+	//    every displayed string below is derived from them, so a report cannot
+	//    describe a design it did not run (the free-text version could).
+	evaldesign::Partition split;   // how the locked test was formed
+	evaldesign::SamplingUnit unit = evaldesign::SamplingUnit::Unspecified;
+	evaldesign::AucInference inference = evaldesign::AucInference::None;
+	string inferenceReason;        // why inference is None -- NEVER a fit failure
+	                               //    (a procedure that did not fit says so in its
+	                               //    own column's note; the two are different facts)
+
 	vector< unsigned > testRows;   // locked-test raw row ids (identity, for the CSV)
 	vector< unsigned > outcome;    // per locked-test row, true 0/1 (paired)
+
+	// Stable cluster identity per locked-test row, when the design has groups --
+	//    parallel to testRows, ids in 0 .. nClusters-1. Empty means UNGROUPED, not
+	//    "unknown": absence is meaningful. The ids need only be stable within the
+	//    run; the raw source values are deliberately not carried, because a group
+	//    key can be built from identifying columns.
+	vector< unsigned > cluster;
+	unsigned nClusters = 0;
+
 	vector< LockedColumn > columns;
 	LockedContrast contrast;
+
+	// True when an AUC covariance estimator actually ran (the CI/contrast columns
+	//    are meaningful). Derived -- there is no separate flag to fall out of step.
+	bool inferenceRan() const
+		{ return inference != evaldesign::AucInference::None; }
+
+	// The displayed design lines, all derived from the fields above.
+	string splitPlanText() const;
+	string samplingUnitText() const;
+	string independenceText() const;
+	string inferenceText() const;
+
+	// "" when the cluster identity is well formed (absent, or one id per locked
+	//    row with every id < nClusters and nClusters actually achieved). Returns
+	//    the defect otherwise, so an artifact writer refuses rather than emitting
+	//    a mis-joined cluster column -- a cluster id off by one row silently
+	//    re-labels which patients are correlated.
+	string clusterError() const;
 };
 
 // Tier 1: the one-screen headline summary (box table + verdict block) as text.
