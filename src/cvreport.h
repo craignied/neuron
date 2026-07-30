@@ -52,6 +52,13 @@ struct PlanInfo {
 	string primary;    // prespecified primary procedure name (for the contrast line)
 	string reference;  // the procedure it is contrasted against
 
+	// Stable cluster identity per CV row, when the fold plan is group-aware --
+	//    parallel to cmp.outcome / cmp.foldId. Empty means UNGROUPED, not
+	//    "unknown". Written to cv_predictions.csv so a downstream analysis can
+	//    see which out-of-fold predictions share a sampling unit; nothing in the
+	//    report interprets it.
+	vector< unsigned > cluster;
+
 	// The one-line fold plan, derived. "" when no plan was described.
 	string foldPlanText() const;
 };

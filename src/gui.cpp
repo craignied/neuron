@@ -470,6 +470,34 @@ string param( const httplib::Request& req, const string& name )
 	return "";
 }
 
+// Parse a comma-separated list of 1-based input COLUMN numbers into 0-based
+//    input-node positions. Returns "" on success, else the error to report.
+//    Blank tokens are skipped so a trailing comma is not an error.
+//
+//    One parser for every endpoint that names columns (/api/load's strata and
+//    group, /api/cv's own): the range message and the 1-based -> node
+//    conversion are exactly the kind of thing that drifts when each handler
+//    writes its own loop, and a column off by one silently stratifies on the
+//    wrong variable.
+string parseColumnList( const string& text, unsigned nInput, const char* what,
+	vector< unsigned >& out )
+{
+	out.clear();
+	stringstream ss( text );
+	string tok;
+	while ( getline( ss, tok, ',' ) )
+	{
+		size_t a = tok.find_first_not_of( " \t" );
+		if ( a == string::npos ) continue; // skip a blank token
+		long v = atol( tok.c_str() + a );
+		if ( v < 1 || ( unsigned ) v > nInput )
+			return string( what ) + " column out of range (1.."
+				+ to_string( nInput ) + ")";
+		out.push_back( ( unsigned ) ( v - 1 ) ); // 1-based -> input node
+	}
+	return "";
+}
+
 // Whether the field arrived at all -- req.has_param alone is FALSE for a
 //    field sent as a multipart part (the page's file-upload posts), which is
 //    exactly when get_file_value holds it instead
@@ -704,18 +732,9 @@ string handleLoad( const httplib::Request& req )
 				if ( !strataStr.empty() )
 				{
 					vector< unsigned > cols;
-					stringstream ss( strataStr );
-					string tok;
-					while ( getline( ss, tok, ',' ) )
-					{
-						size_t a = tok.find_first_not_of( " \t" );
-						if ( a == string::npos ) continue; // skip a blank token
-						long v = atol( tok.c_str() + a );
-						if ( v < 1 || ( unsigned ) v > ds->getInput() )
-							return jsonMsg( false, "strata column out of range "
-								"(1.." + to_string( ds->getInput() ) + ")" );
-						cols.push_back( ( unsigned ) ( v - 1 ) ); // 1-based -> node
-					}
+					string bad = parseColumnList( strataStr, ds->getInput(),
+						"strata", cols );
+					if ( !bad.empty() ) return jsonMsg( false, bad );
 					ds->setStrataColumns( cols );
 				}
 				string binsStr = param( req, "strata_bins" );
@@ -734,18 +753,9 @@ string handleLoad( const httplib::Request& req )
 				if ( !groupStr.empty() )
 				{
 					vector< unsigned > cols;
-					stringstream gs( groupStr );
-					string tok;
-					while ( getline( gs, tok, ',' ) )
-					{
-						size_t a = tok.find_first_not_of( " \t" );
-						if ( a == string::npos ) continue; // skip a blank token
-						long v = atol( tok.c_str() + a );
-						if ( v < 1 || ( unsigned ) v > ds->getInput() )
-							return jsonMsg( false, "group column out of range "
-								"(1.." + to_string( ds->getInput() ) + ")" );
-						cols.push_back( ( unsigned ) ( v - 1 ) ); // 1-based -> node
-					}
+					string bad = parseColumnList( groupStr, ds->getInput(),
+						"group", cols );
+					if ( !bad.empty() ) return jsonMsg( false, bad );
 					ds->setGroupColumns( cols );
 				}
 
@@ -1808,6 +1818,24 @@ struct CvConfig
 	//    that decides, so a "cluster" declaration can never fall back to ordinary
 	//    DeLong by a caller forgetting a branch.
 	evaldesign::SamplingUnit unit = evaldesign::SamplingUnit::Unspecified;
+
+	// Fold policy (ROADMAP 4). 0-based input-node positions, parsed from the CV
+	//    request's OWN strata= / group= -- a CV request is self-contained and
+	//    never inherits /api/load's split configuration, which answers a
+	//    different question (one holdout, not a fold plan) and would silently
+	//    change what a CV run means when the dataset panel was last used.
+	//    Empty = the shipped outcome-stratified behavior, unchanged.
+	vector< unsigned > strataColumns;
+	unsigned strataBins = 4;
+	vector< unsigned > groupColumns;
+
+	// Which planner the two lists select. Derived once in handleCv so the job and
+	//    every report read the same answer rather than re-testing emptiness.
+	evaldesign::PartitionMethod foldMethod
+		= evaldesign::PartitionMethod::OutcomeStratified;
+
+	// The user's 1-based column numbers, for the report -- the form they typed.
+	vector< unsigned > userStrata, userGroup;
 };
 
 // The whole comparison on the worker thread: build an outcome-stratified k-fold
@@ -2030,32 +2058,124 @@ string runCvJob( CvConfig c )
 	lockedSplit.method = evaldesign::PartitionMethod::OutcomeStratified;
 	lockedSplit.seed = c.seed;
 
-	// Per-RAW-ROW group identity, empty while no CV request builds groups. Kept at
-	//    this scope because the locked columns are gathered by raw row index.
+	// Per-RAW-ROW group identity. Built ONCE, over the whole raw dataset, because
+	//    the same key must govern both the locked holdout and the outer folds --
+	//    two independently built keys would be two different definitions of a
+	//    cluster, and the leakage they were introduced to prevent would return.
+	//    Empty means an ungrouped request; absence is meaningful downstream.
+	const bool grouped =
+		( c.foldMethod == evaldesign::PartitionMethod::StratifiedGroup );
 	vector< unsigned > rowGroup;
 	unsigned nGroups = 0;
+	if ( grouped )
+	{
+		rowGroup = data.groupKey( c.groupColumns );
+		set< unsigned > gs( rowGroup.begin(), rowGroup.end() );
+		nGroups = ( unsigned ) gs.size();
+	}
 
 	if ( locked )
 	{
 		util::set_seed( c.seed );
-		nsplit::Holdout h = nsplit::stratifiedHoldout( label, c.lockedN );
-		devRows = h.train; lockedRows = h.test;
+		if ( grouped )
+		{
+			// Whole groups on one side. Groups are indivisible, so the achieved
+			//    size only approximates the request -- both are reported.
+			nsplit::GroupHoldout h = nsplit::groupHoldout( label, rowGroup, c.lockedN );
+			devRows = h.train; lockedRows = h.test;
+			lockedSplit.method = evaldesign::PartitionMethod::StratifiedGroup;
+			lockedSplit.groupColumns = c.userGroup;
+			lockedSplit.nGroups = nGroups;
+		}
+		else
+		{
+			nsplit::Holdout h = nsplit::stratifiedHoldout( label, c.lockedN );
+			devRows = h.train; lockedRows = h.test;
+		}
 		lockedSplit.nRequested = c.lockedN;
 		lockedSplit.nAchieved = ( unsigned ) lockedRows.size();
+
+		// Independent check that the locked partition is well formed and, when
+		//    grouped, that no group straddles it. The planner already guarantees
+		//    both; this is the pass that would notice if it stopped.
+		string bad = nsplit::partitionError( n, devRows, lockedRows, true );
+		if ( !bad.empty() )
+			return jsonMsg( false, "the locked-test split is not a valid partition: "
+				+ bad );
+		if ( grouped )
+		{
+			vector< char > inDev( nGroups, 0 ), inLocked( nGroups, 0 );
+			for ( unsigned i = 0; i < devRows.size(); i++ )
+				inDev[ rowGroup[ devRows[ i ] ] ] = 1;
+			for ( unsigned i = 0; i < lockedRows.size(); i++ )
+				inLocked[ rowGroup[ lockedRows[ i ] ] ] = 1;
+			unsigned leaked = 0;
+			for ( unsigned g = 0; g < nGroups; g++ ) if ( inDev[ g ] && inLocked[ g ] ) leaked++;
+			lockedSplit.leakage = leaked;
+			if ( leaked )
+				return jsonMsg( false, to_string( leaked ) + " group(s) appear in both "
+					"the development set and the locked test; the split is refused" );
+		}
+
 		Matrix< double > devRaw = raw.includerows( devRows );
 		devData = data;                 // copy config (inputs/outputs/discrete)
 		devData.setRawMatrix( devRaw );  // dev-only Raw; CV never sees the locked rows
 		cvData = &devData;
 	}
 
-	// Fold plan: outcome-stratified k-fold over the CV dataset (dev rows if locked).
+	// Fold plan over the CV dataset (development rows only when a locked test was
+	//    taken). Which planner runs is the request's fold policy, decided once in
+	//    handleCv; the outcome-only path is unchanged and byte-identical.
 	Matrix< double >& craw = cvData->getRawMatrix();
 	unsigned nCv = craw.rows(), cvOut = craw.cols() - 1;
 	vector< unsigned > cvLabel( nCv );
 	for ( unsigned r = 0; r < nCv; r++ )
 		cvLabel[ r ] = ( craw( r, cvOut ) != 0 ) ? 1u : 0u;
+
+	// The fold plan's structured description, filled by the code that builds it.
+	evaldesign::Partition foldDesign;
+	foldDesign.method = c.foldMethod;
+	foldDesign.seed = c.seed;
+	foldDesign.k = c.k;
+	foldDesign.developmentOnly = locked;
+	foldDesign.strataColumns = c.userStrata;
+	foldDesign.strataBins = c.strataColumns.empty() ? 0 : c.strataBins;
+	foldDesign.groupColumns = c.userGroup;
+
+	// Group ids for the CV rows, GATHERED by raw row -- never rebuilt on the
+	//    development subset, which would be a second definition of a cluster.
+	vector< unsigned > cvGroup;
+	if ( grouped )
+	{
+		cvGroup.resize( nCv );
+		for ( unsigned r = 0; r < nCv; r++ )
+			cvGroup[ r ] = rowGroup[ locked ? devRows[ r ] : r ];
+	}
+
 	util::set_seed( c.seed );
-	vector< unsigned > foldId = nsplit::kFold( cvLabel, c.k );
+	vector< unsigned > foldId;
+	if ( grouped )
+	{
+		nsplit::GroupFoldPlan gp = nsplit::stratifiedGroupKFold( cvLabel, cvGroup, c.k );
+		if ( !gp.ok ) return jsonMsg( false, "fold plan: " + gp.reason );
+		foldId = gp.foldId;
+		foldDesign.nGroups = gp.nGroups;
+		foldDesign.leakage = gp.leakageCount;
+		foldDesign.warnings = gp.warnings;
+	}
+	else if ( !c.strataColumns.empty() )
+	{
+		// DataSet owns what a stratum key MEANS; the bins are computed on the CV
+		//    rows, so a locked test never influences where a bin boundary falls.
+		vector< unsigned > stratum = cvData->strataKey( c.strataColumns, c.strataBins );
+		nsplit::FoldPlan fp = nsplit::stratifiedKFold( stratum, c.k );
+		if ( !fp.ok ) return jsonMsg( false, "fold plan: " + fp.reason );
+		foldId = fp.foldId;
+		foldDesign.nStrata = fp.nStrata;
+		foldDesign.warnings = fp.warnings;
+	}
+	else
+		foldId = nsplit::kFold( cvLabel, c.k );
 
 	// Templates for the network procedures. They MUST outlive compare()/evaluateOnce
 	//    -- trainProcedure captures the template by reference -- so they live here
@@ -2213,11 +2333,13 @@ string runCvJob( CvConfig c )
 	info.n = n;
 	info.events = events;
 	// The fold plan, structured: the report derives its sentence from this rather
-	//    than being handed one (DLG-8), so the two can never disagree.
-	info.folds.method = evaldesign::PartitionMethod::OutcomeStratified;
-	info.folds.seed = c.seed;
-	info.folds.k = c.k;
-	info.folds.developmentOnly = locked;
+	//    than being handed one (DLG-8), so the two can never disagree. It is the
+	//    SAME object the planner filled in, not a restatement of the request.
+	info.folds = foldDesign;
+	// Cluster identity for the folded rows, so cv_predictions.csv can say which
+	//    out-of-fold predictions share a sampling unit. Gathered by raw row, like
+	//    the locked one -- never rebuilt on the development subset.
+	if ( grouped ) info.cluster = cvGroup;
 	if ( !locked && c.neural && c.logistic )
 	{
 		info.primary = c.neuralObd ? "Neural (OBD)" : "Neural";
@@ -2375,6 +2497,58 @@ string handleCv( const httplib::Request& req )
 	// Locked-test evaluation (ROADMAP 4 Phase 4): an outcome-stratified ROW holdout
 	//    held out of CV. locked_fraction [0,1) or locked_n (a count) sizes it (0 =
 	//    none). The two are alternatives -- supplying both is a conflict (DLG-7).
+	// The CV request's OWN fold policy (ROADMAP 4). Deliberately re-parsed here
+	//    rather than read from the loaded DataSet: /api/load's strata=/group=
+	//    configure a train/test HOLDOUT, and silently reusing them would change
+	//    what a cross-validation means depending on how the dataset panel was last
+	//    driven. Absent = the shipped outcome-stratified fold plan, unchanged.
+	{
+		string strataStr = param( req, "strata" );
+		if ( !strataStr.empty() )
+		{
+			string bad = parseColumnList( strataStr, dataPtr->getInput(), "strata",
+				c.strataColumns );
+			if ( !bad.empty() ) return jsonMsg( false, bad );
+			string binsStr = param( req, "strata_bins" );
+			if ( !binsStr.empty() )
+			{
+				long b = atol( binsStr.c_str() );
+				if ( b < 2 ) return jsonMsg( false, "strata_bins must be at least 2" );
+				c.strataBins = ( unsigned ) b;
+			}
+		}
+		string groupStr = param( req, "group" );
+		if ( !groupStr.empty() )
+		{
+			string bad = parseColumnList( groupStr, dataPtr->getInput(), "group",
+				c.groupColumns );
+			if ( !bad.empty() ) return jsonMsg( false, bad );
+		}
+
+		// Stratifying and grouping pull in different directions -- one makes each
+		//    fold resemble the sample, the other makes it a set of unseen clusters
+		//    -- and there is no tested joint balancing objective yet. Refuse the
+		//    combination rather than letting one silently win (which is what
+		//    /api/load's engine path does, and is a defect to be fixed there, not
+		//    a precedent to copy).
+		if ( !c.strataColumns.empty() && !c.groupColumns.empty() )
+			return jsonMsg( false, "strata and group cannot be combined for a fold "
+				"plan yet: stratifying balances the subgroups your sample represents, "
+				"while grouping measures transfer to unseen groups. Choose one." );
+
+		c.userStrata.clear(); c.userGroup.clear();
+		for ( unsigned i = 0; i < c.strataColumns.size(); i++ )
+			c.userStrata.push_back( c.strataColumns[ i ] + 1 );
+		for ( unsigned i = 0; i < c.groupColumns.size(); i++ )
+			c.userGroup.push_back( c.groupColumns[ i ] + 1 );
+
+		c.foldMethod = !c.groupColumns.empty()
+			? evaldesign::PartitionMethod::StratifiedGroup
+			: !c.strataColumns.empty()
+				? evaldesign::PartitionMethod::CovariateStratified
+				: evaldesign::PartitionMethod::OutcomeStratified;
+	}
+
 	unsigned nRows = dataPtr->getRawMatrix().rows();
 	{
 		string frac = param( req, "locked_fraction" ), cnt = param( req, "locked_n" );
@@ -2411,13 +2585,50 @@ string handleCv( const httplib::Request& req )
 			vector< unsigned > lab( nRows );
 			for ( unsigned r = 0; r < nRows; r++ )
 				lab[ r ] = ( rawM( r, oc ) != 0 ) ? 1u : 0u;
+			// Preview the split the WORKER will make -- same seed, same planner.
+			//    A grouped request holds out whole groups, so previewing with the
+			//    row-wise holdout would validate counts the run never produces.
 			util::set_seed( c.seed );
-			nsplit::Holdout h = nsplit::stratifiedHoldout( lab, c.lockedN );
+			vector< unsigned > lockedTest, lockedTrain, gkey;
+			unsigned gCount = 0;
+			if ( !c.groupColumns.empty() )
+			{
+				gkey = dataPtr->groupKey( c.groupColumns );
+				set< unsigned > gs( gkey.begin(), gkey.end() );
+				gCount = ( unsigned ) gs.size();
+				nsplit::GroupHoldout g = nsplit::groupHoldout( lab, gkey, c.lockedN );
+				lockedTest = g.test; lockedTrain = g.train;
+			}
+			else
+			{
+				nsplit::Holdout h = nsplit::stratifiedHoldout( lab, c.lockedN );
+				lockedTest = h.test; lockedTrain = h.train;
+			}
 			unsigned lk1 = 0, lk0 = 0, dv1 = 0, dv0 = 0;
-			for ( unsigned i = 0; i < h.test.size(); i++ )
-				( lab[ h.test[ i ] ] ? lk1 : lk0 )++;
-			for ( unsigned i = 0; i < h.train.size(); i++ )
-				( lab[ h.train[ i ] ] ? dv1 : dv0 )++;
+			for ( unsigned i = 0; i < lockedTest.size(); i++ )
+				( lab[ lockedTest[ i ] ] ? lk1 : lk0 )++;
+			for ( unsigned i = 0; i < lockedTrain.size(); i++ )
+				( lab[ lockedTrain[ i ] ] ? dv1 : dv0 )++;
+
+			// A grouped run folds the DEVELOPMENT groups, so there must be at
+			//    least k of them -- a check the row counts cannot make, because a
+			//    thousand development rows in three counties still cannot fill
+			//    five group-disjoint folds.
+			if ( gCount )
+			{
+				set< unsigned > devGroups;
+				for ( unsigned i = 0; i < lockedTrain.size(); i++ )
+					devGroups.insert( gkey[ lockedTrain[ i ] ] );
+				if ( devGroups.size() < c.k )
+				{
+					ostringstream m;
+					m << "only " << devGroups.size() << " group(s) remain in the "
+						"development set for " << c.k << " group-disjoint folds "
+						"(the key gives " << gCount << " groups in all). Use fewer "
+						"folds, a smaller locked size, or a coarser group key.";
+					return jsonMsg( false, m.str() );
+				}
+			}
 			if ( lk0 < 2 || lk1 < 2 )
 			{
 				ostringstream m;
@@ -2459,9 +2670,34 @@ string handleCv( const httplib::Request& req )
 			return jsonMsg( false, "independence (sampling unit) must be 'rows' "
 				"(independent observations) or unset" );
 		if ( u == evaldesign::SamplingUnit::Cluster )
-			return jsonMsg( false, "clustered locked-test inference is not yet available "
-				"(a follow-on). Omit the sampling unit to get predictions and point "
-				"AUCs without ordinary DeLong, which would be invalid on clustered data." );
+		{
+			// Say precisely which prerequisites are missing, so the refusal is a
+			//    map rather than a wall. The estimator itself is the last one.
+			string why;
+			if ( c.groupColumns.empty() )
+				why = "clustered inference needs a group= key naming the clustering "
+					"columns; without one there are no sampling units to cluster on";
+			else if ( c.lockedN == 0 )
+				why = "clustered inference is computed on the locked test set; set "
+					"locked_fraction or locked_n";
+			else
+				why = "the clustered ROC covariance estimator is not built yet "
+					"(a follow-on)";
+			return jsonMsg( false, why + ". Omit the sampling unit to get predictions "
+				"and point AUCs without ordinary DeLong, which would be invalid on "
+				"clustered data." );
+		}
+		// Declaring independent ROWS over a group-disjoint design is a contradiction:
+		//    grouping stops leakage, it does not make the held-out rows independent.
+		//    Refused here rather than described as "descriptive grouping" and then
+		//    handed to ordinary DeLong. evaldesign::chooseInference enforces the same
+		//    rule downstream; this is the early, specific message.
+		if ( u == evaldesign::SamplingUnit::Row && !c.groupColumns.empty() )
+			return jsonMsg( false, "independence=rows contradicts a grouped design: "
+				"grouping prevents leakage but does not make rows independent, so "
+				"ordinary DeLong would not be valid. Omit the sampling unit for point "
+				"AUCs without inference, or drop group= if the rows really are "
+				"independent." );
 		c.unit = u;
 	}
 

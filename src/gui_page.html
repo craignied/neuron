@@ -13,6 +13,7 @@ fieldset { background: #fff; border: 1px solid #ddd; border-radius: 8px;
 legend { font-weight: 600; padding: 0 .4rem; }
 label { margin-right: 1rem; white-space: nowrap; }
 input[type=text] { width: 22rem; } input.num { width: 5.5rem; }
+input.cols { width: 8rem; }
 button { padding: .35rem .9rem; cursor: pointer; }
 .status { margin-left: .8rem; font-size: .9rem; color: #777; }
 .status.ok { color: #1a7f37; } .status.err { color: #b91c1c; }
@@ -491,6 +492,23 @@ size-vs-error search appears in the chart below.</span></div>
      real values erased them and the row read "Contrast neural logistic" with no
      way to tell which was subtracted from which (2026-07-29). -->
 <div class="row"><span class="status" id="cv_contrast_note"></span></div>
+<!-- Fold policy. These belong to the CV REQUEST and are read only from here: a
+     cross-validation must not silently inherit whatever split the Dataset panel
+     was last given, because the two answer different questions. -->
+<div class="row">
+  <label title="Comma-separated 1-based input column numbers. Folds are then balanced on the outcome AND these covariates, so every fold resembles the sample. A column with few distinct values contributes one level per value; a continuous column is cut into quantile bins.">Stratify folds on columns
+    <input class="cols" type="text" id="cv_strata" placeholder="e.g. 2,5"></label>
+  <label title="Quantile bins for a continuous stratification column. A column with at most this many distinct values is treated as categorical instead.">bins
+    <input class="num" type="number" id="cv_strata_bins" value="4" min="2"></label>
+</div>
+<div class="row">
+  <label title="Comma-separated 1-based input column numbers. Rows sharing identical values on ALL of them form one group (a county, a hospital) and are never split across folds or into the locked test. This measures transfer to groups the model never saw, and it prevents cluster leakage -- it does NOT make the rows independent.">Group by columns (never split)
+    <input class="cols" type="text" id="cv_group" placeholder="e.g. 1,3"></label>
+</div>
+<div class="row"><span class="status">Stratifying balances the subgroups your sample
+already represents. Grouping measures transfer to groups the model never saw, and keeps
+a cluster whole. Declaring the sampling unit changes the uncertainty, not the split.
+Stratification and grouping cannot be combined yet.</span></div>
 <div class="row">
   <label title="DeLong assumes INDEPENDENT test observations. Declare the sampling unit so the AUC confidence intervals and the contrast p-value are only produced when independence is justified. Leave unspecified to get predictions and point AUCs without inference. 'Clustered' (e.g. shared county) is a follow-on and cannot be selected yet.">Sampling unit
     <select id="cv_independence">
@@ -899,6 +917,14 @@ async function runCv() {
   if ($("cv_primary").value) p.primary = $("cv_primary").value;
   if ($("cv_reference").value) p.reference = $("cv_reference").value;
   if ($("cv_independence").value) p.independence = $("cv_independence").value;
+  // Fold policy comes from THIS panel only. Empty means "not requested" — the
+  // request never falls back to the Dataset panel's split configuration, which
+  // describes a different question (one holdout, not a fold plan).
+  if ($("cv_strata").value.trim()) {
+    p.strata = $("cv_strata").value.trim();
+    p.strata_bins = $("cv_strata_bins").value;
+  }
+  if ($("cv_group").value.trim()) p.group = $("cv_group").value.trim();
   const j = await api("/api/cv", p);
   if (!j.ok) { setStatus("cvstatus", false, j.message); return; }
   cving = true;

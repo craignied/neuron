@@ -1040,14 +1040,22 @@ int main()
 			g.unit = evaldesign::SamplingUnit::Cluster;
 			g.inference = evaldesign::AucInference::None;
 			g.inferenceReason = "clustered inference is a follow-on";
-			g.cluster = { 4, 4, 9, 9 };  // four locked rows, two counties
+			g.split.nGroups = 12;         // the design defines 12 groups in all
+			g.cluster = { 4, 4, 99, 99 };  // 99 is not one of them
 			g.nClusters = 2;
 			expect( !g.clusterError().empty(),
-				"cluster ids outside the declared cluster count are rejected" );
+				"a cluster id outside the design's groups is rejected" );
 
-			g.cluster = { 0, 0, 1, 1 };
+			// Ids stay GLOBAL (they must join across the two prediction files);
+			// nClusters is the number PRESENT here, which is a different number.
+			g.cluster = { 4, 4, 9, 9 };   // four locked rows, two of the 12 counties
 			expect( g.clusterError().empty(),
-				"well-formed cluster identity passes validation" );
+				"global cluster ids with a present-count are well formed" );
+
+			cvreport::LockedInfo miscount = g;
+			miscount.nClusters = 5;       // three more than are actually present
+			expect( !miscount.clusterError().empty(),
+				"a cluster count that disagrees with the ids present is rejected" );
 
 			cvreport::LockedInfo bad = g;
 			bad.cluster.pop_back();      // one id short of the locked rows

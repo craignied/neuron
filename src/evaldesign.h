@@ -88,6 +88,7 @@ struct Partition {
 	//    read against the request. Densification to 0-based happens in DataSet.
 	vector< unsigned > strataColumns;
 	unsigned strataBins = 0;
+	unsigned nStrata = 0;              // cells the stratum key actually produced
 	vector< unsigned > groupColumns;
 	unsigned nGroups = 0;              // distinct groups over the rows partitioned
 

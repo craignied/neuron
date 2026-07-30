@@ -1580,6 +1580,90 @@ PY
 head -1 cv_locked_predictions.csv | grep -q "^row,outcome,Logistic,Neural" \
     || fail "cv_locked_predictions.csv header wrong (row identity + one column per procedure)"
 
+# --- Cross-validation FOLD POLICY (ROADMAP 4) -------------------------------
+#     The CV request carries its own strata=/group=; it must never inherit the
+#     Dataset panel's split configuration, and the two modes cannot be combined.
+curl -s -X POST "$URL/api/cv" -d "folds=3&strata=3&group=4" \
+    | grep -q "cannot be combined" || fail "strata + group must be refused for a fold plan"
+curl -s -X POST "$URL/api/cv" -d "folds=3&group=99" \
+    | grep -q "out of range" || fail "an out-of-range group column must be refused"
+curl -s -X POST "$URL/api/cv" -d "folds=3&strata=3&strata_bins=1" \
+    | grep -q "at least 2" || fail "strata_bins < 2 must be refused"
+
+#     Declaring independent ROWS over a group-disjoint design is a contradiction:
+#     grouping stops leakage, it does not make rows independent. Refused, never
+#     relabelled "descriptive grouping" and handed to ordinary DeLong.
+curl -s -X POST "$URL/api/cv" -d "folds=3&group=3,4,5&locked_fraction=0.25&independence=rows" \
+    | grep -q "does not make rows independent" \
+    || fail "independence=rows over a grouped design must be refused"
+
+#     The clustered refusal names the MISSING prerequisite rather than one wall.
+curl -s -X POST "$URL/api/cv" -d "folds=3&independence=cluster" \
+    | grep -q "needs a group= key" || fail "clustered refusal must name the missing group key"
+curl -s -X POST "$URL/api/cv" -d "folds=3&group=3,4,5&independence=cluster" \
+    | grep -q "locked test" || fail "clustered refusal must name the missing locked test"
+
+#     Covariate-stratified folds: the plan says what it did, in the user's own
+#     1-based column numbers, and the machine-readable design says it structurally.
+curl -s -X POST "$URL/api/cv" \
+    -d "folds=3&seed=42&maxiter=4000&autostop_tol=0.01&logistic=1&neural=0&strata=3,4&strata_bins=4" \
+    | grep -q '"ok":true' || fail "covariate-stratified CV did not start"
+for i in $(seq 1 120); do curl -s "$URL/api/train/status" > cv_strata.json; grep -q '"running":false' cv_strata.json && break; sleep 0.3; done
+$PY - <<'PYSTRATA' || fail "covariate-stratified CV result malformed"
+import json
+d = json.load(open("cv_strata.json", encoding="utf-8"))["result"]
+assert d["ok"], d
+t2 = d["cv"]["tier2"]
+assert "outcome x covariate-stratified 3-fold" in t2, t2[:300]
+assert "on columns 3, 4" in t2, t2[:300]      # the numbers the user typed
+run = json.load(open("cv_run.json", encoding="utf-8"))
+fd = run["foldDesign"]
+assert fd["method"] == "outcome x covariate-stratified", fd
+assert fd["strataColumns"] == [3, 4] and fd["strataBins"] == 4 and fd["strata"] > 2, fd
+assert fd["groupColumns"] == [], fd
+PYSTRATA
+
+#     Group-aware folds AND a group-disjoint locked holdout from the SAME key.
+#     Zero leakage is asserted from the ARTIFACTS, independently of the planner's
+#     own count: no cluster id in two folds, and none in both the folded rows and
+#     the locked test.
+curl -s -X POST "$URL/api/cv" \
+    -d "folds=3&seed=42&maxiter=4000&autostop_tol=0.01&logistic=1&neural=0&group=3,4,5&locked_fraction=0.25" \
+    | grep -q '"ok":true' || fail "group-aware CV did not start"
+for i in $(seq 1 120); do curl -s "$URL/api/train/status" > cv_group.json; grep -q '"running":false' cv_group.json && break; sleep 0.3; done
+$PY - <<'PYGROUP' || fail "group-aware CV result malformed"
+import csv, json
+d = json.load(open("cv_group.json", encoding="utf-8"))["result"]
+assert d["ok"], d
+t1 = d["cv"]["tier1"]
+# The locked holdout is NOT described as a row holdout -- what it holds out is groups.
+assert "group-disjoint locked holdout" in t1, t1[:800]
+assert "group-disjoint outcome-stratified" in t1, t1[:800]
+lk = d["cv"]["locked"]
+assert lk["splitMethod"] == "group-disjoint outcome-stratified", lk
+assert lk["clusters"] >= 1, lk
+assert lk["inferenceRan"] is False, lk   # no sampling unit declared
+
+run = json.load(open("cv_run.json", encoding="utf-8"))
+assert run["foldDesign"]["groupColumns"] == [3, 4, 5], run["foldDesign"]
+assert run["foldDesign"]["leakage"] == 0, run["foldDesign"]
+assert run["lockedTest"]["splitDesign"]["leakage"] == 0, run["lockedTest"]
+
+folds = {}
+with open("cv_predictions.csv", encoding="utf-8") as f:
+    rows = list(csv.DictReader(f))
+assert "cluster" in rows[0], rows[0]
+for r in rows:
+    folds.setdefault(r["cluster"], set()).add(r["fold"])
+assert all(len(v) == 1 for v in folds.values()), [c for c, v in folds.items() if len(v) > 1]
+
+with open("cv_locked_predictions.csv", encoding="utf-8") as f:
+    lrows = list(csv.DictReader(f))
+assert "cluster" in lrows[0], lrows[0]
+lockedClusters = {r["cluster"] for r in lrows}
+assert not (lockedClusters & set(folds)), lockedClusters & set(folds)
+PYGROUP
+
 # DLG-3 (k-aware development feasibility): a rare-event set where the locked test
 #    can hold >= 2 of each class, but the development set is left with fewer than k
 #    events -- so some outer fold could not contain an event. The request must be

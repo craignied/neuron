@@ -2703,3 +2703,51 @@ indivisibility changes the problem: you cannot deal a group.
     wrong to pass.
   - Gates: zero-warning Release, 12/12 ctest, goldens byte-identical, smoke green, oracle
     identical.
+
+**2026-07-30 (evening) — fold policy reaches `/api/cv`, and the locked test obeys the
+same key.** Phases 4 and 5 of the group-aware plan shipped **together**, because they are
+not independently correct: group-disjoint folds with a row-wise locked holdout still let a
+county straddle development and locked, which is the leakage the whole feature exists to
+prevent. `/api/cv` now takes `strata=` / `strata_bins=` / `group=`, and the CV panel has
+controls for each.
+
+  - **A CV request is self-contained.** The parameters are re-parsed on the CV call and
+    never read from the loaded `DataSet`, whose `/api/load` `strata=`/`group=` size a
+    train/test *holdout*. Inheriting them would silently change what a cross-validation
+    means depending on how the Dataset panel had last been driven.
+  - **One group key, built once over the raw data**, governs both the locked holdout
+    (`nsplit::groupHoldout`) and the outer folds (`nsplit::stratifiedGroupKFold`). The
+    fold-plan key is **gathered** by raw row (`rowGroup[ devRows[ r ] ]`), never rebuilt on
+    the development subset — a second build is a second definition of a cluster. The
+    covariate stratum key, by contrast, IS built on the development rows, so a locked test
+    never influences where a quantile-bin boundary falls.
+  - **Leakage is checked again in the job**, independently of the planners: `partitionError`
+    on the locked split, then an explicit group-straddle count that refuses the run. The
+    smoke suite checks it a third way — from `cv_predictions.csv` and
+    `cv_locked_predictions.csv`, which now carry a `cluster` column (global ids, so the two
+    files join) — so three separate mechanisms would have to fail together.
+  - **`clusterError()` had the wrong contract and a real run caught it.** Ids are global
+    (0 .. groups-1) but `nClusters` counts the groups *present in the locked sample*; the
+    validator compared ids against the present-count and refused a perfectly valid file
+    ("cluster id 9 is out of range for 2 clusters"). Ids are now range-checked against the
+    design's group count and `nClusters` against the ids actually present — two different
+    quantities that were conflated. Found by running the endpoint, not by reading it.
+  - **Refusals that name the missing thing.** `strata` + `group` together (no tested joint
+    balancing objective — refused rather than letting one silently win, which is what
+    `/api/load`'s engine path does and is a defect there, not a precedent).
+    `independence=rows` with `group=` (a contradiction: grouping stops leakage, it does not
+    make rows independent). `independence=cluster` names *which* prerequisite is absent —
+    the group key, the locked test, or the estimator. A grouped run is preflighted for ≥ k
+    development **groups**, which no row count can establish, and the locked preflight now
+    previews the planner the worker will actually use rather than the row-wise one.
+  - **`parseColumnList` extracted**: `/api/load`'s two copies of the 1-based → node loop and
+    the range message became one function that `/api/cv`'s two new parameters also use. A
+    column off by one silently stratifies on the wrong variable.
+  - **Sabotage, in three stages.** Replacing the grouped locked holdout with a row holdout
+    is caught by the in-job group-straddle guard (the run refuses). Removing that guard too:
+    caught by `cv_run.json`'s `leakage` field. Zeroing that as well: caught by the smoke
+    suite's artifact-level check, which reported **9 clusters present in both the folded
+    rows and the locked test**. Each layer was proved to fire on its own.
+  - Gates: zero-warning Release, 12/12 ctest, goldens byte-identical, smoke green (extended),
+    oracle identical. `AGENTS.md`, `docs/gui_cli_parity.md` updated in the same commit.
+    A live GUI click-through of the two new text controls is still outstanding.

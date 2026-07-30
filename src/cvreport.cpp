@@ -58,20 +58,25 @@ string cvreport::LockedInfo::clusterError() const
 		return "cluster ids (" + to_string( cluster.size() ) + ") do not pair with "
 			"the locked-test rows (" + to_string( testRows.size() ) + ")";
 
+	// Ids are GLOBAL over the dataset ( 0 .. split.nGroups-1 ), not renumbered per
+	//    sample, so the same county carries the same id in cv_predictions.csv and
+	//    in cv_locked_predictions.csv and the two files can be joined. nClusters is
+	//    a different quantity: the groups PRESENT here, i.e. how many independent
+	//    units a clustered estimator would actually have. Conflating them is what
+	//    made a valid locked file refuse itself.
 	set< unsigned > seen;
 	for ( unsigned i = 0; i < cluster.size(); i++ )
 	{
-		if ( nClusters && cluster[ i ] >= nClusters )
-			return "cluster id " + to_string( cluster[ i ] ) + " is out of range for "
-				+ to_string( nClusters ) + " clusters";
+		if ( split.nGroups && cluster[ i ] >= split.nGroups )
+			return "cluster id " + to_string( cluster[ i ] ) + " is outside the "
+				+ to_string( split.nGroups ) + " groups the design defines";
 		seen.insert( cluster[ i ] );
 	}
-	// The locked sample need not contain every group in the dataset, but it can
-	//    never contain MORE distinct ids than the design says exist.
-	if ( nClusters && seen.size() > nClusters )
-		return "more distinct cluster ids than the declared cluster count";
 	if ( !nClusters )
 		return "per-row cluster ids without a cluster count";
+	if ( seen.size() != nClusters )
+		return "the locked sample holds " + to_string( seen.size() )
+			+ " distinct clusters but reports " + to_string( nClusters );
 
 	return "";
 }
@@ -317,6 +322,7 @@ string partitionJson( const evaldesign::Partition& p )
 		+ ", \"k\": " + to_string( p.k )
 		+ ", \"strataColumns\": " + uintArray( p.strataColumns )
 		+ ", \"strataBins\": " + to_string( p.strataBins )
+		+ ", \"strata\": " + to_string( p.nStrata )
 		+ ", \"groupColumns\": " + uintArray( p.groupColumns )
 		+ ", \"groups\": " + to_string( p.nGroups )
 		+ ", \"developmentOnly\": " + ( p.developmentOnly ? "true" : "false" )
@@ -735,7 +741,12 @@ vector< cvreport::ArtifactResult > cvreport::writeArtifacts(
 	// cv_predictions.csv -- one row per exemplar, one column per procedure.
 	results.push_back( writeOne( dir, "cv_predictions.csv", [&]( ostream& f )
 	{
+		// The cluster column appears ONLY for a group-aware fold plan, and only
+		//    when its identity pairs with the rows -- a mis-joined cluster id
+		//    would relabel which out-of-fold predictions are correlated.
+		const bool hasCluster = ( info.cluster.size() == n && n > 0 );
 		f << "exemplar,outcome,fold";
+		if ( hasCluster ) f << ",cluster";
 		for ( unsigned p = 0; p < cmp.entries.size(); p++ )
 			f << "," << csv( cmp.entries[ p ].name );
 		f << "\n";
@@ -743,6 +754,7 @@ vector< cvreport::ArtifactResult > cvreport::writeArtifacts(
 		{
 			f << r << "," << cmp.outcome[ r ] << ","
 				<< ( r < cmp.foldId.size() ? cmp.foldId[ r ] : 0 );
+			if ( hasCluster ) f << "," << info.cluster[ r ];
 			for ( unsigned p = 0; p < cmp.entries.size(); p++ )
 				f << "," << num( cmp.entries[ p ].result.oofPrediction[ r ] );
 			f << "\n";

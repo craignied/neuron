@@ -597,7 +597,20 @@ not the dataset totals Tier 1 reports; the same two numbers are `cv_run.json`'s
 out-of-fold substrate, never printed). `cv.files` lists ONLY files that were fully
 written; if any could not be (unwritable dir, full disk) the run still succeeds with
 the in-memory results and names the failure in `cv.warnings[]` — it never claims a
-file was written unless it truly was. **Cost:** CV is k trainings per procedure,
+file was written unless it truly was. **Fold policy** (ROADMAP 4): `strata=` (comma-separated 1-based input columns) and
+`strata_bins=` give outcome × covariate-stratified folds; `group=` gives
+group-disjoint folds where rows sharing identical values on all named columns are
+one indivisible cluster, never split across folds — **and the same key governs the
+locked holdout**, so a cluster cannot straddle development and locked either. These
+are the CV request's OWN parameters and are never inherited from `/api/load`'s
+`strata=`/`group=`, which size a train/test holdout and answer a different question.
+Absent both, the fold plan is the shipped outcome-stratified k-fold, unchanged. The
+two **cannot be combined** yet and the combination is refused, rather than one
+silently winning. Stratifying balances the subgroups your sample already represents;
+grouping measures transfer to groups the model never saw. **Neither makes rows
+independent** — see `independence=` below, which is a separate axis. A grouped run is
+additionally preflighted for ≥ k development *groups* (a thousand rows in three
+counties still cannot fill five group-disjoint folds). **Cost:** CV is k trainings per procedure,
 and the nested-OBD procedure is k full OBD searches, so it is the most expensive
 run in the GUI — start with small `folds`/`hidden_max`/`iter_budget` on large data.
 No formal cross-validation inference is reported (the fold results are dependent);
@@ -620,9 +633,13 @@ the row id **only** for a grouped design) joins the Tier-3 files.
 sampling unit**: `independence=rows` (independent observations). Without it you
 still get predictions + point AUCs, but ordinary DeLong is **withheld** with an
 explanation (never a silently invalid *p*, e.g. on clustered SEER county data).
-`independence=cluster` is **refused** for now — clustered inference is a
-follow-on; when it lands, `cluster` will route to a clustered estimator and must
-**never** fall back to ordinary DeLong. When inference runs, Tier 1 gains the
+`independence=cluster` is **refused** for now, and the refusal names the missing
+prerequisite — no `group=` key, no locked test, or the estimator itself; when it
+lands, `cluster` will route to a clustered estimator and must **never** fall back to
+ordinary DeLong. `independence=rows` **together with** `group=` is also refused: a
+group-disjoint design prevents leakage but does not make the held-out rows
+independent, so ordinary DeLong would not be valid, and calling the grouping
+"descriptive" would not repair the *p*. When inference runs, Tier 1 gains the
 `AUC (test) [95% CI]` column and the prespecified-contrast verdict (ΔAUC + DeLong
 two-sided *p* → significant/not at 0.05; a *deterministic separation* of areas
 reports p≈0, and *equal areas* report "no testable difference"); `cv.locked`

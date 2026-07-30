@@ -132,6 +132,7 @@ have **no CLI equivalent by design** — that is not a parity gap.
 | Cross-validation model comparison — logistic / LDFA / QDFA / neural (nested OBD) over ONE shared outcome-stratified k-fold plan, three-tier report (ROADMAP 4 Phase 4) | Dataset-independent "Cross-validation" panel + pinned Tier-1 headline table | `POST /api/cv` (async; three-tier report in the result) | — n/a (new capability, menus frozen) |
 | Nested-OBD optimizer rule — canonical / CGD / Shanno / Auto for the architecture search inside each CV fold, selected independently per fold and for the locked refit | CV panel "OBD optimizer" select (same four choices and wording as the standalone OBD panel) | `POST /api/cv` `algorithm=1\|2\|3\|auto` (default `auto`) | — n/a (new capability, menus frozen) |
 | Locked-test evaluation + opt-in DeLong inference — set aside an untouched row holdout; refit each procedure on the development rows, score once for point AUCs; DeLong CIs/contrast p ONLY when the sampling unit is declared independent (ROADMAP 4 Phase 4) | CV panel "Locked-test fraction" + primary/reference contrast selects + "Sampling unit" (independent rows / not declared / clustered-disabled) | `POST /api/cv` `locked_fraction=` (or `locked_n=`), `primary`/`reference` tokens, `independence=rows` | — n/a (new capability, menus frozen) |
+| Cross-validation fold policy — covariate-stratified or group-aware (cluster-disjoint) fold plans, chosen per CV request and never inherited from the Dataset panel (ROADMAP 4) | CV panel "Stratify folds on columns" + "bins", "Group by columns (never split)" | `POST /api/cv` `strata=` (1-based cols) `strata_bins=`, `group=` (1-based cols) | — n/a (new capability, menus frozen) |
 | Structured cross-validation progress — stage, procedure n of m, outer fold n of k, completed folds/procedures, and the nested architecture trial inside the current fold (2026-07-29) | CV panel status line beside Run/Stop | `GET /api/train/status` → top-level `cv{stage,procedure,procedureIndex,procedureCount,completedProcedures,fold,folds,completedFolds,inner{phase,hidden}}` | — n/a (new capability, menus frozen) |
 | Monitored held-out set, named by the engine — which set training and the OBD score actually watch (validation when loaded, else test) so a chart legend cannot contradict it (2026-07-29) | Live-error and OBD-search chart legends | `POST /api/load`, `POST /api/train`, `POST /api/obd` → `monitor:"validation"\|"test"\|"none"` | — n/a (new capability, menus frozen) |
 | Result provenance — the ROC/Statistics panels name the operation that produced them, and a standalone analysis (DFA, CV) says it did not become the current model (2026-07-29) | Provenance banner above the ROC panel + Statistics heading + the CV report's closing scope note | (presentation; derived from which endpoint produced the panels) | — n/a (new capability, menus frozen) |
@@ -165,8 +166,22 @@ panel's, or a previous run's. Async-only, shares the training job (status + stop
 standalone analysis — it does NOT touch the current model. The result carries the
 report as text (`cv.tier1`/`cv.tier2`) and the paths of the Tier-3 files
 (`cv_predictions.csv` / `cv_metrics.csv` / `cv_run.json`, written beside the data).
-The fold plan is outcome-stratified k-fold; composing CV with the covariate-strata
-/ group-aware split modes is a later extension.
+**Fold policy** is the CV request's own, parsed from `strata=` / `strata_bins=` /
+`group=` on this call and **never** read from `/api/load`'s split configuration —
+those size a train/test holdout and answer a different question, so inheriting them
+would change what a cross-validation means depending on how the Dataset panel was
+last driven. Absent both, the fold plan is the shipped outcome-stratified k-fold,
+byte-identical. `strata=` gives outcome × covariate-stratified folds (a column with
+few distinct values contributes one level per value; a continuous column is cut into
+`strata_bins` quantile bins, computed on the *development* rows so the locked test
+never influences a bin boundary). `group=` gives group-disjoint folds: rows sharing
+identical values on all named columns are one indivisible group, never split across
+folds — **and the same key governs the locked holdout**, so a cluster cannot straddle
+development and locked either. The two **cannot be combined** yet (there is no tested
+joint balancing objective) and the combination is refused rather than letting one
+silently win. Stratifying balances the subgroups the sample already represents;
+grouping measures transfer to groups the model never saw. Neither makes rows
+independent — that is what `independence=` declares, and it is a separate axis.
 
 Locked-test params on the same call: `locked_fraction` (0–1, `0` = none) OR
 `locked_n` (a count — not both) set aside an outcome-stratified **row holdout**
@@ -180,11 +195,20 @@ prespecified contrast and **must be selected procedures** (else a validation err
 absent, it defaults to neural vs logistic when both are present. When inference
 runs, Tier 1 gains an `AUC (test) [95% CI]` column + the contrast verdict (ΔAUC +
 DeLong *p*); `cv.locked` carries the areas/CIs, the signed contrast, and
-`samplingUnit`/`independenceStatus`/`inferenceMethod`/`inferenceRan` metadata, and
-`cv_locked_predictions.csv` (row id + one column per procedure) is written. The
-locked size is validated for achieved per-class counts (≥ 2 of each on both sides).
-**Ordinary DeLong assumes independent test rows** — not valid for clustered (e.g.
-county) data; cluster-aware test inference is a follow-on.
+`samplingUnit`/`independenceStatus`/`inferenceMethod`/`inferenceRan`/`inferenceReason`/
+`clusters`/`splitMethod`/`splitPlan` metadata, and `cv_locked_predictions.csv`
+(row id, a `cluster` column for a grouped design, outcome, one column per procedure)
+is written. `cv_predictions.csv` gains the same `cluster` column when the fold plan is
+group-aware; ids are **global** across both files, so they join. The locked size is
+validated for achieved per-class counts (≥ 2 of each on both sides) **using the
+planner the run will actually use** — a grouped request previews a group holdout — and
+a grouped run additionally needs ≥ k development *groups*, which no row count can
+establish. **Ordinary DeLong assumes independent test rows** — not valid for clustered
+(e.g. county) data; cluster-aware test inference is a follow-on. Two combinations are
+refused outright rather than described away: `independence=rows` with `group=` (a
+group-disjoint design does not make rows independent), and `independence=cluster`,
+whose refusal names the missing prerequisite — no `group=` key, no locked test, or the
+estimator itself.
 
 ## Logging (cross-cutting)
 

@@ -103,7 +103,9 @@ static string keyClause( const evaldesign::Partition& p )
 	{
 		s += " on column" + string( p.strataColumns.size() == 1 ? "" : "s" ) + " "
 			+ columnList( p.strataColumns );
-		if ( p.strataBins ) s += " (" + to_string( p.strataBins ) + " bins)";
+		if ( p.strataBins ) s += " (" + to_string( p.strataBins ) + " bins";
+		if ( p.strataBins && p.nStrata ) s += ", " + to_string( p.nStrata ) + " cells";
+		if ( p.strataBins ) s += ")";
 	}
 	if ( !p.groupColumns.empty() )
 	{
