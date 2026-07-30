@@ -96,12 +96,50 @@ struct GroupHoldout {
 GroupHoldout groupHoldout( const vector< unsigned >& label,
 	const vector< unsigned >& group, unsigned nTest );
 
-// Stratified k-fold assignment (ROADMAP 4 Phase 4). label[ r ] is the binary
-//    outcome; returns fold[ r ] in 0 .. k-1 with every row in exactly one fold.
-//    Within each class the rows are shuffled (seeded) and dealt round-robin to
-//    the folds through one shared counter, so every fold holds ~n/k rows AND
-//    ~the population outcome rate -- the stratification that makes each fold a
-//    fair held-out set. Reproducible under util::set_seed; 2 <= k <= n.
+// A structured k-fold assignment: the plan, its achieved counts, and anything
+//    the caller should be told about it. ok is false when no plan could be built
+//    (with reason); warnings carry facts that do NOT invalidate the plan -- a
+//    stratum too small to appear in every fold, most often.
+//
+//    foldId is the assignment ( row -> 0 .. k-1 ); foldSize[ f ] and
+//    stratumByFold[ f ][ s ] are RECOMPUTED from that assignment rather than
+//    accumulated while dealing, so the reported balance is what was actually
+//    produced and not what the algorithm intended (a displayed fact is derived
+//    from the object that owns it).
+struct FoldPlan {
+	bool ok = false;
+	string reason;                              // why no plan, when !ok
+	vector< unsigned > foldId;                  // per row, 0 .. k-1
+	unsigned k = 0;
+	unsigned nStrata = 0;
+	vector< unsigned > foldSize;                // rows per fold
+	vector< vector< unsigned > > stratumByFold; // [ fold ][ stratum ] achieved
+	vector< string > warnings;
+};
+
+// General stratified k-fold assignment over ARBITRARY stratum ids (ROADMAP 4).
+//    stratum[ r ] is row r's cell -- the outcome alone, or an outcome x named
+//    covariate cross-classification (DataSet::strataKey builds those). Ids need
+//    not be dense; they are compacted in ascending order, which is the order the
+//    strata are dealt in.
+//
+//    Each stratum's rows are fully shuffled (seeded Fisher-Yates) and dealt
+//    round-robin through ONE counter shared across strata, so a stratum's
+//    remainder starts where the previous stratum stopped instead of every
+//    remainder landing on fold 0 -- that bias is what makes small strata pile up
+//    in the low-numbered folds. Every fold then holds ~n/k rows and ~each
+//    stratum's population share.
+//
+//    kFold( label, k ) is exactly this function on the outcome alone; the
+//    identity is asserted by tests/split/check_split.cpp against a range of
+//    seeds, which is what licensed making one a wrapper for the other.
+FoldPlan stratifiedKFold( const vector< unsigned >& stratum, unsigned k );
+
+// Stratified k-fold assignment on a binary outcome (ROADMAP 4 Phase 4).
+//    label[ r ] must be 0 or 1; returns fold[ r ] in 0 .. k-1 with every row in
+//    exactly one fold. Reproducible under util::set_seed; 2 <= k <= n. This is
+//    the outcome-only case of stratifiedKFold above and delegates to it, so the
+//    two can never drift apart.
 vector< unsigned > kFold( const vector< unsigned >& label, unsigned k );
 
 }

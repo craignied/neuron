@@ -228,30 +228,96 @@ nsplit::GroupHoldout nsplit::groupHoldout( const vector< unsigned >& label,
 	return h;
 }
 
+nsplit::FoldPlan nsplit::stratifiedKFold( const vector< unsigned >& stratum,
+	unsigned k )
+{
+	FoldPlan plan;
+	unsigned n = ( unsigned ) stratum.size();
+
+	// A refusal is a first-class result here, not an assert: this entry point is
+	//    reachable from a request, where k comes from the user.
+	if ( k < 2 )
+	{
+		plan.reason = "k-fold cross-validation needs at least 2 folds";
+		return plan;
+	}
+	if ( n == 0 )
+	{
+		plan.reason = "no rows to fold";
+		return plan;
+	}
+	if ( k > n )
+	{
+		plan.reason = "more folds (" + to_string( k ) + ") than rows ("
+			+ to_string( n ) + ")";
+		return plan;
+	}
+
+	// Compact the stratum ids in ASCENDING order -- the order the strata are
+	//    dealt in, so the assignment depends only on the partition the ids
+	//    describe and not on which row happened to appear first.
+	vector< unsigned > distinct = stratum;
+	sort( distinct.begin(), distinct.end() );
+	distinct.erase( unique( distinct.begin(), distinct.end() ), distinct.end() );
+
+	unsigned S = ( unsigned ) distinct.size();
+	vector< vector< unsigned > > rows( S );
+	for ( unsigned r = 0; r < n; r++ )
+	{
+		unsigned s = ( unsigned ) ( lower_bound( distinct.begin(), distinct.end(),
+			stratum[ r ] ) - distinct.begin() );
+		rows[ s ].push_back( r );
+	}
+
+	// Shuffle each stratum (a full Fisher-Yates) so the deal is random, then deal
+	//    every stratum through ONE counter: stratum s+1 starts where s stopped.
+	plan.foldId.assign( n, 0 );
+	unsigned counter = 0;
+	for ( unsigned s = 0; s < S; s++ )
+	{
+		selectFront( rows[ s ], ( unsigned ) rows[ s ].size() );
+		for ( unsigned i = 0; i < rows[ s ].size(); i++ )
+			plan.foldId[ rows[ s ][ i ] ] = ( counter++ ) % k;
+	}
+
+	plan.ok = true;
+	plan.k = k;
+	plan.nStrata = S;
+
+	// Achieved counts, recomputed FROM the assignment.
+	plan.foldSize.assign( k, 0 );
+	plan.stratumByFold.assign( k, vector< unsigned >( S, 0 ) );
+	for ( unsigned r = 0; r < n; r++ )
+	{
+		unsigned f = plan.foldId[ r ];
+		unsigned s = ( unsigned ) ( lower_bound( distinct.begin(), distinct.end(),
+			stratum[ r ] ) - distinct.begin() );
+		plan.foldSize[ f ]++;
+		plan.stratumByFold[ f ][ s ]++;
+	}
+
+	// A stratum smaller than k cannot appear in every fold. That is a fact about
+	//    the data, not a failure -- say it and fold anyway. Never fabricate rows
+	//    and never collapse the stratum silently to make the arithmetic tidy.
+	unsigned thin = 0;
+	for ( unsigned s = 0; s < S; s++ )
+		if ( rows[ s ].size() < k ) thin++;
+	if ( thin )
+		plan.warnings.push_back( to_string( thin ) + " of " + to_string( S )
+			+ " strata have fewer than " + to_string( k )
+			+ " rows, so they cannot appear in every fold" );
+
+	return plan;
+}
+
 vector< unsigned > nsplit::kFold( const vector< unsigned >& label, unsigned k )
 {
-	unsigned n = ( unsigned ) label.size();
+	assert( k >= 2 && k <= label.size() ); // caller validates the fold count
 
-	assert( k >= 2 && k <= n ); // caller validates the fold count
-
-	// Partition row indices by outcome, preserving order within each class.
-	vector< unsigned > zeros, ones;
-	for ( unsigned r = 0; r < n; r++ )
-		( label[ r ] == 0 ? zeros : ones ).push_back( r );
-
-	// Shuffle each class (a full Fisher-Yates) so the deal is random.
-	selectFront( zeros, ( unsigned ) zeros.size() );
-	selectFront( ones, ( unsigned ) ones.size() );
-
-	// Deal both classes round-robin through ONE shared counter: each fold then
-	//    receives ~n0/k zeros and ~n1/k ones -- balanced size and outcome rate.
-	vector< unsigned > fold( n );
-	unsigned counter = 0;
-
-	for ( unsigned i = 0; i < zeros.size(); i++ )
-		fold[ zeros[ i ] ] = ( counter++ ) % k;
-	for ( unsigned i = 0; i < ones.size(); i++ )
-		fold[ ones[ i ] ] = ( counter++ ) % k;
-
-	return fold;
+	// The outcome-only case of the general planner. The two produced identical
+	//    seeded assignments before this became a delegation (asserted over many
+	//    seeds/shapes in check_split.cpp), which is what licensed collapsing them:
+	//    a second implementation of the same deal is how they would drift.
+	FoldPlan plan = stratifiedKFold( label, k );
+	return plan.foldId;
 }

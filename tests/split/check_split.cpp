@@ -29,6 +29,13 @@
 
 using namespace std;
 
+// Distinct ids in a densified key vector -- the size of the partition it describes.
+static unsigned countDistinct( const vector< unsigned >& v )
+{
+	set< unsigned > s( v.begin(), v.end() );
+	return ( unsigned ) s.size();
+}
+
 int failures = 0;
 
 // Element-wise vector equality. (nvec's own operator== template in
@@ -628,6 +635,244 @@ int main()
 			.find( "duplicate training" ) != string::npos, "partition: a dup is refused" );
 		expect( nsplit::partitionError( 6, { 0 }, { 9 }, false )
 			.find( "out of range" ) != string::npos, "partition: out-of-range is refused" );
+	}
+
+
+	// ---------------------------------------------------------------------
+	// The generalized stratified k-fold planner (ROADMAP 4).
+	// ---------------------------------------------------------------------
+	//
+	// nsplit::kFold is now the outcome-only case of nsplit::stratifiedKFold. That
+	// collapse is only safe if the general planner reproduces the SHIPPED planner's
+	// seeded assignments exactly -- otherwise generalizing quietly re-blesses every
+	// CV result in the repository. These 27 strings were produced by the PRE-
+	// generalization kFold (commit 2567090's split.cpp, compiled standalone) over
+	// 3 seeds x 3 sizes x 3 fold counts; each character is one row's fold id.
+	// A drift in the deal order, in the per-stratum shuffle, or in how many RNG
+	// draws are consumed moves them.
+	{
+		static const char* GOLDEN[ 27 ] = {
+		"01000111000011111001",
+		"30103021412212343044",
+		"45201101062543326345",
+		"001000110011011101110000110010011011011100101001010",
+		"430201320010423233032104413410344142124012143220013",
+		"603264231030456633411653404242621152200550105541361",
+		"1110110101110001010100100011000010100110100010111001011011101111000010010110101110001011000100011",
+		"4210131403133312213113323032444444201431023241022120001100300232244000013022314413444203122443011",
+		"2143231564364456540503241450353610506304462162120353300612655334341146201532124566420262501205011",
+		"10001010100011111010",
+		"04420243400333112121",
+		"14025521530436143602",
+		"010011001001101000111111001000100111001110110001001",
+		"430200302103001032044131243232110044442344223111312",
+		"225110032501514665401153036442622324405356633640110",
+		"0010000110101100001110110011000110100011001010110000000011111001010111001111101100111001011100101",
+		"1013340141111022421344033000314022230030433122143112400240032422140431302240102414133243243231041",
+		"3246003422350443122335551061204331154104441540154661356242543350406266302651135616523606512012020",
+		"00111101111001010000",
+		"22241301032444301013",
+		"52324601130045152364",
+		"010101000011110001110111001011101001111101000001000",
+		"221223234231200404143024204111040313332104130430041",
+		"064015202536336055101451402130045661622424241331365",
+		"0101110100010001100011100011011010100001101100001000000111011001010110011111101000101101111100101",
+		"1330430103221243304402102200440441100032222011443203412434414231311122010314240013311314030433222",
+		"6611406664500225324062436255024313030151316356161552414536522360132430414250030043221655241304514",
+		};
+
+		const unsigned seeds[] = { 1, 42, 7 };
+		const unsigned ns[] = { 20, 51, 97 };
+		const unsigned ks[] = { 2, 5, 7 };
+		unsigned caseIdx = 0, mismatches = 0;
+		for ( unsigned si = 0; si < 3; si++ )
+		for ( unsigned ni = 0; ni < 3; ni++ )
+		for ( unsigned ki = 0; ki < 3; ki++, caseIdx++ )
+		{
+			unsigned n = ns[ ni ], k = ks[ ki ];
+			vector< unsigned > label( n );
+			for ( unsigned r = 0; r < n; r++ ) label[ r ] = ( r * 7 % 11 < 4 ) ? 1u : 0u;
+
+			util::set_seed( seeds[ si ] );
+			nsplit::FoldPlan plan = nsplit::stratifiedKFold( label, k );
+
+			string got;
+			for ( unsigned r = 0; r < n; r++ )
+				got += ( char ) ( '0' + plan.foldId[ r ] );
+			if ( !plan.ok || got != string( GOLDEN[ caseIdx ] ) ) mismatches++;
+		}
+		expect( mismatches == 0,
+			"the general planner reproduces the shipped kFold's seeded assignments exactly" );
+
+		// Structural contracts on the general planner, over an outcome x covariate
+		// stratum key with a deliberately awkward remainder.
+		{
+			const unsigned n = 203, k = 5, S = 7;
+			vector< unsigned > stratum( n );
+			for ( unsigned r = 0; r < n; r++ ) stratum[ r ] = ( r * 13 ) % S;
+			util::set_seed( 99 );
+			nsplit::FoldPlan p = nsplit::stratifiedKFold( stratum, k );
+			expect( p.ok && p.k == k && p.nStrata == S && p.foldId.size() == n,
+				"the plan reports its own k, stratum count, and one assignment per row" );
+
+			// Every row in exactly one valid fold, and the achieved sizes agree
+			// with the assignment they are supposed to summarize.
+			unsigned total = 0; bool inRange = true;
+			vector< unsigned > count( k, 0 );
+			for ( unsigned r = 0; r < n; r++ )
+			{
+				if ( p.foldId[ r ] >= k ) inRange = false;
+				else count[ p.foldId[ r ] ]++;
+			}
+			for ( unsigned f = 0; f < k; f++ ) total += p.foldSize[ f ];
+			expect( inRange && total == n && count == p.foldSize,
+				"every row lands in exactly one valid fold and foldSize matches" );
+
+			// Size spread is the unavoidable remainder only (203 = 40*5 + 3).
+			unsigned lo = p.foldSize[ 0 ], hi = p.foldSize[ 0 ];
+			for ( unsigned f = 1; f < k; f++ )
+			{
+				if ( p.foldSize[ f ] < lo ) lo = p.foldSize[ f ];
+				if ( p.foldSize[ f ] > hi ) hi = p.foldSize[ f ];
+			}
+			expect( hi - lo <= 1, "fold sizes differ by at most the remainder" );
+
+			// COVARIATE balance: every stratum is spread across the folds within
+			// one row of its fair share. This is the assertion the sabotage below
+			// is aimed at -- reduce the key to the outcome alone and it fails.
+			bool balanced = true;
+			for ( unsigned s = 0; s < S; s++ )
+			{
+				unsigned sTotal = 0;
+				for ( unsigned f = 0; f < k; f++ ) sTotal += p.stratumByFold[ f ][ s ];
+				for ( unsigned f = 0; f < k; f++ )
+				{
+					unsigned share = p.stratumByFold[ f ][ s ];
+					if ( share + 1 < sTotal / k || share > sTotal / k + 1 ) balanced = false;
+				}
+			}
+			expect( balanced,
+				"each stratum is spread across the folds within one row of its share" );
+
+			// A remainder must not always land on fold 0: with 7 strata of 29 rows
+			// each and k = 5, dealing each stratum from a fresh fold 0 would give
+			// fold 0 a visible surplus. One shared counter is what prevents it.
+			expect( p.foldSize[ 0 ] <= n / k + 1,
+				"stratum remainders do not pile up on the first fold" );
+
+			// Same seed -> same plan; different seed -> a different one.
+			util::set_seed( 99 );
+			nsplit::FoldPlan again = nsplit::stratifiedKFold( stratum, k );
+			util::set_seed( 100 );
+			nsplit::FoldPlan other = nsplit::stratifiedKFold( stratum, k );
+			expect( again.foldId == p.foldId, "a fixed seed reproduces the fold plan" );
+			expect( other.foldId != p.foldId, "a different seed gives a different plan" );
+		}
+
+		// A stratum smaller than k is a fact about the data, not a failure: the
+		// plan is produced and the thin strata are WARNED about, never fabricated
+		// away and never silently collapsed into a neighbour.
+		{
+			vector< unsigned > stratum( 40 );
+			for ( unsigned r = 0; r < 40; r++ ) stratum[ r ] = ( r < 37 ) ? 0u : ( r - 36 );
+			util::set_seed( 3 );
+			nsplit::FoldPlan p = nsplit::stratifiedKFold( stratum, 5 );
+			expect( p.ok && p.warnings.size() == 1
+				&& p.warnings[ 0 ].find( "3 of 4 strata" ) != string::npos,
+				"strata too small for k are reported as a warning, not a refusal" );
+		}
+
+		// Refusals are structured results, not asserts: k comes from a request.
+		{
+			vector< unsigned > s( 10, 0 );
+			expect( !nsplit::stratifiedKFold( s, 1 ).ok
+				&& !nsplit::stratifiedKFold( s, 11 ).ok
+				&& !nsplit::stratifiedKFold( vector< unsigned >(), 2 ).ok,
+				"k < 2, k > n, and an empty dataset are refused with a reason" );
+		}
+	}
+
+
+	// ---- The exposed key builders (ROADMAP 4) -------------------------------
+	// DataSet owns what a stratum/group key MEANS -- which columns are levels,
+	// which are quantile-binned, how tuples densify. Cross-validation needs that
+	// same interpretation over ITS OWN columns, so the builders are public and the
+	// configured (/api/load) path is one caller of them. These pin the semantics
+	// the CV fold planner will depend on.
+	{
+		// col 0: categorical {0,1,2}. col 1: continuous (200 distinct values).
+		// col 2 (last): the binary outcome.
+		Matrix< double > kraw( 200, 3 );
+		for ( unsigned r = 0; r < 200; r++ )
+		{
+			kraw( r, 0 ) = ( double ) ( r % 3 );
+			kraw( r, 1 ) = ( double ) r * 0.5;
+			kraw( r, 2 ) = ( r % 5 == 0 ) ? 1.0 : 0.0;
+		}
+		DataSet kds;
+		kds.setInput( 2 ); kds.setOutput( 1 ); kds.setDiscrete( true );
+		kds.setHistory( false );
+		kds.setRawMatrix( kraw );
+
+		// Outcome only: exactly two strata.
+		vector< unsigned > sOut = kds.strataKey( vector< unsigned >(), 4 );
+		unsigned distinctOut = countDistinct( sOut );
+		expect( sOut.size() == 200 && distinctOut == 2,
+			"an empty column list gives the outcome-only stratum key" );
+
+		// Outcome x one categorical column: 2 x 3 = 6 cells, all occupied.
+		vector< unsigned > sCat = kds.strataKey( vector< unsigned >{ 0 }, 4 );
+		expect( countDistinct( sCat ) == 6,
+			"a categorical column contributes one level per value" );
+
+		// Outcome x a CONTINUOUS column: quantile-binned, so the cell count follows
+		// the bin count, not the 200 distinct values.
+		vector< unsigned > sCont4 = kds.strataKey( vector< unsigned >{ 1 }, 4 );
+		vector< unsigned > sCont5 = kds.strataKey( vector< unsigned >{ 1 }, 5 );
+		expect( countDistinct( sCont4 ) <= 8 && countDistinct( sCont4 ) >= 5
+			&& countDistinct( sCont5 ) > countDistinct( sCont4 ),
+			"a continuous column is quantile-binned, and more bins give more cells" );
+
+		// Two columns at once, and the configured path agrees with the explicit one.
+		vector< unsigned > sBoth = kds.strataKey( vector< unsigned >{ 0, 1 }, 4 );
+		expect( countDistinct( sBoth ) > countDistinct( sCat ),
+			"several columns cross-classify into finer cells" );
+
+		kds.setStrataColumns( vector< unsigned >{ 0 } );
+		kds.setStrataBins( 4 );
+		vector< unsigned > sConfigured = kds.strataKey( kds.getStrataColumns(),
+			kds.getStrataBins() );
+		expect( sConfigured == sCat,
+			"the configured columns produce the same key as naming them explicitly" );
+
+		// Group keys: exact match, no binning. col 0 has 3 values -> 3 groups.
+		vector< unsigned > g0 = kds.groupKey( vector< unsigned >{ 0 } );
+		expect( g0.size() == 200 && countDistinct( g0 ) == 3,
+			"a group key is an exact match on the named columns" );
+
+		// Grouping on a continuous column does NOT bin: every value its own group.
+		vector< unsigned > g1 = kds.groupKey( vector< unsigned >{ 1 } );
+		expect( countDistinct( g1 ) == 200,
+			"group keys never bin -- distinct values are distinct groups" );
+
+		// Grouping by nothing makes every row its own group, so the "no group
+		// straddles a partition" invariant stays TRUE rather than becoming
+		// vacuously false with a single all-rows group.
+		vector< unsigned > gNone = kds.groupKey( vector< unsigned >() );
+		expect( countDistinct( gNone ) == 200,
+			"grouping by no columns gives one group per row" );
+
+		// Out-of-range columns are ignored, not thrown: the request layer reports
+		// them, and a key builder must not take the process down.
+		vector< unsigned > gBad = kds.groupKey( vector< unsigned >{ 99 } );
+		expect( gBad.size() == 200,
+			"an out-of-range group column is ignored rather than throwing" );
+
+		// No Raw loaded -> an empty key, never a read of an empty Matrix.
+		DataSet empty;
+		expect( empty.strataKey( vector< unsigned >(), 4 ).empty()
+			&& empty.groupKey( vector< unsigned >() ).empty(),
+			"the key builders return nothing without a raw dataset" );
 	}
 
 	if ( failures == 0 )

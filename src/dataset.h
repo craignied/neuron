@@ -178,6 +178,29 @@ public:
 	void setGroupColumns( const vector< unsigned >& c ) { groupColumns = c; }
 	const vector< unsigned >& getGroupColumns() const { return groupColumns; }
 
+	// The KEY BUILDERS, exposed (ROADMAP 4). DataSet owns interpreting selected
+	//    input columns -- which are categorical levels, which are quantile-binned,
+	//    and how the tuples densify into ids -- and cross-validation needs exactly
+	//    that interpretation for its fold plan. Exposing them is what stops a
+	//    second implementation appearing in the GUI (rule 6): the private,
+	//    configured path below calls these with the object's own columns, so a CV
+	//    request that names DIFFERENT columns gets the SAME semantics without
+	//    disturbing the /api/load split configuration.
+	//
+	//    Both are read-only over Raw, so they need a rawLoaded dataset and return
+	//    an empty vector without one. Columns are 0-based input-node positions;
+	//    out-of-range columns are ignored rather than throwing, because the
+	//    caller's validation layer reports them (see /api/cv).
+	//
+	//    strataKey: the binary outcome is ALWAYS a factor -- a CV stratum key
+	//    balances the outcome first and the named covariates within it.
+	vector< unsigned > strataKey( const vector< unsigned >& columns,
+		unsigned bins ) const;
+	// groupKey: exact match on all named columns, no binning. Rows sharing every
+	//    value form one indivisible group. With no columns every row is its own
+	//    group, which is the honest answer to "group by nothing".
+	vector< unsigned > groupKey( const vector< unsigned >& columns ) const;
+
 	// Logging to history file accessors
 	void setHistory( const bool flag ) { historyFlag = flag; } // set history logging
 	bool getHistory() { return historyFlag; } // get history logging

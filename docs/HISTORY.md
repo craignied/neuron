@@ -2625,3 +2625,41 @@ it. The report describes a design; it no longer authors one.
     oracle numerically identical. No API parameter and no GUI control changed, so
     `docs/gui_cli_parity.md` is unaffected; `AGENTS.md` and
     `docs/evaluation_report_spec.md` record the new artifact fields.
+
+**2026-07-30 (later) — the generalized stratified k-fold planner.** `nsplit::kFold` folded
+on the outcome alone. `nsplit::stratifiedKFold( stratum, k )` now folds on **arbitrary
+stratum ids** and returns a structured `FoldPlan` — the assignment, achieved fold sizes,
+a stratum x fold matrix, and warnings — with `kFold` reduced to the outcome-only case of
+it. Refusals (`k < 2`, `k > n`, no rows) are returned as results, not asserted, because
+`k` reaches this function from a request.
+
+  - **The collapse was licensed by a golden, not by reading the code.** Generalizing a
+    planner that every CV result in the repository depends on is a silent re-bless if the
+    seeded assignments move by one draw. The pre-generalization `kFold` was compiled
+    standalone from `2567090:src/split.cpp` and run over 3 seeds x 3 sizes x 3 fold counts;
+    those 27 assignments are embedded in `check_split.cpp` and the general planner must
+    reproduce them character for character. It does.
+  - **Achieved counts are recomputed FROM the assignment**, not accumulated while dealing,
+    so the reported balance is what was produced rather than what the algorithm intended.
+  - **The shared deal counter is load-bearing and now has an assertion.** Each stratum is
+    shuffled and dealt round-robin through ONE counter, so stratum s+1 starts where s
+    stopped. Restarting per stratum piles every remainder onto fold 0 — with 7 strata and
+    k = 5 that is a visible surplus. Sabotaging the counter fails three assertions,
+    including the equivalence golden.
+  - **A stratum smaller than k warns; it never fabricates or collapses.** It cannot appear
+    in every fold, which is a fact about the data, not a failure.
+  - **Sabotage (the covariate-balance proof):** dealing all rows in one shuffle, ignoring
+    the strata entirely, fails *"each stratum is spread across the folds within one row of
+    its share"* — and also the three pre-existing outcome-balance assertions, which is the
+    evidence that the delegation preserved what `kFold` guaranteed.
+  - **`DataSet::strataKey( columns, bins )` and `groupKey( columns )` are now public**, with
+    the configured `/api/load` path (`buildStrata` / `buildGroupKey`) reduced to callers
+    that pass the object's own columns. CV needs DataSet's *interpretation* of selected
+    columns — which are levels, which are quantile-binned, how tuples densify — over its
+    OWN column list, and exposing the builder is what stops a second implementation
+    appearing in `gui.cpp` (rule 6). Grouping by no columns gives one group per row, the
+    honest reading, which also keeps every "no group straddles a partition" invariant
+    true rather than vacuously false. Out-of-range columns are ignored (the request layer
+    reports them); no raw dataset gives an empty key rather than a read of an empty Matrix.
+  - Gates: zero-warning Release, 12/12 ctest, goldens byte-identical, smoke green, oracle
+    identical.

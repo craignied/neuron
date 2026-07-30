@@ -1090,8 +1090,22 @@ void DataSet::makeFold( const vector< unsigned >& trainRows,
 //    tuples are densified into ids 0 .. S-1 in order of first appearance.
 vector< unsigned > DataSet::buildStrata() const
 {
+	return strataKey( strataColumns, strataBins );
+}
+
+// The same construction, over an ARBITRARY column list -- the form cross-
+//    validation needs, because a CV request carries its own stratification and
+//    must not silently inherit the one /api/load was given. buildStrata above is
+//    this function applied to the object's configured columns, so there is one
+//    implementation of what a stratum key MEANS.
+vector< unsigned > DataSet::strataKey( const vector< unsigned >& columns,
+	unsigned bins ) const
+{
+	if ( !rawLoadedFlag || Raw.rows() == 0 ) return vector< unsigned >();
+
 	unsigned n = Raw.rows();
 	unsigned outCol = Raw.cols() - 1;
+	if ( bins < 2 ) bins = 2; // a single bin is not a stratification
 
 	// Every row's key starts with its outcome level (0 or 1).
 	vector< vector< unsigned > > key( n, vector< unsigned >( 1 ) );
@@ -1099,9 +1113,10 @@ vector< unsigned > DataSet::buildStrata() const
 		key[ r ][ 0 ] = ( Raw( r, outCol ) == 0 ) ? 0u : 1u;
 
 	// Append a level for each named stratum column.
-	for ( unsigned k = 0; k < strataColumns.size(); k++ )
+	for ( unsigned k = 0; k < columns.size(); k++ )
 	{
-		unsigned c = strataColumns[ k ];
+		unsigned c = columns[ k ];
+		if ( c >= outCol ) continue; // not an input column; the caller validates
 
 		vector< double > val( n );
 		for ( unsigned r = 0; r < n; r++ ) val[ r ] = Raw( r, c );
@@ -1112,13 +1127,13 @@ vector< unsigned > DataSet::buildStrata() const
 
 		vector< unsigned > level( n );
 
-		if ( distinct.size() <= strataBins ) // categorical: one level per value
+		if ( distinct.size() <= bins ) // categorical: one level per value
 		{
 			for ( unsigned r = 0; r < n; r++ )
 				level[ r ] = ( unsigned ) ( lower_bound( distinct.begin(),
 					distinct.end(), val[ r ] ) - distinct.begin() );
 		}
-		else // continuous: strataBins equal-count quantile bins, by rank
+		else // continuous: `bins` equal-count quantile bins, by rank
 		{
 			vector< unsigned > ord( n );
 			for ( unsigned r = 0; r < n; r++ ) ord[ r ] = r;
@@ -1126,7 +1141,7 @@ vector< unsigned > DataSet::buildStrata() const
 				[ &val ]( unsigned a, unsigned b ) { return val[ a ] < val[ b ]; } );
 			for ( unsigned rank = 0; rank < n; rank++ )
 				level[ ord[ rank ] ] =
-					( unsigned ) ( ( ( unsigned long ) rank * strataBins ) / n );
+					( unsigned ) ( ( ( unsigned long ) rank * bins ) / n );
 		}
 
 		for ( unsigned r = 0; r < n; r++ ) key[ r ].push_back( level[ r ] );
@@ -1222,16 +1237,31 @@ void DataSet::splitDiagnostic( const vector< unsigned >& testRows,
 //    order.
 vector< unsigned > DataSet::buildGroupKey() const
 {
+	return groupKey( groupColumns );
+}
+
+// The same construction over an ARBITRARY column list, for the same reason as
+//    strataKey: a CV request brings its own group definition.
+vector< unsigned > DataSet::groupKey( const vector< unsigned >& columns ) const
+{
+	if ( !rawLoadedFlag || Raw.rows() == 0 ) return vector< unsigned >();
+
 	unsigned n = Raw.rows();
+	unsigned outCol = Raw.cols() - 1;
 
 	map< vector< double >, unsigned > id;
 	vector< unsigned > group( n );
 
 	for ( unsigned r = 0; r < n; r++ )
 	{
-		vector< double > key( groupColumns.size() );
-		for ( unsigned k = 0; k < groupColumns.size(); k++ )
-			key[ k ] = Raw( r, groupColumns[ k ] );
+		vector< double > key;
+		key.reserve( columns.size() );
+		for ( unsigned k = 0; k < columns.size(); k++ )
+			if ( columns[ k ] < outCol ) key.push_back( Raw( r, columns[ k ] ) );
+		// With no usable columns every row is its own group -- the honest reading
+		//    of "group by nothing", and it keeps every downstream group invariant
+		//    (no group straddles a partition) trivially true rather than false.
+		if ( key.empty() ) key.push_back( ( double ) r );
 
 		map< vector< double >, unsigned >::iterator it = id.find( key );
 		if ( it == id.end() )
