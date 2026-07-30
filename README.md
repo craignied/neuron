@@ -160,7 +160,8 @@ voters or political behavior and is not a tool for political targeting.*
 
 ## Architecture and API reference
 
-The **[neuron Design Manifest](docs/manifest.pdf)** is the human-readable
+The **[neuron Design Manifest](https://raw.githubusercontent.com/craignied/neuron/main/docs/manifest.pdf)**
+opens directly as a PDF and is the human-readable
 reference for the project architecture. It documents:
 
 - the neuron 3.0 layer and ownership model;
