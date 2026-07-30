@@ -158,6 +158,21 @@ explicitly fictional synthetic dataset to show how to:
 *Civic Choice is fictional synthetic demonstration data. It describes no real
 voters or political behavior and is not a tool for political targeting.*
 
+## Architecture and API reference
+
+The **[neuron Design Manifest](docs/manifest.pdf)** is the human-readable
+reference for the project architecture. It documents:
+
+- the neuron 3.0 layer and ownership model;
+- the command-line interface and reproducible scripted sessions;
+- the complete loopback REST API, including asynchronous jobs and artifacts;
+- the current data-preparation and HTML-deployment helpers; and
+- the mathematical and object-design foundations inherited from neUROn2++.
+
+The current neuron 3.0 material appears first; the retained historical
+mathematics and class design are clearly labeled as the foundational design
+record.
+
 ## Data and experiment files
 
 The engine works with numeric datasets whose outcome is the final column. The
@@ -287,11 +302,6 @@ an entire replaced ROC confidence-interval path.
 | [`AGENTS.md`](AGENTS.md) | Operational recipes and repository rules for AI assistants |
 | [`CLAUDE.md`](CLAUDE.md) | Standing rules, current state, settled decisions, and active roadmap |
 | [`docs/HISTORY.md`](docs/HISTORY.md) | Dated development record and completed roadmaps |
-
-The original neUROn2++ manual is preserved at
-[`docs/manifest.pdf`](docs/manifest.pdf). It documents the engine's model and menu
-lineage; current GUI/API behavior is documented in the repository's Markdown
-references.
 
 ## Current status
 
