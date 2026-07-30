@@ -11,7 +11,9 @@
 #include "iterative.h"
 #include "utility.h"
 
+#include <algorithm>
 #include <atomic>
+#include <map>
 #include <memory>
 #include <sstream>
 
@@ -156,39 +158,121 @@ crossval::Procedure cvadapters::dfaProcedure( bool quadratic )
 	};
 }
 
+cvadapters::InnerSplit cvadapters::innerValidationSplit(
+	const vector< unsigned >& trainRows, const vector< unsigned >& rowLabel,
+	const vector< unsigned >& rowGroup, double fraction )
+{
+	InnerSplit out;
+	unsigned nTrain = ( unsigned ) trainRows.size();
+	if ( nTrain < 2 )
+	{
+		out.reason = "too few training rows in this fold for an inner validation split";
+		return out;
+	}
+
+	vector< unsigned > label( nTrain );
+	for ( unsigned i = 0; i < nTrain; i++ ) label[ i ] = rowLabel[ trainRows[ i ] ];
+
+	unsigned nVal = ( unsigned ) ( fraction * nTrain + 0.5 );
+	if ( nVal < 1 ) nVal = 1;
+	if ( nVal > nTrain - 1 ) nVal = nTrain - 1; // always leave an inner training row
+
+	vector< unsigned > pickTrain, pickVal; // positions within trainRows
+	if ( rowGroup.empty() )
+	{
+		nsplit::Holdout h = nsplit::stratifiedHoldout( label, nVal );
+		pickTrain = h.train; pickVal = h.test;
+	}
+	else
+	{
+		// Group-disjoint inner split. groupHoldout indexes by dense id, so the
+		//    fold's ids are densified here -- in order of FIRST APPEARANCE among
+		//    the training rows, never by ascending value. groupHoldout visits
+		//    groups in a seeded permutation of the dense id list, so densifying by
+		//    value would make the split depend on how the caller happened to NUMBER
+		//    its clusters: relabel the same clustering and a different set of rows
+		//    becomes the inner validation set. First appearance is a property of
+		//    the data, so the same clustering always gives the same split.
+		vector< unsigned > gid( nTrain );
+		{
+			map< unsigned, unsigned > dense;
+			for ( unsigned i = 0; i < nTrain; i++ )
+			{
+				unsigned key = rowGroup[ trainRows[ i ] ];
+				map< unsigned, unsigned >::iterator it = dense.find( key );
+				if ( it == dense.end() )
+				{
+					unsigned id = ( unsigned ) dense.size();
+					dense[ key ] = id;
+					gid[ i ] = id;
+				}
+				else gid[ i ] = it->second;
+			}
+			if ( dense.size() < 2 )
+			{
+				out.reason = "this fold's training rows come from a single group, so no "
+					"group-disjoint inner validation set exists";
+				return out;
+			}
+		}
+
+		nsplit::GroupHoldout h = nsplit::groupHoldout( label, gid, nVal );
+		pickTrain = h.train; pickVal = h.test;
+	}
+
+	if ( pickTrain.empty() || pickVal.empty() )
+	{
+		out.reason = rowGroup.empty()
+			? "the inner validation fraction leaves one side of the split empty"
+			: "whole groups cannot be divided into a usable inner training and "
+				"validation set at this fraction";
+		return out;
+	}
+
+	out.train.reserve( pickTrain.size() );
+	out.validation.reserve( pickVal.size() );
+	for ( unsigned i = 0; i < pickTrain.size(); i++ )
+		out.train.push_back( trainRows[ pickTrain[ i ] ] );
+	for ( unsigned i = 0; i < pickVal.size(); i++ )
+		out.validation.push_back( trainRows[ pickVal[ i ] ] );
+	out.ok = true;
+	return out;
+}
+
 crossval::Procedure cvadapters::nestedObdProcedure( const obd::Config& cfg,
 	double innerValFraction, vector< crossval::FoldSelection >* selections,
-	obd::ProgressFn progress )
+	obd::ProgressFn progress, const vector< unsigned >& rowGroup )
 {
-	return [ cfg, innerValFraction, selections, progress ]( DataSet& foldData,
+	return [ cfg, innerValFraction, selections, progress, rowGroup ]( DataSet& foldData,
 		const vector< unsigned >& trainRows,
 		const vector< unsigned >& testRows,
 		const atomic< bool >* cancel ) -> ProcResult
 	{
 		ProcResult pr;
 
-		// Inner validation split of the fold's TRAINING rows ONLY, stratified on
-		//    the outcome. This is where leak-freeness is won: the held-out testRows
-		//    are never among the rows OBD's early stopping watches.
+		// Inner validation split of the fold's TRAINING rows ONLY. This is where
+		//    leak-freeness is won: the held-out testRows are never among the rows
+		//    OBD's early stopping watches. When the run is grouped the inner split
+		//    is group-disjoint as well, so the architecture is not chosen on rows
+		//    whose clusters are also in the inner training set.
 		Matrix< double >& raw = foldData.getRawMatrix();
 		unsigned outCol = raw.cols() - 1;
-		vector< unsigned > innerLabel( trainRows.size() );
-		for ( unsigned i = 0; i < trainRows.size(); i++ )
-			innerLabel[ i ] = ( raw( trainRows[ i ], outCol ) != 0 ) ? 1u : 0u;
+		vector< unsigned > rowLabel( raw.rows() );
+		for ( unsigned r = 0; r < raw.rows(); r++ )
+			rowLabel[ r ] = ( raw( r, outCol ) != 0 ) ? 1u : 0u;
 
-		unsigned nInnerVal = ( unsigned ) ( innerValFraction * trainRows.size() + 0.5 );
-		if ( nInnerVal < 1 ) nInnerVal = 1;
-		if ( trainRows.size() >= 2 && nInnerVal > trainRows.size() - 1 )
-			nInnerVal = trainRows.size() - 1; // always leave an inner training row
-
-		nsplit::Holdout h = nsplit::stratifiedHoldout( innerLabel, nInnerVal );
-		vector< unsigned > innerTrain, innerVal;
-		innerTrain.reserve( h.train.size() );
-		innerVal.reserve( h.test.size() );
-		for ( unsigned i = 0; i < h.train.size(); i++ )
-			innerTrain.push_back( trainRows[ h.train[ i ] ] );
-		for ( unsigned i = 0; i < h.test.size(); i++ )
-			innerVal.push_back( trainRows[ h.test[ i ] ] );
+		InnerSplit split = innerValidationSplit( trainRows, rowLabel, rowGroup,
+			innerValFraction );
+		if ( !split.ok )
+		{
+			// A fold whose inner partition is infeasible FAILS with its reason --
+			//    it never silently falls back to a row-wise inner split, which
+			//    would answer a different question than the one being asked.
+			pr.reason = split.reason;
+			return pr;
+		}
+		const vector< unsigned >& innerTrain = split.train;
+		const vector< unsigned >& innerVal = split.validation;
 
 		// Materialize the fold three ways: train = innerTrain, validation =
 		//    innerVal (what OBD's early stopping watches), test = testRows (the

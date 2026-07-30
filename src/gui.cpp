@@ -2249,7 +2249,12 @@ string runCvJob( CvConfig c )
 	// Assemble the procedure specs given an arch sink, so CV and the locked-test
 	//    evaluation each get their OWN sink (CV's records a size per fold; the
 	//    locked one records the single frozen fit's size).
-	auto assemble = [ & ]( vector< crossval::FoldSelection >* archSink )
+	//    innerGroup is the per-raw-row group identity for THE DATASET THAT PROCEDURE
+	//    WILL RECEIVE -- cvData's rows for the CV pass, the full data's rows for the
+	//    locked-development refit. They are different index spaces, so each pass
+	//    passes its own; handing the wrong one over would silently mis-group.
+	auto assemble = [ & ]( vector< crossval::FoldSelection >* archSink,
+		const vector< unsigned >& innerGroup )
 	{
 		vector< crossval::ProcedureSpec > ps;
 		if ( c.logistic )
@@ -2263,7 +2268,7 @@ string runCvJob( CvConfig c )
 			if ( c.neuralObd )
 				ps.push_back( { "Neural (OBD)",
 					cvadapters::nestedObdProcedure( c.obd, c.innerVal, archSink,
-						innerProgress ), archSink } );
+						innerProgress, innerGroup ), archSink } );
 			else
 				ps.push_back( { "Neural", cvadapters::trainProcedure( *sp, c.maxIter ), nullptr } );
 		}
@@ -2271,7 +2276,7 @@ string runCvJob( CvConfig c )
 	};
 
 	vector< crossval::FoldSelection > cvArchSink;
-	vector< crossval::ProcedureSpec > procs = assemble( &cvArchSink );
+	vector< crossval::ProcedureSpec > procs = assemble( &cvArchSink, cvGroup );
 	if ( procs.empty() )
 		return jsonMsg( false, "select at least one procedure to compare" );
 
@@ -2315,7 +2320,9 @@ string runCvJob( CvConfig c )
 			job.cvStage = "locked-test evaluation";
 		}
 		vector< crossval::FoldSelection > lockedArchSink;
-		vector< crossval::ProcedureSpec > lprocs = assemble( &lockedArchSink );
+		// The locked refit runs on the FULL dataset's row space, so it takes the
+		//    raw group vector -- not cvGroup, which is indexed by development row.
+		vector< crossval::ProcedureSpec > lprocs = assemble( &lockedArchSink, rowGroup );
 		util::set_seed( c.seed );
 		crossval::LockedResult lr = crossval::evaluateOnce( data, devRows, lockedRows,
 			lprocs, &job.cancel, true /* substreams */, c.seed, cvProgress );

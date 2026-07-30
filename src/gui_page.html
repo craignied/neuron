@@ -502,7 +502,7 @@ size-vs-error search appears in the chart below.</span></div>
     <input class="num" type="number" id="cv_strata_bins" value="4" min="2"></label>
 </div>
 <div class="row">
-  <label title="Comma-separated 1-based input column numbers. Rows sharing identical values on ALL of them form one group (a county, a hospital) and are never split across folds or into the locked test. This measures transfer to groups the model never saw, and it prevents cluster leakage -- it does NOT make the rows independent.">Group by columns (never split)
+  <label title="Comma-separated 1-based input column numbers. Rows sharing identical values on ALL of them form one group -- a clinic, a household, a school, a repeated subject, whatever your data clusters by -- and are never split across folds or into the locked test. This measures transfer to groups the model never saw, and it prevents cluster leakage -- it does NOT make the rows independent.">Group by columns (never split)
     <input class="cols" type="text" id="cv_group" placeholder="e.g. 1,3"></label>
 </div>
 <div class="row"><span class="status">Stratifying balances the subgroups your sample
@@ -510,7 +510,7 @@ already represents. Grouping measures transfer to groups the model never saw, an
 a cluster whole. Declaring the sampling unit changes the uncertainty, not the split.
 Stratification and grouping cannot be combined yet.</span></div>
 <div class="row">
-  <label title="DeLong assumes INDEPENDENT test observations. Declare the sampling unit so the AUC confidence intervals and the contrast p-value are only produced when independence is justified. Leave unspecified to get predictions and point AUCs without inference. 'Clustered' (e.g. shared county) is a follow-on and cannot be selected yet.">Sampling unit
+  <label title="DeLong assumes INDEPENDENT test observations. Declare the sampling unit so the AUC confidence intervals and the contrast p-value are only produced when independence is justified. Leave unspecified to get predictions and point AUCs without inference. 'Clustered' (rows sharing a sampling unit) is a follow-on and cannot be selected yet.">Sampling unit
     <select id="cv_independence">
       <option value="">— not declared (no inference)</option>
       <option value="rows">independent rows (IID) — run DeLong</option>

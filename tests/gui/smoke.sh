@@ -1664,6 +1664,45 @@ lockedClusters = {r["cluster"] for r in lrows}
 assert not (lockedClusters & set(folds)), lockedClusters & set(folds)
 PYGROUP
 
+#     Nested OBD under a grouped fold plan: the architecture search runs on a
+#     GROUP-DISJOINT inner validation split (unit-tested in check_crossval), and
+#     end to end every fold must fit and no cluster may cross a fold.
+curl -s -X POST "$URL/api/cv" \
+    -d "folds=2&seed=42&group=3,4,5&logistic=0&neural=1&neural_obd=1&hidden_max=2&iter_budget=4000&autostop_tol=0.01&algorithm=2&inner_val=0.3" \
+    | grep -q '"ok":true' || fail "grouped nested-OBD CV did not start"
+for i in $(seq 1 300); do curl -s "$URL/api/train/status" > cv_gobd.json; grep -q '"running":false' cv_gobd.json && break; sleep 0.3; done
+$PY - <<'PYGOBD' || fail "grouped nested-OBD CV result malformed"
+import csv, json
+d = json.load(open("cv_gobd.json", encoding="utf-8"))["result"]
+assert d["ok"], d
+run = json.load(open("cv_run.json", encoding="utf-8"))
+p = run["procedures"][0]
+assert p["validFolds"] == 2, p          # both folds fitted through the grouped inner split
+assert len(p["arch"]) == 2, p           # and each recorded what it selected
+assert run["foldDesign"]["method"] == "group-disjoint outcome-stratified", run["foldDesign"]
+folds = {}
+for r in csv.DictReader(open("cv_predictions.csv", encoding="utf-8")):
+    folds.setdefault(r["cluster"], set()).add(r["fold"])
+assert all(len(v) == 1 for v in folds.values()), [c for c, v in folds.items() if len(v) > 1]
+PYGOBD
+
+#     A grouped fold whose training rows are ONE group has no group-disjoint inner
+#     split. It must FAIL that fold with the reason -- never fall back to a
+#     row-wise inner validation, which would select on rows whose clusters the
+#     model also trained on.
+curl -s -X POST "$URL/api/cv" \
+    -d "folds=2&seed=42&group=4&logistic=0&neural=1&neural_obd=1&hidden_max=2&iter_budget=4000&autostop_tol=0.01&algorithm=2" \
+    | grep -q '"ok":true' || fail "single-group-fold CV did not start"
+for i in $(seq 1 200); do curl -s "$URL/api/train/status" > cv_gthin.json; grep -q '"running":false' cv_gthin.json && break; sleep 0.3; done
+$PY - <<'PYTHIN' || fail "infeasible grouped inner split not reported"
+import json
+run = json.load(open("cv_run.json", encoding="utf-8"))
+p = run["procedures"][0]
+assert p["validFolds"] == 0, p
+assert p["failures"], p
+assert all("single group" in f["reason"] for f in p["failures"]), p["failures"]
+PYTHIN
+
 # DLG-3 (k-aware development feasibility): a rare-event set where the locked test
 #    can hold >= 2 of each class, but the development set is left with fewer than k
 #    events -- so some outer fold could not contain an event. The request must be

@@ -884,7 +884,8 @@ int main()
 	// the group sizes make even folds impossible.
 	{
 		// 60 groups of unequal size (1..9 rows), outcome varying by group so some
-		// groups are one-class -- the shape a county cohort actually has.
+		// groups are one-class -- the shape clustered data actually has, whatever
+		// the sampling unit is (a clinic, a household, a school, a repeated subject).
 		const unsigned k = 5;
 		vector< unsigned > label, group;
 		unsigned nGroupsMade = 60;

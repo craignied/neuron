@@ -59,7 +59,7 @@ string cvreport::LockedInfo::clusterError() const
 			"the locked-test rows (" + to_string( testRows.size() ) + ")";
 
 	// Ids are GLOBAL over the dataset ( 0 .. split.nGroups-1 ), not renumbered per
-	//    sample, so the same county carries the same id in cv_predictions.csv and
+	//    sample, so the same cluster carries the same id in cv_predictions.csv and
 	//    in cv_locked_predictions.csv and the two files can be joined. nClusters is
 	//    a different quantity: the groups PRESENT here, i.e. how many independent
 	//    units a clustered estimator would actually have. Conflating them is what

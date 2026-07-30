@@ -31,7 +31,7 @@ namespace evaldesign {
 
 // What the caller declares to be the INDEPENDENT unit of observation. This is a
 //    statement about the data, not about the split: a group-aware split keeps a
-//    county whole but does not make two patients in that county independent.
+//    cluster whole but does not make two rows from that cluster independent.
 //    Unspecified is the default and withholds inference -- silence is never read
 //    as a declaration of independence (DLG-1).
 enum class SamplingUnit { Unspecified, Row, Cluster };

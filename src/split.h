@@ -81,7 +81,9 @@ struct GroupHoldout {
 };
 
 // Group-aware holdout: every row of a group lands in the SAME set, so a cluster
-//    (a hospital, a county) is never split across train and test. label[ r ] is
+//    -- whatever the caller's group key names: a clinic, a household, a school,
+//    a physician, a repeated subject -- is never split across train and test.
+//    label[ r ] is
 //    the binary outcome and group[ r ] the group id ( 0 .. G-1 ) for row r; the
 //    caller keeps groups intact by giving rows that must stay together the same
 //    id. Groups are visited in a seeded-random order and each whole group is
@@ -154,7 +156,7 @@ struct GroupFoldPlan : FoldPlan {
 };
 
 // Outcome-balanced GROUP k-fold (ROADMAP 4). Every row of a group lands in the
-//    same fold, so a cluster (a county, a hospital) is never split across folds
+//    same fold, so a cluster is never split across folds
 //    and each held-out fold measures generalization to groups the model never
 //    trained on. label[ r ] is the binary outcome and group[ r ] the group id.
 //

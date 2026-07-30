@@ -20,6 +20,8 @@
 #include <unistd.h> // access/symlink for the POSIX post-open write-failure test
 #endif
 
+#include <set>
+
 #include "crossval.h"
 #include "cvadapters.h"
 #include "cvreport.h"
@@ -1048,7 +1050,7 @@ int main()
 
 			// Ids stay GLOBAL (they must join across the two prediction files);
 			// nClusters is the number PRESENT here, which is a different number.
-			g.cluster = { 4, 4, 9, 9 };   // four locked rows, two of the 12 counties
+			g.cluster = { 4, 4, 9, 9 };   // four locked rows, two of the 12 clusters
 			expect( g.clusterError().empty(),
 				"global cluster ids with a present-count are well formed" );
 
@@ -1119,6 +1121,130 @@ int main()
 			}
 			expect( ej.find( "quote \\\" and \\\\ backslash" ) != string::npos,
 				"structured design strings are JSON-escaped in cv_run.json" );
+		}
+	}
+
+
+	// ---------------------------------------------------------------------
+	// Group-disjoint INNER validation (ROADMAP 4).
+	// ---------------------------------------------------------------------
+	//
+	// Group-disjoint OUTER folds are not enough for an honest unseen-group claim:
+	// if the nested search picks its architecture using rows from clusters that are
+	// also in its inner training set, the selection saw the cluster even though the
+	// outer score did not. cvadapters::innerValidationSplit is that decision, pulled
+	// out of the adapter so it can be checked directly rather than only through a
+	// full nested run.
+	{
+		// A generic clustered fixture: arbitrary (non-contiguous, non-zero-based)
+		// group identities, unequal sizes, and outcomes that vary by group.
+		const unsigned nGroups = 24;
+		vector< unsigned > rowLabel, rowGroup, allRows;
+		for ( unsigned g = 0; g < nGroups; g++ )
+		{
+			unsigned size = 2 + ( g * 5 ) % 7;
+			for ( unsigned i = 0; i < size; i++ )
+			{
+				allRows.push_back( ( unsigned ) rowLabel.size() );
+				rowGroup.push_back( 5000 + g * 13 ); // arbitrary ids, not 0..G-1
+				rowLabel.push_back( ( ( g % 3 ) && ( ( g + i ) % 2 == 0 ) ) ? 1u : 0u );
+			}
+		}
+
+		util::set_seed( 4 );
+		cvadapters::InnerSplit s = cvadapters::innerValidationSplit( allRows,
+			rowLabel, rowGroup, 0.25 );
+		expect( s.ok && !s.train.empty() && !s.validation.empty(),
+			"inner: a grouped fold yields a usable inner training/validation split" );
+
+		// THE invariant: no group is on both sides of the inner split.
+		{
+			set< unsigned > tg, vg;
+			for ( unsigned i = 0; i < s.train.size(); i++ ) tg.insert( rowGroup[ s.train[ i ] ] );
+			for ( unsigned i = 0; i < s.validation.size(); i++ ) vg.insert( rowGroup[ s.validation[ i ] ] );
+			unsigned shared = 0;
+			for ( set< unsigned >::const_iterator it = tg.begin(); it != tg.end(); ++it )
+				if ( vg.count( *it ) ) shared++;
+			expect( shared == 0,
+				"inner: no group appears in both the inner training and validation sets" );
+		}
+
+		// The inner split partitions the fold's training rows and touches nothing
+		// else -- an outer held-out row cannot enter architecture selection.
+		{
+			set< unsigned > seen( s.train.begin(), s.train.end() );
+			seen.insert( s.validation.begin(), s.validation.end() );
+			expect( s.train.size() + s.validation.size() == allRows.size()
+				&& seen.size() == allRows.size(),
+				"inner: the split covers the fold's training rows exactly once" );
+		}
+
+		// Only a SUBSET of the fold's training rows: give it half of them and check
+		// nothing outside that subset is ever selected. This is the property that
+		// keeps the outer held-out fold out of the inner search.
+		{
+			vector< unsigned > half( allRows.begin(), allRows.begin() + allRows.size() / 2 );
+			set< unsigned > allowed( half.begin(), half.end() );
+			util::set_seed( 4 );
+			cvadapters::InnerSplit hs = cvadapters::innerValidationSplit( half,
+				rowLabel, rowGroup, 0.25 );
+			bool inside = hs.ok;
+			for ( unsigned i = 0; i < hs.train.size() && inside; i++ )
+				if ( !allowed.count( hs.train[ i ] ) ) inside = false;
+			for ( unsigned i = 0; i < hs.validation.size() && inside; i++ )
+				if ( !allowed.count( hs.validation[ i ] ) ) inside = false;
+			expect( inside,
+				"inner: no row outside the fold's training rows enters the inner split" );
+		}
+
+		// Reproducible under a seed, and INVARIANT to how the groups are numbered:
+		// the same clustering must give the same inner partition whatever ids the
+		// caller happens to use.
+		{
+			util::set_seed( 4 );
+			cvadapters::InnerSplit again = cvadapters::innerValidationSplit( allRows,
+				rowLabel, rowGroup, 0.25 );
+			expect( again.train == s.train && again.validation == s.validation,
+				"inner: a fixed seed reproduces the inner split" );
+
+			vector< unsigned > renumbered( rowGroup.size() );
+			for ( unsigned r = 0; r < rowGroup.size(); r++ )
+				renumbered[ r ] = 900000 - rowGroup[ r ]; // order-reversing relabel
+			util::set_seed( 4 );
+			cvadapters::InnerSplit rs = cvadapters::innerValidationSplit( allRows,
+				rowLabel, renumbered, 0.25 );
+			set< unsigned > a( s.validation.begin(), s.validation.end() );
+			set< unsigned > b( rs.validation.begin(), rs.validation.end() );
+			expect( rs.ok && a == b,
+				"inner: renumbering the groups does not change the inner partition" );
+		}
+
+		// An infeasible grouped fold FAILS with a specific reason -- it never falls
+		// back to a row-wise inner split, which would select on rows whose clusters
+		// the model also trained on.
+		{
+			vector< unsigned > oneGroup( rowGroup.size(), 77 );
+			cvadapters::InnerSplit bad = cvadapters::innerValidationSplit( allRows,
+				rowLabel, oneGroup, 0.25 );
+			expect( !bad.ok && bad.reason.find( "single group" ) != string::npos,
+				"inner: a fold whose training rows are one group fails with a reason" );
+
+			vector< unsigned > tiny( 1, 0 );
+			expect( !cvadapters::innerValidationSplit( tiny, rowLabel, rowGroup, 0.25 ).ok,
+				"inner: a fold too small to split at all fails rather than guessing" );
+		}
+
+		// The UNGROUPED path is untouched: an empty group vector still gives the
+		// shipped outcome-stratified inner split, and it is NOT group-disjoint
+		// (which is the point -- the grouped behavior must be a real difference).
+		{
+			util::set_seed( 4 );
+			cvadapters::InnerSplit plain = cvadapters::innerValidationSplit( allRows,
+				rowLabel, vector< unsigned >(), 0.25 );
+			expect( plain.ok && plain.train.size() + plain.validation.size() == allRows.size(),
+				"inner: an ungrouped request still gets the outcome-stratified split" );
+			expect( plain.validation != s.validation,
+				"inner: the grouped split really differs from the row-wise one" );
 		}
 	}
 

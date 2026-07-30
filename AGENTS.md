@@ -623,7 +623,13 @@ row holdout held ENTIRELY out of CV**. Then CV folds only the development rows,
 each procedure is **refit on the development rows by its own prespecified rule**
 (logistic/DFA on all dev rows; nested OBD carves its own inner validation split of
 the dev rows — no forced full-dev refit), and scored **once** on the untouched
-locked test. `cv.locked` carries per-procedure **point AUCs** and predictions;
+locked test. Under a grouped fold plan that inner validation split is
+**group-disjoint too**: group-disjoint outer folds alone would still let the
+architecture be chosen using rows from clusters in its own inner training set, so
+the "generalizes to unseen groups" claim would cover the score but not the
+selection. A fold whose training rows turn out to be a single group has no such
+split and **fails that fold with the reason** — there is no fallback to a row-wise
+inner validation. `cv.locked` carries per-procedure **point AUCs** and predictions;
 `cv_locked_predictions.csv` (raw row id, outcome, one column per procedure — the
 auditable pairing, written whenever predictions exist; a `cluster` column follows
 the row id **only** for a grouped design) joins the Tier-3 files.

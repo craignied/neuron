@@ -2751,3 +2751,48 @@ controls for each.
   - Gates: zero-warning Release, 12/12 ctest, goldens byte-identical, smoke green (extended),
     oracle identical. `AGENTS.md`, `docs/gui_cli_parity.md` updated in the same commit.
     A live GUI click-through of the two new text controls is still outstanding.
+
+**2026-07-30 (later) — group-disjoint INNER validation.** Group-disjoint outer folds are
+not enough for an unseen-group claim. If the nested architecture search picks its size
+using rows from clusters that are also in its inner training set, the *selection* saw the
+cluster even though the outer score did not — the claim then covers the score and not the
+model that produced it. `cvadapters::innerValidationSplit` now makes that split
+group-disjoint whenever the run is grouped.
+
+  - **The decision was pulled out of the adapter.** It is the whole no-leakage argument
+    for a nested search, and inline it could only be reached by a full nested run. As a
+    named function it is checked directly: group-disjointness, exact coverage of the
+    fold's training rows, that no row outside them is ever selected, seed reproducibility,
+    renumbering invariance, and the two infeasible cases.
+  - **The same relabelling trap as the fold planner, in a different place.**
+    `nsplit::groupHoldout` visits groups in a seeded permutation of the DENSE id list, so
+    densifying the fold's group ids by ascending value made the inner split depend on how
+    the caller happened to number its clusters — reverse the numbering of the same
+    clustering and a different set of rows became the inner validation set. Densifying by
+    FIRST APPEARANCE among the training rows fixed it. Caught by the invariance test,
+    which is the second time that test has earned its place today.
+  - **No fallback, ever.** A fold whose training rows are one group fails with
+    *"this fold's training rows come from a single group"*; a fold too small to split at
+    all fails too. Falling back to a row-wise inner split would answer a different
+    question than the one asked, silently.
+  - **Two index spaces, two vectors.** The CV pass receives a dataset indexed by
+    development row and the locked refit one indexed by raw row, so `assemble()` takes the
+    group vector as a parameter and each pass passes its own. Handing over the wrong one
+    would mis-group without failing.
+  - **Sabotage:** forcing the row-wise branch on a grouped request fails three assertions,
+    headed by *"no group appears in both the inner training and validation sets"*.
+  - **Smoke** gained two end-to-end cases: a grouped nested-OBD run where both folds fit
+    through the grouped inner split and no cluster crosses a fold, and a deliberately
+    coarse key (2 groups, 2 folds) where every fold's training rows are one group and each
+    fold is failed with that reason.
+  - Gates: zero-warning Release, 12/12 ctest, goldens byte-identical, smoke green, oracle
+    identical.
+
+  *Terminology note, at Sol's correction:* this is not a SEER feature. A cluster is any
+  sampling unit — a clinic, a household, a school, a physician, a repeated subject. The
+  acceptance criteria are the generic ones exercised above (arbitrary group identities,
+  multiple key columns, unequal sizes, one-class groups, an oversized group, renumbering
+  invariance, leakage, infeasible partitions), all on synthetic fixtures and repository
+  datasets. Any future large external cohort is an optional scale confirmation, not an
+  implementation gate, and the repository fixtures are integration fixtures — they
+  establish the endpoint and workflow, not performance or memory at scale.
