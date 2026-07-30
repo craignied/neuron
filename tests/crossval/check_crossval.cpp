@@ -920,7 +920,7 @@ int main()
 			"locked Tier 1 caveat states the inference is on the locked test" );
 		expect( lt2.find( "Locked-test evaluation" ) != string::npos
 			&& lt2.find( "delta = AUC(primary) - AUC(reference)" ) != string::npos
-			&& lt2.find( "cluster-aware inference is a follow-on" ) != string::npos,
+			&& lt2.find( "declare a clustered sampling" ) != string::npos,
 			"locked Tier 2 details the areas, the contrast direction, and the scope" );
 
 		vector< cvreport::ArtifactResult > lfiles =

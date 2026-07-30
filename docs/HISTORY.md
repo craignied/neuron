@@ -2900,3 +2900,35 @@ never come from different estimators.
     purest form — the label and the computation are two different facts.
   - Gates: zero-warning Release, 13/13 ctest, goldens byte-identical, smoke green
     (extended), oracle identical. `AGENTS.md` and `docs/gui_cli_parity.md` updated.
+
+**2026-07-30 (close) — documentation, and what acceptance actually is.** Sol's correction
+mid-session reframed the whole batch and is recorded because it changed what was built:
+**this is not a feature for one dataset.** A cluster is any sampling unit — a clinic, a
+household, a school, a physician, a repeated subject. No external cohort's name, column
+numbers, expected cluster counts, or vocabulary appears in production code or in the
+general tests, and no external run is an implementation gate.
+
+  - **Acceptance is the generic criteria**, all exercised on synthetic fixtures and
+    repository datasets: arbitrary (non-dense, relabelled) group identities, multiple
+    group-key columns, unequal group sizes, one-class groups, an oversized group,
+    renumbering invariance, zero leakage checked independently of the planner, and
+    infeasible partitions refused with a reason.
+  - **Scale is measured, on generated data.** `tests/clustered/scale_probe.cpp` builds a
+    skewed-cluster cohort of any size and times the layer. At 226,679 rows / 612 clusters /
+    2.91% events: group holdout **0.004 s**, group 5-fold plan **0.003 s** (zero leakage,
+    imbalance 0.0023), clustered covariance over 44,068 locked rows in 172 clusters
+    **0.012 s**, peak RSS **18 MB**. Nothing in the layer is quadratic. It is built by CI
+    so it cannot rot, but deliberately **not** registered with `add_test` — a wall-clock
+    assertion in the suite is a flake generator.
+  - **Repository datasets are integration fixtures.** They establish that the endpoint and
+    the workflow are correct; they do not establish performance or memory at scale, and
+    saying otherwise would be the kind of unmeasured claim rule 3 exists to stop.
+  - `CLAUDE.md`: ROADMAP 4 items 1 and 2 marked done (only B9 remains), the SEER acceptance
+    run removed from the standing gate chain, "Where things stand" rewritten for the design
+    types / fold policy / clustered inference, and **eight new settled decisions** added —
+    including the two that cost measurement to establish (the design effect runs both ways;
+    a group tie-break must be a property of the data, never an id).
+  - **Still outstanding, explicitly:** a live `neuron --gui` click-through of the CV panel's
+    three new controls (fold stratification columns/bins, group columns, clustered sampling
+    unit). The automated smoke coverage for all three is complete; the browser pass is not
+    mine to run.

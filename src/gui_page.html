@@ -221,7 +221,7 @@ table.coef th { background: #f4f6fb; } table.coef td.name { text-align: left; }
         title="close">&times;</button>
       <h4>Group-aware split &mdash; a <em>harder</em> test</h4>
       <p>Rows that share identical values on the named columns form a cluster
-        (patients in a hospital, a county) that is kept <b>entirely on one side</b>
+        (rows sharing a clinic, a household, a school, a repeated subject) kept <b>entirely on one side</b>
         of the split &mdash; no cluster straddles train and test.</p>
       <p>This answers a different question from stratification: not &ldquo;how does
         the model do on new patients from <i>known</i> sites?&rdquo; but &ldquo;how

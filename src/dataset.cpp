@@ -1233,7 +1233,7 @@ void DataSet::splitDiagnostic( const vector< unsigned >& testRows,
 // Build a per-row group id from EXACT values on the named group columns
 //    (ROADMAP 4 Phase 3). Rows sharing identical values on ALL groupColumns get
 //    the same id (no binning -- a cluster is an exact match, e.g. the area-SES
-//    tuple that identifies a county). Ids are densified in first-appearance
+//    tuple that identifies a sampling unit). Ids are densified in first-appearance
 //    order.
 vector< unsigned > DataSet::buildGroupKey() const
 {

@@ -9,7 +9,7 @@
    virtual dispatch) -- distinct from a forbidden god TRAINING switch: fitting
    stays each concrete model's own virtual train(). The factory reaches only the
    models' public interfaces and preserves the construction order the manifest
-   requires. It does not train, evaluate, or know about folds, HTTP, or SEER. */
+   requires. It does not train, evaluate, or know about folds, HTTP, or any dataset. */
 
 #ifndef MODELFACTORY_H
 #define MODELFACTORY_H

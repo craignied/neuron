@@ -171,7 +171,8 @@ public:
 	// Group-aware splitting accessors (ROADMAP 4 Phase 3). Naming input data
 	//    columns here keeps every cluster of rows that share identical values on
 	//    ALL those columns together on one side of the split -- so a hospital or
-	//    a county is never split across train and test, giving a harder test of
+	//    a clinic or a household is never split across train and test, giving a
+	//    harder test of
 	//    generalization to unseen groups. Exact-match (no binning), 0-based
 	//    input-node positions. Empty is the default (no grouping). When set,
 	//    randomize() uses the group-aware path in preference to covariate strata.

@@ -15,7 +15,8 @@
    a policy layer above the mechanism (the GUI CV job: crossval::evaluateOnce + delong);
    DeLong assumes independent test rows (see delong.h). Ownership (rule 6): the
    coordinator owns the summary; this renderer iterates procedures and whatever metadata
-   each carries -- it has NO model-family switches, and nothing here is SEER-specific. */
+   each carries -- it has NO model-family switches, and nothing here is specific to any
+   dataset. */
 
 #ifndef CVREPORT_H
 #define CVREPORT_H

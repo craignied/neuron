@@ -244,19 +244,40 @@ convention visible after selection.
 
 **Splitting and evaluation.** `src/split.{h,cpp}` owns the index-level cube: outcome-
 stratified holdout, outcome × covariate strata (quantile-binned, Hamilton apportionment),
-group-aware (indivisible clusters), stratified k-fold, and three-way train/validation/test.
-`src/crossval.{h,cpp}` runs procedures over one shared fold plan (logistic / LDFA / QDFA /
-neural with nested OBD inside every fold); `src/cvreport.{h,cpp}` renders the three-tier
-report (Tier 1 headline table, Tier 2 detail, Tier 3 machine-readable files). The
-locked-test layer (`src/delong.{h,cpp}`) scores procedures once on rows held entirely out
-of CV and compares a prespecified contrast — **inference is opt-in** (see settled
-decisions).
+group-aware (indivisible clusters), general stratified k-fold over arbitrary stratum ids,
+outcome-balanced **group** k-fold (whole-cluster bin packing), and three-way
+train/validation/test. `src/crossval.{h,cpp}` runs procedures over one shared fold plan
+(logistic / LDFA / QDFA / neural with nested OBD inside every fold); `src/cvreport.{h,cpp}`
+renders the three-tier report. The locked-test layer scores procedures once on rows held
+entirely out of CV and compares a prespecified contrast — **inference is opt-in** (see
+settled decisions).
+
+**The evaluation design is a type, not prose** (`src/evaldesign.{h,cpp}`, 2026-07-30):
+`SamplingUnit` / `AucInference` / `PartitionMethod` / `Partition`, with every displayed
+string and every JSON field derived from them, and **one** function —
+`evaldesign::chooseInference` — mapping (declared unit × achieved partition method ×
+estimability) to a permitted estimator plus a reason when the answer is none. A report can
+no longer describe a design that was not run.
+
+**Fold policy and cluster-aware inference.** `/api/cv` takes its OWN `strata=` /
+`strata_bins=` / `group=` (never inherited from `/api/load`, which sizes a holdout and
+answers a different question). One group key governs the locked holdout, the outer folds,
+**and** the nested search's inner validation split — group-disjoint outer folds alone would
+still let the architecture be chosen on rows from clusters in its own inner training set.
+`independence=cluster` routes to **Obuchowski's clustered ROC covariance**
+(`src/clustered_auc.{h,cpp}`), validated against the published worked example through all
+**nine** of its intermediate structural components; the shared statistics layer
+(`src/auccov.{h,cpp}`) holds the placements, tie handling and contrast algebra, so the two
+estimators cannot disagree about an area. A cluster is any sampling unit — a clinic, a
+household, a school, a repeated subject. **Grouping prevents leakage; it does not make rows
+independent**, so `independence=rows` over a grouped design is refused, and Tier 1 states
+how many independent clusters an interval and a *p* rest on.
 
 **The gates, run at the end of every piece of work**: zero-warning
 Release build → `tests/golden/run_golden.sh` byte-identical (3 transcripts: `xor_seed42`,
-`regress_seed42`, `binormal_seed42`) → `ctest` (12 tests) → `tests/gui/smoke.sh` →
+`regress_seed42`, `binormal_seed42`) → `ctest` (13 tests) → `tests/gui/smoke.sh` →
 `tests/oracle/verify_oracle.sh` numerically identical → live `neuron --gui` click-through
-for anything that adds a control → the SEER acceptance run for splitter work. CI runs the
+for anything that adds a control. CI runs the
 build, goldens, ctest, smoke, and the Python tools on macOS/Linux/Windows.
 The automated gates are currently green, and **no GUI click-through is outstanding.** The
 live walkthrough that was running through late July is **complete and published** —
@@ -285,7 +306,10 @@ condition number of exactly 1 and was silently correct elsewhere only when the d
 happened not to be extremal. Fixed in its own commit, with no golden re-bless required. The leaked
 `gsl_vector` went with it. → HISTORY 2026-07-27.
 
-**Open work** is the three remaining ROADMAP 4 items under "What remains" below.
+**Open work** is the one remaining ROADMAP 4 item under "What remains" below (B9, the
+GUI-wide strict-parsing pass). A live GUI click-through of the CV panel's three new
+controls — fold stratification columns/bins, group columns, and the clustered sampling
+unit — is **outstanding**; the automated smoke coverage for them is complete.
 
 ## Settled decisions — do not reopen
 
@@ -320,10 +344,49 @@ Re-proposing one is rework, not initiative. Full reasoning at the cited HISTORY 
 - **Cross-validation carries no formal inference.** Fold mean ± sd is descriptive spread
   across dependent folds, never a CI; classical DeLong is invalid on pooled out-of-fold
   predictions. → HISTORY 2026-07-22; `docs/cross_validation.md`.
-- **Locked-test inference is opt-in and independent-rows-only.** DeLong runs only when the
-  caller declares `independence=rows`; `independence=cluster` is refused and must never
-  silently fall back to ordinary DeLong. Craig's words: *"Metadata cannot repair an invalid
-  p-value after it has been presented."* → HISTORY 2026-07-24.
+- **Locked-test inference is opt-in, and the DESIGN chooses the estimator.** DeLong runs
+  only when the caller declares `independence=rows` over a row-wise design;
+  `independence=cluster` over a group-aware design runs Obuchowski's clustered covariance;
+  neither ever falls back to the other, and every refusal states its own reason. Craig's
+  words: *"Metadata cannot repair an invalid p-value after it has been presented."*
+  → HISTORY 2026-07-24, 2026-07-30.
+- **Group-aware splitting and clustered inference are different mechanisms and are NOT
+  substitutes.** Grouping decides which rows may share a partition — it prevents leakage
+  and changes the estimand to "a group the model never saw". Clustering decides the
+  variance. Keeping a cluster whole does not make its rows independent, so
+  `independence=rows` over a grouped design is **refused**, not relabelled "descriptive
+  grouping". → HISTORY 2026-07-30; `docs/roc_theory.md`.
+- **The clustered estimand is the ordinary one; only the uncertainty changes.** The point
+  area stays the exact patient-ROW Mann-Whitney probability over all pairs, computed by the
+  SAME shared placement code as DeLong. Do NOT cluster-average the area — that estimates a
+  different quantity. → `docs/roc_theory.md`.
+- **The design effect runs BOTH ways — do not assert that clustering always widens the
+  interval.** Measured: a cluster offset that moves both classes together makes
+  within-cluster pairs more concordant and gives a *smaller* clustered SE (0.0164 vs
+  DeLong's 0.0188), and the published reference example has `S11` positive for one reader
+  and negative for the other. The general truth is that the clustered SE tracks a
+  whole-cluster bootstrap and the row-based one does not. → HISTORY 2026-07-30.
+- **Clustered refusals count CLUSTERS, not rows.** The divisors are (informative
+  clusters − 1), so fifty locked rows from one cluster carry no between-cluster
+  information. → HISTORY 2026-07-30.
+- **The clustered area interval is deliberately NOT clamped to [0,1]**; the ordinary Wald
+  DeLong interval still is (DLG-9). Matching the reference implementation's unclamped
+  interval is part of the acceptance test, and an interval past the boundary tells the
+  reader the normal approximation is straining. → `docs/roc_theory.md`.
+- **A group tie-break must be a property of the DATA, never a group id.** Both the group
+  fold planner and the nested inner split were renumbering-dependent until their final
+  tie-break became the group's first row: relabelling the same clustering produced a
+  different partition of the same data. → HISTORY 2026-07-30.
+- **`strata=` and `group=` do not compose** into a fold plan yet (no tested joint balancing
+  objective) and the combination is **refused** — never resolved by letting one silently
+  win. → HISTORY 2026-07-30.
+- **A large external cohort is an optional scale confirmation, never an implementation
+  gate.** Acceptance is the generic criteria (arbitrary/relabelled group ids, multi-column
+  keys, unequal and one-class and oversized groups, renumbering invariance, leakage,
+  infeasible partitions), exercised on synthetic fixtures and repository datasets.
+  Repository datasets are **integration fixtures** — they establish the endpoint and the
+  workflow, not performance at scale; `./build/scale_probe` is the reproducible scale
+  measurement, on generated data. → Sol, 2026-07-30.
 - **No `TrainingConfig` extraction.** `Network::copy`/`Iterative::copy` already carry the
   training config (autoalgo depends on it), so CV clones a configured model per fold; a
   second config-application path would be against DRY. → HISTORY 2026-07-22.
@@ -428,18 +491,11 @@ plan as agreed and executed is in `docs/HISTORY.md` → "Completed roadmaps → 
 read it before extending any of that machinery, because it records which parts of the
 design were corrected mid-build and why.
 
-Three items remain, in Craig's priority order:
+Items 1 and 2 — **group-aware / covariate-stratified CV folds** and **cluster-aware
+(non-IID) locked-test inference** — are **DONE and shipped** (2026-07-30; the plan as
+executed is `group-aware_plan.md`, the record is in `docs/HISTORY.md`). One remains:
 
-1. **Group-aware / covariate-stratified CV folds.** Fold plans are outcome-stratified
-   k-fold today; the splitter already owns group and covariate-strata modes, so this is
-   composing existing mechanisms in `crossval::run`'s plan construction, plus the GUI
-   params and the diagnostic. `nsplit::kFold` is the primitive to extend.
-2. **County-cluster-aware (non-IID) locked-test inference.** The successor to ordinary
-   DeLong for clustered data (Obuchowski 1997). Group-aware splitting stops leakage but
-   does not make rows independent, which is exactly why `independence=cluster` is
-   currently *refused* rather than approximated. Plan: `group-aware_plan.md` (Sol).
-   Prerequisite: DLG-8, structured cluster/sampling-unit metadata in the Tier-3 artifacts.
-3. **B9 — the GUI-wide strict-parsing pass.** Shared strict integer / floating-point /
+1. **B9 — the GUI-wide strict-parsing pass.** Shared strict integer / floating-point /
    boolean parsers with full-string consumption, range and overflow checks, and
    field-specific errors, migrated across **every** handler (`atol`/`atof` today accept
    `folds=5junk` → 5, and any non-`"1"`/`"true"` boolean → false). Do NOT broaden accepted
@@ -448,11 +504,20 @@ Three items remain, in Craig's priority order:
 ### Verification (end of every phase)
 Zero-warning Release build → `tests/golden/run_golden.sh` (byte-identical; the Phase-1
 `binormal_seed42` re-bless is done and no further move is expected — read any diff) →
-`tests/gui/smoke.sh` (extended per phase) → `ctest` (new `split_*` cases) →
-`tests/oracle/verify_oracle.sh` (numerically identical — the splitter path is not on the
-oracle) → **the SEER acceptance run** (timed + diagnostic inspected) → live `neuron --gui`
+`tests/gui/smoke.sh` (extended per phase) → `ctest` → `tests/oracle/verify_oracle.sh`
+(numerically identical — the splitter path is not on the oracle) → live `neuron --gui`
 click-through for any phase that adds a control. AGENTS.md, `docs/gui_cli_parity.md`, this
 file, and the session entry in `docs/HISTORY.md` all land in the same commits.
+
+**Acceptance is the generic criteria, not a dataset.** What the partition and inference
+layers must satisfy is exercised on synthetic fixtures and repository datasets: arbitrary
+(non-dense, relabelled) group identities, multiple group-key columns, unequal group sizes,
+one-class groups, an oversized group, renumbering invariance, zero leakage, and infeasible
+partitions refused with a reason. `./build/scale_probe [rows] [clusters]` is a reproducible
+scale measurement on generated data (built by CI, deliberately not a ctest case — timings
+are machine-dependent). A large external cohort is an **optional** confirmation of scale
+and never an implementation gate; the repository datasets are integration fixtures — they
+establish the endpoint and the workflow, not performance or memory at scale.
 
 ## Backlog (unordered, nothing forcing them)
 

@@ -695,8 +695,9 @@ string cvreport::tier2( const crossval::Comparison& cmp, const PlanInfo& info,
 				"Mann-Whitney areas.\n";
 		else
 			os << "  DeLong assumes independent test observations; it does not apply to "
-				"clustered\n  test data (e.g. shared county) -- cluster-aware inference "
-				"is a follow-on.\n";
+				"clustered\n  test data (rows sharing a sampling unit) -- declare a "
+				"clustered sampling\n  unit for that, which selects the clustered "
+				"covariance instead.\n";
 	}
 	return os.str();
 }

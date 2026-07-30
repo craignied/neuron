@@ -135,6 +135,17 @@ add_executable(check_clustered
 target_include_directories(check_clustered PRIVATE src)
 add_test(NAME clustered_auc COMMAND check_clustered)
 
+# A reproducible SCALE probe for the partition + clustered-inference layer, on
+# generated data. Built (so it cannot rot) but NOT registered with add_test: it
+# measures wall time and peak memory, which are machine-dependent, and a timing
+# assertion in the suite would be a flake generator. Run it deliberately:
+#   ./build/scale_probe [rows] [clusters]
+add_executable(scale_probe
+    tests/clustered/scale_probe.cpp
+    src/split.cpp src/clustered_auc.cpp src/auccov.cpp
+    src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
+target_include_directories(scale_probe PRIVATE src)
+
 # Unit test: the generic cross-validation runner (ROADMAP 4 Phase 4b-CV). Runs a
 # train procedure over a stratified fold plan and checks every row gets one
 # out-of-fold prediction, the pooled OOF AUC beats chance, and it is reproducible.

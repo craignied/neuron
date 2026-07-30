@@ -12,8 +12,8 @@
 //     row between test and train;
 //   - reproducibility/divergence -> fails if the split stops riding the seeded
 //     RNG stream.
-// The extreme-imbalance case is a scale model of the SEER cohort (2.96%
-// positives) that this splitter exists to handle.
+// The extreme-imbalance case is a rare-event cohort (2.96% positives), the shape
+// this splitter exists to handle.
 
 #include <algorithm>
 #include <iostream>
@@ -247,7 +247,7 @@ int main()
 		checkHoldout( label, 50, "balanced" );
 	}
 
-	// Extreme imbalance -- a scale model of SEER (2.96% positive)
+	// Extreme imbalance -- a rare-event cohort (2.96% positive)
 	util::set_seed( 7 );
 	{
 		unsigned n = 10000, nPos = 296;
@@ -560,7 +560,7 @@ int main()
 		checkKFold( lab, 10, "kfold-10" );
 	}
 	{
-		// Rare-event scale model (SEER-like 3%): stratification must still hold
+		// Rare-event cohort (~3% positive): stratification must still hold
 		vector< unsigned > lab( 1000, 0 );
 		for ( unsigned i = 0; i < 30; i++ ) lab[ i * 33 ] = 1; // 30 positives
 		checkKFold( lab, 5, "kfold-rare" );

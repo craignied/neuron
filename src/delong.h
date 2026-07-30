@@ -11,11 +11,13 @@
    valid on:
      - out-of-fold cross-validation predictions (k overlapping fitted models inject
        dependence its variance ignores -- see docs/cross_validation.md), or
-     - clustered test data (e.g. SEER patients sharing a county). Group-aware
-       SPLITTING prevents train/test leakage but does NOT make the test rows
-       independent, so it does not satisfy DeLong's assumption. Cluster-aware test
-       inference (a clustered/aggregated variance) is a deliberate FOLLOW-ON item,
-       not this layer. Use this only when the locked test rows are independent.
+     - clustered test data (rows sharing a sampling unit -- a clinic, a household,
+       a school, a repeated subject). Group-aware SPLITTING prevents train/test
+       leakage but does NOT make the test rows independent, so it does not satisfy
+       DeLong's assumption. Use this only when the locked test rows are independent;
+       for clustered data use clustered_auc.h (Obuchowski's clustered covariance),
+       which the inference policy selects automatically from the declared sampling
+       unit. The two must never substitute for each other.
 
    Class-layer note (rule 4): the covariance is a Matrix< double > so the algebra
    reads like DeLong's paper and every access is bounds-checked. The placement
