@@ -80,6 +80,10 @@ GSL 1.9–1.10; modern GSL is 2.x — untested).
 
 ## Docs (`docs/`)
 
+The user-facing entry point is **`docs/datasets/civic-choice/WALKTHROUGH.md`** — the
+illustrated GUI walkthrough (published 2026-07-29), with the fictional synthetic dataset,
+its generator, and its data notes beside it in the same directory.
+
 Legacy documentation copied from `../distro/doc/` (2026-07-11):
 
 - `docs/manifest.pdf` — the full neUROn2++ manual (ch. 11 covers the dropped exporters)
@@ -249,15 +253,17 @@ Release build → `tests/golden/run_golden.sh` byte-identical (3 transcripts: `x
 `tests/oracle/verify_oracle.sh` numerically identical → live `neuron --gui` click-through
 for anything that adds a control → the SEER acceptance run for splitter work. CI runs the
 build, goldens, ctest, smoke, and the Python tools on macOS/Linux/Windows.
-The automated gates are currently green. The live stepwise-regression click-through is
-complete: reverse progress/Stop/cancellation and immediate rerun passed; Craig accepted
-the forward progress and final selected-variable summary; and the original logistic
-model retrained normally afterward, confirming that stepwise left it usable.
-**Awaiting a live click-through:** the 2026-07-29 GUI batch (panel action placement,
-OBD node-count labels, validation-aware legends, CV progress, contrast direction, result
-provenance). Its automated gates are green and `smoke.sh` passed three consecutive times
-— the CV-progress assertions sample a live run, so flakiness was checked deliberately —
-but no browser session was available to drive the page.
+The automated gates are currently green, and **no GUI click-through is outstanding.** The
+live walkthrough that was running through late July is **complete and published** —
+`docs/datasets/civic-choice/WALKTHROUGH.md` (2026-07-29, commit `13bc12c`), sixteen real
+screenshots of the session it documents, linked from the README as the project's entry
+point. It drove the whole workflow in a browser on the `52bd30f` build: the three-way
+split, the logistic baseline, grouped stepwise (reverse progress/Stop/cancellation, an
+immediate rerun, the forward selection summary, and the original model retraining normally
+afterward), standalone LDFA/QDFA, validation-guided OBD, and the four-procedure nested CV
+with its locked test — which is also the live review of the 2026-07-29 GUI batch (panel
+action placement, OBD node-count labels, validation-aware legends, CV progress, contrast
+direction, result provenance), every item of it visible in the published screenshots.
 
 **Stepwise regression** (2026-07-27) runs like the other long jobs: `/api/regress&async=1` with
 structured progress, a Stop that reaches the candidate training at that moment, and a persistent
