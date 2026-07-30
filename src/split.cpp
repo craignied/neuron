@@ -310,6 +310,227 @@ nsplit::FoldPlan nsplit::stratifiedKFold( const vector< unsigned >& stratum,
 	return plan;
 }
 
+nsplit::GroupFoldPlan nsplit::stratifiedGroupKFold( const vector< unsigned >& label,
+	const vector< unsigned >& group, unsigned k )
+{
+	GroupFoldPlan plan;
+	unsigned n = ( unsigned ) label.size();
+
+	if ( k < 2 )
+	{
+		plan.reason = "k-fold cross-validation needs at least 2 folds";
+		return plan;
+	}
+	if ( n == 0 )
+	{
+		plan.reason = "no rows to fold";
+		return plan;
+	}
+	if ( group.size() != n )
+	{
+		plan.reason = "the group vector does not pair with the rows";
+		return plan;
+	}
+
+	// Compact the group ids in ascending order. The assignment must not depend on
+	//    how the caller happened to number its groups, so the ONLY ordering that
+	//    reaches the algorithm is by size and by the seeded tie-break below.
+	vector< unsigned > distinct = group;
+	sort( distinct.begin(), distinct.end() );
+	distinct.erase( unique( distinct.begin(), distinct.end() ), distinct.end() );
+	unsigned G = ( unsigned ) distinct.size();
+
+	if ( G < k )
+	{
+		plan.reason = "fewer groups (" + to_string( G ) + ") than folds ("
+			+ to_string( k ) + "): some fold would be empty. Use fewer folds, "
+			"or a coarser group key.";
+		return plan;
+	}
+
+	// Each group's rows and its per-class counts.
+	vector< vector< unsigned > > gRows( G );
+	vector< unsigned > gNeg( G, 0 ), gPos( G, 0 );
+	unsigned n0 = 0, n1 = 0;
+	for ( unsigned r = 0; r < n; r++ )
+	{
+		unsigned g = ( unsigned ) ( lower_bound( distinct.begin(), distinct.end(),
+			group[ r ] ) - distinct.begin() );
+		gRows[ g ].push_back( r );
+		if ( label[ r ] == 0 ) { gNeg[ g ]++; n0++; } else { gPos[ g ]++; n1++; }
+	}
+
+	// Hardest first: the big groups constrain the packing most, so place them
+	//    while every fold is still empty enough to take one. Within a size, the
+	//    more outcome-lopsided group is harder and goes first.
+	vector< unsigned > order( G );
+	for ( unsigned g = 0; g < G; g++ ) order[ g ] = g;
+	sort( order.begin(), order.end(),
+		[ &gRows, &gNeg, &gPos ]( unsigned a, unsigned b )
+		{
+			if ( gRows[ a ].size() != gRows[ b ].size() )
+				return gRows[ a ].size() > gRows[ b ].size();
+			// |neg - pos| as a plain integer distance, no sign games on unsigned
+			unsigned ia = gNeg[ a ] > gPos[ a ] ? gNeg[ a ] - gPos[ a ] : gPos[ a ] - gNeg[ a ];
+			unsigned ib = gNeg[ b ] > gPos[ b ] ? gNeg[ b ] - gPos[ b ] : gPos[ b ] - gNeg[ b ];
+			if ( ia != ib ) return ia > ib;
+			// The last key is the group's FIRST ROW, not its id. Two groups with the
+			//    same size and the same outcome split are interchangeable to the
+			//    packer, so something must order them -- and if that something is
+			//    the id, renumbering the groups silently produces a different
+			//    partition of the same data. The first row is a property of the
+			//    data, so the plan depends on the grouping and not on its labels.
+			return gRows[ a ][ 0 ] < gRows[ b ][ 0 ];
+		} );
+
+	// The seeded permutation of the FOLD order: candidate folds are examined in
+	//    this order and only a STRICT improvement displaces the incumbent, so the
+	//    permutation decides exact ties and nothing else. This is the only draw
+	//    from the RNG stream, which keeps the plan reproducible under a seed
+	//    without letting randomness into the packing decisions themselves.
+	vector< unsigned > foldOrder( k );
+	for ( unsigned f = 0; f < k; f++ ) foldOrder[ f ] = f;
+	selectFront( foldOrder, k );
+
+	// Fair shares. Every deviation below is measured against these, normalized so
+	//    a class with few members is not drowned out by the row count.
+	const double tNeg = ( double ) n0 / k;
+	const double tPos = ( double ) n1 / k;
+	const double tAll = ( double ) n / k;
+
+	vector< unsigned > fNeg( k, 0 ), fPos( k, 0 ), fAll( k, 0 ), fGroups( k, 0 );
+	plan.foldId.assign( n, 0 );
+
+	for ( unsigned oi = 0; oi < G; oi++ )
+	{
+		unsigned g = order[ oi ];
+
+		// Score each fold by how much adding this WHOLE group would INCREASE the
+		//    plan's total squared imbalance -- the CHANGE, not the resulting
+		//    deviation. That distinction is the whole algorithm: the resulting
+		//    deviation is smallest for a fold already at its target, so minimizing
+		//    it fills the fullest folds first and leaves the rest empty (measured:
+		//    2 of 5 folds empty on a 60-group fixture). The change,
+		//    ( a + s - t )^2 - ( a - t )^2, is smallest for the fold furthest
+		//    BELOW its target, which is the fold that should take the group.
+		//    Only the candidate fold's term moves, so this is also the argmin over
+		//    the whole plan's cost.
+		auto delta = []( double have, double add, double target )
+		{
+			if ( target <= 0 ) return 0.0;
+			double before = have - target, after = have + add - target;
+			return ( after * after - before * before ) / ( target * target );
+		};
+
+		unsigned best = foldOrder[ 0 ];
+		double bestCost = 0;
+		for ( unsigned i = 0; i < k; i++ )
+		{
+			unsigned f = foldOrder[ i ];
+			double cost = delta( fNeg[ f ], gNeg[ g ], tNeg )
+				+ delta( fPos[ f ], gPos[ g ], tPos )
+				+ delta( fAll[ f ], ( double ) gRows[ g ].size(), tAll );
+			// Strict improvement only, so the seeded fold order decides exact ties
+			//    and nothing else.
+			if ( i == 0 || cost < bestCost ) { bestCost = cost; best = f; }
+		}
+
+		for ( unsigned i = 0; i < gRows[ g ].size(); i++ )
+			plan.foldId[ gRows[ g ][ i ] ] = best;
+		fNeg[ best ] += gNeg[ g ];
+		fPos[ best ] += gPos[ g ];
+		fAll[ best ] += ( unsigned ) gRows[ g ].size();
+		fGroups[ best ]++;
+	}
+
+	// --- everything below is RECOMPUTED from the assignment ------------------
+	//
+	// Not carried over from the loop above: the counts a caller acts on must
+	//    describe the plan that exists, and leakage in particular has to be
+	//    checked by an independent pass or it is only a restatement of the
+	//    algorithm's intent.
+	plan.k = k;
+	plan.nStrata = 2; // the outcome classes; the strata a group plan balances
+	plan.nGroups = G;
+	plan.foldSize.assign( k, 0 );
+	plan.classByFold.assign( k, vector< unsigned >( 2, 0 ) );
+	plan.stratumByFold.assign( k, vector< unsigned >( 2, 0 ) );
+	plan.groupsPerFold.assign( k, 0 );
+
+	for ( unsigned r = 0; r < n; r++ )
+	{
+		unsigned f = plan.foldId[ r ];
+		plan.foldSize[ f ]++;
+		unsigned c = ( label[ r ] == 0 ) ? 0u : 1u;
+		plan.classByFold[ f ][ c ]++;
+		plan.stratumByFold[ f ][ c ]++;
+	}
+
+	// Leakage: a group appearing in more than one fold. Counted over the groups
+	//    themselves, from the row assignment.
+	for ( unsigned g = 0; g < G; g++ )
+	{
+		unsigned f0 = plan.foldId[ gRows[ g ][ 0 ] ];
+		bool straddles = false;
+		for ( unsigned i = 1; i < gRows[ g ].size(); i++ )
+			if ( plan.foldId[ gRows[ g ][ i ] ] != f0 ) straddles = true;
+		if ( straddles ) plan.leakageCount++;
+		else plan.groupsPerFold[ f0 ]++;
+		if ( gRows[ g ].size() > plan.largestGroup )
+			plan.largestGroup = ( unsigned ) gRows[ g ].size();
+	}
+
+	if ( plan.leakageCount )
+	{
+		// Unreachable by construction -- which is exactly why it is checked. A
+		//    plan that leaks is not reported with a warning; it is refused.
+		plan.ok = false;
+		plan.reason = to_string( plan.leakageCount )
+			+ " group(s) were split across folds (leakage); the plan is refused";
+		return plan;
+	}
+
+	// The worst relative deviation of any fold's size or class count from its
+	//    fair share -- the honest summary of what indivisible groups cost.
+	auto worst = [ & ]( unsigned got, double target )
+	{
+		if ( target <= 0 ) return 0.0;
+		double d = ( double ) got - target;
+		if ( d < 0 ) d = -d;
+		return d / target;
+	};
+	for ( unsigned f = 0; f < k; f++ )
+	{
+		double w = worst( plan.foldSize[ f ], tAll );
+		if ( w > plan.imbalanceScore ) plan.imbalanceScore = w;
+		w = worst( plan.classByFold[ f ][ 0 ], tNeg );
+		if ( w > plan.imbalanceScore ) plan.imbalanceScore = w;
+		w = worst( plan.classByFold[ f ][ 1 ], tPos );
+		if ( w > plan.imbalanceScore ) plan.imbalanceScore = w;
+	}
+
+	// A fold with only one outcome class cannot supply an AUC. That is a
+	//    reportable fact, not a refusal: the run still yields the other folds.
+	unsigned oneClass = 0;
+	for ( unsigned f = 0; f < k; f++ )
+		if ( plan.classByFold[ f ][ 0 ] == 0 || plan.classByFold[ f ][ 1 ] == 0 )
+			oneClass++;
+	if ( oneClass )
+		plan.warnings.push_back( to_string( oneClass ) + " of " + to_string( k )
+			+ " folds contain only one outcome class and can supply no AUC" );
+
+	// An oversized group -- one that alone exceeds a fold's fair share -- is
+	//    never split. Say so, because it is the whole explanation of a large
+	//    imbalanceScore and the caller may want a coarser key or fewer folds.
+	if ( plan.largestGroup > tAll )
+		plan.warnings.push_back( "the largest group has " + to_string( plan.largestGroup )
+			+ " rows, more than a fold's fair share of " + to_string( ( unsigned ) tAll )
+			+ "; groups are never split, so the folds cannot be even" );
+
+	plan.ok = true;
+	return plan;
+}
+
 vector< unsigned > nsplit::kFold( const vector< unsigned >& label, unsigned k )
 {
 	assert( k >= 2 && k <= label.size() ); // caller validates the fold count

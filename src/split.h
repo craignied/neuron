@@ -135,6 +135,46 @@ struct FoldPlan {
 //    seeds, which is what licensed making one a wrapper for the other.
 FoldPlan stratifiedKFold( const vector< unsigned >& stratum, unsigned k );
 
+// A group-aware fold plan: a FoldPlan whose folds are made of WHOLE groups.
+//    groupsPerFold and leakageCount describe the group partition; leakageCount
+//    is recomputed independently from the assignment and must be 0 (a nonzero
+//    value refuses the plan rather than reporting it).
+//
+//    imbalanceScore is the worst relative deviation of any fold's row count or
+//    per-class count from its fair share -- 0.08 means "the worst fold is 8% off".
+//    Groups are indivisible, so it is never 0 in general and a large value is a
+//    fact about the group sizes, not a defect to tune away.
+struct GroupFoldPlan : FoldPlan {
+	unsigned nGroups = 0;
+	vector< unsigned > groupsPerFold;
+	vector< vector< unsigned > > classByFold; // [ fold ][ 0/1 ] achieved counts
+	unsigned leakageCount = 0;
+	double imbalanceScore = 0;
+	unsigned largestGroup = 0;                // rows in the biggest group
+};
+
+// Outcome-balanced GROUP k-fold (ROADMAP 4). Every row of a group lands in the
+//    same fold, so a cluster (a county, a hospital) is never split across folds
+//    and each held-out fold measures generalization to groups the model never
+//    trained on. label[ r ] is the binary outcome and group[ r ] the group id.
+//
+//    Indivisible groups make this bin packing, not dealing, so it is a separate
+//    planner rather than a mode of stratifiedKFold. Groups are processed
+//    hardest-first (descending size, then descending outcome imbalance) and each
+//    whole group goes to the fold that minimizes the prospective deviation of
+//    that fold's outcome-0 count, outcome-1 count, and total size from their fair
+//    shares. Ties are broken by a seeded permutation of the fold order -- the ONLY
+//    place randomness enters, so two runs of the same seed agree and the plan does
+//    not depend on the arbitrary numbering of the groups.
+//
+//    An oversized group is never split to meet a target: the plan reports
+//    largestGroup and imbalanceScore and lets the caller judge. Fewer than k
+//    distinct groups is a refusal (some fold would be empty); fewer than k groups
+//    carrying an outcome class is a warning, because those folds cannot supply an
+//    AUC but the run is still meaningful.
+GroupFoldPlan stratifiedGroupKFold( const vector< unsigned >& label,
+	const vector< unsigned >& group, unsigned k );
+
 // Stratified k-fold assignment on a binary outcome (ROADMAP 4 Phase 4).
 //    label[ r ] must be 0 or 1; returns fold[ r ] in 0 .. k-1 with every row in
 //    exactly one fold. Reproducible under util::set_seed; 2 <= k <= n. This is

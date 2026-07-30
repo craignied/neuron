@@ -2663,3 +2663,43 @@ it. Refusals (`k < 2`, `k > n`, no rows) are returned as results, not asserted, 
     reports them); no raw dataset gives an empty key rather than a read of an empty Matrix.
   - Gates: zero-warning Release, 12/12 ctest, goldens byte-identical, smoke green, oracle
     identical.
+
+**2026-07-30 (later still) — group-aware fold planning is bin packing, not dealing.**
+`nsplit::stratifiedGroupKFold( label, group, k )` places WHOLE groups so that no cluster
+is ever split across folds, and each held-out fold measures generalization to groups the
+model never trained on. It is a separate planner from `stratifiedKFold` because
+indivisibility changes the problem: you cannot deal a group.
+
+  - **The greedy score must be the CHANGE in imbalance, not the resulting imbalance.**
+    Scoring each candidate fold by where adding the group would leave it — the obvious
+    formulation — prefers folds already AT their target, because an empty fold's
+    post-addition deviation is still enormous. Measured on the 60-group fixture: **2 of 5
+    folds empty, imbalanceScore 1.0**. Scoring by `(a+s-t)^2 - (a-t)^2` instead is
+    smallest for the fold furthest *below* its share; the same fixture then gives five
+    folds of exactly 60 rows with class counts within one, imbalanceScore **0.0385**. The
+    balance assertion caught this, which is why it is written with a measured threshold
+    (0.10) rather than as a vague "reasonably balanced".
+  - **The final tie-break is the group's FIRST ROW, not its id.** Two groups with the same
+    size and the same outcome split are interchangeable to the packer, so *something*
+    orders them — and while that something was the compacted id, renumbering the groups
+    produced a different partition of the same data. The permutation-invariance test
+    caught it. The first row is a property of the data, so the plan now depends on the
+    grouping and not on its labels. The test was strengthened at the same time, from
+    "row 0's block matches" to "a bijection exists between the two fold labelings".
+  - **The seeded draw enters in exactly one place** — a permutation of the FOLD order,
+    consulted only for exact cost ties. Fold numbering is arbitrary, so randomness never
+    reaches a packing decision.
+  - **Leakage is recomputed independently and refuses the plan.** A group found in two
+    folds sets `ok = false` with a reason rather than being reported as a warning. It is
+    unreachable by construction, which is precisely why it is checked rather than assumed.
+  - **What it refuses vs. what it reports.** Fewer groups than folds is a refusal (a fold
+    would be empty), as is a group vector that does not pair with the rows. Folds with one
+    outcome class, and a group larger than a fold's fair share, are *warnings* with the
+    numbers — an oversized group is never split to meet a target, and the caller decides
+    whether to coarsen the key or use fewer folds.
+  - **Sabotage:** assigning rows within a group round-robin instead of as a unit fails
+    seven assertions, headed by *"no group appears in more than one fold"* — checked in
+    the test independently of the planner's own `leakageCount`, so both would have to be
+    wrong to pass.
+  - Gates: zero-warning Release, 12/12 ctest, goldens byte-identical, smoke green, oracle
+    identical.

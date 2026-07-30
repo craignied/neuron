@@ -20,6 +20,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <map>
 #include <set>
 
 #include "split.h"
@@ -873,6 +874,190 @@ int main()
 		expect( empty.strataKey( vector< unsigned >(), 4 ).empty()
 			&& empty.groupKey( vector< unsigned >() ).empty(),
 			"the key builders return nothing without a raw dataset" );
+	}
+
+
+	// ---- The group-aware fold planner (ROADMAP 4) ---------------------------
+	// Indivisible groups make this bin packing, not dealing. What must hold: every
+	// row folded exactly once, NO group in two folds, reproducibility under a seed,
+	// invariance to how the groups happen to be numbered, and honest reporting when
+	// the group sizes make even folds impossible.
+	{
+		// 60 groups of unequal size (1..9 rows), outcome varying by group so some
+		// groups are one-class -- the shape a county cohort actually has.
+		const unsigned k = 5;
+		vector< unsigned > label, group;
+		unsigned nGroupsMade = 60;
+		for ( unsigned g = 0; g < nGroupsMade; g++ )
+		{
+			unsigned size = 1 + ( g * 7 ) % 9;
+			for ( unsigned i = 0; i < size; i++ )
+			{
+				group.push_back( g );
+				// group-level event risk: some groups all-0, some mixed
+				label.push_back( ( ( g % 4 ) && ( ( g + i ) % 3 == 0 ) ) ? 1u : 0u );
+			}
+		}
+		const unsigned n = ( unsigned ) label.size();
+
+		util::set_seed( 21 );
+		nsplit::GroupFoldPlan p = nsplit::stratifiedGroupKFold( label, group, k );
+		expect( p.ok && p.k == k && p.nGroups == nGroupsMade && p.foldId.size() == n,
+			"groups: the plan reports its k, group count, and one assignment per row" );
+
+		// Every row in exactly one valid fold.
+		unsigned total = 0; bool inRange = true;
+		for ( unsigned r = 0; r < n; r++ ) if ( p.foldId[ r ] >= k ) inRange = false;
+		for ( unsigned f = 0; f < k; f++ ) total += p.foldSize[ f ];
+		expect( inRange && total == n, "groups: every row lands in exactly one fold" );
+
+		// THE invariant: no group appears in two folds. Checked here independently
+		// of the planner's own leakage count, so both would have to be wrong.
+		{
+			map< unsigned, unsigned > firstFold;
+			unsigned straddling = 0;
+			for ( unsigned r = 0; r < n; r++ )
+			{
+				map< unsigned, unsigned >::iterator it = firstFold.find( group[ r ] );
+				if ( it == firstFold.end() ) firstFold[ group[ r ] ] = p.foldId[ r ];
+				else if ( it->second != p.foldId[ r ] ) straddling++;
+			}
+			expect( straddling == 0 && p.leakageCount == 0,
+				"groups: no group appears in more than one fold" );
+		}
+
+		// Group counts and class counts agree with the assignment they summarize.
+		{
+			unsigned gTotal = 0, ev = 0, evPlan = 0;
+			for ( unsigned f = 0; f < k; f++ )
+			{
+				gTotal += p.groupsPerFold[ f ];
+				evPlan += p.classByFold[ f ][ 1 ];
+			}
+			for ( unsigned r = 0; r < n; r++ ) if ( label[ r ] ) ev++;
+			expect( gTotal == nGroupsMade && evPlan == ev,
+				"groups: per-fold group and event counts add up to the whole" );
+		}
+
+		// Balance. Measured on this fixture: every fold lands on exactly 60 rows
+		// with class counts within one, imbalanceScore 0.0385. The 0.10 threshold
+		// is well clear of that and well clear of a broken packer -- scoring folds
+		// by their RESULTING deviation instead of the CHANGE in it (the bug this
+		// assertion caught) leaves 2 of 5 folds empty at score 1.0.
+		expect( p.imbalanceScore < 0.10,
+			"groups: the packing keeps every fold within a tenth of its share" );
+
+		// Reproducibility, and invariance to the ARBITRARY numbering of the groups:
+		// relabelling the groups must not change which rows share a fold.
+		util::set_seed( 21 );
+		nsplit::GroupFoldPlan again = nsplit::stratifiedGroupKFold( label, group, k );
+		expect( again.foldId == p.foldId, "groups: a fixed seed reproduces the plan" );
+
+		{
+			vector< unsigned > permuted( n );
+			for ( unsigned r = 0; r < n; r++ )
+				permuted[ r ] = ( group[ r ] * 37 + 11 ) % nGroupsMade + 1000;
+			util::set_seed( 21 );
+			nsplit::GroupFoldPlan q = nsplit::stratifiedGroupKFold( label, permuted, k );
+			// Same PARTITION of rows: the fold NUMBERS may permute, but the blocks
+			// must be identical -- established by requiring a bijection between
+			// p's fold ids and q's, checked over every row.
+			bool samePartition = q.ok;
+			map< unsigned, unsigned > toQ, toP;
+			for ( unsigned r = 0; r < n && samePartition; r++ )
+			{
+				unsigned a = p.foldId[ r ], b = q.foldId[ r ];
+				if ( toQ.count( a ) && toQ[ a ] != b ) samePartition = false;
+				if ( toP.count( b ) && toP[ b ] != a ) samePartition = false;
+				toQ[ a ] = b; toP[ b ] = a;
+			}
+			expect( samePartition,
+				"groups: relabelling the groups does not change the partition" );
+		}
+
+		// Fewer groups than folds is a refusal, not a plan with an empty fold.
+		{
+			vector< unsigned > few( 30 ), fewLabel( 30, 0 );
+			for ( unsigned r = 0; r < 30; r++ ) { few[ r ] = r % 3; fewLabel[ r ] = r % 2; }
+			nsplit::GroupFoldPlan r5 = nsplit::stratifiedGroupKFold( fewLabel, few, 5 );
+			expect( !r5.ok && r5.reason.find( "fewer groups" ) != string::npos,
+				"groups: fewer groups than folds is refused with the counts" );
+		}
+
+		// A mismatched group vector is refused rather than read past its end.
+		{
+			vector< unsigned > shortGroup( n - 1, 0 );
+			expect( !nsplit::stratifiedGroupKFold( label, shortGroup, k ).ok,
+				"groups: a group vector that does not pair with the rows is refused" );
+		}
+
+		// One-class groups: when too few groups carry an event, some fold has no
+		// event and can supply no AUC. That is WARNED, not refused -- the other
+		// folds are still informative.
+		{
+			vector< unsigned > rareLabel( label.size(), 0 ), rareGroup = group;
+			for ( unsigned r = 0; r < rareLabel.size(); r++ )
+				if ( group[ r ] == 3 ) rareLabel[ r ] = 1; // events in ONE group only
+			util::set_seed( 5 );
+			nsplit::GroupFoldPlan rp = nsplit::stratifiedGroupKFold( rareLabel,
+				rareGroup, k );
+			bool warned = false;
+			for ( unsigned i = 0; i < rp.warnings.size(); i++ )
+				if ( rp.warnings[ i ].find( "only one outcome class" ) != string::npos )
+					warned = true;
+			expect( rp.ok && warned,
+				"groups: folds with no event are warned about, not refused" );
+		}
+
+		// An oversized group is never split to meet a target -- the plan says so
+		// and reports the imbalance rather than quietly breaking the cluster.
+		{
+			vector< unsigned > bigGroup, bigLabel;
+			for ( unsigned i = 0; i < 200; i++ ) { bigGroup.push_back( 0 ); bigLabel.push_back( i % 2 ); }
+			for ( unsigned g = 1; g < 20; g++ )
+				for ( unsigned i = 0; i < 5; i++ )
+					{ bigGroup.push_back( g ); bigLabel.push_back( i % 2 ); }
+			util::set_seed( 8 );
+			nsplit::GroupFoldPlan bp = nsplit::stratifiedGroupKFold( bigLabel, bigGroup, k );
+			bool saidSo = false;
+			for ( unsigned i = 0; i < bp.warnings.size(); i++ )
+				if ( bp.warnings[ i ].find( "largest group" ) != string::npos ) saidSo = true;
+			unsigned biggestFold = 0;
+			for ( unsigned f = 0; f < k; f++ )
+				if ( bp.foldSize[ f ] > biggestFold ) biggestFold = bp.foldSize[ f ];
+			expect( bp.ok && bp.leakageCount == 0 && saidSo && bp.largestGroup == 200
+				&& biggestFold >= 200 && bp.imbalanceScore > 0.5,
+				"groups: an oversized group is kept whole, and the imbalance is reported" );
+		}
+
+		// Keys built from one and from several columns both reach the planner as
+		// plain ids -- via DataSet::groupKey, so the CV path is exercised end to end.
+		{
+			Matrix< double > graw( 120, 3 );
+			for ( unsigned r = 0; r < 120; r++ )
+			{
+				graw( r, 0 ) = ( double ) ( r % 6 );        // 6 levels
+				graw( r, 1 ) = ( double ) ( ( r / 6 ) % 4 ); // 4 levels
+				graw( r, 2 ) = ( r % 3 == 0 ) ? 1.0 : 0.0;
+			}
+			DataSet gds;
+			gds.setInput( 2 ); gds.setOutput( 1 ); gds.setDiscrete( true );
+			gds.setHistory( false );
+			gds.setRawMatrix( graw );
+
+			vector< unsigned > lab( 120 );
+			for ( unsigned r = 0; r < 120; r++ ) lab[ r ] = ( r % 3 == 0 ) ? 1u : 0u;
+
+			vector< unsigned > one = gds.groupKey( vector< unsigned >{ 0 } );
+			vector< unsigned > two = gds.groupKey( vector< unsigned >{ 0, 1 } );
+			util::set_seed( 2 );
+			nsplit::GroupFoldPlan p1 = nsplit::stratifiedGroupKFold( lab, one, 3 );
+			util::set_seed( 2 );
+			nsplit::GroupFoldPlan p2 = nsplit::stratifiedGroupKFold( lab, two, 4 );
+			expect( p1.ok && p1.nGroups == 6 && p1.leakageCount == 0
+				&& p2.ok && p2.nGroups == 24 && p2.leakageCount == 0,
+				"groups: keys from one and from several columns both fold cleanly" );
+		}
 	}
 
 	if ( failures == 0 )
