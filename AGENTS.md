@@ -639,10 +639,19 @@ the row id **only** for a grouped design) joins the Tier-3 files.
 sampling unit**: `independence=rows` (independent observations). Without it you
 still get predictions + point AUCs, but ordinary DeLong is **withheld** with an
 explanation (never a silently invalid *p*, e.g. on clustered SEER county data).
-`independence=cluster` is **refused** for now, and the refusal names the missing
-prerequisite — no `group=` key, no locked test, or the estimator itself; when it
-lands, `cluster` will route to a clustered estimator and must **never** fall back to
-ordinary DeLong. `independence=rows` **together with** `group=` is also refused: a
+`independence=cluster` routes to **Obuchowski's clustered ROC covariance**
+(*Biometrics* 1997;53:567–578) — the cluster, not the row, is the independent unit.
+It requires a `group=` key (there is nothing to cluster on without one) and a locked
+test, and the refusal names whichever is missing; it **never** falls back to ordinary
+DeLong, and a clustered *p* is never labelled "DeLong". The locked sample is
+preflighted for **≥ 2 clusters carrying each outcome class** (the estimator's own
+divisor is `informative clusters − 1`, so this is a cluster condition, not a row one:
+fifty locked rows from one cluster carry no between-cluster information). Tier 1
+states how many independent clusters the interval and *p* rest on, because a *p* from
+four clusters and one from four hundred otherwise read identically. Clustered area
+intervals are deliberately **not** clamped to [0,1] (the reference implementation's
+behaviour, and an interval past the boundary is information — the ordinary path still
+clamps). `independence=rows` **together with** `group=` is refused: a
 group-disjoint design prevents leakage but does not make the held-out rows
 independent, so ordinary DeLong would not be valid, and calling the grouping
 "descriptive" would not repair the *p*. When inference runs, Tier 1 gains the

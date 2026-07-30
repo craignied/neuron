@@ -177,9 +177,21 @@ evaldesign::InferenceChoice evaldesign::chooseInference( SamplingUnit unit,
 		return ch;
 	}
 
-	// SamplingUnit::Cluster. The clustered estimator is not built yet; until it
-	//    is, this REFUSES rather than falling back to ordinary DeLong (a settled
-	//    decision, not a gap to paper over).
-	ch.reason = "clustered inference is a follow-on";
+	// SamplingUnit::Cluster. Clustered inference needs cluster identity, which
+	//    only a group-aware design carries. Declaring a cluster unit over a
+	//    row-wise split is not a refinement of it -- there is nothing to cluster
+	//    on -- so it is refused rather than silently downgraded to DeLong.
+	if ( split != PartitionMethod::StratifiedGroup )
+	{
+		ch.reason = "a clustered sampling unit needs a group-aware design; the "
+			"partition carries no cluster identity";
+		return ch;
+	}
+	if ( !estimable )
+	{
+		ch.reason = "clustered inference not estimable: " + unestimableReason;
+		return ch;
+	}
+	ch.method = AucInference::ObuchowskiClustered;
 	return ch;
 }

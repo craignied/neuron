@@ -456,6 +456,14 @@ string cvreport::tier1( const crossval::Comparison& cmp, const PlanInfo& info,
 				<< ", " << method << " p = " << pv.str() << "  \xE2\x86\x92  "
 				<< ( c.significant ? "significant" : "not significant" ) << "\n";
 		}
+		// How many INDEPENDENT UNITS the interval and the p rest on. For a
+		//    clustered design that is the cluster count, not the row count, and it
+		//    belongs at the headline: a p from four clusters and a p from four
+		//    hundred read identically without it.
+		if ( locked.nClusters )
+			os << "   95% CIs and the contrast use " << locked.inferenceText()
+				<< "; " << locked.nClusters << " independent cluster"
+				<< ( locked.nClusters == 1 ? "" : "s" ) << ".\n";
 	}
 	else if ( L && locked.contrast.hasDelta )
 	{

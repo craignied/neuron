@@ -45,6 +45,7 @@
 #include "cvadapters.h"
 #include "cvreport.h"
 #include "delong.h"
+#include "clustered_auc.h"
 #include "split.h"
 #include "utility.h"
 #include "version.h"
@@ -1881,25 +1882,51 @@ static cvreport::LockedInfo buildLockedInfo( const crossval::LockedResult& lr,
 	// Point AUCs (and, if the design permits inference, the covariance) over the
 	//    entries that produced predictions -- paired on the same rows.
 	vector< vector< double > > preds;
-	vector< int > idx( lr.entries.size(), -1 ); // entry -> column in the DeLong result
+	vector< int > idx( lr.entries.size(), -1 ); // entry -> column in the estimator
 	for ( unsigned e = 0; e < lr.entries.size(); e++ )
 		if ( lr.entries[ e ].ok )
 		{
 			idx[ e ] = ( int ) preds.size();
 			preds.push_back( lr.entries[ e ].pred );
 		}
-	delong::Result dr = delong::analyze( lr.outcome, preds );
+
+	// The POINT areas come from the shared placement code, so they exist whenever
+	//    both outcome classes are present -- independent of whether any covariance
+	//    estimator is permitted or estimable (the DLG-4 principle: a descriptive
+	//    number is not withheld because an inferential one is unavailable).
+	auccov::Placements place = auccov::compute( lr.outcome, preds );
+
+	// Which estimator the design permits, and whether the data can support it.
+	//    Both estimators are asked ONLY when their own unit was declared -- an
+	//    undeclared run does no covariance work at all.
+	delong::Result dr;
+	clustered_auc::Result cr;
+	bool estimable = false;
+	string estimableReason;
+	const bool clusterUnit = ( c.unit == evaldesign::SamplingUnit::Cluster );
+	if ( clusterUnit && !L.cluster.empty() )
+	{
+		cr = clustered_auc::analyze( lr.outcome, L.cluster, preds );
+		estimable = cr.ok; estimableReason = cr.reason;
+	}
+	else if ( c.unit == evaldesign::SamplingUnit::Row )
+	{
+		dr = delong::analyze( lr.outcome, preds );
+		estimable = dr.ok; estimableReason = dr.reason;
+	}
 
 	// ONE decision (DLG-8): the declared sampling unit plus the ACHIEVED partition
 	//    method decide which estimator may run. A mechanically generated row holdout
 	//    is not independent unless the caller says the observations are; a
-	//    group-disjoint design forbids ordinary DeLong outright; a cluster
-	//    declaration waits for the clustered estimator rather than falling back.
+	//    group-disjoint design forbids ordinary DeLong outright; a clustered unit
+	//    needs a group-aware design to have anything to cluster on.
 	evaldesign::InferenceChoice choice = evaldesign::chooseInference( c.unit,
-		split.method, dr.ok, dr.reason );
+		split.method, estimable, estimableReason );
 	L.inference = choice.method;
 	L.inferenceReason = choice.reason;
 	const bool inferenceRan = L.inferenceRan();
+	const bool clustered =
+		( L.inference == evaldesign::AucInference::ObuchowskiClustered );
 
 	for ( unsigned e = 0; e < lr.entries.size(); e++ )
 	{
@@ -1918,15 +1945,23 @@ static cvreport::LockedInfo buildLockedInfo( const crossval::LockedResult& lr,
 		}
 		if ( !lr.entries[ e ].ok )
 			col.note = "failed: " + lr.entries[ e ].reason;
-		else if ( dr.ok )
+		else if ( place.ok )
 		{
-			// The point AUC is available whether or not inference was declared; the
-			//    95% CI (Wald DeLong) only when an estimator actually ran.
-			delong::Interval iv = delong::interval( dr, ( unsigned ) idx[ e ] );
-			col.hasAuc = true; col.auc = iv.auc;
-			if ( inferenceRan ) { col.hasCi = true; col.lo = iv.lo; col.hi = iv.hi; }
+			// The point AUC is available whether or not inference was declared or
+			//    estimable; the 95% interval only when an estimator actually ran,
+			//    and it comes from THAT estimator (clustered intervals are not
+			//    DeLong intervals and are never labelled as such).
+			col.hasAuc = true;
+			col.auc = place.auc[ idx[ e ] ];
+			if ( inferenceRan )
+			{
+				auccov::Interval iv = clustered
+					? clustered_auc::interval( cr, ( unsigned ) idx[ e ] )
+					: delong::interval( dr, ( unsigned ) idx[ e ] );
+				col.hasCi = true; col.lo = iv.lo; col.hi = iv.hi;
+			}
 		}
-		else col.note = "AUC not computable: " + dr.reason;
+		else col.note = "AUC not computable: " + place.reason;
 		L.columns.push_back( col );
 	}
 
@@ -1943,20 +1978,26 @@ static cvreport::LockedInfo buildLockedInfo( const crossval::LockedResult& lr,
 		}
 		if ( pe < 0 || re < 0 )
 			ct.note = "a contrast procedure was not evaluated";
-		else if ( !dr.ok || idx[ pe ] < 0 || idx[ re ] < 0 )
+		else if ( !place.ok || idx[ pe ] < 0 || idx[ re ] < 0 )
 			ct.note = "a contrast procedure has no point AUC on the locked test";
 		else
 		{
 			// The point difference is always available; the p only when the design
 			//    permitted an estimator AND that estimator produced a valid contrast.
 			ct.hasDelta = true;
-			ct.delta = dr.auc[ idx[ pe ] ] - dr.auc[ idx[ re ] ];
-			if ( L.inference == evaldesign::AucInference::DeLongIndependent )
+			ct.delta = place.auc[ idx[ pe ] ] - place.auc[ idx[ re ] ];
+			if ( inferenceRan )
 			{
-				delong::Contrast dc = delong::contrast( dr,
-					( unsigned ) idx[ pe ], ( unsigned ) idx[ re ] );
+				auccov::Contrast dc = clustered
+					? clustered_auc::contrast( cr, ( unsigned ) idx[ pe ],
+						( unsigned ) idx[ re ] )
+					: delong::contrast( dr, ( unsigned ) idx[ pe ],
+						( unsigned ) idx[ re ] );
 				if ( !dc.valid )
-					ct.note = dc.note.empty() ? "DeLong contrast not computable" : dc.note;
+					ct.note = dc.note.empty()
+						? evaldesign::inferenceShortName( L.inference )
+							+ " contrast not computable"
+						: dc.note;
 				else
 				{
 					ct.hasInference = true;
@@ -2619,7 +2660,7 @@ string handleCv( const httplib::Request& req )
 
 			// A grouped run folds the DEVELOPMENT groups, so there must be at
 			//    least k of them -- a check the row counts cannot make, because a
-			//    thousand development rows in three counties still cannot fill
+			//    thousand development rows in three clusters still cannot fill
 			//    five group-disjoint folds.
 			if ( gCount )
 			{
@@ -2634,6 +2675,29 @@ string handleCv( const httplib::Request& req )
 						"(the key gives " << gCount << " groups in all). Use fewer "
 						"folds, a smaller locked size, or a coarser group key.";
 					return jsonMsg( false, m.str() );
+				}
+				// Clustered inference divides by ( informative clusters - 1 ), so
+				//    the LOCKED sample needs at least two clusters carrying each
+				//    outcome class. That is the estimator's own requirement, checked
+				//    here so an expensive run is not spent to discover it -- and it
+				//    is a cluster condition, not a row condition: fifty locked rows
+				//    from one cluster carry no between-cluster information at all.
+				if ( c.unit == evaldesign::SamplingUnit::Cluster )
+				{
+					set< unsigned > withEvent, withoutEvent;
+					for ( unsigned i = 0; i < lockedTest.size(); i++ )
+						( lab[ lockedTest[ i ] ] ? withEvent : withoutEvent )
+							.insert( gkey[ lockedTest[ i ] ] );
+					if ( withEvent.size() < 2 || withoutEvent.size() < 2 )
+					{
+						ostringstream m;
+						m << "clustered inference needs at least two locked-test "
+							"clusters carrying each outcome class (found "
+							<< withEvent.size() << " with an event and "
+							<< withoutEvent.size() << " without). Use a larger locked "
+							"size, or a finer group key.";
+						return jsonMsg( false, m.str() );
+					}
 				}
 			}
 			if ( lk0 < 2 || lk1 < 2 )
@@ -2678,8 +2742,9 @@ string handleCv( const httplib::Request& req )
 				"(independent observations) or unset" );
 		if ( u == evaldesign::SamplingUnit::Cluster )
 		{
-			// Say precisely which prerequisites are missing, so the refusal is a
-			//    map rather than a wall. The estimator itself is the last one.
+			// Clustered inference needs cluster identity and something to compute
+			//    it on. Say precisely which prerequisite is missing, so the refusal
+			//    is a map rather than a wall.
 			string why;
 			if ( c.groupColumns.empty() )
 				why = "clustered inference needs a group= key naming the clustering "
@@ -2687,12 +2752,10 @@ string handleCv( const httplib::Request& req )
 			else if ( c.lockedN == 0 )
 				why = "clustered inference is computed on the locked test set; set "
 					"locked_fraction or locked_n";
-			else
-				why = "the clustered ROC covariance estimator is not built yet "
-					"(a follow-on)";
-			return jsonMsg( false, why + ". Omit the sampling unit to get predictions "
-				"and point AUCs without ordinary DeLong, which would be invalid on "
-				"clustered data." );
+			if ( !why.empty() )
+				return jsonMsg( false, why + ". Omit the sampling unit to get "
+					"predictions and point AUCs without ordinary DeLong, which would "
+					"be invalid on clustered data." );
 		}
 		// Declaring independent ROWS over a group-disjoint design is a contradiction:
 		//    grouping stops leakage, it does not make the held-out rows independent.

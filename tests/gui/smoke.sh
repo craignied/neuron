@@ -1703,6 +1703,64 @@ assert p["failures"], p
 assert all("single group" in f["reason"] for f in p["failures"]), p["failures"]
 PYTHIN
 
+#     CLUSTERED locked-test inference (Obuchowski). Declaring a clustered
+#     sampling unit routes to the clustered covariance -- never to DeLong, and
+#     never labelled as DeLong. The refusals name the missing prerequisite.
+curl -s -X POST "$URL/api/cv" -d "folds=3&locked_fraction=0.3&independence=cluster" \
+    | grep -q "needs a group= key" || fail "clustered without group= must be refused"
+curl -s -X POST "$URL/api/cv" -d "folds=3&group=3,4,5&independence=cluster" \
+    | grep -q "locked test" || fail "clustered without a locked test must be refused"
+
+curl -s -X POST "$URL/api/cv" \
+    -d "folds=3&seed=42&group=3,4,5&locked_fraction=0.3&independence=cluster&logistic=1&neural=1&neural_obd=0&neural_hidden=3&maxiter=4000&autostop_tol=0.01" \
+    | grep -q '"ok":true' || fail "clustered CV did not start"
+for i in $(seq 1 300); do curl -s "$URL/api/train/status" > cv_clust.json; grep -q '"running":false' cv_clust.json && break; sleep 0.3; done
+$PY - <<'PYCLUST' || fail "clustered locked-test result malformed"
+import json
+d = json.load(open("cv_clust.json", encoding="utf-8"))["result"]
+assert d["ok"], d
+lk = d["cv"]["locked"]
+assert lk["inferenceRan"] is True, lk
+assert "Obuchowski" in lk["inferenceMethod"], lk
+assert "DeLong" not in lk["inferenceMethod"], lk        # never mislabelled
+assert lk["samplingUnit"].startswith("cluster"), lk
+assert lk["independenceStatus"] == "declared: clustered observations", lk
+assert lk["clusters"] >= 2, lk                          # independent units, not rows
+assert lk["areas"][0]["lo"] is not None, lk             # a clustered interval
+assert lk["contrast"]["inferenceRan"] is True, lk["contrast"]
+
+t1 = d["cv"]["tier1"]
+# The estimator names itself, and the headline says how many INDEPENDENT UNITS
+# the p rests on -- a p from four clusters and one from four hundred otherwise
+# read identically.
+assert "clustered ROC p" in t1 or "no testable difference" in t1 or "deterministic separation" in t1, t1
+assert "DeLong p" not in t1, t1
+assert "independent cluster" in t1, t1
+t2 = d["cv"]["tier2"]
+assert "clusters in the locked sample:" in t2, t2[t2.find("Locked-test"):][:500]
+assert "Obuchowski" in t2, t2[t2.find("Locked-test"):][:500]
+# The standing scope note is the clustered one, not the DeLong one.
+assert "treats the cluster, not the row" in t2, t2[t2.find("Locked-test"):][:900]
+
+run = json.load(open("cv_run.json", encoding="utf-8"))
+assert run["lockedTest"]["clusters"] >= 2, run["lockedTest"]
+assert "Obuchowski" in run["lockedTest"]["inferenceMethod"], run["lockedTest"]
+
+# THE NUMBERS, not just the label. Asserting only that the report SAYS
+# "Obuchowski" leaves the label correct while the interval and the p come from
+# the row-based estimator -- a sabotage that swapped the covariance while
+# keeping the wording passed every structural assertion above. These are the
+# clustered estimator's values on this seeded fixture; the row-based estimator
+# on exactly the same fit gives [0.3695, 0.7017] and p = 0.2283, so a fallback
+# cannot hide here.
+a0 = lk["areas"][0]
+assert abs(a0["auc"] - 0.535613) < 1e-5, a0        # the AREA is shared by both
+assert abs(a0["lo"] - 0.320824) < 1e-4, a0         # the INTERVAL is not
+assert abs(a0["hi"] - 0.750401) < 1e-4, a0
+assert abs(lk["contrast"]["delta"] - 0.119658) < 1e-5, lk["contrast"]
+assert lk["contrast"]["p"] < 1e-3, lk["contrast"]  # clustered 8.7e-05 vs row 0.23
+PYCLUST
+
 # DLG-3 (k-aware development feasibility): a rare-event set where the locked test
 #    can hold >= 2 of each class, but the development set is left with fewer than k
 #    events -- so some outer fold could not contain an event. The request must be

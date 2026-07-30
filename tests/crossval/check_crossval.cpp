@@ -1014,6 +1014,12 @@ int main()
 			evaldesign::InferenceChoice clustered = evaldesign::chooseInference(
 				evaldesign::SamplingUnit::Cluster,
 				evaldesign::PartitionMethod::StratifiedGroup, true, "" );
+			evaldesign::InferenceChoice clusterNoGroups = evaldesign::chooseInference(
+				evaldesign::SamplingUnit::Cluster,
+				evaldesign::PartitionMethod::OutcomeStratified, true, "" );
+			evaldesign::InferenceChoice clusterThin = evaldesign::chooseInference(
+				evaldesign::SamplingUnit::Cluster,
+				evaldesign::PartitionMethod::StratifiedGroup, false, "one cluster" );
 			evaldesign::InferenceChoice sparse = evaldesign::chooseInference(
 				evaldesign::SamplingUnit::Row,
 				evaldesign::PartitionMethod::OutcomeStratified, false, "one class" );
@@ -1023,9 +1029,17 @@ int main()
 			expect( grouped.method == evaldesign::AucInference::None
 				&& grouped.reason.find( "group-disjoint" ) != string::npos,
 				"a grouped design cannot reach ordinary DeLong, whatever is declared" );
-			expect( clustered.method == evaldesign::AucInference::None
-				&& clustered.reason.find( "follow-on" ) != string::npos,
-				"a clustered sampling unit refuses rather than falling back to DeLong" );
+			expect( clustered.method == evaldesign::AucInference::ObuchowskiClustered
+				&& clustered.reason.empty(),
+				"a clustered unit over a group-aware design selects the clustered estimator" );
+			// ... but NEVER falls back to DeLong when it cannot run. Both ways of
+			// being unable are refusals with their own reason, not a downgrade.
+			expect( clusterNoGroups.method == evaldesign::AucInference::None
+				&& clusterNoGroups.reason.find( "no cluster identity" ) != string::npos,
+				"a clustered unit over a row-wise design is refused, not downgraded to DeLong" );
+			expect( clusterThin.method == evaldesign::AucInference::None
+				&& clusterThin.reason.find( "one cluster" ) != string::npos,
+				"an unestimable clustered design reports the estimator's reason, not DeLong" );
 			expect( sparse.method == evaldesign::AucInference::None
 				&& sparse.reason.find( "one class" ) != string::npos,
 				"an unestimable locked test reports the estimator's own reason" );

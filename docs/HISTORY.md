@@ -2865,3 +2865,38 @@ a clinic, a household, a school, a repeated subject; nothing in the estimator kn
     selected because it gives a friendlier answer.
   - Gates: zero-warning Release, **13/13** ctest (new `clustered_auc`), goldens
     byte-identical, smoke green, oracle identical.
+
+**2026-07-30 (night, later) — the inference policy chooses, and the report says which.**
+`independence=cluster` is no longer a refusal: it routes to the clustered estimator, and
+every layer above it was already method-neutral from DLG-8, so wiring it in was mostly
+deleting the refusal. What needed care was making sure the *labels* and the *numbers* can
+never come from different estimators.
+
+  - **`chooseInference` gained the clustered branch, and two refusals with it.** A
+    clustered unit over a row-wise design is refused — there is no cluster identity in the
+    partition, so it is not a refinement of DeLong but a different design — and an
+    unestimable clustered sample reports the estimator's own reason. Neither downgrades.
+  - **Point areas moved off `delong::analyze` onto the shared placements**, so they exist
+    whenever both classes are present, independent of whether any covariance estimator is
+    permitted or estimable. Intervals and contrasts come from *whichever* estimator the
+    policy chose; a clustered interval is never produced by DeLong and never labelled as
+    one.
+  - **The preflight counts clusters, not rows.** A clustered request needs ≥ 2 locked
+    clusters carrying each outcome class, checked before the run rather than after an
+    expensive one. Fifty locked rows from one cluster carry no between-cluster information
+    at all, and no row-count check can see that.
+  - **Tier 1 now states the number of independent clusters** beside the contrast:
+    *"95% CIs and the contrast use Obuchowski (clustered ROC covariance); 4 independent
+    clusters."* A *p* from four clusters and a *p* from four hundred read identically
+    without it, and the repository fixture really does produce four.
+  - **A sabotage got through, and the fix is the finding.** Making the clustered branch
+    fall back to DeLong left every structural smoke assertion green: the response still
+    said `"Obuchowski"`, still declared a cluster unit, still reported the cluster count —
+    while the interval and the *p* came from the row-based covariance
+    ([0.3695, 0.7017], p = 0.2283 instead of [0.3208, 0.7504], p = 8.7e-05). Asserting
+    the *label* guarded nothing. Smoke now pins the clustered estimator's **numbers** on
+    the seeded fixture and records the row-based values it must not equal; the same
+    sabotage then fails. This is the "tests must assert their mechanism" trap in its
+    purest form — the label and the computation are two different facts.
+  - Gates: zero-warning Release, 13/13 ctest, goldens byte-identical, smoke green
+    (extended), oracle identical. `AGENTS.md` and `docs/gui_cli_parity.md` updated.

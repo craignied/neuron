@@ -510,11 +510,11 @@ already represents. Grouping measures transfer to groups the model never saw, an
 a cluster whole. Declaring the sampling unit changes the uncertainty, not the split.
 Stratification and grouping cannot be combined yet.</span></div>
 <div class="row">
-  <label title="DeLong assumes INDEPENDENT test observations. Declare the sampling unit so the AUC confidence intervals and the contrast p-value are only produced when independence is justified. Leave unspecified to get predictions and point AUCs without inference. 'Clustered' (rows sharing a sampling unit) is a follow-on and cannot be selected yet.">Sampling unit
+  <label title="DeLong assumes INDEPENDENT test observations. Declare the sampling unit so the AUC confidence intervals and the contrast p-value are only produced when independence is justified. Leave unspecified to get predictions and point AUCs without inference. 'Clustered' (rows sharing a sampling unit) uses Obuchowski's clustered ROC covariance and requires a group key and a locked-test fraction.">Sampling unit
     <select id="cv_independence">
       <option value="">— not declared (no inference)</option>
       <option value="rows">independent rows (IID) — run DeLong</option>
-      <option value="cluster" disabled>clustered — not yet available</option>
+      <option value="cluster">clustered (Obuchowski) — needs a group key + locked test</option>
     </select></label>
 </div>
 <div class="row"><span class="status">Every procedure is scored over ONE shared,
@@ -530,8 +530,10 @@ the development rows and scored once on it (cv_locked_predictions.csv is written
 too). DeLong produces the AUC 95% CIs and the prespecified contrast's p ONLY when
 you declare the sampling unit as independent rows &mdash; ordinary DeLong assumes
 independent observations, which a mechanical row holdout does not establish (on
-clustered data, e.g. shared county, it would be invalid). Without the declaration
-you still get predictions and point AUCs; clustered inference is a follow-on.</span></div>
+clustered data it would be invalid). Without the declaration you still get
+predictions and point AUCs. Declaring a <b>clustered</b> sampling unit &mdash; which
+needs a group key and a locked-test fraction &mdash; uses Obuchowski's clustered ROC
+covariance instead, treating the cluster rather than the row as the independent unit.</span></div>
 <div class="row action">
   <button id="cvbtn" onclick="runCv()">Run cross-validation</button>
   <span class="status" id="cvstatus"></span>
