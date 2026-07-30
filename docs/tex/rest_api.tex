@@ -1,0 +1,328 @@
+\chapter{Loopback REST API}\label{rest_api}
+\index{REST API}
+
+The graphical interface is a client of the same HTTP endpoints that
+are available to scripts.  Start the service without opening a browser:
+
+\begin{verbatim}
+./build/neuron --gui --no-browser
+\end{verbatim}
+
+The engine prints a URL such as
+\texttt{http://127.0.0.1:54321/}.  The port is assigned at runtime, so
+clients should read it from standard output.  Requests use ordinary
+form fields or multipart file uploads.  Successful JSON responses
+contain \texttt{"ok":true}; failures contain
+\texttt{"ok":false} and a human-readable \texttt{message}.
+
+The server deliberately binds only to loopback and has no
+authentication.  It is intended for a user or local agent on the same
+computer.  It must not be exposed as a public web service.
+
+\section{A complete minimal session}
+
+\begin{verbatim}
+URL=http://127.0.0.1:54321
+
+curl -s -X POST "$URL/api/load" \
+  -d "mode=raw&path=data.txt&fraction=0.25&seed=42"
+
+curl -s -X POST "$URL/api/model" \
+  -d "type=logistic"
+
+curl -s -X POST "$URL/api/train" \
+  -d "algorithm=1&maxiter=20000&seed=42"
+
+curl -s "$URL/api/stats"
+curl -s "$URL/api/save/network" -o network.txt
+curl -s "$URL/api/save/scales" -o scales.txt
+\end{verbatim}
+
+File fields accept either a path for a local script or an uploaded
+multipart part for a browser.  Uploaded files are copied into the run
+directory using the safe final component of their filename.
+
+\section{Endpoint summary}
+
+\begin{longtable}{|>{\raggedright\arraybackslash}p{0.45in}|>{\raggedright\arraybackslash}p{1.35in}|>{\raggedright\arraybackslash}p{2.35in}|}
+\hline
+\textbf{Verb} & \textbf{Path} & \textbf{Purpose} \\ \hline
+\endfirsthead
+\hline
+\textbf{Verb} & \textbf{Path} & \textbf{Purpose} \\ \hline
+\endhead
+GET & \texttt{/api/version} & Engine package and version string. \\ \hline
+POST & \texttt{/api/load} & Load, normalize, and optionally split a dataset. \\ \hline
+POST & \texttt{/api/model} & Create a model or load a saved network. \\ \hline
+POST & \texttt{/api/randomize} & Reset the current model's weights from a seed. \\ \hline
+POST & \texttt{/api/train} & Train synchronously or start an asynchronous run. \\ \hline
+GET & \texttt{/api/train/status} & Read progress and the completed result of the active or most recent long job. \\ \hline
+POST & \texttt{/api/train/stop} & Request graceful cancellation at an iteration boundary. \\ \hline
+GET & \texttt{/api/stats} & Return the current trained model's ROC and classification statistics. \\ \hline
+POST & \texttt{/api/regress} & Run forward or reverse stepwise regression. \\ \hline
+POST & \texttt{/api/dfa} & Run linear or quadratic discriminant analysis. \\ \hline
+POST & \texttt{/api/obd} & Start asynchronous hidden-layer sizing. \\ \hline
+POST & \texttt{/api/cv} & Start asynchronous procedure comparison and optional locked-test inference. \\ \hline
+GET & \texttt{/api/save/:what} & Download a session artifact. \\ \hline
+\end{longtable}
+
+\section{Dataset loading: POST /api/load}
+
+\begin{description}
+\item[\texttt{mode}] \texttt{raw} to normalize and split one file;
+\texttt{train} to load an already normalized training set and optional
+matched test set.
+\item[\texttt{path} or \texttt{file}] Dataset path or multipart upload.
+\item[\texttt{testpath} or \texttt{testfile}] Optional matched test set
+in \texttt{train} mode.
+\item[\texttt{inputs}, \texttt{outputs}] Optional column-count
+overrides.  Outputs default to 1; multiple outputs select BackProp and
+accuracy-only reporting.
+\item[\texttt{discrete}] \texttt{1} for classification or \texttt{0}
+for a continuous outcome.
+\item[\texttt{fraction}, \texttt{test\_n}] Test share or exact test
+count.  Use one form.  A value of 0 keeps all rows in training.
+\item[\texttt{val\_fraction}, \texttt{val\_n}] Optional validation
+share or count for a three-way split.  The count form accompanies
+\texttt{test\_n}.
+\item[\texttt{seed}] Reproducible split seed.
+\item[\texttt{strata}, \texttt{strata\_bins}] Comma-separated
+one-based input columns for covariate stratification and the number of
+quantile bins for continuous columns.
+\item[\texttt{group}] Comma-separated one-based input columns whose
+joint values define indivisible clusters.  Grouping takes precedence
+over covariate stratification.
+\item[\texttt{threshold}] Classification threshold between 0 and 1.
+\item[\texttt{in\_lower}, \texttt{in\_upper}] Input normalization
+bounds.
+\item[\texttt{out\_lower}, \texttt{out\_upper}] Output normalization
+bounds for a continuous outcome.
+\item[\texttt{roc\_report}] \texttt{both} or \texttt{either}, defining
+the class-availability rule for ROC reporting.
+\item[\texttt{roc\_min}] Minimum observations needed for statistical
+ROC reporting.
+\item[\texttt{history}] \texttt{1} or \texttt{0} for dataset-operation
+logging.
+\end{description}
+
+Outcome stratification is always applied to ordinary random splits.
+Covariate stratification and grouping are deliberate alternatives.
+A three-way split cannot currently be combined with either of them.
+The response includes achieved row counts and, when appropriate, a
+representativeness or zero-leakage diagnostic.
+
+\section{Model construction: POST /api/model}
+
+\begin{description}
+\item[\texttt{type}] \texttt{logistic} or \texttt{simpleprop}.
+\item[\texttt{hidden}] A comma-separated layer list such as
+\texttt{5} or \texttt{8,4}.  Several layers create BackProp.
+\item[\texttt{bias}] \texttt{0} creates BareProp for a one-hidden-layer
+network; \texttt{1} keeps bias nodes.
+\item[\texttt{errfunc}] \texttt{auto}, \texttt{xentropy}, or
+\texttt{lms}.
+\item[\texttt{mode}] \texttt{load} reads the network type and
+architecture from a saved network.
+\item[\texttt{path} or \texttt{file}] Saved network path or multipart
+upload when \texttt{mode=load}.
+\item[\texttt{log\_lastop}, \texttt{log\_history}] \texttt{1} or
+\texttt{0} logging controls.
+\end{description}
+
+Model construction requires a loaded dataset because the input and
+output dimensions are data-dependent.  A loaded network is checked
+against those dimensions before it becomes current.
+
+\section{Weight reset: POST /api/randomize}
+
+The optional \texttt{seed} field resets the current trainable model to
+a reproducible starting point.  Training itself continues from current
+weights; repeated calls to \texttt{/api/train} do not randomize
+implicitly.
+
+\section{Training: POST /api/train}
+
+\begin{description}
+\item[\texttt{algorithm}] \texttt{1} for canonical gradient descent,
+\texttt{2} for conjugate gradient, \texttt{3} for Shanno, or
+\texttt{auto} to probe and choose.
+\item[\texttt{maxiter}] Required positive iteration ceiling.
+\item[\texttt{seed}] Seed used by training and automatic selection.
+\item[\texttt{async}] \texttt{1} returns immediately and publishes
+progress through \texttt{/api/train/status}.
+\item[\texttt{eta}, \texttt{autostep}] Manual learning rate and
+automatic-step toggle.
+\item[\texttt{batch\_epoch}] Batch or epoch mode.  Logistic regression
+requires it to remain on.
+\item[\texttt{weight\_decay}, \texttt{decay}] Weight-decay toggle and
+lambda.
+\item[\texttt{minerr}, \texttt{change}, \texttt{errwindow},
+\texttt{gradmax}] Classic stopping conditions.  Omitting a field keeps
+its current value; sending an empty field disables that condition.
+\item[\texttt{autostop}, \texttt{autostop\_tol},
+\texttt{autostop\_window}] Plateau detector and its tolerance and
+moving-window width.
+\item[\texttt{logprint}, \texttt{printcount}] Iteration-table
+presentation only.  These fields never change the fitted endpoint.
+\end{description}
+
+A blocking call returns the complete report, ROC series, and structured
+statistics.  An asynchronous call returns acceptance immediately; the
+same complete result later appears in status.  The response separates
+operation success from fit validity with fields including
+\texttt{converged}, \texttt{ceilingExhausted}, and
+\texttt{stopReason}.
+
+\section{Long-job control}
+
+\subsection{GET /api/train/status}
+
+Training, stepwise regression, OBD, and cross-validation share one job
+channel.  Status returns \texttt{running}, the current phase, decimated
+training and held-out error series, and procedure-specific progress.
+OBD adds its phase and hidden-node count.  Stepwise adds the current
+pass and candidate.  Cross-validation adds stage, procedure, run,
+fold, and nested-search detail when present.  When the job finishes,
+\texttt{result} contains the same object its blocking form would have
+returned.
+
+\subsection{POST /api/train/stop}
+
+Cancellation is graceful: the engine finishes the current iteration
+and produces the appropriate partial audit.  Bodyless POST requests
+must still carry a zero-length body:
+
+\begin{verbatim}
+curl -s -X POST -d "" "$URL/api/train/stop"
+\end{verbatim}
+
+A bare \texttt{curl -X POST} sends no Content-Length header and can
+make the server wait for its read timeout before dispatching.
+
+Only status and stop remain available while a job owns the engine.
+Other engine-touching endpoints return HTTP 409 with
+\texttt{"busy":true}; there is no hidden request queue.
+
+\section{Standalone analyses}
+
+\subsection{POST /api/dfa}
+
+\texttt{type=linear} runs LDFA and
+\texttt{type=quadratic} runs QDFA.  Optional
+\texttt{log\_lastop} and \texttt{log\_history} fields control logging.
+The response includes a captured report and, for a discrete
+single-output dataset, ROC series and structured statistics.  DFA does
+not replace the current model.
+
+\subsection{POST /api/regress}
+
+\begin{description}
+\item[\texttt{structure}] Semicolon-separated conceptual variables;
+commas join nodes and hyphens denote inclusive ranges, for example
+\texttt{0;1-4;5;6,7}.
+\item[\texttt{direction}] \texttt{forward} or \texttt{reverse}.
+\item[\texttt{threshold}] Selection p-value threshold.
+\item[\texttt{async}] \texttt{1} for status, progress, and Stop.
+\end{description}
+
+Stepwise requires a trained cross-entropy model.  Candidate subnetworks
+are fitted on clones, never mutate the current model, and must converge
+before entering a Wilks comparison.  The result contains the selection
+path, every candidate audit, the final variables settled by completed
+passes, and a \texttt{complete} flag.
+
+\subsection{POST /api/obd}
+
+\begin{description}
+\item[\texttt{hidden\_start}, \texttt{hidden\_max}] Starting size and
+safety ceiling.
+\item[\texttt{iter\_budget}, \texttt{sample\_every}] Per-size ceiling
+and held-out sampling cadence.
+\item[\texttt{early\_stop\_tol}, \texttt{early\_stop\_patience}]
+Within-size held-out reversal rule.
+\item[\texttt{grow\_patience}, \texttt{prune\_tol}] Growth and pruning
+rules.
+\item[\texttt{autostop\_tol}, \texttt{autostop\_window}] Per-size
+training plateau backstop.
+\item[\texttt{algorithm}] \texttt{1}, \texttt{2}, \texttt{3}, or
+\texttt{auto}.
+\item[\texttt{seed}] Reproducibility seed.
+\end{description}
+
+OBD is asynchronous-only and requires a discrete, single-output
+dataset with a held-out monitoring set.  Its result names that set as
+\texttt{validation} or \texttt{test}, records every size trial, and
+replaces the current model only after a successful search.
+
+\subsection{POST /api/cv}
+
+\begin{description}
+\item[\texttt{folds}, \texttt{seed}] Fold count and reproducibility
+seed.
+\item[\texttt{logistic}, \texttt{ldfa}, \texttt{qdfa},
+\texttt{neural}] Procedure-selection toggles.
+\item[\texttt{neural\_obd}, \texttt{neural\_hidden}] Nested OBD or a
+fixed neural size.
+\item[\texttt{maxiter}, \texttt{hidden\_max},
+\texttt{iter\_budget}] Ordinary-fit and nested-search ceilings.
+\item[\texttt{algorithm}] Nested OBD optimizer, including
+\texttt{auto}.
+\item[\texttt{autostop\_tol}, \texttt{autostop\_window},
+\texttt{inner\_val}] Nested-fit plateau rule and inner validation
+share.
+\item[\texttt{locked\_fraction}, \texttt{locked\_n}] Optional locked
+test share or count.  Use one form.
+\item[\texttt{primary}, \texttt{reference}] Prespecified procedure
+tokens for the signed AUC contrast.
+\item[\texttt{independence}] \texttt{rows} opts into ordinary paired
+DeLong inference.  Omit it for point estimates only.
+\end{description}
+
+Cross-validation is asynchronous-only, requires raw discrete
+single-output data, and does not alter the current model.  The result
+contains headline and detailed reports plus paths to Tier 3 CSV and
+JSON artifacts.  A locked test adds per-row predictions and, when its
+independence assumption is declared, paired AUC confidence intervals
+and the prespecified DeLong contrast.
+
+\section{Statistics and downloads}
+
+\subsection{GET /api/stats}
+
+Returns structured train and optional test statistics for the current
+trained classification model.  Each set includes classification
+measures, ROC estimates, confidence intervals, and curve data.  The
+training endpoint also embeds these values with the captured
+human-readable report.
+
+\subsection{GET /api/save/:what}
+
+Replace \texttt{:what} with one of:
+
+\begin{center}
+\begin{tabular}{ll}
+\texttt{network} & saved model weights and architecture \\
+\texttt{scales} & natural-to-normalized scaling factors \\
+\texttt{train\_set}, \texttt{test\_set} & normalized datasets \\
+\texttt{train\_guesses}, \texttt{test\_guesses} & model predictions \\
+\texttt{dfa\_train\_guesses}, \texttt{dfa\_test\_guesses} & DFA predictions \\
+\texttt{report} & captured report from the last training operation \\
+\end{tabular}
+\end{center}
+
+The engine writes the artifact in the run directory and returns the
+same bytes as a download.  Missing prerequisites return HTTP 400 with
+a JSON explanation.
+
+\section{Response and audit conventions}
+
+The API returns machine-readable values together with the engine's
+captured report, rather than asking clients to reconstruct statistical
+meaning from a few scalars.  JSON numeric fields that cannot be
+calculated are null, not invented sentinel estimates.
+
+Every API action, including save and stop, is timestamped in
+\texttt{neuron\_actions.log}.  Engine operations and self-describing
+training headers are written to \texttt{neuron.log}.  Together with
+the seed and saved artifacts, these logs make a local GUI or scripted
+session reproducible and auditable.

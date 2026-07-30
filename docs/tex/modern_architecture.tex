@@ -1,0 +1,247 @@
+\chapter{neuron 3.0 Architecture}\label{modern_architecture}
+\index{neuron 3.0}
+
+The 2026 reanimation preserves the object design described in this
+Manifest while giving it three contemporary ways to be used: the
+original menu interface, a local graphical interface, and a loopback
+HTTP interface.  The same C++ model and statistical classes serve all
+three.  Python tools prepare data and export trained models, but do not
+duplicate the engine.
+
+The central architectural rule is that every mechanism has one
+authoritative implementation in the class that conceptually owns it.
+The graphical interface may call that implementation, and a
+cross-validation run may call it repeatedly, but neither copies its
+mathematics.  Dependencies point down through the layers:
+
+\begin{center}
+\begin{tabular}{|>{\raggedright\arraybackslash}p{4.35in}|}
+\hline
+Human and programmatic interfaces: GUI, REST API, frozen CLI menus \\
+\hline
+Experiment orchestration: cross-validation, OBD sizing, reports,
+automatic optimizer selection \\
+\hline
+Model and data interfaces: Model, DataSet, TwoSet, split plans,
+model factory and clone helpers \\
+\hline
+Training and concrete methods: Iterative, Network, Logistic,
+SimpleProp, BareProp, BackProp, LDFA, QDFA, RegressNet \\
+\hline
+Numerical foundation: Matrix, vector operations, statistics and
+utility functions \\
+\hline
+\end{tabular}
+\end{center}
+
+A lower layer never learns a higher concern.  Matrix can gather rows
+but does not know what a fold is.  DataSet can materialize a fold but
+does not choose a model.  A model fits itself but does not run a
+cross-validation loop.  OBD chooses a hidden-layer size but does not
+own final evaluation.  Cross-validation owns repetition, not training.
+This separation keeps the matrix notation, the implementation, and the
+statistical report traceable to one another.
+
+\section{Interfaces}
+
+\subsection{Command line}
+
+The interactive menus remain the authoritative feature inventory and
+are intentionally frozen.  Reproducible command-line runs feed a
+complete answer file to the engine and always provide a seed:
+
+\begin{verbatim}
+./build/neuron --seed 42 < session.in > session.out
+\end{verbatim}
+
+The transcript is the permanent record of the run.  The program is not
+intended to be driven by keystrokes in an automated experiment.
+
+\subsection{Graphical interface}
+
+\begin{verbatim}
+./build/neuron --gui
+\end{verbatim}
+
+This starts an embedded cpp-httplib server on
+\texttt{127.0.0.1} at an operating-system-assigned port and opens a
+single local web page.  The page provides the full load, model, train,
+analysis, report, and save workflow.  It includes realtime training
+progress and ROC plots.  The server is loopback-only: it is a local
+application, not a network service.
+
+GUI and CLI parity is a contract.  Every CLI capability must have both
+a page control and an HTTP parameter.  The maintained option-by-option
+map is \texttt{docs/gui\_cli\_parity.md}.  Features added beyond the
+frozen CLI, including automatic optimizer selection, OBD sizing, and
+cross-validation, are available through both the GUI and the HTTP
+interface.
+
+\subsection{Python tools}
+
+\texttt{tools/mkdataset.py} turns raw CSV data into the numeric,
+outcome-last format used by the engine and writes the key and
+input-group files needed to interpret the encoded columns.
+\texttt{tools/neuron2web.py} combines a saved network, scaling factors,
+and a human-readable label specification into a self-contained HTML
+calculator.  The deployed calculator performs inference entirely in
+the browser.
+
+\section{Data ownership and splitting}
+
+\texttt{DataSet} owns loaded and normalized observations.
+\texttt{TwoSet} owns classification and ROC reporting for a modeled
+set.  The dedicated \texttt{split} layer owns index plans and provides:
+
+\begin{itemize}
+\item outcome-stratified train and test splits;
+\item optional covariate stratification with quantile cells and
+Hamilton apportionment;
+\item group-aware splits that keep an entire cluster on one side;
+\item three-way train, validation, and untouched test splits; and
+\item outcome-stratified folds for cross-validation.
+\end{itemize}
+
+These mechanisms solve different problems.  Covariate stratification
+makes two samples more alike and is useful for subgroup coverage.
+Grouping makes evaluation harder by preventing site or cluster
+leakage.  A validation set permits model selection without repeatedly
+looking at the final test set.
+
+\section{Models and training}
+
+\texttt{Model} defines the common modeling interface.
+\texttt{Network} adds connected layers and weights.
+\texttt{Iterative} owns the training loop, stopping conditions,
+progress callbacks, and convergence state.  Concrete model classes own
+their distinct mathematics:
+
+\begin{description}
+\item[SimpleProp] One hidden layer with bias nodes.
+\item[BareProp] One hidden layer without bias nodes.
+\item[BackProp] Multiple hidden layers and multi-output networks.
+\item[Logistic] Binary logistic regression, including Wald tests and
+the design-matrix condition number.
+\item[LDFA and QDFA] Linear and quadratic discriminant analysis.
+\item[RegressNet] Forward and reverse stepwise variable selection
+using the Wilks likelihood-ratio test.
+\end{description}
+
+Training supports canonical gradient descent, conjugate gradient
+descent, and Shanno's method.  The automatic selector probes all three
+from cloned starting weights for a short wall-clock budget, adopts the
+lowest-error probe, and continues from the progress it made.
+
+Stopping conditions are evaluated every iteration, independently of
+how often an iteration row is printed.  Reaching the iteration ceiling
+means that the requested operation ran, but the fit did not converge.
+The weights remain available for continuation; an unfinished fit is
+not eligible for model selection or cross-validation scoring.
+
+\section{Model selection and evaluation}
+
+\subsection{OBD hidden-layer sizing}
+
+The \texttt{obd} layer grows a SimpleProp hidden layer while held-out
+error improves, then prunes by saliency.  Each candidate size is
+stopped at its held-out minimum or by a valid training stopping
+condition.  With a three-way split, the search monitors validation and
+leaves test untouched.  A successful standalone OBD run replaces the
+current model with the selected, trained network.
+
+\subsection{Cross-validation}
+
+\texttt{crossval} applies logistic regression, LDFA, QDFA, a fixed
+neural architecture, or nested OBD to one shared fold plan.
+\texttt{cvadapters} connects those procedures to their existing model
+implementations.  \texttt{cvreport} renders a three-tier result:
+
+\begin{enumerate}
+\item a headline comparison suitable for decisions;
+\item a detailed human-readable audit; and
+\item machine-readable prediction, metric, and run files.
+\end{enumerate}
+
+Nested OBD repeats architecture selection inside each training fold.
+It therefore estimates the performance of the selection procedure,
+not the performance of an architecture chosen using all observations.
+Cross-validation is a standalone analysis and does not replace the
+current model.
+
+\subsection{Locked-test inference}
+
+A locked test set may be removed before cross-validation.  Procedures
+are compared on the development rows, refitted by their own rules, and
+scored once on the locked rows.  \texttt{delong} supplies paired AUC
+confidence intervals and the prespecified AUC contrast when the caller
+declares independent rows.  Clustered observations require
+cluster-aware inference, so ordinary DeLong inference is withheld
+rather than silently reported.
+
+\section{Statistical reporting}
+
+Binary models report classification accuracy, sensitivity,
+specificity, and two complementary ROC estimates.  The trapezoidal
+area is the exact non-parametric AUC over every distinct operating
+point.  The primary binormal $A_z$ is fitted to the z-ROC curve and is
+reported with a stratified bootstrap confidence interval.  Reports
+state the number of fitted operating points, bootstrap resamples, and
+failures.  Logistic models additionally report coefficient-level Wald
+tests and the condition number.
+
+\section{Run artifacts and audit trail}
+
+The directory of the first loaded dataset is the run directory.
+Networks, scaling factors, normalized sets, guesses, reports,
+\texttt{neuron.log}, and \texttt{neuron\_actions.log} are written
+there.  The latter records every GUI or API action with a timestamp and
+its parameter values.  Long operations publish structured progress
+through one shared status channel and honor graceful cancellation at
+an iteration boundary.
+
+\section{Source map for the modern layers}
+
+\begin{longtable}{|>{\raggedright\arraybackslash}p{1.05in}|>{\raggedright\arraybackslash}p{3.15in}|}
+\hline
+\textbf{Files} & \textbf{Responsibility} \\ \hline
+\endfirsthead
+\hline
+\textbf{Files} & \textbf{Responsibility} \\ \hline
+\endhead
+\texttt{gui.*},
+\texttt{gui\_page.html} &
+Local server, REST handlers, asynchronous job state, and browser
+interface. \\ \hline
+\texttt{split.*} &
+Stratified, group-aware, three-way, and k-fold index plans. \\ \hline
+\texttt{crossval.*},
+\texttt{cvadapters.*},
+\texttt{cvreport.*} &
+Procedure comparison, connections to model implementations, and
+human plus machine-readable reports. \\ \hline
+\texttt{obd.*} &
+Grow-and-prune hidden-layer selection. \\ \hline
+\texttt{autoalgo.*},
+\texttt{plateau.h} &
+Optimizer probing and plateau detection shared by training
+workflows. \\ \hline
+\texttt{delong.*} &
+Paired locked-test AUC inference. \\ \hline
+\texttt{modelfactory.*},
+\texttt{netclone.*} &
+Construction and faithful cloning through the common model
+interfaces. \\ \hline
+\texttt{dataset.*},
+\texttt{twoset.*} &
+Observation ownership, normalization, classification, ROC, and
+statistical reporting. \\ \hline
+\texttt{model.*},
+\texttt{network.*},
+\texttt{iterative.*} &
+Core model contract, network structure, and authoritative training
+loop. \\ \hline
+\texttt{matrix.*},
+\texttt{vector\_ops.*},
+\texttt{stats.*} &
+Bounds-checked numerical and statistical foundation. \\ \hline
+\end{longtable}

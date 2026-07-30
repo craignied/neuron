@@ -3,16 +3,20 @@
 \usepackage{color}
 \usepackage{makeidx}
 \usepackage{graphicx}
-\usepackage[dvipdfm]{hyperref} % this should be the last package
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{url}
+\usepackage{hyperref} % this should be the last package
+\graphicspath{{figures/}}
 
 % Colors
 \definecolor{myLinkColor}{rgb}{0.5, 0.0, 0.7}
-\def\beginpurple{{\special{pdf:bc \purple}}}
+\def\beginpurple{\color{myLinkColor}}
 \def\purple{[0.2 0.0 0.45]}
-\def\beginred{{\special{pdf:bc \red}}}
+\def\beginred{\color{red}}
 \def\red{[0.8 0.0 0.0]}
-\def\begincolor#1{\special{pdf:bc #1}}
-\def\endcolor{{\special{pdf:ec}}}
+\def\begincolor#1{\color{black}}
+\def\endcolor{\color{black}}
 
 % hyperref configuration
 \hypersetup{colorlinks=true,
@@ -29,12 +33,14 @@ linkcolor=myLinkColor}
 
 \title{neUROn Design Manifest}
 \author{C. Niederberger\\and\\the neUROn group}
+\date{Revised July 2026}
 
 \makeindex
 
 \begin{document}
 
 \maketitle
+\tableofcontents
 
 \chapter{Introduction and History}
 
@@ -107,6 +113,26 @@ were added.  In 2000, the code was redesigned from the ``ground up''.
 This document is intended to be a description of neUROn programming,
 past, present, and future.  As such, the document is a plan that is
 expected to evolve as neUROn is redesigned and recoded in the future.
+
+\part{Current neuron 3.0}
+
+\input{modern_architecture}
+
+\chapter{Command-line interface}
+\input{current_driver}
+
+\input{rest_api}
+
+\input{current_tooling}
+
+\part{Foundational design record}
+
+The chapters in this part preserve the mathematical derivations,
+documentation philosophy, numerical layer, and object design from the
+neUROn2++ redesign.  They explain why the engine is organized as it
+is, but their method inventories and code examples are not the current
+public interface specification.  For present architecture, build,
+menus, and HTTP behavior, use Part I and the source tree.
 
 \chapter{Methodology}\index{Golden, Richard|(}
 
@@ -995,7 +1021,7 @@ a[i] = 10;
 
 \end{itemize}
 
-\chapter{C++ coding}
+\chapter{C++ coding and building}
 
 neUROn was written in C, and took advantage of the high- and low-level
 compilation features available in that language.  While neUROn2++ was
@@ -1022,23 +1048,28 @@ programming: code must be
 \item {\em Bulletproof}
 \end{itemize}
 
-Two excellent resources for C++ coding questions are the C++ Usenet
-group {\em comp.lang.c++} and Marshall Cline's companion FAQ at \\
-\href{http://www.parashift.com/c++-faq-lite}
-{http://www.parashift.com/c++-faq-lite}.  If you have {\em any}
-question regarding the most efficient way to code a particular
-problem, post it on comp.lang.c++: you'll likely get a response within
-a couple of hours if not minutes, and the responses often contain
-excellent strategies that you would not have considered.  However,
-look first in the FAQ, because if it's contained there, your post will
-likely be met with the terse and somewhat embarrasing reply, ``look in
-the FAQ.''
+\section{Current build and portability}
 
-\section{Cross compilation}
+neuron 3.0 is a C++17 project built with CMake.  GSL and a thread
+library are its compiled dependencies; the browser page is embedded
+into the executable at configure time.  A Release build is important
+because an unoptimized engine is approximately an order of magnitude
+slower.
 
-All code must be compiled successfully on both GNU C++ (g++) and
-Microsoft Visual C++ (MSVC++).  Code will not be considered complete
-until it can be successfully compiled and executed on both platforms.
+\begin{verbatim}
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+./build/neuron --version
+\end{verbatim}
+
+On macOS, install the prerequisites with
+\texttt{brew install cmake gsl}.  On Ubuntu or Debian, use
+\texttt{apt install build-essential cmake libgsl-dev}.  There are no
+hand-maintained IDE project files or compiler-specific RTTI settings.
+
+Portability is expressed in \texttt{CMakeLists.txt} and verified by
+continuous integration, rather than maintained as parallel compiler
+projects.
 
 \section{Use friends sparingly}
 
@@ -1071,24 +1102,24 @@ applied while code is written, not after.  Constness applied as a
 patch to already written code is uniformly considered to be very poor
 programming practice.}
 
-\section{Use asserts generously}
+\section{Validate invariants at the appropriate boundary}
 
-Asserts allow you to easily track down runtime errors that would be
-otherwise very difficult to find, {\em but you have to include the
-asserts in the first place.}  For example, in the Matrix class, here
-is an assert that will catch a programmer trying to add 2 Matrices of
-different sizes:
+Assertions remain useful for programmer invariants in development
+builds, but Release builds define \texttt{NDEBUG} and therefore cannot
+depend on them for user input or memory safety.  Public handlers
+validate request values before calling the engine.  Matrix element
+access performs unconditional bounds checks and throws
+\texttt{BoundsViolation} in every build.
+
+An assertion can still document an internal precondition such as
+equal matrix dimensions:
 \begin{verbatim}
 // Catch different size matrices
 assert ( nrows_ == rhs.nrows_ && ncols_ == rhs.ncols_ );
 \end{verbatim}
-If the program encounters an add operation with 2 Matrices of
-different sizes, it will cease immediately, and print out a meaningful
-error statement with an appropriate program line, pointing you
-directly to the problem.  Without the assert, the program may bomb out
-with the ubiquitous stackdump or core runtime error, giving you
-absolutely no debugging information, and sending you on a debugging
-task that may take many hours to complete.
+Code reachable from data, GUI, or API input must additionally reject
+invalid dimensions through ordinary control flow or an unconditional
+exception.
 
 \chapter{vector and Matrix}\label{matrix_chapter}
 
@@ -1561,16 +1592,6 @@ cout << v_flat << endl;
 cout << flatten( parse_numbers ) << endl;
 \end{verbatim}
 
-\subsubsection{Notes}
-If you're using MSVC, you {\em must} include in your code the
-following, as MSVC will give you error warnings for each vector$<$
-vector$<$ unsigned $>$ $>$ reference:
-\begin{verbatim}
-#ifdef _MSC_VER	// MSVC
-#pragma warning (disable: 4786)
-#endif
-\end{verbatim}
-
 \subsection{Binning a vector into a vector of vector}
 
 \begin{itemize}
@@ -1620,15 +1641,6 @@ partitioned with small last bin =
 0 1 2  3 4 5  6 7 8  9
 partitioned with large last bin =
 0 1 2  3 4 5  6 7 8 9
-\end{verbatim}
-
-\subsubsection{Notes}
-As with the previous method {\em flatten}, if you're using MSVC, you
-{\em must} include in your code the following:
-\begin{verbatim}
-#ifdef _MSC_VER	// MSVC
-#pragma warning (disable: 4786)
-#endif
 \end{verbatim}
 
 \section{matrix.h and the Matrix class}
@@ -2908,7 +2920,7 @@ try
    cout << "The inverse of " << I << "is " << I.inverse( J,
    determinant )
       << endl;
-   // Note g++ requires this to be on a 2nd line, but MSVC++ does not:
+   // Store the inverse and determinant separately for clarity:
    cout << "The determinant is " << determinant << endl;
 
    // Test returning a new Matrix with a determinant
@@ -3022,6 +3034,7 @@ cout << "Minimum value = " << minabs( eigenv ) << endl;
 
 \subsubsection{Notes}
 
+\iffalse
 All of the files needed are contained in the directory ``gsl''.  If
 you are working in a pre-existing environment, you do not need to be
 concerned about searching for directory paths, they should be there
@@ -3099,6 +3112,13 @@ choice, then set the following:
 \end{itemize}
 \end{itemize}
 \end{itemize}
+
+\fi
+GSL is discovered and linked by CMake through
+\texttt{find\_package(GSL REQUIRED)} and the imported targets
+\texttt{GSL::gsl} and \texttt{GSL::gslcblas}.  Do not add local GSL
+copies, compiler search paths, or IDE-specific library settings to the
+source tree.
 
 \section{An example of the Matrix and vector classes}
 
@@ -3472,15 +3492,6 @@ util::utilErr exceptions thrown by this method include e.what()
 
 \subsection{Example}
 \begin{verbatim}
-#include "stdafx.h" // if you're using MSVC
-
-// Because, apparently, vector< vector< unsigned > > symbol names
-exceeds 255
-//    characters in length, and MSCV will error with that (ugly!)
-#ifdef _MSC_VER	// MSVC
-#pragma warning (disable: 4786)
-#endif
-
 #include <iostream>
 #include <fstream>
 #include <vector>
@@ -3537,22 +3548,10 @@ int main()
 }
 \end{verbatim}
 
-\subsubsection{Notes}
-If you're using MSVC, you {\em must} include in your code the
-following, as MSVC will give you error warnings for each vector$<$
-vector$<$ unsigned $>$ $>$ reference:
-\begin{verbatim}
-#ifdef _MSC_VER	// MSVC
-#pragma warning (disable: 4786)
-#endif
-\end{verbatim}
-
 {\bf variable\_parse( ifstream\& $fileObj$ ) will close and clear the
 file for you.}  Parsing a file will support multiple line definitions
 of variables by concatenating the lines prior to parsing the resulting
-string.  However, MSVC places a limit of 2,048 characters per string,
-and if compiling with MSVC, definitions containing more than 2,048
-characters will not be supported.
+string.
 
 \section{Remove a variable from a vector of vector of unsigned data
 structure}\label{rm_var}
@@ -3600,16 +3599,6 @@ parse_new2 = util::remove_variable( parse_numbers, position );
 cout << "Making a new data structure : " << endl;
 cout << "Here is the original: " << parse_numbers << endl;
 cout << "Here is the result: " << parse_new2 << endl;
-\end{verbatim}
-
-\subsubsection{Notes}
-If you're using MSVC, you {\em must} include in your code the
-following, as MSVC will give you error warnings for each vector$<$
-vector$<$ unsigned $>$ $>$ reference:
-\begin{verbatim}
-#ifdef _MSC_VER	// MSVC
-#pragma warning (disable: 4786)
-#endif
 \end{verbatim}
 
 \chapter{Statistical methods}
@@ -4589,9 +4578,7 @@ will be added) are shown in solid lines.
 \begin{picture}(4.2,4.2)
 \put(0,0){\framebox(4.2,4.2)}
 % for dvi
-\put(0.1,0.1){\includegraphics[width=4in,height=4in]{objects.bmp}}
-% for dvipdfm
-\put(0.1,0.1){\special{pdf: epdf width 4in height 4in (objects.pdf)}}
+\put(0.1,0.1){\includegraphics[width=4in,height=4in]{objects.pdf}}
 \end{picture}
 \end{center}
 \caption{Object design}\label{hierarchy}
@@ -7371,8 +7358,8 @@ stepwise forward and reverse regression on the built logistic
 regression model using the \hyperref[regressnet] {RegressNet class}.
 
 Note that the error is \hyperref[xentropyfunk]{cross-entropy} by
-definition, that the gradient descent method is \hyperref[
-batchepochdef]
+definition, that the gradient descent method is
+\hyperref[batchepochdef]
 {batch-epoch} by definition, and a bias node (y-intercept) is present
 by definition.  At the end of a run, the $\beta$ weights and standard
 error are reported and $p$-values for the Wald test that the $\beta$
@@ -7693,9 +7680,7 @@ demonstrates stepwise reverse regression.
 \begin{picture}(4.2,2.2)
 \put(0,0){\framebox(4.2,2.2)}
 % for dvi
-\put(0.1,0.1){\includegraphics[width=4in,height=2in]{reverse.bmp}}
-% for dvipdfm
-\put(0.1,0.1){\special{pdf: epdf width 4in height 2in (reverse.pdf)}}
+\put(0.1,0.1){\includegraphics[width=4in,height=2in]{reverse.pdf}}
 \end{picture}
 \end{center}
 \caption{Stepwise reverse regression}\label{revfig}
@@ -7724,9 +7709,7 @@ demonstrates stepwise forward regression.
 \begin{picture}(4.2,2.2)
 \put(0,0){\framebox(4.2,2.2)}
 % for dvi
-\put(0.1,0.1){\includegraphics[width=4in,height=2.1in]{forward.bmp}}
-% for dvipdfm
-\put(0.1,0.1){\special{pdf: epdf width 4in height 2.1in(forward.pdf)}}
+\put(0.1,0.1){\includegraphics[width=4in,height=2.1in]{forward.pdf}}
 \end{picture}
 \end{center}
 \caption{Stepwise forward regression}\label{forfig}
@@ -7887,6 +7870,7 @@ catch ( RegressNet::RegressNetErr& e ) {
 }
 \end{verbatim}
 
+\iffalse
 \section{Adding code}\label{regresscode}
 
 \beginred If you are creating a regressable {\em Network} object (and
@@ -7933,24 +7917,29 @@ Box.  Then, click the box for ``Enable Run-Time Type Information
 \begin{picture}(4.2,2.6)
 \put(0,0){\framebox(4.2,2.6)}
 % for dvi
-\put(0.1,0.1){\includegraphics[width=4in,height=2.431in]{snap.bmp}}
-% for dvipdfm
-\put(0.1,0.1){\special{pdf: epdf width 4in height 2.431 in
-(snap.pdf)}}
+\put(0.1,0.1){\includegraphics[width=4in,height=2.431in]{snap.pdf}}
 \end{picture}
 \end{center}
 \caption{Setting RTTI in MSVC++}\label{rttifig}
 \end{figure}
+\fi
 
-\chapter{The Driver}
+\section{Extending stepwise support today}\label{regresscode}
 
-You of course may design your own driver for the neUROn2++
-environment.
-Naturally, a command line interface driver is under development.  The
-following is the user's guide to that driver.
+RegressNet no longer contains a type-by-type copy switch, and no
+compiler-specific RTTI option is needed.  Network cloning is
+centralized in \texttt{netclone.*}; construction from saved and
+requested model types is centralized in \texttt{modelfactory.*}.
+A new network type must participate in those shared interfaces and
+must preserve all architecture and training state when cloned.
 
-\input{drivertext}
+Stepwise analysis works on clones and must never mutate the current
+trained model.  Candidate fits use the same authoritative training
+loop as ordinary training, but run quietly and do not inspect the test
+set.  Every candidate must converge before its likelihood may enter a
+Wilks comparison.
 
+\iffalse
 \chapter{Utility Scripts}\label{utility_chap}
 \setcounter{figcount}{1}
 
@@ -8345,12 +8334,8 @@ the ``predict'' button would then appear as in
 \begin{picture}(4.2,4.4)
 \put(0,0){\framebox(4.2,4.4)}
 % for dvi
-\put(0.1,1.3){\includegraphics[width=4in,height=2.971in]{html.bmp}}
-\put(0.1,0.1){\includegraphics[width=4in,height=1.067in]{htmlout.bmp}}
-% for dvipdfm
-\put(0.1,1.3){\special{pdf: epdf width 4in height 2.971in(html.pdf)}}
-\put(0.1,0.1){\special{pdf: epdf width 4in height
-1.067in(htmlout.pdf)}}
+\put(0.1,1.3){\includegraphics[width=4in,height=2.971in]{html.pdf}}
+\put(0.1,0.1){\includegraphics[width=4in,height=1.067in]{htmlout.pdf}}
 \end{picture}
 \end{center}
 \caption{Example generated html file and its pop-up window}\label{
@@ -9483,9 +9468,10 @@ extraction definitions encoded in the header file were:
 \end{itemize}
 \index{History!neUROn++|)}
 
+\fi
+
 % Index bookmark
-\special{pdf: out 0 << /Title (Index) /Dest [ @nextpage /FitB
-@ypos ] >>}
+\pdfbookmark[0]{Index}{manifest-index}
 
 % Index see cross-references
 \index{Cross-entropy|see{Error function, Cross-entropy}}
@@ -9497,17 +9483,6 @@ extraction definitions encoded in the header file were:
 \printindex
 
 \end{document}
-
-
-
-
-
-
-
-
-
-
-
 
 
 

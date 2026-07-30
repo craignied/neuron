@@ -1,0 +1,80 @@
+The command-line menus remain fully supported and are the
+authoritative feature inventory, but they are frozen.  New interactive
+work normally uses the GUI described in Chapter
+\ref{modern_architecture}; new programmatic work uses the REST API in
+Chapter \ref{rest_api}.
+
+\section{Reproducible sessions}
+
+Automated runs write every menu answer to a text file, one answer per
+line, and feed that file through standard input.  Always supply a seed
+and capture standard output:
+
+\begin{verbatim}
+./build/neuron --seed 42 < session.in > session.out
+\end{verbatim}
+
+Read the completed transcript and verify that it ends after the quit
+confirmation, not at an error or unanswered prompt.  Do not automate
+the menus by typing into a live terminal.
+
+\section{Menu organization}
+
+\begin{description}
+\item[Specify dataset] Set input and output counts; load raw data or a
+normalized training and test pair; create a seeded train and test
+split; set outcome type, normalization bounds, and ROC reporting; save
+normalized sets and scaling factors.
+\item[Specify model] Create a feed-forward network or binary logistic
+model; set bias nodes, hidden layers, and error function; load a saved
+network; set logging.
+\item[Use model] Randomize weights; configure learning rate, weight
+decay, batch or epoch behavior, printing, and stopping conditions;
+train with canonical gradient descent, conjugate gradient descent, or
+Shanno's method; run stepwise selection; save the network and
+predictions.
+\item[Discriminant function analysis] Run linear or quadratic
+discriminant analysis and save its predictions.
+\end{description}
+
+The exact menu-to-GUI-to-API mapping is maintained in
+\path{docs/gui_cli_parity.md}.  That file is the current
+option-level reference and is updated whenever an interface changes.
+
+\section{Dataset and run files}
+
+Numeric data place the outcome in the final column.  Binary outcomes
+are encoded as 0 and 1.  The first loaded dataset establishes the run
+directory, where the engine writes networks, scaling factors, reports,
+predictions, \texttt{neuron.log}, and
+\texttt{neuron\_actions.log}.
+
+For raw CSV data, use \texttt{tools/mkdataset.py} as described in
+Chapter \ref{utility_chap}.  When an intercept-bearing model will be
+trained, reference-category coding avoids collinearity between a full
+one-hot group and the intercept.
+
+\section{Convergence and reporting}
+
+The iteration ceiling is a safety limit, not evidence of convergence.
+If training reaches it, the current weights can be continued, but the
+fit is unfinished.  Model-selection and cross-validation procedures
+refuse unfinished candidate fits.
+
+For binary outcomes, interpret held-out performance through
+classification measures and ROC areas, not accuracy alone.  The
+primary fitted binormal $A_z$ is reported with its bootstrap 95\%
+confidence interval, operating-point count, resample count, and any
+failures.  The exact empirical AUC and Hanley--McNeil interval are an
+independent cross-check.  Logistic reports additionally provide Wald
+tests and a condition number.
+
+\section{Current command-line options}
+
+\begin{verbatim}
+Usage: neuron [--seed N] [--gui [--no-browser]] [--version]
+\end{verbatim}
+
+\texttt{--gui} starts the local browser interface.
+\texttt{--no-browser} leaves it running without opening a browser.
+\texttt{--version} prints the package version and exits.

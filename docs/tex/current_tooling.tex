@@ -1,0 +1,136 @@
+\chapter{Data preparation and deployment tools}\label{utility_chap}
+
+The current support tools are standard-library Python programs in
+\texttt{tools/}.  They require Python 3 but no installed packages.
+The Perl, Palm OS, and early iPhone exporters from neUROn2++ are not
+part of neuron 3.0.
+
+\begin{center}
+\begin{tabular}{|>{\raggedright\arraybackslash}p{1.25in}|>{\raggedright\arraybackslash}p{2.95in}|}
+\hline
+\textbf{Program} & \textbf{Purpose} \\ \hline
+\texttt{mkdataset.py} & Convert a delimited table into a numeric
+neuron dataset plus interpretation files. \\ \hline
+\texttt{neuron2web.py} & Convert a saved model and its natural-unit
+interface into a self-contained browser calculator. \\ \hline
+\end{tabular}
+\end{center}
+
+The maintained command reference is \path{tools/README.md}.  Both
+programs are exercised against committed expected outputs by
+\texttt{tests/tools/run\_tools.sh}.
+
+\section{Preparing a dataset}
+
+\texttt{mkdataset.py} converts an ordinary delimited file into the
+numeric, outcome-last form used by the engine.  It can change
+delimiters, one-hot encode categorical inputs, map a two-valued text
+outcome to 0 and 1, create missing-value indicator pairs, and omit one
+reference category from each categorical group.
+
+\begin{verbatim}
+python3 tools/mkdataset.py --onehot --refcat \
+  --key key.txt --inputs inputs.txt \
+  -o data.txt raw.csv
+\end{verbatim}
+
+The key maps encoded columns back to human variables.
+\texttt{inputs.txt} groups nodes belonging to the same conceptual
+variable for stepwise analysis.  The program reports the resulting
+column count; the number of input nodes is one less than that count
+for a single outcome.
+
+\subsection{Current grooming behavior}
+
+\begin{itemize}
+\item The first row is treated as column labels unless
+\texttt{--noheader} is supplied.
+\item Python's CSV parser preserves quoted fields containing embedded
+delimiters.  \texttt{--delimiter} accepts any single character,
+including \texttt{\string\t} for a tab.
+\item Rows with a blank outcome are dropped with a warning.
+\texttt{--noelim} retains them when that behavior is intentional.
+\item A numeric input containing blanks becomes a two-node indicator
+pair: presence followed by value.  A blank is represented by
+\texttt{0,0}; a present value by \texttt{1,value}.
+\item \texttt{--onehot} with no column list detects non-numeric
+columns automatically.  A comma-separated list of one-based column
+numbers limits conversion to selected columns.
+\item A two-level text outcome becomes one binary output.  Text input
+levels become grouped indicator nodes; a blank input activates none.
+\item \texttt{--refcat} omits the alphabetically first input level and
+records it as the reference.  This is the appropriate form for
+logistic regression and other intercept-bearing models because it
+avoids a perfectly collinear full indicator group.
+\item \texttt{--key} records every emitted column and its source
+label.  \texttt{--inputs} records conceptual-variable groups in the
+syntax accepted by stepwise regression.
+\item \texttt{--quiet} suppresses the narrative report without
+changing the output files.
+\end{itemize}
+
+\section{Creating a browser calculator}
+
+\texttt{neuron2web.py} combines three artifacts:
+
+\begin{enumerate}
+\item a saved network containing architecture and weights;
+\item scaling factors mapping natural values to model inputs; and
+\item a label specification describing fields, units, categories, and
+outcome text.
+\end{enumerate}
+
+\begin{verbatim}
+python3 tools/neuron2web.py \
+  --network network.txt --scales scales.txt \
+  --spec spec.txt -o calculator.html
+\end{verbatim}
+
+The resulting HTML file is self-contained.  Its JavaScript, model,
+scaling rules, and form are embedded, so it can be opened from disk,
+emailed, or served by any static web host.  Inference remains in the
+visitor's browser.
+
+\subsection{Supported models and form fields}
+
+The exporter currently accepts saved SimpleProp and binary logistic
+models.  It refuses other network types rather than approximating
+their architecture.  The label specification supports:
+
+\begin{description}
+\item[\texttt{N}] A numeric field with label and optional units.
+\item[\texttt{C}] A categorical menu whose levels expand to indicator
+columns.  An asterisk marks a reference level omitted by
+\texttt{--refcat}.
+\item[\texttt{B}] A binary choice.
+\item[\texttt{K}] A missingness indicator paired with a numeric field.
+\item[\texttt{O}] Labels for outcomes 0 and 1.
+\item[\texttt{R}] Optional text for the reported odds.
+\end{description}
+
+The complete label grammar and validation contract are in
+\path{docs/deploy.md}.  The tool checks the specification against the
+saved network's input count and the scaling file before it writes the
+calculator.
+
+\subsection{Verification and preview}
+
+Before deployment, use \texttt{--eval} with a known natural-unit row
+to verify the complete scaling and forward-pass path.  A dataset that
+arrived already normalized needs the original natural-to-normalized
+scales; scales saved from a later training run over normalized values
+would merely reproduce that normalized interface.
+
+\texttt{--serve} writes the calculator, serves it on loopback at an
+operating-system-assigned port, and opens a preview in the browser.
+\texttt{--title} supplies the page title.  \texttt{--quiet}
+suppresses informational output.  Neither preview nor deployment
+requires an external JavaScript package or web service.
+
+\section{Worked examples}
+
+The illustrated Civic Choice walkthrough at
+\path{docs/datasets/civic-choice/WALKTHROUGH.md} is the current
+end-to-end guide.  The dataset-specific READMEs under
+\path{docs/datasets/} provide further preparation and deployment
+examples.

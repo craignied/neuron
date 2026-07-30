@@ -86,13 +86,18 @@ its generator, and its data notes beside it in the same directory.
 
 Legacy documentation copied from `../distro/doc/` (2026-07-11):
 
-- `docs/manifest.pdf` — the full neUROn2++ manual (ch. 11 covers the dropped exporters)
+- `docs/manifest.pdf` — the design manifest, updated for neuron 3.0 architecture,
+  build, CLI, Python tools, and loopback REST API. Obsolete MSVC project instructions,
+  Perl/Palm/iPhone exporters, and the pre-menu file/header configuration are omitted
+  from the published PDF; the retained mathematical and class chapters are explicitly
+  labeled as the foundational design record.
 - `docs/spin.html` — tutorial (self-contained, no external assets)
 - `docs/maths.pdf`, `bareprop.pdf`, `network.pdf`, `driver.pdf` — algorithm/design docs
-- `docs/tex/` — LaTeX sources (grep-able; `manifest.tex` is the searchable form of the
-  manual) + `figures/` with small PDF versions of the manifest figures. The original
-  `manifest.tex` references multi-MB `.bmp` scans that were deliberately NOT copied;
-  a rebuild would need `\includegraphics` switched to the PDF figures.
+- `docs/tex/` — buildable LaTeX sources (grep-able; `manifest.tex` is the root) +
+  `figures/` with PDF versions of the manifest figures. Build the manual from that
+  directory with `latexmk -pdf manifest.tex`.
+- `docs/manifest_maintenance.md` — source organization, authority map, writing rules,
+  build/visual-QA workflow, and checklist for every future manifest addition.
 
 ## Standing rules
 
