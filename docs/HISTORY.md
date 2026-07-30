@@ -2796,3 +2796,72 @@ group-disjoint whenever the run is grouped.
   datasets. Any future large external cohort is an optional scale confirmation, not an
   implementation gate, and the repository fixtures are integration fixtures — they
   establish the endpoint and workflow, not performance or memory at scale.
+
+**2026-07-30 (night) — the clustered ROC-area covariance, held to its published example.**
+`src/clustered_auc.{h,cpp}` implements Obuchowski's nonparametric clustered structural-
+component covariance (*Biometrics* 1997;53:567–578), the successor to ordinary DeLong for
+test rows that share a sampling unit. A cluster is whatever the caller's group key names —
+a clinic, a household, a school, a repeated subject; nothing in the estimator knows which.
+
+  - **Refactor before behavior (rule 6).** `src/auccov.{h,cpp}` was extracted from
+    `delong.cpp` *first*, unchanged: the mid-ranks, the placements, the point areas, and
+    the whole `interval`/`contrast` algebra including DLG-2's zero-variance case law. That
+    reasoning is about a covariance matrix, not about how it was estimated, and a
+    "clustered AUC" that disagreed with the ordinary AUC in the fourth decimal because one
+    used mid-ranks and the other a pairwise loop would be a defect no test of either alone
+    could see. `delong::Contrast`/`Interval` are now typedefs of the shared types, so no
+    caller changed. Proved behavior-preserving before anything new was added: 12/12 ctest,
+    goldens byte-identical, smoke green.
+  - **What the estimator adds is the `S11` cross term** — the covariance between the
+    outcome-1 and outcome-0 rows *of the same cluster*. Ordinary DeLong has no place for
+    it: under independence an observation is only ever one role or the other, so the two
+    cannot correlate. That missing term is the entire difference.
+  - **The acceptance test matches the published intermediates, not just the answer.** The
+    paper's worked example (36 clusters, 65 observations, 1–2 per cluster, two readers)
+    prints its structural components in the table footer. We reproduce **all nine** —
+    `S10`, `S01`, `S11` per reader and the four cross terms — to all ten printed digits,
+    plus the areas (0.9837, 0.9852), SEs (0.0108, 0.0097), difference SE (0.0066), its
+    interval and *p* (0.8271). Several wrong formulas land near the right SE; none of them
+    land on nine intermediates. The example data is embedded in the test as literals, as
+    `check_wickens` does with Wickens' table.
+  - **The single-area interval is deliberately NOT clamped** to [0,1]: the reference
+    implementation reports (0.9625, **1.005**) for that example and matching it is part of
+    the acceptance test. An interval that has run past the boundary is telling the reader
+    the normal approximation is straining, which truncation hides. The ordinary path still
+    clamps (DLG-9) — the difference is intentional and stated in both headers.
+  - **The reduction is asymptotic and the test says so.** With one row per cluster the
+    `S11` terms vanish identically, but the finite-sample factors differ —
+    `I10/((I10−1)M)` against `1/(M−1)` — so the variances differ by exactly
+    `I10(M−1)/((I10−1)M)`. The test asserts that factor and thence agreement to 2%, rather
+    than claiming an identity that does not hold.
+  - **I over-claimed the direction of the design effect, and the measurement corrected
+    me.** I wrote an assertion that ordinary DeLong "understates the SE on clustered
+    data". It failed. On a fixture where the cluster offset moves both classes together,
+    within-cluster pairs become MORE concordant and the clustered SE is *smaller* (0.0164
+    vs DeLong's 0.0188) — and the published example itself has `S11` positive for one
+    reader and negative for the other. The design effect genuinely runs both ways. The
+    test now asserts what is true in general (the clustered SE tracks the whole-cluster
+    bootstrap and the row-based one does not), and the anti-conservative direction is
+    demonstrated on its own fixture where it really is the truth: 40 one-class clusters of
+    5 rows, where clustered SE **0.0967** matches a 2000-resample whole-cluster bootstrap
+    at **0.0966** while ordinary DeLong gives **0.0428** — a design effect of 2.26, an
+    interval less than half as wide as it should be. Rule 3 applied to my own statistics
+    claim, again.
+  - **Refusals count CLUSTERS, not rows.** The divisors are `I10−1` and `I01−1`, so one
+    informative cluster leaves no between-cluster spread to estimate however many rows it
+    holds. A 40-row, one-cluster sample is refused with the counts — and the test asserts
+    that ordinary DeLong *accepts* that same sample, which is exactly the mistake the
+    refusal prevents.
+  - **Sabotage, twice.** Dropping the `S11` cross terms fails six assertions including the
+    nine-component reconstruction. Substituting DeLong's row divisors for the cluster ones
+    fails five. Neither survives the published example.
+  - Also tested: ties (area 0.5 by half credit, matching the ordinary path), unequal
+    cluster sizes, one-class clusters, identical procedures (degenerate, not separated),
+    perfect vs reversed (separated, not degenerate), invariance to non-dense cluster
+    relabelling, and five malformed inputs.
+  - `docs/roc_theory.md` gained the design record the plan required *before* the estimator:
+    the estimand does not change, the variance does; the two mechanisms (group-aware
+    splitting, clustered inference) are not substitutes; and clustered inference is never
+    selected because it gives a friendlier answer.
+  - Gates: zero-warning Release, **13/13** ctest (new `clustered_auc`), goldens
+    byte-identical, smoke green, oracle identical.

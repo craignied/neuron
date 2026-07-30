@@ -32,6 +32,7 @@
 #include <string>
 #include <vector>
 
+#include "auccov.h"
 #include "matrix.h"
 
 using namespace std;
@@ -66,44 +67,21 @@ Result analyze( const vector< unsigned >& label,
 // A pairwise contrast of areas i and j from a Result. The difference is always
 //    delta = auc[ i ] - auc[ j ] (the caller passes i = the prespecified PRIMARY,
 //    j = the REFERENCE, so delta reads AUC(primary) - AUC(reference) everywhere).
-//    p is two-sided (H0: equal areas). ci* are 95% normal (Wald) intervals on the
-//    area scale, clamped to [0,1] (classic DeLong; a logit interval is a noted
-//    future refinement -- see interval()). valid is false when i/j are out of
-//    range, the Result is not ok, or the difference variance is materially
-//    negative (an invalid covariance, refused not silently zeroed) -- then note
-//    explains it.
-//
-//    The zero-difference-variance case has TWO distinct meanings and they must not
-//    be conflated (a materially different pair can have zero estimated variance):
-//      - degenerate: seDelta == 0 AND delta == 0 -- the two areas are equal with no
-//        spread, so there is genuinely NO testable difference (p reported as 1).
-//      - separated:  seDelta == 0 AND delta != 0 -- the placements are constant and
-//        the areas differ deterministically (e.g. AUC 0 vs AUC 1): the difference is
-//        real and total, not absent. p is 0 and the flag says so, rather than the
-//        old code's fabricated "no difference, p = 1" (the DLG-2 bug).
-struct Contrast {
-	double aucI = 0, aucJ = 0, delta = 0;   // areas and their difference (i - j)
-	double seI = 0, seJ = 0, seDelta = 0;   // standard errors
-	double ciLoI = 0, ciHiI = 0;            // 95% CI on area i
-	double ciLoJ = 0, ciHiJ = 0;            // 95% CI on area j
-	double ciLoDelta = 0, ciHiDelta = 0;    // 95% CI on the difference
-	double z = 0, p = 1;                    // test statistic and two-sided p
-	bool degenerate = false;                // equal areas, zero variance: no test
-	bool separated = false;                 // areas differ deterministically (p = 0)
-	string note;                            // reason when !valid
-	bool valid = false;
-};
+//    The type and ALL of its case law -- the two meanings of a zero difference
+//    variance, the scale-aware split between them, the refusal of a materially
+//    negative variance -- live in auccov, shared with the clustered estimator:
+//    that reasoning is about a covariance matrix, not about how it was estimated.
+//    Area intervals here ARE clamped to [0,1] (classic DeLong 1988; the clustered
+//    path deliberately does not clamp -- see auccov.h).
+typedef auccov::Contrast Contrast;
 Contrast contrast( const Result& r, unsigned i, unsigned j );
 
-// A single area with its 95% DeLong interval. This is a NORMAL (Wald) interval on
-//    the area scale, auc +/- 1.96*se, clamped to [0,1] (classic DeLong 1988).
-//    Truncation near the boundary shifts nominal coverage; a logit-scale or
-//    bootstrap interval for near-boundary areas is noted future work (DLG-9). The
-//    report labels this the Wald DeLong interval.
-struct Interval {
-	double auc = 0, se = 0, lo = 0, hi = 0;
-	bool valid = false;
-};
+// A single area with its 95% DeLong interval: a NORMAL (Wald) interval on the
+//    area scale, auc +/- 1.96*se, clamped to [0,1]. Truncation near the boundary
+//    shifts nominal coverage; a logit-scale or bootstrap interval for
+//    near-boundary areas is noted future work (DLG-9). The report labels this the
+//    Wald DeLong interval.
+typedef auccov::Interval Interval;
 Interval interval( const Result& r, unsigned i );
 
 } // namespace delong

@@ -636,3 +636,127 @@ copy is the maintained one (it carries the 2.6.x and 3.0 fixes); the roc app
 additionally collected the ROC curve coordinates for plotting (`ROCx`/`ROCy`),
 ported into the engine 2026-07-13 (`getTrapROCarea()` fills them; the GUI's
 ROC plot draws them).
+
+---
+
+## Clustered ROC data: what the sampling unit changes (2026-07-30)
+
+The design record required before the clustered estimator was written. It is the
+statistical contract the implementation is held to, and it is deliberately short.
+
+### The estimand does not change; the uncertainty does
+
+**The point area stays the patient-row Mann–Whitney probability.** It is the chance
+that a randomly chosen outcome-1 row scores above a randomly chosen outcome-0 row,
+with half credit for ties, over *all* pairs — including pairs from different
+clusters. Clustering changes nothing about what the area estimates. Do not
+"cluster-average" the area itself; that estimates a different quantity (a
+cluster-weighted area) and answers a question nobody asked.
+
+**What clustering changes is the variance.** Rows sharing a sampling unit are
+correlated, so the effective number of independent observations is nearer the
+number of clusters than the number of rows. Ordinary DeLong divides by rows and is
+therefore anti-conservative on clustered data — intervals too narrow, *p* too
+small. The clusters, not the rows, are the independent units.
+
+**A cluster is whatever the caller says it is** — a clinic, a household, a school,
+a physician, a repeated subject, a geographic area. Nothing in the engine knows or
+cares which; the group key is data configuration.
+
+### The two mechanisms are not interchangeable
+
+- **Group-aware splitting** decides which rows may appear together in a fold or in
+  the locked test. It prevents *leakage* and it changes the estimand from "a new
+  row from the represented mixture" to "a row from a group the model never saw".
+- **Clustered inference** estimates uncertainty when the locked rows share sampling
+  units. It changes standard errors, intervals, and the paired contrast.
+
+Keeping a cluster wholly on one side of a split does **not** make the patients
+within a held-out cluster independent. Group-aware splitting therefore does not
+license ordinary DeLong, and the engine refuses that combination rather than
+describing the grouping as "descriptive" and running DeLong anyway.
+
+### The standing rules
+
+- All compared procedures use the same immutable partitions and are paired on the
+  same locked rows and the same cluster identities.
+- No fitting, tuning, architecture selection, optimizer selection, or stopping
+  decision may see locked outcomes or locked predictions.
+- **Reports name the estimand actually used** — row-generalization and
+  group-generalization are different claims.
+- Ordinary DeLong is available only for a *declared* independent-row sampling unit.
+- **Clustered inference is never selected because it gives a more favourable
+  result.** The design determines the estimator, and the design is fixed before the
+  numbers are seen.
+
+### The estimator
+
+Obuchowski's nonparametric clustered structural-component covariance
+(*Biometrics* 1997;53:567–578, DOI `10.2307/2533958`), the clustered generalization
+of DeLong, DeLong & Clarke-Pearson (*Biometrics* 1988;44:837–845).
+
+Write `M` for the total outcome-1 rows, `N` for the outcome-0 rows, `I` for the
+number of clusters, and `I₁₀` / `I₀₁` for the clusters containing at least one
+outcome-1 / outcome-0 row. The placements are DeLong's, unchanged:
+
+```
+V10(i) = (1/N) Σ_j ψ(x_i, y_j)     over all outcome-0 rows j
+V01(j) = (1/M) Σ_i ψ(x_i, y_j)     over all outcome-1 rows i
+ψ(a,b) = 1 if a > b, ½ if a = b, 0 otherwise
+```
+
+For cluster `c`, `X_c` sums `V10` over its outcome-1 rows and `Y_c` sums `V01` over
+its outcome-0 rows; `m_c` and `n_c` are those counts. Then, for procedures `r`, `s`:
+
+```
+S10^rs = ( I10 / ((I10-1)·M) ) Σ_c (X_c^r − m_c·θ^r)(X_c^s − m_c·θ^s)
+S01^rs = ( I01 / ((I01-1)·N) ) Σ_c (Y_c^r − n_c·θ^r)(Y_c^s − n_c·θ^s)
+S11^rs = ( I   / (I-1)       ) Σ_c (X_c^r − m_c·θ^r)(Y_c^s − n_c·θ^s)
+
+Cov(θ^r, θ^s) = S10^rs/M + S01^rs/N + ( S11^rs + S11^sr ) / (M·N)
+```
+
+The **`S11` cross terms are the whole point**: they carry the covariance between the
+outcome-1 and outcome-0 rows *of the same cluster*. Ordinary DeLong has no such
+term — under independence the two roles cannot be correlated — which is exactly the
+correlation it is missing on clustered data. Note `S11` is not symmetric in
+`(r, s)`, so both orderings appear.
+
+The sum in each term runs over **all** clusters; a cluster with no outcome-1 rows
+contributes `X_c = m_c = 0` to `S10` and drops out naturally.
+
+### How it is validated
+
+1. **The published worked example.** Obuchowski's Table 3 (magnetic-resonance
+   angiography, two readers, 36 patients / 65 arteries, 1 or 2 arteries per
+   patient) with the intermediate components printed in the table footer. Our
+   implementation reproduces **every one of the nine published components to all ten
+   printed digits** — `S10`, `S01`, `S11` for each reader and the four cross terms —
+   as well as the areas (0.9837, 0.9852), the standard errors (0.0108, 0.0097), the
+   difference SE (0.0066), its interval and *p* (0.8271). Matching a covariance
+   through its intermediates, rather than only through the final SE, is what makes
+   this an acceptance test instead of a coincidence.
+2. **The reduction.** With one row per cluster the estimator must approach ordinary
+   DeLong. It does so *asymptotically, not exactly*: with singleton clusters the
+   `S11` terms vanish identically, but the finite-sample factors differ —
+   Obuchowski's `I10/((I10−1)M)` against DeLong's `1/(M−1)` — so the variances
+   differ by `I10(M−1)/((I10−1)M)`, which is a fraction of a percent at realistic
+   sizes and → 1. The test asserts agreement to a stated tolerance and states the
+   factor, rather than claiming an identity that does not hold.
+3. **A paired whole-cluster bootstrap**, resampling clusters with replacement from
+   the reserved resampling stream, as an independent check on the analytic spread.
+   It is a cross-check, not a substitute: it is kept as a possible future
+   alternative and is not wired into the reported inference.
+4. **Structure and degeneracy**: ties, unequal cluster sizes, clusters carrying only
+   one outcome class, identical procedures (zero difference variance), perfect and
+   reversed scores, invariance to cluster relabelling, and malformed input.
+
+### The interval is unclamped, deliberately
+
+The single-area interval is `θ ± 1.96·SE` on the area scale and is **not** truncated
+to `[0,1]`. The reference implementation reports `(0.9625, 1.005)` for the worked
+example above, and matching it is part of the acceptance test; truncating would
+hide that the normal approximation has run past the boundary, which is information
+the reader needs. This differs from the ordinary-DeLong path, whose classic Wald
+interval *is* clamped (DLG-9) — a deliberate difference, noted in both places. A
+logit-scale interval for near-boundary areas remains future work for both.

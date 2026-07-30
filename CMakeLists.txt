@@ -115,10 +115,25 @@ add_test(NAME obd_sizing COMMAND check_obd)
 # the twoset stack for the Mann-Whitney cross-check; no GSL.
 add_executable(check_delong
     tests/delong/check_delong.cpp
-    src/delong.cpp src/twoset.cpp src/stats.cpp src/matrix.cpp
+    src/delong.cpp src/auccov.cpp src/twoset.cpp src/stats.cpp src/matrix.cpp
     src/vector_ops.cpp src/utility.cpp)
 target_include_directories(check_delong PRIVATE src)
 add_test(NAME delong_areas COMMAND check_delong)
+
+# Literature acceptance test: Obuchowski's nonparametric CLUSTERED ROC-area
+# covariance (ROADMAP 4). Held to the published worked example -- areas,
+# standard errors, difference, interval, p -- AND to the nine intermediate
+# structural components printed in that source's table footer, which is what
+# distinguishes an acceptance test from a coincidence (several wrong formulas
+# land near the right SE). Also pins the reduction toward ordinary DeLong on
+# singleton clusters, a paired whole-cluster bootstrap cross-check, and the
+# degeneracy/refusal contracts. Links delong for the side-by-side comparison.
+add_executable(check_clustered
+    tests/clustered/check_clustered.cpp
+    src/clustered_auc.cpp src/delong.cpp src/auccov.cpp
+    src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
+target_include_directories(check_clustered PRIVATE src)
+add_test(NAME clustered_auc COMMAND check_clustered)
 
 # Unit test: the generic cross-validation runner (ROADMAP 4 Phase 4b-CV). Runs a
 # train procedure over a stratified fold plan and checks every row gets one
