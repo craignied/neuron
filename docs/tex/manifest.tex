@@ -6,6 +6,7 @@
 \usepackage{longtable}
 \usepackage{array}
 \usepackage{url}
+\usepackage{pdflscape}
 \usepackage{hyperref} % this should be the last package
 \graphicspath{{figures/}}
 
@@ -113,6 +114,39 @@ were added.  In 2000, the code was redesigned from the ``ground up''.
 This document is intended to be a description of neUROn programming,
 past, present, and future.  As such, the document is a plan that is
 expected to evolve as neUROn is redesigned and recoded in the future.
+
+The current neuron 3.0 work resumes that design discipline around a modern C++
+engine and a loopback web interface.  It preserves the original numerical,
+model, and statistical object hierarchy while adding reproducible scripted
+sessions; a GUI and REST API with command-line parity; asynchronous training and
+cancellation; explicit convergence semantics; automatic optimizer probing;
+plateau stopping; validation-based OBD architecture selection; shared,
+stratified, and group-disjoint cross-validation plans; untouched locked-test
+evaluation; and machine-readable prediction, metric, and design artifacts.
+\index{neuron 3.0}
+\index{Graphical interface}
+\index{REST API}
+\index{Cross-validation}
+\index{Group-disjoint partition}
+\index{Locked test}
+\index{Optimal Brain Damage}
+
+Statistical reporting has likewise been made explicit about its sampling unit.
+Independent-row locked tests use paired DeLong covariance; clustered locked
+tests use Obuchowski's nonparametric clustered covariance.  Both share the same
+Mann--Whitney point AUC, placements, tie handling, interval algebra, and paired
+contrast rules.  Group-aware partitioning and clustered inference remain
+separate mechanisms: the first prevents leakage, while the second estimates
+uncertainty when rows within a sampling unit are correlated.
+\index{Sampling unit}
+\index{DeLong covariance}
+\index{Obuchowski covariance}
+
+Part I describes these current interfaces and workflows.  Part II retains the
+mathematical derivations, documentation rules, and object specifications which
+make the manifest a programming plan rather than a user manual.  Chapter 12 now
+connects the established objects with the newer partition, training-control,
+selection, covariance, cross-validation, and reporting services.
 
 \part{Current neuron 3.0}
 
@@ -4569,20 +4603,20 @@ matrix and vector operations, as described in Chapter
 \ref{matrix_chapter}.
 
 \hyperref[hierarchy]{Figure~\ref{obj_chap}.\arabic{figcount}}
-demonstrates the object hierarchy.  Objects that are to be built are
-enclosed in dashed lines. Objects that are built (although features
-will be added) are shown in solid lines.
+demonstrates the current inheritance hierarchy and the services which compose
+experiments around it.  Rounded boxes are objects in the inheritance or
+ownership hierarchy.  Component-shaped boxes are namespace services or helper
+objects; their arrows show use and data flow rather than inheritance.
 
-\begin{figure}[htb] \addtocounter{figcount}{1}
-\begin{center}
-\begin{picture}(4.2,4.2)
-\put(0,0){\framebox(4.2,4.2)}
-% for dvi
-\put(0.1,0.1){\includegraphics[width=4in,height=4in]{objects.pdf}}
-\end{picture}
-\end{center}
+\clearpage
+\begin{landscape}
+\begin{figure}[p] \addtocounter{figcount}{1}
+\centering
+\includegraphics[width=9in]{objects.pdf}
 \caption{Object design}\label{hierarchy}
 \end{figure}
+\end{landscape}
+\clearpage
 
 \begin{itemize}
 \item {\bf DataSet} contains and manipulates the data to be modeled.
@@ -4624,6 +4658,8 @@ will be added) are shown in solid lines.
       discriminant function analysis.  {\bf LDFA} extends {\em DFA},
       and encodes linear discriminant function analysis.
 \end{itemize}
+
+\input{modern_objects}
 
 \section{Function definitions}
 
@@ -6312,7 +6348,7 @@ method.}\index{Transfer function!Sigmoidal}
 The method
 
 \begin{verbatim}
-virtual void removeInputs( vector< unsigned >& v )
+virtual void removeInputs( const vector< unsigned >& v )
 \end{verbatim}
 
 must be coded to take as its argument a vector of unsigned
@@ -6325,12 +6361,16 @@ code which removes input nodes in the structures representing weights
 in the {\em Network} object, typically {\em Matrix} columns.  See
 SimpleProp::removeInputs and BareProp::removeInputs as examples.
 
-\subsection{Code that must be added to {\em RegressNet}}
+\subsection{Cloning and construction required for a new {\em Network}}
+\index{cloneNetwork}
+\index{modelfactory}
 
-If you are creating a regressable {\em Network} object (and
-chances are that you are,) you {\em must} add code to the methods
-RegressNet::copy\_network() and RegressNet::network\_name().  See
-section \ref{regresscode} for details.
+A new concrete {\em Network} type must participate in the centralized
+\texttt{cloneNetwork()} dispatch in \texttt{netclone.*}; this is the clone used
+by stepwise regression and automatic optimizer probes.  If the type may be
+created or loaded through a human interface it must also participate in
+\texttt{modelfactory.*}.  {\em RegressNet} contains no type switch and must not
+be edited for each concrete network.  See section \ref{regresscode}.
 
 \subsection{{\em Network} protected members}
 
@@ -9483,13 +9523,6 @@ extraction definitions encoded in the header file were:
 \printindex
 
 \end{document}
-
-
-
-
-
-
-
 
 
 

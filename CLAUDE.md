@@ -279,7 +279,8 @@ Release build → `tests/golden/run_golden.sh` byte-identical (3 transcripts: `x
 `tests/oracle/verify_oracle.sh` numerically identical → live `neuron --gui` click-through
 for anything that adds a control. CI runs the
 build, goldens, ctest, smoke, and the Python tools on macOS/Linux/Windows.
-The automated gates are currently green, and **no GUI click-through is outstanding.** The
+The automated gates are currently green, and **no GUI click-through is outstanding** —
+the last one, the group-aware CV controls, was run and approved by Craig on 2026-07-31. The
 live walkthrough that was running through late July is **complete and published** —
 `docs/datasets/civic-choice/WALKTHROUGH.md` (2026-07-29, commit `13bc12c`), sixteen real
 screenshots of the session it documents, linked from the README as the project's entry
@@ -307,10 +308,12 @@ happened not to be extremal. Fixed in its own commit, with no golden re-bless re
 `gsl_vector` went with it. → HISTORY 2026-07-27.
 
 **Open work** is the one remaining ROADMAP 4 item under "What remains" below (B9, the
-GUI-wide strict-parsing pass). **No GUI click-through is outstanding:** Sol drove the CV
-panel's three new controls — fold stratification columns/bins, group columns, and the
-clustered sampling unit — confirming each is visible, selectable, and submitted by the
-page, and they were re-checked after the 2026-07-30 help-text corrections.
+GUI-wide strict-parsing pass). **No GUI click-through is outstanding: Craig ran the live
+GUI on the group-aware CV batch and approved it (2026-07-31).** The CV panel's three new
+controls — fold stratification columns/bins, group columns, and the clustered sampling
+unit — are visible, selectable and submitted by the page, after the 2026-07-30 help-text
+corrections. Sol had driven the same controls on 2026-07-30; Craig's run is the approval
+the walkthrough protocol asks for.
 
 ## Settled decisions — do not reopen
 
@@ -493,8 +496,8 @@ read it before extending any of that machinery, because it records which parts o
 design were corrected mid-build and why.
 
 Items 1 and 2 — **group-aware / covariate-stratified CV folds** and **cluster-aware
-(non-IID) locked-test inference** — are **DONE and shipped** (2026-07-30; the plan as
-executed is `group-aware_plan.md`, the record is in `docs/HISTORY.md`). One remains:
+(non-IID) locked-test inference** — are **DONE and shipped** (2026-07-30). Their
+implementation record and settled decisions are in `docs/HISTORY.md`. One item remains:
 
 1. **B9 — the GUI-wide strict-parsing pass.** Shared strict integer / floating-point /
    boolean parsers with full-string consumption, range and overflow checks, and

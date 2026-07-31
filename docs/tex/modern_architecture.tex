@@ -1,5 +1,22 @@
 \chapter{neuron 3.0 Architecture}\label{modern_architecture}
 \index{neuron 3.0}
+\index{Architecture!neuron 3.0}
+\index{Command-line interface}
+\index{Graphical interface}
+\index{GUI/CLI parity}
+\index{Python tools}
+\index{Data ownership}
+\index{Train/validation/test split}
+\index{Scaling!training rows only}
+\index{Model selection}
+\index{Cross-validation!architecture}
+\index{Locked test!architecture}
+\index{Statistical reporting!architecture}
+\index{DeLong covariance!independent rows}
+\index{Obuchowski covariance!clustered rows}
+\index{Audit trail}
+\index{Source map}
+\index{Artifact!run outputs}
 
 The 2026 reanimation preserves the object design described in this
 Manifest while giving it three contemporary ways to be used: the
@@ -98,15 +115,20 @@ set.  The dedicated \texttt{split} layer owns index plans and provides:
 \item optional covariate stratification with quantile cells and
 Hamilton apportionment;
 \item group-aware splits that keep an entire cluster on one side;
-\item three-way train, validation, and untouched test splits; and
-\item outcome-stratified folds for cross-validation.
+\item three-way train, validation, and untouched test splits;
+\item outcome-stratified and outcome-by-covariate folds for
+cross-validation; and
+\item outcome-balanced group folds that never divide a cluster.
 \end{itemize}
 
 These mechanisms solve different problems.  Covariate stratification
 makes two samples more alike and is useful for subgroup coverage.
 Grouping makes evaluation harder by preventing site or cluster
-leakage.  A validation set permits model selection without repeatedly
-looking at the final test set.
+leakage.  In a grouped comparison, one group key governs the outer
+folds, the locked holdout, and nested OBD's inner validation split.
+No model-selection stage can therefore see rows from a cluster that it
+later treats as unseen.  A validation set permits model selection
+without repeatedly looking at the final test set.
 
 \section{Models and training}
 
@@ -168,15 +190,37 @@ not the performance of an architecture chosen using all observations.
 Cross-validation is a standalone analysis and does not replace the
 current model.
 
+The default plan is outcome-stratified.  A request may instead balance
+folds on outcome-by-covariate cells or assign whole groups with a
+seeded, outcome-balanced bin-packing plan.  Covariate stratification
+and grouping are alternatives: no untested joint objective is silently
+invented.  The completed design records achieved rows, events, and
+groups per fold, its largest group and imbalance, and a zero-leakage
+check in the Tier 3 run artifact.
+
 \subsection{Locked-test inference}
 
 A locked test set may be removed before cross-validation.  Procedures
 are compared on the development rows, refitted by their own rules, and
-scored once on the locked rows.  \texttt{delong} supplies paired AUC
-confidence intervals and the prespecified AUC contrast when the caller
-declares independent rows.  Clustered observations require
-cluster-aware inference, so ordinary DeLong inference is withheld
-rather than silently reported.
+scored once on the locked rows.  The evaluation design is structured by
+\texttt{evaldesign}: the declared sampling unit and achieved partition
+select the only permitted covariance estimator.
+
+For genuinely independent rows, \texttt{delong} supplies ordinary
+paired AUC intervals and the prespecified contrast.  For rows clustered
+by the request's group key, \texttt{clustered\_auc} supplies
+Obuchowski's non-parametric clustered ROC covariance.  Both use the
+same \texttt{auccov} placements, mid-ranks, point AUC, and contrast
+algebra.  They can therefore differ only in the covariance appropriate
+to the sampling unit.  Grouping prevents leakage but does not make rows
+independent; an independent-row declaration over a group-disjoint
+design is refused rather than passed to ordinary DeLong.
+
+The point AUC remains the row-level Mann--Whitney probability under
+both methods.  Clustering changes uncertainty, not the point estimand.
+The effect has no fixed direction: ordinary row-based standard errors
+can be too small or too large, depending on the within-cluster
+covariance.
 
 \section{Statistical reporting}
 
@@ -213,7 +257,8 @@ an iteration boundary.
 Local server, REST handlers, asynchronous job state, and browser
 interface. \\ \hline
 \texttt{split.*} &
-Stratified, group-aware, three-way, and k-fold index plans. \\ \hline
+Stratified, group-aware, three-way, arbitrary-stratum k-fold, and
+whole-group k-fold index plans. \\ \hline
 \texttt{crossval.*},
 \texttt{cvadapters.*},
 \texttt{cvreport.*} &
@@ -225,8 +270,13 @@ Grow-and-prune hidden-layer selection. \\ \hline
 \texttt{plateau.h} &
 Optimizer probing and plateau detection shared by training
 workflows. \\ \hline
-\texttt{delong.*} &
-Paired locked-test AUC inference. \\ \hline
+\texttt{evaldesign.*} &
+Typed partition, sampling-unit, and inference policy metadata. \\ \hline
+\texttt{auccov.*},
+\texttt{delong.*},
+\texttt{clustered\_auc.*} &
+Shared AUC placements and contrast algebra, ordinary independent-row
+DeLong covariance, and Obuchowski clustered covariance. \\ \hline
 \texttt{modelfactory.*},
 \texttt{netclone.*} &
 Construction and faithful cloning through the common model

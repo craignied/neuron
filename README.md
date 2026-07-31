@@ -57,8 +57,11 @@ research orientation: statistical output is part of the model, not an afterthoug
   train/validation/test splits
 - Shared-fold cross-validation across logistic regression, LDFA, QDFA, and neural
   procedures
-- Nested OBD inside cross-validation, so architecture selection does not leak
+- Outcome-stratified, covariate-stratified, or group-disjoint cross-validation folds
+- Nested OBD inside cross-validation, including group-disjoint inner validation
 - Optional untouched locked-test evaluation with paired empirical AUC comparison
+- Ordinary DeLong inference for declared independent rows and Obuchowski clustered
+  inference for declared sampling-unit clusters
 - Auditable prediction, metric, configuration, and action-log artifacts
 
 ### Deployment
@@ -215,15 +218,18 @@ assumptions, implementation, citations, and recommended reporting language.
 
 Cross-validation summaries are descriptive: folds share training observations, so
 fold-to-fold variation is not a confidence interval. Formal paired empirical-AUC
-comparison is available on an untouched locked test through ordinary DeLong inference
-only when the analyst explicitly declares that rows are independent sampling units.
-A mechanical row split does not establish independence. Ordinary DeLong is not valid
-for clustered observations such as patients within counties or hospitals;
-cluster-aware ROC inference remains planned work.
+comparison is available on an untouched locked test. Declaring
+`independence=rows` selects ordinary DeLong inference for genuinely independent rows;
+declaring `independence=cluster` with a `group=` key selects Obuchowski's clustered
+ROC covariance. A mechanical row split does not establish independence, and neuron
+never substitutes one estimator for the other.
 
 Group-aware splitting and cluster-aware inference solve different problems. Keeping a
 group wholly on one side prevents train/test leakage and measures generalization to
-unseen groups; it does not make rows within a held-out group independent.
+unseen groups; it does not make rows within a held-out group independent. Clustered
+inference changes the covariance estimate while leaving the patient-row empirical AUC
+unchanged. Depending on the within-cluster covariance, the row-based standard error can
+be too small or too large.
 
 ## Model comparison and data splitting
 
@@ -237,11 +243,13 @@ example, all patients from a site or county. This is the appropriate design when
 question is performance on entirely unseen groups. A validation split can additionally
 reserve model-selection data so the final test remains untouched.
 
-The cross-validation comparison runs selected procedures over one shared,
-outcome-stratified fold plan, producing paired out-of-fold predictions. Neural
-architecture search is nested within each fold. Procedure-specific deterministic RNG
-substreams make a procedure's result invariant to which other procedures are included
-or how they are ordered.
+The cross-validation comparison runs selected procedures over one shared fold plan,
+producing paired out-of-fold predictions. By default the folds are outcome-stratified.
+`strata=` adds selected covariates to the balancing cells; `group=` instead keeps every
+cluster intact and uses the same group key for the locked holdout and nested OBD's inner
+validation split. The two policies are currently alternatives, not a combined mode.
+Procedure-specific deterministic RNG substreams make a procedure's result invariant to
+which other procedures are included or how they are ordered.
 
 Tiered output keeps the headline comparison readable while preserving the substrate:
 
@@ -278,7 +286,8 @@ ctest --test-dir build --output-on-failure
 The verification layers include:
 
 - unit and subsystem tests for matrix operations, splitting, training, ROC statistics,
-  goodness of fit, OBD, cross-validation, and DeLong covariance;
+  goodness of fit, OBD, cross-validation, ordinary DeLong covariance, and Obuchowski
+  clustered covariance;
 - three seeded end-to-end golden sessions whose transcripts must remain
   byte-identical apart from elapsed time;
 - explicit coverage assertions ensuring the goldens actually execute the statistical
@@ -314,7 +323,8 @@ intentional corrections with regression tests.
 The primary interface is now the embedded GUI, while the menu interface remains
 available for automation and compatibility. Data grooming, model deployment, modern
 ROC intervals, scalable splitting, validation-aware OBD, cross-validation comparison,
-locked-test inference guardrails, and auditable experiment artifacts are implemented.
+group-disjoint evaluation, clustered locked-test inference, and auditable experiment
+artifacts are implemented.
 The standing rules, current state, and remaining roadmap live in
 [`CLAUDE.md`](CLAUDE.md); the dated development record is
 [`docs/HISTORY.md`](docs/HISTORY.md).

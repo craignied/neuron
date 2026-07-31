@@ -1,7 +1,7 @@
 # Evaluation report specification (ROADMAP 4 Phase 4)
 
-> **STATUS (2026-07-23): this is the ASPIRATIONAL spec; the shipped single-run CV report
-> (`src/cvreport.{h,cpp}`, reached via `/api/cv`) implements a subset.** SHIPPED: the
+> **STATUS (updated 2026-07-31): this records the shipped `/api/cv` report and clearly
+> labels the remaining aspirational pieces.** The current implementation provides the
 > three-tier structure; Tier-1 headline table (Procedure · AUC(CV) mean ± sd · Arch · Time)
 > + verdict block + the standing caveat; Tier-2 per-fold AUC/sens/spec, per-procedure
 > failures (with reasons) and validFolds, and OBD architecture- AND optimizer-selection
@@ -10,18 +10,18 @@
 > (with per-procedure `validFolds` + `failures`). A Tier-3 file that cannot be written (unwritable
 > directory, full disk) is reported as a run WARNING naming the file + reason — never silently
 > dropped, and never counted as written unless it opened/wrote/flushed/closed cleanly.
-> **SHIPPED 2026-07-24 — the locked-test layer (inference is OPT-IN):** with
-> `locked_fraction`/`locked_n` on `/api/cv`, an outcome-stratified ROW holdout is scored for
+> The locked-test layer is opt-in. With `locked_fraction`/`locked_n` on `/api/cv`, an
+> outcome-stratified row holdout, or a group-disjoint holdout when `group=` is present, is scored for
 > point AUCs and predictions (`cv_locked_predictions.csv`; a `lockedTest` block in
 > `cv_run.json`). Ordinary DeLong assumes *independent* observations, which a mechanical row
-> holdout does not establish, so the AUC 95% CIs and the contrast *p* are produced **only when
-> the caller declares `independence=rows`**; otherwise inference is **withheld** (point AUCs
-> still shown) and the metadata records why. When inference runs, Tier 1 gains the
-> `AUC (test) [95% CI]` column and the prespecified DeLong verdict (ΔAUC + two-sided *p* →
-> significant/not; a deterministic area separation reports p≈0, equal areas "no testable
-> difference"); Tier 2 gains a locked-test section with sampling-unit/inference metadata; the
+> holdout does not establish. `independence=rows` selects ordinary DeLong for an independent-row
+> design; `independence=cluster` selects Obuchowski clustered covariance for a grouped design.
+> Without a declaration, inference is **withheld** while point AUCs remain available. When
+> inference runs, Tier 1 gains the `AUC (test) [95% CI]` column and a prespecified verdict that
+> names the estimator supplying its two-sided *p*. A deterministic area separation reports p≈0;
+> equal areas report "no testable difference." Tier 2 gains sampling-unit metadata; the
 > "frozen architecture" appears as each procedure's locked-test `arch`.
-> **SHIPPED 2026-07-30 — fold policy and cluster-aware inference:** `/api/cv` takes its own
+> `/api/cv` takes its own
 > `strata=`/`strata_bins=`/`group=`, so the fold plan may be outcome-stratified (the default,
 > unchanged), outcome × covariate-stratified, or **group-disjoint** — and a grouped request's
 > key governs the locked holdout and the nested search's inner validation split as well.

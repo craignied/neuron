@@ -1,0 +1,1023 @@
+\begingroup
+\sloppy
+
+\section{Current object and service map}\label{modern_objects}
+\index{Object design!current services}
+
+Figure~\ref{hierarchy} includes both the inheritance hierarchy and the modern
+services that compose experiments around it.  A component-shaped box is not a
+new base class: it is a namespace service or helper object with one explicit
+responsibility.  The arrows describe use or ownership, not inheritance unless
+the label says ``base of.''
+
+The important division is between mechanisms and coordination.  \texttt{DataSet}
+owns data and materializes row partitions; \texttt{nsplit} chooses indices;
+\texttt{Network} objects fit models; \texttt{obd} selects an architecture;
+\texttt{crossval} repeats a supplied procedure; \texttt{evaldesign} records what
+design was achieved and which inference it permits; the AUC covariance modules
+estimate uncertainty; and \texttt{cvreport} renders and writes results.  No
+outer coordinator reimplements a lower layer's rule.
+
+\subsection{Current additions to DataSet}
+\index{DataSet!validation set}
+\index{DataSet!strataKey}
+\index{DataSet!groupKey}
+\index{DataSet!makeFold}
+\index{DataSet!randomize3}
+\index{DataSet!monitorSet}
+\index{DataSet!validation set}
+\index{DataSet!covariate stratification}
+\index{DataSet!group columns}
+
+The original \texttt{DataSet} contract earlier in this chapter remains valid.
+The following public methods extend it for validation and planned partitions:
+
+\begin{itemize}
+\item \texttt{valLoaded()}, \texttt{getValMatrix()}, and \texttt{getNumVal()}
+      expose the optional validation set.
+\item \texttt{monitorSet()} returns \texttt{MONITOR\_NONE},
+      \texttt{MONITOR\_VALIDATION}, or \texttt{MONITOR\_TEST};
+      \texttt{monitorSetName()} returns the same choice for reports.
+\item \texttt{randomize3(nTest,nVal)} and
+      \texttt{randomize3D(testRatio,valRatio)} create an outcome-stratified
+      train/validation/test split.
+\item \texttt{makeFold(trainRows,testRows,valRows)} materializes explicit raw-row
+      indices and computes every scale from the training rows only.
+\item \texttt{setStrataColumns}, \texttt{getStrataColumns},
+      \texttt{setStrataBins}, and \texttt{getStrataBins} configure
+      outcome-by-covariate splitting.
+\item \texttt{setGroupColumns} and \texttt{getGroupColumns} configure exact
+      joint-value groups which may not be divided.
+\item \texttt{strataKey(columns,bins)} returns dense outcome-by-covariate cell
+      identifiers; \texttt{groupKey(columns)} returns dense exact-match group
+      identifiers.  Both read the raw matrix without changing configuration.
+\end{itemize}
+
+\subsubsection{Example}
+\begin{verbatim}
+vector<unsigned> group = data.groupKey({2, 3, 4});
+nsplit::GroupFoldPlan p =
+    nsplit::stratifiedGroupKFold(label, group, 5);
+data.makeFold(trainRows, testRows, validationRows);
+cout << data.monitorSetName();       // "validation"
+\end{verbatim}
+
+\subsubsection{Notes}
+Column positions passed by C++ callers are zero-based input positions.  Public
+REST fields are one-based and are validated and converted by the handler.
+Grouping takes precedence over covariate stratification in the ordinary raw
+split.  A three-way split is outcome-stratified and does not currently compose
+with either policy.
+
+\section{Current contracts added to established objects}\label{current_established_objects}
+\index{TwoSet!current ROC contract}
+\index{TwoSet!invalidate}
+\index{TwoSet!getTrapROCarea}
+\index{TwoSet!getROCfit}
+\index{TwoSet!bootstrapROC}
+\index{TwoSet!confidence interval}
+\index{TwoSet!operating points}
+\index{TwoSet!Pearson statistic}
+\index{Model!error objective query}
+\index{Iterative!current training contract}
+\index{Iterative!StopReason}
+\index{Iterative!converged}
+\index{Iterative!Observer}
+\index{Iterative!quiet training}
+\index{Iterative!plateau stopping}
+\index{Network!current diagnostics}
+\index{Network!sampleTestError}
+\index{Network!condition number}
+\index{SimpleProp!hidden-layer resizing}
+\index{SimpleProp!growHidden}
+\index{SimpleProp!removeHidden}
+\index{Logistic regression!structured results}
+\index{Logistic regression!coefficients}
+\index{Logistic regression!Wald test}
+\index{RegressNet!structured results}
+\index{RegressNet!progress}
+\index{RegressNet!candidate audit}
+\index{RegressNet!completion status}
+
+The detailed specifications later in this chapter describe the established
+objects.  The following additions are part of their current public contracts and
+must be read with those specifications.
+
+\subsection{Model}
+The following method exposes the objective needed by likelihood-based callers:
+
+\begin{itemize}
+\item \texttt{bool getXEerror() const}: returns \texttt{true} when
+      cross-entropy is active and \texttt{false} for least-mean-square error.
+\end{itemize}
+
+Callers whose mathematics depends on likelihood, notably stepwise Wilks
+comparisons, query this state and refuse an incompatible source fit; they do not
+mutate the model's objective to make it appear compatible.
+
+\subsection{TwoSet}
+\texttt{TwoSet} now exposes explicit cache invalidation and structured ROC
+results.  The following methods are available:
+
+\begin{itemize}
+\item \texttt{void invalidate()}: clears every cached statistic after a caller
+      changes predictions through a mutable accessor.
+\item \texttt{unsigned getTP()}, \texttt{getTN()}, \texttt{getFP()}, and
+      \texttt{getFN()}: return the four confusion-matrix counts at the current
+      threshold.
+\item \texttt{double getTrapROCarea()}: returns the exact empirical
+      Mann--Whitney AUC over every distinct operating point.
+\item \texttt{const vector<double>\& getROCx()} and \texttt{getROCy()}:
+      return the empirical ROC coordinates, $1-$specificity and sensitivity.
+\item \texttt{ROCfit getROCfit()}: returns the current binormal ROC fit as a
+      structured value; an unsupported fit has \texttt{valid=false}.
+\item \texttt{void bootstrapROC()}: performs the configured number of
+      outcome-stratified bootstrap resamples and caches a percentile interval
+      for the binormal area.
+\item \texttt{CI getStatCi()}: returns the cached bootstrap interval.
+\item \texttt{void setBootstrapResamples(unsigned n)}: sets the requested
+      resample count; zero disables the bootstrap.
+\item \texttt{unsigned getBootstrapResamples()}: returns that count.
+\item \texttt{unsigned getStatPoints()}: returns the number of distinct
+      interior operating points fitted by the zROC line.
+\item \texttt{double getStatChi2()}: returns the zROC fit chi-square.
+\item \texttt{double getPearsonX2()}: returns the individual-level Pearson
+      statistic; it is not assigned a chi-square p-value on continuous data.
+\end{itemize}
+
+\texttt{ROCfit} contains the following public variables:
+
+\begin{itemize}
+\item \texttt{double az}: fitted binormal ROC area.
+\item \texttt{double chi2}: zROC fit chi-square, or not-a-number when it cannot
+      be computed.
+\item \texttt{double p}: fit p-value, or not-a-number when unavailable.
+\item \texttt{unsigned points}: operating points included in the fit.
+\item \texttt{bool valid}: whether a fit was computed.
+\end{itemize}
+
+\texttt{CI} contains:
+
+\begin{itemize}
+\item \texttt{double lo, hi}: 2.5th and 97.5th percentiles.
+\item \texttt{double se}: standard deviation of successful resampled areas.
+\item \texttt{unsigned resamples}: successful resamples.
+\item \texttt{unsigned failures}: resamples for which no area was computable.
+\item \texttt{bool valid}: whether enough resamples succeeded.
+\end{itemize}
+
+\subsection{Iterative}
+\texttt{StopReason} identifies why the last run ended:
+
+\begin{itemize}
+\item \texttt{STOP\_NONE}: training has not run.
+\item \texttt{STOP\_MIN\_ERROR}, \texttt{STOP\_CHANGE},
+      \texttt{STOP\_WINDOW}, \texttt{STOP\_GRADMAX},
+      \texttt{STOP\_PLATEAU}, and \texttt{STOP\_EARLY\_STOP}: a configured
+      stopping rule fired, so the run converged under its declared rule.
+\item \texttt{STOP\_MAX\_ITERATIONS}: the safety ceiling was exhausted; this is
+      not convergence.
+\item \texttt{STOP\_CANCELLED}: an external request stopped the fit.
+\item \texttt{STOP\_PROBE\_BUDGET}: an optimizer probe used its wall-clock
+      allowance; the probe is an experiment, not a completed fit.
+\end{itemize}
+
+The following methods expose and control this state:
+
+\begin{itemize}
+\item \texttt{static const char* stopReasonToken(StopReason r)}: returns the
+      single machine-readable name used in reports and JSON.
+\item \texttt{static bool converged(StopReason r)}: returns \texttt{true} only
+      for the six stopping-rule outcomes listed above.
+\item \texttt{void setObserver(Observer* obs)} and
+      \texttt{Observer* getObserver()}: install or return the non-owning
+      iteration observer.
+\item \texttt{StopReason getStopReason()}: returns the last run's reason.
+\item \texttt{unsigned getIterations()}: returns iterations completed by the
+      last run.
+\item \texttt{void setAutoStop(bool flag,double tol,unsigned win)}: enables or
+      disables plateau stopping and sets its tolerance and window.
+\item \texttt{bool getAutoStop()}, \texttt{double getAutoStopTol()}, and
+      \texttt{unsigned getAutoStopWindow()}: return that configuration.
+\item \texttt{void setQuiet(bool flag)} and \texttt{bool getQuiet()}:
+      suppress or query narration and the reporting epilogue.  Quiet mode never
+      suppresses a calculation used by fitting or stopping.
+\end{itemize}
+
+An \texttt{Iterative::Observer} supplies:
+
+\begin{itemize}
+\item \texttt{bool onIteration(unsigned iteration,double setError)}: receives
+      every completed iteration and returns \texttt{false} to stop.
+\item \texttt{StopReason whyStopped() const}: identifies why the observer
+      returned \texttt{false}; the conservative default is cancellation.
+\end{itemize}
+
+\subsection{Network and concrete models}
+The following current methods supplement the detailed \texttt{Network}
+specification later in this chapter:
+
+\begin{itemize}
+\item \texttt{double sampleTestError(unsigned stride)}: returns mean error over
+      every \texttt{stride}-th exemplar in the authoritative validation/test
+      monitoring set without changing cached statistics; returns $-1$ when no
+      one-output monitoring set exists.
+\item \texttt{double getCondNum() const}: returns the last computed condition
+      number, or $-1$ before calculation.
+\item \texttt{double getCondMaxEig() const} and
+      \texttt{getCondMinEig() const}: return the extreme eigenvalues used in
+      that condition number.
+\end{itemize}
+
+\texttt{SimpleProp} adds the following OBD mechanisms:
+
+\begin{itemize}
+\item \texttt{void growHidden(unsigned extra)}: adds hidden units as a warm
+      start, preserving existing weights and assigning each new unit zero
+      outgoing contribution.
+\item \texttt{void removeHidden(const vector<unsigned>\& indices)}: removes
+      the named non-bias hidden units while preserving the order and weights of
+      survivors; at least one unit must remain.
+\item \texttt{vector<double> hiddenSaliency()}: returns one saliency per
+      non-bias hidden unit, $|w_j|$ times the training-set standard deviation of
+      that unit's output.
+\end{itemize}
+
+\texttt{Logistic} exposes its last coefficient audit:
+
+\begin{itemize}
+\item \texttt{const vector<double>\& getBetas() const}: returns fitted
+      coefficients; the last element is the intercept.
+\item \texttt{const vector<double>\& getBetaSE() const}: returns coefficient
+      standard errors; $-1$ marks an unavailable value.
+\item \texttt{const vector<double>\& getWaldP() const}: returns coefficient
+      Wald-test p-values.
+\end{itemize}
+
+\subsection{RegressNet}
+The following methods support non-interactive, cancellable stepwise analysis:
+
+\begin{itemize}
+\item \texttt{void setThreshold(double t)}: supplies the p-value threshold
+      without an interactive prompt.
+\item \texttt{void setProgress(ProgressFn f)}: installs the progress callback.
+\item \texttt{void setObserver(Iterative::Observer* obs)}: installs the
+      non-owning cancellation observer on every candidate clone.
+\item \texttt{const vector<Candidate>\& getCandidates() const}: returns every
+      candidate in evaluation order.
+\item \texttt{const vector<pair<double,unsigned> >\& getSelectionPath() const}:
+      returns selected p-value/variable pairs in selection order.
+\item \texttt{const vector<unsigned>\& getFinalVariables() const}: returns the
+      variables settled by completed passes.
+\item \texttt{unsigned getFitsCompleted() const}: returns candidate fits made.
+\item \texttt{bool getComplete() const}: distinguishes a completed selection
+      from a partial audit after failure or cancellation.
+\end{itemize}
+
+\texttt{Progress} contains direction, pass number, candidate number and pass
+total, completed-fit count, conceptual variable, its full input-node group,
+phase, completion flag, convergence flag, and stop-reason token.
+
+\texttt{Candidate} contains pass/candidate/variable identity, the full input
+group, prior and candidate errors, degrees of freedom, $G^2$, p-value,
+convergence, stop reason, iterations, and whether it won its pass.
+
+\subsubsection{Example}
+\begin{verbatim}
+network.setAutoStop(true, 1e-4, 100);
+double error = network.train();
+if (!Iterative::converged(network.getStopReason())) rejectFit();
+
+TwoSet::ROCfit fit = data.getTestTwoSet().getROCfit();
+const vector<double>& p = logistic.getWaldP();
+\end{verbatim}
+
+\subsubsection{Notes}
+Reaching \texttt{STOP\_MAX\_ITERATIONS} is operation completion but not fit
+convergence.  Quiet mode changes output only.  The ROC bootstrap uses an
+independent resampling stream and cannot perturb training.  Stepwise candidate
+fits must converge under cross-entropy before entering a Wilks comparison, and
+the original model is never mutated.
+
+\section{Partition planning: nsplit}\label{nsplit_objects}
+\index{nsplit}
+\index{Group-disjoint partition}
+\index{Stratified partition}
+
+The \texttt{nsplit} namespace is an index-level service.  It never scales data,
+fits a model, or interprets an input column.
+
+\texttt{Holdout} contains:
+
+\begin{itemize}
+\item \texttt{vector<unsigned> test, train}: row positions assigned to each
+      side.
+\item \texttt{unsigned n0, n1}: whole-sample outcome counts.
+\item \texttt{unsigned n0Test, n1Test}: achieved test-set outcome counts.
+\end{itemize}
+
+\texttt{StratHoldout} contains:
+
+\begin{itemize}
+\item \texttt{vector<unsigned> test, train}: row positions assigned to each
+      side.
+\item \texttt{vector<unsigned> cellTotal}: whole-sample count in each stratum.
+\item \texttt{vector<unsigned> cellTest}: achieved test count in each stratum.
+\end{itemize}
+
+\texttt{GroupHoldout} contains:
+
+\begin{itemize}
+\item \texttt{vector<unsigned> test, train}: row positions assigned to each
+      side, with every group wholly on one side.
+\item \texttt{unsigned nGroups}: number of distinct groups.
+\item \texttt{vector<unsigned> groupsInTest}: group identifiers assigned to
+      the test side.
+\end{itemize}
+
+\texttt{FoldPlan} contains:
+
+\begin{itemize}
+\item \texttt{bool ok} and \texttt{string reason}: planning status and refusal.
+\item \texttt{vector<unsigned> foldId}: fold number for every input row.
+\item \texttt{unsigned k, nStrata}: requested folds and observed strata.
+\item \texttt{vector<unsigned> foldSize}: achieved rows per fold.
+\item \texttt{vector<vector<unsigned> > stratumByFold}: achieved stratum counts
+      by fold.
+\item \texttt{vector<string> warnings}: non-fatal planning facts.
+\end{itemize}
+
+\texttt{GroupFoldPlan} extends \texttt{FoldPlan} with:
+
+\begin{itemize}
+\item \texttt{unsigned nGroups}: distinct groups in the planned rows.
+\item \texttt{vector<unsigned> groupsPerFold}: whole groups assigned per fold.
+\item \texttt{vector<array<unsigned,2> > classByFold}: negative and positive
+      rows achieved per fold.
+\item \texttt{unsigned leakageCount}: groups found in more than one fold; a
+      valid plan has zero.
+\item \texttt{double imbalanceScore}: worst relative row or class imbalance.
+\item \texttt{unsigned largestGroup}: size of the largest indivisible group.
+\end{itemize}
+
+The following functions are available:
+
+\begin{itemize}
+\item \texttt{string partitionError(unsigned nRows,train,test,bool coverage)}:
+      returns an empty string for a valid two-way row partition, otherwise a
+      reason describing an out-of-range, duplicate, overlapping, or missing row.
+\item \texttt{Holdout stratifiedHoldout(label,nTest)}: returns an
+      outcome-stratified train/test partition of binary labels.
+\item \texttt{StratHoldout holdoutByStrata(stratum,nTest)}: apportions test
+      positions across arbitrary stratum identifiers by largest remainder.
+\item \texttt{GroupHoldout groupHoldout(label,group,nTest)}: assigns each
+      complete group to training or test while approaching the requested size
+      and outcome balance.
+\item \texttt{FoldPlan stratifiedKFold(stratum,k)}: returns a balanced k-fold
+      assignment over arbitrary stratum identifiers.
+\item \texttt{GroupFoldPlan stratifiedGroupKFold(label,group,k)}: returns an
+      outcome-balanced whole-group fold assignment with measured leakage and
+      imbalance.
+\item \texttt{vector<unsigned> kFold(label,k)}: returns the outcome-only case
+      of \texttt{stratifiedKFold}.
+\end{itemize}
+\index{nsplit!stratifiedGroupKFold}
+\index{nsplit!partitionError}
+\index{nsplit!stratifiedHoldout}
+\index{nsplit!holdoutByStrata}
+\index{nsplit!groupHoldout}
+\index{nsplit!stratifiedKFold}
+\index{nsplit!kFold}
+\index{FoldPlan}
+\index{GroupFoldPlan}
+\index{Leakage!partition validation}
+
+\subsubsection{Example}
+\begin{verbatim}
+util::set_seed(42);
+nsplit::GroupFoldPlan plan =
+    nsplit::stratifiedGroupKFold(label, group, 5);
+if (!plan.ok || plan.leakageCount != 0)
+    throw runtime_error(plan.reason);
+\end{verbatim}
+
+\subsubsection{Notes}
+Every plan is reproducible under the engine seed.  Group identifiers are merely
+equivalence labels; renumbering them must not change the partition.  Achieved
+fold counts and leakage are recomputed from the final assignment.  Indivisible
+groups may make exact sizes or exact class balance impossible, so imbalance is
+reported rather than hidden.  Fewer than \texttt{k} groups is a refusal.
+
+\section{Typed evaluation design: evaldesign}\label{evaldesign_objects}
+\index{evaldesign}
+\index{Sampling unit}
+\index{AUC inference policy}
+\index{evaldesign!Partition}
+\index{evaldesign!SamplingUnit}
+\index{evaldesign!PartitionMethod}
+\index{evaldesign!chooseInference}
+\index{Evaluation design!typed vocabulary}
+
+\texttt{evaldesign} is the vocabulary and policy layer; it computes no
+statistic.  Its enumerations are:
+
+\begin{itemize}
+\item \texttt{SamplingUnit}: \texttt{Unspecified}, \texttt{Row}, or
+      \texttt{Cluster}, declaring the independent sampling unit.
+\item \texttt{AucInference}: \texttt{None}, \texttt{DeLongIndependent}, or
+      \texttt{ObuchowskiClustered}, naming the permitted estimator.
+\item \texttt{PartitionMethod}: \texttt{OutcomeStratified},
+      \texttt{CovariateStratified}, or \texttt{StratifiedGroup}, naming how
+      rows were assigned.
+\end{itemize}
+
+\texttt{Partition} contains the following public variables:
+
+\begin{itemize}
+\item \texttt{PartitionMethod method}: assignment method.
+\item \texttt{unsigned seed}: reproducibility seed.
+\item \texttt{unsigned k}: number of folds; zero for a holdout.
+\item \texttt{vector<unsigned> strataColumns}: caller's one-based covariate
+      columns; \texttt{strataBins} and \texttt{nStrata} give bin count and
+      achieved cell count.
+\item \texttt{vector<unsigned> groupColumns}: caller's one-based group columns;
+      \texttt{nGroups} gives distinct groups in the partitioned rows.
+\item \texttt{bool developmentOnly}: whether the folds exclude a locked test.
+\item \texttt{unsigned nRequested, nAchieved}: requested and achieved holdout
+      sizes; indivisible groups may make them differ.
+\item \texttt{unsigned leakage}: groups or rows found on both sides; a valid
+      group plan requires zero.
+\item \texttt{vector<string> warnings}: non-fatal design facts.
+\item \texttt{string refusal}: reason no partition could be built.
+\item \texttt{foldRows, foldEvents, foldGroups}: parallel achieved counts for
+      each fold.
+\item \texttt{double imbalanceScore}: worst relative deviation from a fold's
+      fair row or class share.
+\item \texttt{unsigned largestGroup}: largest indivisible cluster size.
+\end{itemize}
+
+\texttt{InferenceChoice} contains \texttt{AucInference method} and
+\texttt{string reason}; the reason is required when the method is
+\texttt{None}.
+
+The following functions are available:
+
+\begin{itemize}
+\item \texttt{bool parseSamplingUnit(string text,SamplingUnit\& out)}: parses
+      the REST value \texttt{rows}, \texttt{cluster}, or an empty declaration;
+      returns \texttt{false} for an unrecognized token.
+\item \texttt{samplingUnitName}, \texttt{samplingUnitPhrase}, and
+      \texttt{independenceStatus}: return the authoritative display wording for
+      a sampling-unit declaration.
+\item \texttt{inferenceName}, \texttt{inferenceText}, and
+      \texttt{inferenceShortName}: return long, reason-bearing, and compact
+      names for an inference choice.
+\item \texttt{partitionMethodName}: returns the display name of a partition
+      method.
+\item \texttt{string describeFolds(const Partition\& p)}: derives a fold-plan
+      sentence from structured fields.
+\item \texttt{string describeHoldout(const Partition\& p)}: derives the
+      corresponding holdout sentence, including requested and achieved sizes.
+\item \texttt{InferenceChoice chooseInference(unit,split,estimable,reason)}:
+      returns the only covariance estimator permitted by the declared unit and
+      achieved split, or \texttt{None} with a reason.
+\end{itemize}
+
+Display strings must come from these functions rather than being composed by a
+GUI or report.
+
+\subsubsection{Example}
+\begin{verbatim}
+evaldesign::InferenceChoice c = evaldesign::chooseInference(
+    evaldesign::SamplingUnit::Cluster,
+    evaldesign::PartitionMethod::StratifiedGroup,
+    clustered.ok, clustered.reason);
+\end{verbatim}
+
+\subsubsection{Notes}
+A group-disjoint split prevents leakage; it does not establish row independence.
+An unspecified unit intentionally withholds inferential claims.  Independent-row
+inference over a grouped design is refused, and neither covariance estimator may
+silently substitute for the other.
+
+\section{Shared AUC covariance algebra: auccov}\label{auccov_objects}
+\index{auccov}
+\index{ROC area!placements}
+\index{Mann--Whitney area}
+\index{auccov!midranks}
+\index{auccov!compute}
+\index{auccov!interval}
+\index{auccov!contrast}
+\index{ROC area!ties}
+\index{ROC area!zero-variance contrast}
+
+\texttt{auccov} owns the operations that are invariant to the sampling unit.
+\texttt{Placements} contains:
+
+\begin{itemize}
+\item \texttt{bool ok} and \texttt{string reason}: computation status.
+\item \texttt{unsigned n0, n1}: negative and positive row counts.
+\item \texttt{vector<unsigned> pos, neg}: original row indices by outcome.
+\item \texttt{vector<vector<double> > v10, v01}: procedure-by-observation
+      structural components.
+\item \texttt{vector<double> auc}: exact point AUC for each procedure.
+\end{itemize}
+
+\texttt{Interval} contains point \texttt{auc}, standard error \texttt{se},
+limits \texttt{lo}/\texttt{hi}, and \texttt{valid}.
+
+\texttt{Contrast} contains the two areas and their standard errors, difference
+\texttt{delta} and \texttt{seDelta}, each area's interval, the difference
+interval, \texttt{z}, two-sided \texttt{p}, zero-variance flags
+\texttt{degenerate}/\texttt{separated}, explanatory \texttt{note}, and
+\texttt{valid}.
+
+The following functions are available:
+
+\begin{itemize}
+\item \texttt{vector<double> midranks(const vector<double>\& x)}: returns
+      one-based ranks; tied observations receive the mean rank they span.
+\item \texttt{Placements compute(label,pred)}: returns positive/negative row
+      indices, structural components, and exact point AUCs for paired procedures.
+\item \texttt{Interval interval(auc,cov,i,bool clamp)}: returns the normal
+      interval for area \texttt{i}; \texttt{clamp} controls truncation to
+      $[0,1]$.
+\item \texttt{Contrast contrast(auc,cov,i,j,bool clamp)}: returns
+      $AUC_i-AUC_j$, its standard error, interval, z statistic, and two-sided
+      p-value.
+\end{itemize}
+
+The estimator above this layer supplies the covariance matrix; it does not
+reimplement these operations.
+
+\subsubsection{Example}
+\begin{verbatim}
+auccov::Placements p = auccov::compute(label, predictions);
+auccov::Contrast c =
+    auccov::contrast(p.auc, covariance, 0, 1, false);
+\end{verbatim}
+
+\subsubsection{Notes}
+Ties receive half credit through common mid-ranks, so the ordinary and clustered
+paths have identical point AUCs.  A zero-variance, zero-difference contrast has
+\texttt{p=1}; a zero-variance nonzero difference is deterministic separation
+with \texttt{p=0}.  A materially negative difference variance is refused.
+
+\section{AUC covariance estimators}\label{auc_estimators}
+\index{DeLong covariance}
+\index{delong}
+\index{delong!analyze}
+\index{delong!interval}
+\index{delong!contrast}
+\index{Obuchowski covariance}
+\index{clustered auc@\texttt{clustered\_auc}}
+\index{clustered auc@\texttt{clustered\_auc}!analyze}
+\index{clustered auc@\texttt{clustered\_auc}!interval}
+\index{clustered auc@\texttt{clustered\_auc}!contrast}
+\index{Clustered ROC data}
+
+\subsection{delong}
+\texttt{delong::Result} contains:
+
+\begin{itemize}
+\item \texttt{unsigned n0, n1}: negative and positive row counts.
+\item \texttt{vector<double> auc}: one exact point area per procedure.
+\item \texttt{Matrix<double> cov}: paired DeLong covariance matrix.
+\item \texttt{bool ok} and \texttt{string reason}: estimator status and refusal.
+\end{itemize}
+
+The following functions are available:
+
+\begin{itemize}
+\item \texttt{Result analyze(label,pred)}: estimates paired DeLong covariance
+      for procedures scored on the same independent rows.
+\item \texttt{Interval interval(const Result\& r,unsigned i)}: returns the
+      normal DeLong interval for procedure \texttt{i}, clamped to $[0,1]$.
+\item \texttt{Contrast contrast(const Result\& r,unsigned i,unsigned j)}:
+      returns the paired area contrast $AUC_i-AUC_j$.
+\end{itemize}
+
+\subsection{clustered\_auc}
+\texttt{clustered\_auc::Result} contains:
+
+\begin{itemize}
+\item \texttt{bool ok} and \texttt{string reason}: estimator status and refusal.
+\item \texttt{unsigned nRows, nClusters}: row and independent-cluster counts.
+\item \texttt{unsigned clusters10, clusters01}: clusters carrying at least one
+      positive or negative row; these are the covariance divisors' populations.
+\item \texttt{unsigned n0, n1}: negative and positive row counts.
+\item \texttt{vector<double> auc}: exact patient-row point areas.
+\item \texttt{Matrix<double> cov}: Obuchowski clustered covariance matrix.
+\item \texttt{string method}: authoritative estimator name for reports.
+\end{itemize}
+
+The following functions are available:
+
+\begin{itemize}
+\item \texttt{Result analyze(label,cluster,pred)}: estimates Obuchowski's
+      nonparametric clustered covariance for paired procedures.
+\item \texttt{Interval interval(const Result\& r,unsigned i)}: returns the
+      unclamped published normal interval for procedure \texttt{i}.
+\item \texttt{Contrast contrast(const Result\& r,unsigned i,unsigned j)}:
+      returns the clustered paired area contrast.
+\end{itemize}
+
+\subsubsection{Example}
+\begin{verbatim}
+delong::Result iid = delong::analyze(label, predictions);
+clustered_auc::Result grouped =
+    clustered_auc::analyze(label, cluster, predictions);
+// The design policy decides which result may be reported.
+\end{verbatim}
+
+\subsubsection{Notes}
+DeLong requires at least two rows of each outcome class and assumes independent
+rows.  Obuchowski requires at least two clusters carrying each outcome class.
+Clustering can increase or decrease the estimated standard error; its defining
+property is that the cluster is the independent unit.  Out-of-fold predictions
+are not an independent test sample for either locked-test contrast.
+
+\section{Training-control services}\label{training_control_objects}
+
+\subsection{PlateauDetector}
+\index{PlateauDetector}
+\index{Early stopping!plateau}
+\index{PlateauDetector!update}
+\index{PlateauDetector!reset}
+\texttt{PlateauDetector} maintains two adjacent moving-average windows.  The
+following methods are available:
+
+\begin{itemize}
+\item \texttt{PlateauDetector(unsigned window,double tol,unsigned patience)}:
+      constructs a detector; window is at least two and patience at least one.
+\item \texttt{void reset()}: clears both windows and the strike count.
+\item \texttt{bool update(double error)}: adds one iteration error and returns
+      \texttt{true} after the configured number of consecutive comparisons fail
+      to achieve the required relative improvement.
+\item \texttt{unsigned strikes() const}: returns the current consecutive-strike
+      count.
+\end{itemize}
+
+\subsection{autoalgo}
+\index{autoalgo}
+\index{Optimizer!automatic selection}
+\index{autoalgo!Probe}
+\index{autoalgo!pick}
+\index{Optimizer!probe budget}
+\texttt{autoalgo::Probe} contains:
+
+\begin{itemize}
+\item \texttt{int algorithm} and \texttt{string name}: training-menu/API
+      number (1 through 3) and display name.
+\item \texttt{double error}: final probe error.
+\item \texttt{unsigned iterations}: iterations completed within the probe.
+\item \texttt{bool usable}: whether the result may compete for selection.
+\item \texttt{Iterative::StopReason stop}: reason the probe ended.
+\end{itemize}
+
+\texttt{autoalgo::Result} contains:
+
+\begin{itemize}
+\item \texttt{int selected} and \texttt{string selectedName}: winning
+      algorithm and display name.
+\item \texttt{vector<Probe> probes}: complete optimizer audit.
+\item \texttt{unique\_ptr<Network> winner}: selected clone, including probe
+      progress.
+\item \texttt{bool cancelled}: whether external cancellation ended selection.
+\end{itemize}
+
+\begin{itemize}
+\item \texttt{Result pick(const Network\& start,unsigned budgetMs,
+      const atomic<bool>* cancel)}: probes canonical, CGD, and Shanno on clones
+      of identical starting weights and returns the lowest-error usable clone.
+\end{itemize}
+
+\subsection{modelfactory and netclone}
+\index{modelfactory}
+\index{cloneNetwork}
+\index{modelfactory!build}
+\index{modelfactory!createByTypeName}
+\index{Network!cloning}
+\texttt{modelfactory::Spec} contains \texttt{logistic}, \texttt{bias}, hidden
+layer sizes, \texttt{xentropy}, \texttt{logLastop}, and \texttt{logHistory}.
+
+\begin{itemize}
+\item \texttt{unique\_ptr<Model> build(const Spec\& spec,DataSet\& data,
+      string\& err)}: constructs and binds a fresh untrained model in the
+      required order; returns null and fills \texttt{err} for an invalid request.
+\item \texttt{unique\_ptr<Model> createByTypeName(string typeName,bool bias)}:
+      creates the appropriate empty concrete type for a saved-network load;
+      returns null for an unknown type name.
+\item \texttt{unique\_ptr<Network> cloneNetwork(const Network\& source)}:
+      returns a deep copy of a known concrete network, including its dataset and
+      training state; returns null for an unknown concrete type.
+\end{itemize}
+
+\subsubsection{Example}
+\begin{verbatim}
+PlateauDetector stop(100, 1e-4, 3);
+if (stop.update(trainingError)) requestStop();
+
+modelfactory::Spec spec;
+spec.logistic = true;
+unique_ptr<Model> model = modelfactory::build(spec, data, error);
+\end{verbatim}
+
+\subsubsection{Notes}
+A plateau is an eligible stopping rule; an iteration ceiling is not.  Automatic
+optimizer probes are bounded experiments, not completed fits.  Factory
+construction and cloning centralize type knowledge; training remains virtual
+behavior of the concrete model.
+
+\section{OBD architecture selection}\label{obd_objects}
+\index{Optimal Brain Damage}
+\index{obd}
+\index{obd!Config}
+\index{obd!SizeTrial}
+\index{obd!Eligibility}
+\index{obd!run}
+\index{Iteration ceiling!OBD refusal}
+
+\texttt{obd::Eligibility} distinguishes \texttt{ELIGIBLE},
+\texttt{INCOMPLETE\_CEILING}, \texttt{INCOMPLETE\_CANCELLED}, and
+\texttt{NUMERICAL\_FAILURE}.
+
+\texttt{SizeTrial} contains hidden-unit count, training and held-out errors and
+classification accuracies at the validation minimum, stop reason, growth/prune
+phase, eligibility, and iterations.
+
+\texttt{Config} contains:
+
+\begin{itemize}
+\item \texttt{hStart, hMax}: first and largest hidden-unit counts.
+\item \texttt{iterBudget, sampleEvery}: per-size ceiling and validation sampling
+      cadence.
+\item \texttt{earlyStopTol, earlyStopPatience}: tolerated held-out reversal and
+      consecutive samples required to stop a size.
+\item \texttt{growPatience, pruneTol}: growth and pruning decisions.
+\item \texttt{algorithm}: 0/1/2 for a fixed optimizer or $-1$ for automatic
+      selection.
+\item \texttt{plateauTol, plateauWindow}: training-error plateau backstop.
+\end{itemize}
+
+\texttt{Result} contains success/refusal message, selected hidden size, complete
+trial history, owning winner, cancellation and ceiling-exhaustion flags,
+resolved optimizer, and whether it was selected automatically.
+
+The following functions are available:
+
+\begin{itemize}
+\item \texttt{Eligibility classify(StopReason stop,double score,double error)}:
+      returns the authoritative trial-admission classification.
+\item \texttt{const char* stopToken(StopReason stop,Eligibility e)}: returns the
+      machine-readable trial outcome.
+\item \texttt{Result run(DataSet\& data,const Config\& cfg,ProgressFn progress,
+      const atomic<bool>* cancel)}: performs the grow-then-prune search and
+      returns the owning selected network only after a valid search.
+\end{itemize}
+
+\subsubsection{Example}
+\begin{verbatim}
+obd::Config cfg;
+cfg.hMax = 8;
+cfg.algorithm = -1;                  // automatic optimizer probe
+obd::Result r = obd::run(data, cfg, nullptr, nullptr);
+if (r.ok) current = std::move(r.winner);
+\end{verbatim}
+
+\subsubsection{Notes}
+OBD requires one discrete output and a held-out monitoring set.  Validation is
+preferred; the test set is only the two-way fallback.  A needed trial that hits
+its ceiling is refused and never compared.  In nested cross-validation the
+whole search, including optimizer choice, is repeated inside each fold.
+
+\section{Cross-validation objects}\label{crossval_objects}
+\index{Cross-validation!objects}
+\index{crossval}
+\index{crossval!Metrics}
+\index{crossval!RunResult}
+\index{crossval!Comparison}
+\index{crossval!LockedResult}
+\index{crossval!run}
+\index{crossval!compare}
+\index{crossval!evaluateOnce}
+\index{Out-of-fold prediction}
+\index{Deterministic substream}
+
+\texttt{crossval} owns repetition over an immutable fold assignment.
+\texttt{Metrics} contains:
+
+\begin{itemize}
+\item \texttt{unsigned n}: rows contributing to the calculation.
+\item \texttt{double az}: fitted binormal AUC.
+\item \texttt{double trap}: exact empirical AUC.
+\item \texttt{double sens, spec, ca}: sensitivity, specificity, and
+      classification accuracy at the selected threshold.
+\end{itemize}
+
+\texttt{FoldResult} contains:
+
+\begin{itemize}
+\item \texttt{unsigned fold, n}: fold number and held-out row count.
+\item \texttt{bool ok} and \texttt{string reason}: fit status and refusal.
+\item \texttt{Metrics metrics}: the fold's held-out statistics.
+\end{itemize}
+
+\texttt{RunResult} contains:
+
+\begin{itemize}
+\item \texttt{bool ok, cancelled} and \texttt{string message}: run status.
+\item \texttt{vector<FoldResult> folds}: one audit record per fold.
+\item \texttt{vector<double> prediction, outcome}: row-aligned out-of-fold
+      predictions and outcomes.
+\item \texttt{unsigned validFolds, pooledN}: successful folds and pooled rows.
+\item \texttt{double pooledAz, pooledTrap}: pooled OOF binormal and exact AUCs.
+\end{itemize}
+
+The remaining coordination structures are:
+
+\begin{itemize}
+\item \texttt{ProcResult}: success, cancellation, refusal reason, and held-out
+      predictions returned by one procedure invocation.
+\item \texttt{Progress}: stage, current procedure and total procedures, current
+      fold and total folds.
+\item \texttt{FoldSelection}: selected hidden size and optimizer, plus whether
+      automatic optimizer selection was used.
+\item \texttt{ProcedureSpec}: display name, procedure callback, and optional
+      selection-audit sink.
+\item \texttt{Comparison}: shared outcome and fold arrays, fold count, and one
+      timed \texttt{RunResult} entry per procedure.
+\item \texttt{LockedEntry}: procedure name, fit status and reason, paired test
+      predictions, elapsed seconds, and selection audit.
+\item \texttt{LockedResult}: shared original test-row identities and outcomes,
+      cancellation/message, and all \texttt{LockedEntry} values.
+\end{itemize}
+
+\texttt{Procedure} is the model-family callback which fits one materialized
+training fold and returns held-out predictions.  \texttt{ProgressFn} reports the
+current procedure, fold, and stage.
+
+The following functions are available:
+
+\begin{itemize}
+\item \texttt{Metrics metricsFor(outcome,pred,rows)}: calculates held-out
+      classification and ROC metrics for the named rows; unavailable metrics
+      are $-1$.
+\item \texttt{RunResult run(DataSet\& data,foldId,Procedure proc,...)}: runs one
+      procedure over every fold and scatters successful predictions back to
+      their original row positions.
+\item \texttt{Comparison compare(DataSet\& data,foldId,procs,...)}: runs several
+      named procedures over one immutable fold plan and returns paired OOF
+      results.
+\item \texttt{LockedResult evaluateOnce(DataSet\& data,trainRows,testRows,
+      procs,...)}: refits each procedure once on the development rows and scores
+      the common untouched locked test.
+\end{itemize}
+
+\subsection{cvadapters}
+\index{cvadapters}
+\index{cvadapters!trainProcedure}
+\index{cvadapters!dfaProcedure}
+\index{cvadapters!nestedObdProcedure}
+\index{cvadapters!innerValidationSplit}
+\index{Nested cross-validation}
+\texttt{InnerSplit} contains \texttt{ok}, refusal \texttt{reason}, and raw-row
+\texttt{train} and \texttt{validation} vectors.  The following functions adapt
+model families to the generic procedure contract:
+
+\begin{itemize}
+\item \texttt{Procedure trainProcedure(const Network\& templateNet,
+      unsigned maxIter)}: clones and trains a configured network from fresh
+      weights in each fold.
+\item \texttt{Procedure dfaProcedure(bool quadratic)}: returns an LDFA adapter
+      when false and QDFA adapter when true.
+\item \texttt{Procedure nestedObdProcedure(const obd::Config\& cfg,
+      double innerValFraction,...)}: performs the complete OBD architecture
+      search within each outer training fold and returns only outer held-out
+      predictions.
+\item \texttt{InnerSplit innerValidationSplit(trainRows,rowLabel,rowGroup,
+      double fraction)}: returns a stratified inner split, group-disjoint when
+      \texttt{rowGroup} is supplied; returns \texttt{ok=false} rather than
+      falling back when the grouped split is infeasible.
+\end{itemize}
+
+\subsubsection{Example}
+\begin{verbatim}
+crossval::ProcedureSpec logistic{
+    "Logistic",
+    cvadapters::trainProcedure(templateNet, 20000), nullptr};
+crossval::Comparison c = crossval::compare(
+    data, foldPlan.foldId, {logistic}, nullptr, true, 42);
+\end{verbatim}
+
+\subsubsection{Notes}
+A failed fold contributes no fabricated prediction and remains visibly missing.
+All procedures share the same fold plan.  Deterministic substreams key fits by
+seed, procedure name, and fold, so comparison membership and order cannot change
+a procedure's fit.  Nested OBD's inner validation is group-disjoint under a
+grouped design; infeasibility is a failure, never a row-wise fallback.
+
+\section{Cross-validation reporting: cvreport}\label{cvreport_objects}
+\index{cvreport}
+\index{Cross-validation!artifacts}
+\index{cvreport!writeArtifacts}
+\index{cvreport!tier1}
+\index{cvreport!tier2}
+\index{cvreport!render}
+\index{cvreport!PlanInfo}
+\index{cvreport!LockedInfo}
+\index{Raw-row identity}
+
+\texttt{PlanInfo} contains the dataset label and whole-dataset totals, typed fold
+design, primary/reference names, optional per-row cluster identity, original
+raw-row identity, and original row count.  Its methods are:
+
+\begin{itemize}
+\item \texttt{string foldPlanText() const}: derives the fold-plan heading from
+      the typed partition.
+\item \texttt{string rawRowError(unsigned n) const}: returns an empty string for
+      a valid absent/identity map or for exactly \texttt{n} distinct in-range
+      raw-row identifiers; otherwise returns the defect.
+\end{itemize}
+
+\texttt{LockedColumn} contains:
+
+\begin{itemize}
+\item \texttt{string name}: procedure display name.
+\item \texttt{bool hasAuc} and \texttt{double auc}: point-area availability and
+      value.
+\item \texttt{bool hasInterval} and \texttt{double lo, hi}: interval
+      availability and limits.
+\item \texttt{string architecture}: selected architecture description.
+\item \texttt{string note}: refusal or qualification shown with the result.
+\item \texttt{vector<double> prediction}: predictions paired to locked rows.
+\end{itemize}
+
+\texttt{LockedContrast} contains:
+
+\begin{itemize}
+\item \texttt{bool hasPoint, hasInference}: availability of the AUC difference
+      and of its inferential comparison.
+\item \texttt{string primary, reference}: contrasted procedure names.
+\item \texttt{double delta, p}: AUC difference and two-sided p-value.
+\item \texttt{bool significant}: whether the declared comparison crosses its
+      significance rule.
+\item \texttt{bool degenerate, separated}: zero-variance case indicators.
+\item \texttt{string note}: refusal or qualification.
+\end{itemize}
+
+\texttt{LockedInfo} contains:
+
+\begin{itemize}
+\item \texttt{evaldesign::Partition split}: achieved locked-holdout design.
+\item \texttt{SamplingUnit samplingUnit}: declared independent unit.
+\item \texttt{AucInference inference}: covariance estimator permitted by the
+      design.
+\item \texttt{string inferenceReason}: explanation when inference is withheld.
+\item \texttt{vector<unsigned> rawRow}: original locked-row identities.
+\item \texttt{vector<double> outcome}: locked outcomes.
+\item \texttt{vector<unsigned> cluster}: cluster identity for each locked row.
+\item \texttt{unsigned nClusters}: distinct clusters present in the locked
+      sample.
+\item \texttt{vector<LockedColumn> columns}: procedure results.
+\item \texttt{LockedContrast contrast}: prespecified paired comparison.
+\end{itemize}
+
+\texttt{LockedInfo} derives every displayed design string from typed state.
+Its \texttt{clusterError()} method validates cluster identity before clustered
+inference or artifact writing.
+
+\texttt{ArtifactResult} contains attempted artifact name and path, success, and
+error text.  The following functions are available:
+
+\begin{itemize}
+\item \texttt{string tier1(cmp,info,locked)}: returns the one-screen headline
+      table and verdict.
+\item \texttt{string tier2(cmp,info,locked)}: returns per-fold, selection,
+      timing, design, and locked-test detail.
+\item \texttt{vector<ArtifactResult> writeArtifacts(cmp,info,dir,locked)}:
+      writes \texttt{cv\_predictions.csv}, \texttt{cv\_metrics.csv},
+      \texttt{cv\_run.json}, and, when applicable,
+      \texttt{cv\_locked\_predictions.csv}; returns one status per attempted
+      file.
+\item \texttt{void render(ostream\& out,cmp,info,dir,locked)}: writes Tier 2,
+      then Tier 1, then the machine-readable artifacts.
+\end{itemize}
+
+\subsubsection{Example}
+\begin{verbatim}
+cvreport::PlanInfo info;
+info.folds = achievedFoldDesign;
+cvreport::LockedInfo locked;
+locked.split = achievedLockedDesign;
+cvreport::render(cout, comparison, info, runDirectory, locked);
+\end{verbatim}
+
+\subsubsection{Notes}
+The reporter chooses neither partitions nor covariance estimators.  Every design
+sentence is derived from typed state.  Original raw-row and cluster identifiers
+are validated before artifacts are written so development and locked prediction
+files remain joinable.  Tier 1 is the conclusion, Tier 2 is descriptive detail,
+and Tier 3 is the machine-readable audit substrate.
+
+\endgroup

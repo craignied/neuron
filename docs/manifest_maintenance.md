@@ -1,5 +1,22 @@
 # Maintaining the neuron Design Manifest
 
+> **NON-NEGOTIABLE OBJECT-DOCUMENTATION RULE:** The manifest is an
+> architectural specification for programmers, not merely a user guide or REST
+> reference. Before a source change is complete, audit every new or changed
+> public class, struct, enum, namespace service, method, and caller-visible data
+> member against Chapters 8 and later. Any object absent there must receive a
+> manifest entry following Section 7.1: purpose, public methods, public variables,
+> a usable example, and important notes. A REST endpoint never substitutes for
+> the object specification that implements it.
+>
+> **PLACEMENT, HIERARCHY, AND INDEX ARE PART OF THE CHANGE.** Choose the entry's
+> chapter and position from its architectural ownership and dependencies; do not
+> append it wherever editing is convenient. A new high-level object must also be
+> introduced in Chapter 12 and added to Figure 12.1. Every new object, important
+> method, algorithm, and statistical estimator must receive an explicit
+> `\\index{...}` entry, and the index must be rebuilt and inspected in the
+> published PDF.
+
 This document records what we learned while bringing the original neUROn2++
 Design Manifest forward for neuron 3.0. Use it whenever adding a feature,
 changing an interface, or revising `docs/manifest.pdf`.
@@ -20,6 +37,24 @@ The published PDF is the human-readable architecture reference. It is not a
 development log, roadmap, or substitute for exact interface contracts maintained
 elsewhere in the repository.
 
+The other developer documents in `docs/` have narrower jobs:
+
+- `evaluation_report_spec.md` is the normative presentation and artifact contract
+  for cross-validation output. It tells implementers what Tier 1, Tier 2, Tier 3,
+  and the locked-test layer must contain; the manifest explains the architecture
+  that produces them.
+- `gui_cli_parity.md` is an enforcement matrix. It makes every frozen CLI
+  capability traceable to a GUI control and REST parameter and exposes a missing
+  interface as a reviewable gap.
+- `HISTORY.md` is the dated forensic archive: measurements, rejected approaches,
+  completed roadmaps, and the reasons behind settled decisions. It is deliberately
+  not a current specification.
+
+All three belong under `docs/` because they are repository-wide contracts or
+records read by maintainers, not source modules and not root-level onboarding.
+The README should link only the material a new user needs; `CLAUDE.md`,
+`AGENTS.md`, and this guide route maintainers to the rest.
+
 ## Source layout
 
 The root LaTeX source is:
@@ -36,6 +71,7 @@ Current neuron 3.0 chapters are split into focused files:
 | `docs/tex/current_driver.tex` | Current CLI role, reproducible sessions, menu organization, convergence, and reporting |
 | `docs/tex/rest_api.tex` | Loopback HTTP endpoints, parameters, responses, async jobs, and downloads |
 | `docs/tex/current_tooling.tex` | `mkdataset.py`, `neuron2web.py`, validation, and deployment |
+| `docs/tex/modern_objects.tex` | Current Chapter 12 object/service contracts, examples, notes, and index entries |
 
 Small PDF figures used by the retained foundational chapters live in:
 
@@ -53,6 +89,143 @@ LaTeX intermediates and the temporary `docs/tex/manifest.pdf` are build
 artifacts. Do not commit them.
 
 ## Document organization
+
+### How to place object documentation
+
+Placement follows the dependency direction, from foundations to orchestration:
+
+1. Numerical containers and generic operators belong with `vector` and
+   `Matrix` in Chapter 8.
+2. General utilities belong in Chapter 9; reusable statistical primitives and
+   estimators belong in Chapters 10 and 11.
+3. Dataset, model, training-control, evaluation-design, selection, and reporting
+   objects belong in Chapter 12, ordered from the objects that own data and
+   mechanisms toward the coordinators that compose them.
+4. A feature-specific compound object belongs in its own chapter only when its
+   workflow needs a sustained explanation beyond an object contract, as with
+   stepwise regression in Chapter 13. Chapter 12 must still locate that object in
+   the overall hierarchy and point to the detailed chapter.
+
+Do not organize by implementation date, REST route, or roadmap phase. Ask which
+object owns the invariant, which lower-level objects it calls, and which
+higher-level callers consume it. Put the contract beside its architectural
+peers. When no existing chapter can hold it without mixing layers, add a focused
+chapter and explain the dependency boundary at its start.
+
+For each entry, apply the complete Chapter 7 documentation pattern even when the
+implementation uses a namespace rather than a class. Do not reduce Section 7.1
+to a list of names. The entry must contain, in this order:
+
+1. **Natural-language purpose.** Say what problem the object or feature solves,
+   what it owns, and how a caller uses it. Use the conversational tone required
+   by Chapter 7.
+2. **Algorithmic or mathematical description, when applicable.** State the
+   transformation, estimator, selection rule, or data flow. Give an equation or
+   ordered algorithm when that is clearer than prose. A method list alone does
+   not document an algorithm.
+3. **Complete public specification.** Give every caller-visible signature,
+   parameter meaning, accepted range or units, return value, mutation or
+   ownership effect, and documented failure behavior. Document overloads
+   separately. Never make the reader infer inputs and outputs from a method name.
+4. **Public types and state.** List every public enum value and every field of a
+   public result, configuration, progress, or error structure, explaining its
+   meaning and unavailable/sentinel states.
+5. **Example.** Provide a small compilable or near-compilable call sequence that
+   shows realistic inputs, the returned object or changed state, and how failure
+   is checked. A declaration-only fragment is not an example.
+6. **Notes.** State dimensional and cardinality requirements, prerequisites,
+   invariants, exceptions/refusals, efficiency tradeoffs, mutation, ownership,
+   reproducibility, numerical assumptions, and interactions with related methods.
+   Include only the categories that apply, but never omit a known calling
+   constraint.
+
+Chapter 7 also requires documentation in three places: the Design Manifest,
+immediately before the method in source as its specification, and within the
+implementation where the algorithm needs explanation. A manifest review must
+check all three. The Manifest is the reusable caller contract; the source comment
+is the local contract; inline comments explain implementation decisions.
+
+Follow the visual grammar of the original specifications (for example, the
+Matrix dot-product and Gaussian-function entries). After a short explanatory or
+mathematical introduction, put each callable signature in its own `itemize` item
+and state its inputs, output, and effect. Put public variables in a separate
+list, with one field or closely related field group per item. Do not compress a
+dozen methods or fields into a prose paragraph: that may save pages, but it makes
+the contract difficult to find, understand, and implement. Page count is not a
+design constraint. Use visibly labeled `Example` and `Notes` subsections
+consistently.
+
+Before accepting an object section, perform a **vertical-list test**: a reader
+scanning down the page must be able to find each method and public field without
+parsing a dense paragraph. Then perform a **caller test**: for any listed method,
+the reader must be able to tell what to pass, what comes back, what changes, and
+what can fail without opening the header.
+
+Private implementation fields need not be transcribed mechanically, but public
+state must not be omitted. If a header deliberately exposes a result struct,
+every field is part of the architectural contract and belongs in the entry.
+
+### Chapter 12 and Figure 12.1
+
+Chapter 12 is the authoritative map of neuron objects. Whenever a high-level
+object or service is added, removed, renamed, or changes dependency direction:
+
+1. add or revise its explanatory bullet and full contract in Chapter 12;
+2. update the editable source `docs/tex/figures/objects.dot`;
+3. regenerate `docs/tex/figures/objects.pdf` with Graphviz;
+4. keep Figure 12.1 on its dedicated landscape page at approximately the full
+   printable width; do not shrink it back into the Chapter 12 opening text;
+5. check that the prose and arrows agree with the actual includes and calls.
+
+Render Figure 12.1 by itself after every change and inspect it at normal page
+scale. Every node label and edge label must be readable without zooming. If the
+graph becomes too crowded, improve its layout or divide responsibilities into a
+second explanatory figure; never solve crowding by reducing the principal map
+to an unreadable thumbnail.
+
+### Current source-to-manifest coverage map
+
+The July 2026 full-header audit established this routing table. Re-run the audit
+when a header or public type is added; do not treat the table as permission to
+skip source inspection.
+
+| Source objects/services | Manifest home |
+|---|---|
+| `vector_ops.h`, `matrix.h` | Chapter 9, vector and Matrix |
+| `utility.h` | Chapter 10, Utility methods |
+| `stats.h` | Chapter 11, Statistical methods |
+| `function_defs.h` | Chapter 12, Function definitions |
+| `dataset.h`, `twoset.h` | Chapter 12, established specifications plus current-contract additions |
+| `model.h`, `iterative.h`, `network.h` | Chapter 12, inheritance specifications plus current training contract |
+| `bareprop.h`, `simpleprop.h`, `backprop.h`, `logistic.h` | Chapter 12, concrete models plus current resizing/result additions |
+| `dfa.h`, `ldfa.h`, `qdfa.h` | Chapter 12, discriminant model hierarchy |
+| `split.h`, `evaldesign.h` | Chapter 12, partition planning and typed evaluation design |
+| `auccov.h`, `delong.h`, `clustered_auc.h` | Chapter 12, common AUC algebra and sampling-unit-specific covariance |
+| `plateau.h`, `autoalgo.h`, `modelfactory.h`, `netclone.h` | Chapter 12, training-control and construction services |
+| `obd.h` | Chapter 12, architecture selection |
+| `crossval.h`, `cvadapters.h`, `cvreport.h` | Chapter 12, repetition, model-family adapters, reporting, and artifacts |
+| `regressnet.h` | Chapter 12 hierarchy/current contract and Chapter 13 workflow |
+| `gui.h` | Chapters 2 and 4 interface/orchestration boundary; it declares no object |
+| `version.h`, `stdafx.h` | Build/version constants only; no caller object contract |
+
+Nested result, progress, error, and configuration types are covered with their
+owning object or namespace. A new nested public type must be added there even if
+the header itself already appears in this table.
+
+### Index maintenance
+
+The index is a required navigation layer, not an optional finishing touch.
+Every added object and every principal method, algorithm, estimator, or design
+term must have a deliberate `\\index{...}` entry at its defining discussion.
+Run the normal `latexmk` build through `makeindex`, then inspect both the
+generated index pages and representative links/page numbers in the PDF. Merely
+seeing an `.idx` file is not verification.
+
+Index for how programmers search, not merely for source-file names. Include the
+object or namespace, each principal public method, public result/configuration
+types, important algorithms and estimators, statistical assumptions, failure
+concepts, and useful synonyms or hierarchical forms. A module-level entry alone
+is insufficient when the section defines several independently useful methods.
 
 ### Part I: Current neuron 3.0
 
@@ -117,6 +290,8 @@ it. Check the authoritative source before changing prose.
 | Browser controls and fields sent to the API | `src/gui_page.html` |
 | Engine layer ownership | `docs/cv_refactoring_architecture.md`, current C++ classes |
 | Statistical interpretation | `docs/roc_theory.md`, engine reports, statistical tests |
+| Cross-validation report layout and artifacts | `docs/evaluation_report_spec.md`, `src/cvreport.{h,cpp}` |
+| Evaluation design and clustered covariance | `src/evaldesign.{h,cpp}`, `src/auccov.{h,cpp}`, `src/delong.{h,cpp}`, `src/clustered_auc.{h,cpp}` |
 | Dataset preparation | `tools/mkdataset.py`, `tools/README.md`, tool tests |
 | HTML deployment | `tools/neuron2web.py`, `docs/deploy.md`, tool tests |
 | Operational agent recipes | `AGENTS.md` |
@@ -195,6 +370,13 @@ Avoid describing a convenience caller as though it owns the computation.
 Cross-validation owns repetition, not training. OBD owns architecture selection,
 not final evaluation. Models own fitting, not fold management. DataSet owns fold
 materialization, not modeling policy.
+
+Evaluation policy and covariance are also separate. `evaldesign` names the achieved
+partition, declared sampling unit, and permitted estimator. `delong` estimates
+ordinary independent-row covariance; `clustered_auc` estimates Obuchowski clustered
+covariance; `auccov` owns their shared placements, point AUC, and contrast algebra.
+Do not describe grouping as though it performs clustered inference, or describe a
+clustered interval as DeLong.
 
 Update the source map in `modern_architecture.tex` when adding a new architectural
 module or materially changing ownership.
@@ -313,7 +495,16 @@ Text extraction is not a substitute for visual inspection.
 
 - [ ] Decide whether it belongs in Part I or the foundational record.
 - [ ] Identify the authoritative implementation and interface contract.
+- [ ] Audit every new or changed public class, namespace, method, overload, enum,
+      result/configuration field, and error contract.
+- [ ] Document purpose, applicable algorithm or mathematics, complete signatures
+      and parameter/return semantics, public state, a usable example, and notes.
+- [ ] Verify the same contract immediately precedes the method in source and that
+      implementation decisions needing explanation are commented in the code.
+- [ ] Apply the vertical-list test and caller test; reject compressed inventories.
 - [ ] Update the architecture narrative and source map if ownership changed.
+- [ ] Update Figure 12.1 for a high-level object or dependency change, retain its
+      full-page landscape layout, and inspect every label at normal page scale.
 - [ ] Update the REST chapter if routes or parameters changed.
 - [ ] Update the CLI chapter and `docs/gui_cli_parity.md` if parity is involved.
 - [ ] Update the tooling chapter for a new or changed user-facing helper.

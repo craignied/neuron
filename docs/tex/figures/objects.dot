@@ -1,0 +1,45 @@
+digraph neuron_objects {
+  graph [rankdir=TB, bgcolor="transparent", margin=0.04, nodesep=0.22,
+         ranksep=0.30, fontname="Helvetica"];
+  node [shape=box, style="rounded", fontname="Helvetica", fontsize=9,
+        margin="0.08,0.05"];
+  edge [fontname="Helvetica", fontsize=7, arrowsize=0.55];
+
+  DataSet [label="DataSet"];
+  TwoSet [label="TwoSet"];
+  Model [label="Model"];
+  Iterative [label="Iterative"];
+  Network [label="Network"];
+  Concrete [label="BareProp | SimpleProp | BackProp | Logistic"];
+  DFA [label="DFA -> LDFA / QDFA"];
+  RegressNet [label="RegressNet"];
+
+  Split [label="nsplit\npartition planners", shape=component];
+  Eval [label="evaldesign\ndesign + inference policy", shape=component];
+  OBD [label="obd\narchitecture selection", shape=component];
+  CV [label="crossval + cvadapters\nrepetition + procedure fits", shape=component];
+  Report [label="cvreport\nthree-tier reporting", shape=component];
+  Cov [label="auccov\nshared AUC algebra", shape=component];
+  Est [label="delong | clustered_auc\ncovariance estimators", shape=component];
+  Factory [label="modelfactory | netclone | autoalgo\nconstruction, cloning, optimizer probes", shape=component];
+  Plateau [label="PlateauDetector", shape=component];
+
+  DataSet -> TwoSet [label="owns"];
+  Model -> Iterative [label="base of", dir=back];
+  Iterative -> Network [label="base of", dir=back];
+  Network -> Concrete [label="base of", dir=back];
+  Model -> DFA [label="base of", dir=back];
+  Network -> RegressNet [label="cloned by"];
+
+  Split -> DataSet [label="indices"];
+  DataSet -> CV [label="materializes"];
+  Factory -> Network [label="creates/clones"];
+  Plateau -> Iterative [label="stop signal"];
+  OBD -> Network [label="selects"];
+  CV -> OBD [label="nested"];
+  Eval -> Split [label="describes"];
+  CV -> Report [label="results"];
+  Eval -> Report [label="policy"];
+  Cov -> Est [label="combined by"];
+  Est -> Report [label="inference"];
+}

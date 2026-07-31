@@ -129,10 +129,10 @@ have **no CLI equivalent by design** — that is not a parity gap.
 | Covariate stratification of the raw split + representativeness diagnostic (ROADMAP 4 Phase 2) | Dataset panel "Stratify on" columns + bins | `POST /api/load` `strata=` (1-based cols) `strata_bins=` | — n/a (the CLI already stratifies on the outcome; covariate strata are new, menus frozen) |
 | Group-aware split — keep clusters intact for a harder unseen-group test (ROADMAP 4 Phase 3) | Dataset panel "Group on" columns | `POST /api/load` `group=` (1-based cols; rows with identical values stay together) | — n/a (new capability, menus frozen) |
 | Three-way split — train/validation/test so selection (OBD) monitors validation and the test set stays untouched (ROADMAP 4 Phase 4c) | Dataset panel "Validation fraction" | `POST /api/load` `val_fraction=` (or `val_n=` with `test_n=`) | — n/a (new capability, menus frozen) |
-| Cross-validation model comparison — logistic / LDFA / QDFA / neural (nested OBD) over ONE shared outcome-stratified k-fold plan, three-tier report (ROADMAP 4 Phase 4) | Dataset-independent "Cross-validation" panel + pinned Tier-1 headline table | `POST /api/cv` (async; three-tier report in the result) | — n/a (new capability, menus frozen) |
+| Cross-validation model comparison — logistic / LDFA / QDFA / neural (nested OBD) over ONE shared outcome-, covariate-, or group-stratified fold plan, three-tier report (ROADMAP 4 Phase 4) | Dataset-independent "Cross-validation" panel + pinned Tier-1 headline table | `POST /api/cv` (async; three-tier report in the result) | — n/a (new capability, menus frozen) |
 | Nested-OBD optimizer rule — canonical / CGD / Shanno / Auto for the architecture search inside each CV fold, selected independently per fold and for the locked refit | CV panel "OBD optimizer" select (same four choices and wording as the standalone OBD panel) | `POST /api/cv` `algorithm=1\|2\|3\|auto` (default `auto`) | — n/a (new capability, menus frozen) |
 | Clustered locked-test inference (Obuchowski 1997) — the cluster, not the row, is the independent unit; needs a group key + a locked test, preflighted for ≥ 2 clusters per outcome class, and never falls back to DeLong (ROADMAP 4) | CV panel "Sampling unit" → *clustered (Obuchowski)* | `POST /api/cv` `independence=cluster` (with `group=` and `locked_fraction=`/`locked_n=`) | — n/a (new capability, menus frozen) |
-| Locked-test evaluation + opt-in DeLong inference — set aside an untouched row holdout; refit each procedure on the development rows, score once for point AUCs; DeLong CIs/contrast p ONLY when the sampling unit is declared independent (ROADMAP 4 Phase 4) | CV panel "Locked-test fraction" + primary/reference contrast selects + "Sampling unit" (independent rows / not declared / clustered-disabled) | `POST /api/cv` `locked_fraction=` (or `locked_n=`), `primary`/`reference` tokens, `independence=rows` | — n/a (new capability, menus frozen) |
+| Locked-test evaluation + opt-in inference — set aside an untouched row-wise or group-disjoint holdout; refit each procedure on development, score once for point AUCs; use DeLong for declared independent rows or Obuchowski for declared clusters | CV panel "Locked-test fraction" + primary/reference contrast selects + "Sampling unit" (not declared / independent rows / clustered) | `POST /api/cv` `locked_fraction=` (or `locked_n=`), `primary`/`reference`, `independence=rows|cluster`; clustered mode also requires `group=` | — n/a (new capability, menus frozen) |
 | Cross-validation fold policy — covariate-stratified or group-aware (cluster-disjoint) fold plans, chosen per CV request and never inherited from the Dataset panel (ROADMAP 4) | CV panel "Stratify folds on columns" + "bins", "Group by columns (never split)" | `POST /api/cv` `strata=` (1-based cols) `strata_bins=`, `group=` (1-based cols) | — n/a (new capability, menus frozen) |
 | Group-disjoint inner validation for nested OBD — under a grouped fold plan the architecture search's own train/validation split is group-disjoint as well; an infeasible one fails that fold with a reason and never falls back to row-wise (ROADMAP 4) | (no separate control — follows the CV panel's "Group by columns") | `POST /api/cv` `group=` (the same key governs outer folds, the locked holdout, and the inner split) | — n/a (new capability, menus frozen) |
 | Structured cross-validation progress — stage, procedure n of m, outer fold n of k, completed folds/procedures, and the nested architecture trial inside the current fold (2026-07-29) | CV panel status line beside Run/Stop | `GET /api/train/status` → top-level `cv{stage,procedure,procedureIndex,procedureCount,completedProcedures,fold,folds,completedFolds,inner{phase,hidden}}` | — n/a (new capability, menus frozen) |
@@ -186,8 +186,9 @@ grouping measures transfer to groups the model never saw. Neither makes rows
 independent — that is what `independence=` declares, and it is a separate axis.
 
 Locked-test params on the same call: `locked_fraction` (0–1, `0` = none) OR
-`locked_n` (a count — not both) set aside an outcome-stratified **row holdout**
-held out of CV; each procedure is refit on the development rows by its own rule and
+`locked_n` (a count — not both) set aside an untouched holdout: outcome-stratified
+and row-wise by default, or group-disjoint when `group=` is present. Each procedure
+is refit on the development rows by its own rule and
 scored once for point AUCs. **Inference is opt-in:** DeLong CIs and the contrast *p*
 are produced ONLY with `independence=rows` (declaring independent observations);
 without it, predictions + point AUCs are returned and ordinary DeLong is withheld
@@ -196,8 +197,8 @@ and a locked test; refused naming whichever is missing, and never downgraded to 
 `primary`/`reference` (tokens `logistic`|`ldfa`|`qdfa`|`neural`) name the
 prespecified contrast and **must be selected procedures** (else a validation error);
 absent, it defaults to neural vs logistic when both are present. When inference
-runs, Tier 1 gains an `AUC (test) [95% CI]` column + the contrast verdict (ΔAUC +
-DeLong *p*); `cv.locked` carries the areas/CIs, the signed contrast, and
+runs, Tier 1 gains an `AUC (test) [95% CI]` column plus a contrast verdict naming
+the estimator that supplied its *p*; `cv.locked` carries the areas/CIs, the signed contrast, and
 `samplingUnit`/`independenceStatus`/`inferenceMethod`/`inferenceRan`/`inferenceReason`/
 `clusters`/`splitMethod`/`splitPlan` metadata, and `cv_locked_predictions.csv`
 (row id, a `cluster` column for a grouped design, outcome, one column per procedure)

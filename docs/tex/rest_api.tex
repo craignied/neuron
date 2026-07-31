@@ -1,5 +1,35 @@
 \chapter{Loopback REST API}\label{rest_api}
 \index{REST API}
+\index{REST API!/api/version@\texttt{/api/version}}
+\index{REST API!/api/load@\texttt{/api/load}}
+\index{REST API!/api/model@\texttt{/api/model}}
+\index{REST API!/api/randomize@\texttt{/api/randomize}}
+\index{REST API!/api/train@\texttt{/api/train}}
+\index{REST API!/api/train/status@\texttt{/api/train/status}}
+\index{REST API!/api/train/stop@\texttt{/api/train/stop}}
+\index{REST API!/api/stats@\texttt{/api/stats}}
+\index{REST API!/api/regress@\texttt{/api/regress}}
+\index{REST API!/api/dfa@\texttt{/api/dfa}}
+\index{REST API!/api/obd@\texttt{/api/obd}}
+\index{REST API!/api/cv@\texttt{/api/cv}}
+\index{REST API!/api/save@\texttt{/api/save/:what}}
+\index{REST API!asynchronous jobs}
+\index{REST API!cancellation}
+\index{REST API!busy response}
+\index{REST API!action log}
+\index{REST API!error response}
+\index{Dataset loading!REST API}
+\index{Model construction!REST API}
+\index{Training!REST API}
+\index{Stepwise regression!REST API}
+\index{Discriminant analysis!REST API}
+\index{Optimal Brain Damage!REST API}
+\index{Cross-validation!REST API}
+\index{Locked test!REST API}
+\index{Group-disjoint partition!REST API}
+\index{Covariate stratification!REST API}
+\index{Sampling unit!REST declaration}
+\index{Session artifacts!download API}
 
 The graphical interface is a client of the same HTTP endpoints that
 are available to scripts.  Start the service without opening a browser:
@@ -270,20 +300,47 @@ fixed neural size.
 \item[\texttt{autostop\_tol}, \texttt{autostop\_window},
 \texttt{inner\_val}] Nested-fit plateau rule and inner validation
 share.
+\item[\texttt{strata}, \texttt{strata\_bins}] Optional one-based
+input columns for outcome-by-covariate fold balance and the number of
+quantile bins for continuous columns.
+\item[\texttt{group}] Optional one-based input columns whose joint
+values define indivisible sampling groups.  The same key governs the
+outer folds, locked holdout, and nested OBD inner validation split.
 \item[\texttt{locked\_fraction}, \texttt{locked\_n}] Optional locked
 test share or count.  Use one form.
 \item[\texttt{primary}, \texttt{reference}] Prespecified procedure
 tokens for the signed AUC contrast.
 \item[\texttt{independence}] \texttt{rows} opts into ordinary paired
-DeLong inference.  Omit it for point estimates only.
+DeLong inference for a row-wise design.  \texttt{cluster} selects
+Obuchowski clustered covariance and requires \texttt{group} plus a
+locked test.  Omit the field for point estimates only.
 \end{description}
 
 Cross-validation is asynchronous-only, requires raw discrete
 single-output data, and does not alter the current model.  The result
 contains headline and detailed reports plus paths to Tier 3 CSV and
-JSON artifacts.  A locked test adds per-row predictions and, when its
-independence assumption is declared, paired AUC confidence intervals
-and the prespecified DeLong contrast.
+JSON artifacts.
+
+Without \texttt{strata} or \texttt{group}, folds are
+outcome-stratified.  \texttt{strata} balances outcome-by-covariate
+cells; \texttt{group} makes whole-cluster folds for evaluation on
+unseen groups.  The two cannot currently be combined.  These fields
+belong to the CV request and are never inherited from
+\texttt{/api/load}.  A grouped request also makes the locked holdout
+and nested inner validation group-disjoint, with no row-wise fallback
+when a whole-group partition is infeasible.
+
+A locked test adds original-row predictions and a signed,
+prespecified AUC contrast.  Independent-row DeLong and clustered
+Obuchowski inference are explicit alternatives selected by the
+declared sampling unit; neither ever falls back to the other.  The
+clustered preflight requires at least two locked-test clusters carrying
+each outcome class.  Tier 1 names the estimator and the number of
+independent clusters.  \texttt{cv\_run.json} records the typed fold and
+locked-test designs, including per-fold rows, events, groups,
+imbalance, largest group, and leakage.  The two prediction CSV files
+use the original raw-row identity and, for grouped designs, stable
+cluster identifiers, so they join without reconstructing either key.
 
 \section{Statistics and downloads}
 

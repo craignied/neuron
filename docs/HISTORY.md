@@ -3004,3 +3004,14 @@ general tests, and no external run is an implementation gate.
     the original dataset is rejected"*. And the report spec's "invented" Tier-1 example no
     longer reuses recognisable real-cohort numbers — it is 40,000 exemplars in 250 groups,
     which is what "invented" should look like.
+
+**2026-07-31 — Craig ran the live GUI and approved the group-aware CV batch.**
+
+  - The last outstanding click-through in the repository is **closed by its owner**. Craig
+    drove `neuron --gui` on the shipped build and approved the CV panel's three new
+    controls — fold stratification columns/bins, group columns, and the clustered sampling
+    unit — after the 2026-07-30 help-text corrections. Sol had driven the same controls the
+    day before; under the walkthrough protocol the live pass is Craig's checkpoint, and this
+    is that checkpoint, not a repeat of it. ROADMAP 4 items 1 and 2 are now done *and*
+    accepted; **B9** (the GUI-wide strict-parsing pass) is the only remaining item.
+  - `CLAUDE.md` updated in both places that carried the status.

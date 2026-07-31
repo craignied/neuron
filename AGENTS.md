@@ -617,9 +617,10 @@ No formal cross-validation inference is reported (the fold results are dependent
 the inferential comparison is a **locked untouched test set** — supported in the same
 call (see next paragraph).
 
-**Locked-test inference (DeLong).** Add `locked_fraction` (0–1, `0` = none) or
-`locked_n` (a count — supply one, not both) to set aside an **outcome-stratified
-row holdout held ENTIRELY out of CV**. Then CV folds only the development rows,
+**Locked-test inference.** Add `locked_fraction` (0–1, `0` = none) or
+`locked_n` (a count — supply one, not both) to set aside a locked test held
+ENTIRELY out of CV. It is outcome-stratified by default and group-disjoint when
+`group=` is supplied. Then CV folds only the development rows,
 each procedure is **refit on the development rows by its own prespecified rule**
 (logistic/DFA on all dev rows; nested OBD carves its own inner validation split of
 the dev rows — no forced full-dev refit), and scored **once** on the untouched
@@ -655,8 +656,8 @@ clamps). `independence=rows` **together with** `group=` is refused: a
 group-disjoint design prevents leakage but does not make the held-out rows
 independent, so ordinary DeLong would not be valid, and calling the grouping
 "descriptive" would not repair the *p*. When inference runs, Tier 1 gains the
-`AUC (test) [95% CI]` column and the prespecified-contrast verdict (ΔAUC + DeLong
-two-sided *p* → significant/not at 0.05; a *deterministic separation* of areas
+`AUC (test) [95% CI]` column and the prespecified-contrast verdict (ΔAUC plus the
+two-sided *p* from the estimator named in the report; a *deterministic separation* of areas
 reports p≈0, and *equal areas* report "no testable difference"); `cv.locked`
 adds the CIs and the signed contrast (`delta` = AUC(primary) − AUC(reference)) plus
 `samplingUnit`/`independenceStatus`/`inferenceMethod`/`inferenceRan` metadata. When

@@ -258,7 +258,8 @@ comparison**:
 The independent-row choice is an **analyst declaration required for ordinary
 DeLong inference**. Neuron did not infer independence from the file. Repeated
 people, households, sites, or other clusters would require a group-aware design
-and cluster-appropriate inference instead.
+and `independence=cluster`, which uses Obuchowski's clustered ROC covariance,
+instead.
 
 Click **Run cross-validation**. Nested OBD runs independently inside each outer
 fold, preventing validation information from leaking across folds. The live
