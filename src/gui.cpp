@@ -1808,11 +1808,13 @@ struct CvConfig
 	CvConfig() { obd.algorithm = -1; }
 	// Locked-test evaluation (ROADMAP 4 Phase 4). lockedN > 0 sets aside an
 	//    outcome-stratified ROW holdout held OUT of CV; each procedure is refit on
-	//    the development rows by its own rule and scored once on it. DeLong is NOT
-	//    automatic -- it runs only when `independence` declares an independent-row
-	//    sampling unit (a row holdout does not by itself establish independence).
+	//    the development rows by its own rule and scored once on it. Inference is NOT
+	//    automatic -- it runs only when `independence` declares a sampling unit the
+	//    achieved partition method permits (a row holdout does not by itself
+	//    establish independence, and a grouped design does not permit ordinary
+	//    DeLong at all).
 	unsigned lockedN = 0;         // locked-test size (0 = pure CV, no locked test)
-	string primary, reference;    // the prespecified DeLong contrast (internal names)
+	string primary, reference;    // the prespecified contrast (internal names)
 	// The declared sampling unit (DLG-1), as a TYPE rather than a magic string
 	//    (DLG-8). Inference is produced ONLY when the declared unit and the achieved
 	//    partition method permit it -- evaldesign::chooseInference is the one place
@@ -1844,10 +1846,13 @@ struct CvConfig
 //    the ONE shared plan (crossval::compare), render the three-tier report, and
 //    write the Tier-3 files beside the data. Does NOT touch modelPtr -- CV is a
 //    standalone analysis, like DFA. The caller must own the engine.
-// Assemble the report's LockedInfo from a locked-test evaluation: DeLong over the
-//    procedures that fitted (paired on the same rows), each column's area + 95% CI,
-//    and the prespecified contrast AUC(primary) - AUC(reference) when both are
-//    present AND fitted. DeLong assumes independent locked-test rows (see delong.h).
+// Assemble the report's LockedInfo from a locked-test evaluation: the point areas
+//    over the procedures that fitted (paired on the same rows), each column's 95% CI
+//    from whichever estimator the design permits, and the prespecified contrast
+//    AUC(primary) - AUC(reference) when both are present AND fitted. The estimator is
+//    chosen ONCE, by evaldesign::chooseInference, from the declared sampling unit and
+//    the ACHIEVED partition method -- never by the caller and never by which answer
+//    looks better.
 static cvreport::LockedInfo buildLockedInfo( const crossval::LockedResult& lr,
 	const CvConfig& c, const evaldesign::Partition& split,
 	const vector< unsigned >& rowGroup, unsigned nGroups )
@@ -2203,6 +2208,8 @@ string runCvJob( CvConfig c )
 		foldDesign.nGroups = gp.nGroups;
 		foldDesign.leakage = gp.leakageCount;
 		foldDesign.warnings = gp.warnings;
+		foldDesign.imbalanceScore = gp.imbalanceScore;
+		foldDesign.largestGroup = gp.largestGroup;
 	}
 	else if ( !c.strataColumns.empty() )
 	{
@@ -2217,6 +2224,33 @@ string runCvJob( CvConfig c )
 	}
 	else
 		foldId = nsplit::kFold( cvLabel, c.k );
+
+	// PER-FOLD achieved counts, recomputed FROM THE ASSIGNMENT rather than taken
+	//    from whichever planner ran. Two reasons: every planner then reports the
+	//    same way (the outcome-only path returns a bare vector and has no counts
+	//    to hand over), and a count derived from the finished plan cannot describe
+	//    a plan that was not produced. These are the numbers an external audit
+	//    needs -- rows, events and clusters per fold -- and the planners' internal
+	//    tallies were being computed and then discarded (Sol, 2026-07-30).
+	foldDesign.foldRows.assign( c.k, 0 );
+	foldDesign.foldEvents.assign( c.k, 0 );
+	{
+		vector< set< unsigned > > groupsIn( grouped ? c.k : 0 );
+		for ( unsigned r = 0; r < nCv; r++ )
+		{
+			unsigned f = foldId[ r ];
+			if ( f >= c.k ) continue; // cannot happen; a bad plan is refused above
+			foldDesign.foldRows[ f ]++;
+			foldDesign.foldEvents[ f ] += cvLabel[ r ];
+			if ( grouped ) groupsIn[ f ].insert( cvGroup[ r ] );
+		}
+		if ( grouped )
+		{
+			foldDesign.foldGroups.assign( c.k, 0 );
+			for ( unsigned f = 0; f < c.k; f++ )
+				foldDesign.foldGroups[ f ] = ( unsigned ) groupsIn[ f ].size();
+		}
+	}
 
 	// Templates for the network procedures. They MUST outlive compare()/evaluateOnce
 	//    -- trainProcedure captures the template by reference -- so they live here
@@ -2388,6 +2422,11 @@ string runCvJob( CvConfig c )
 	//    out-of-fold predictions share a sampling unit. Gathered by raw row, like
 	//    the locked one -- never rebuilt on the development subset.
 	if ( grouped ) info.cluster = cvGroup;
+	// The ORIGINAL raw row for each folded row, so cv_predictions.csv and
+	//    cv_locked_predictions.csv share one identity space. With a locked test the
+	//    Comparison is indexed by development row, and writing that index as the
+	//    exemplar id made row 7 mean a different patient in each file.
+	if ( locked ) info.rawRow = devRows;
 	if ( !locked && c.neural && c.logistic )
 	{
 		info.primary = c.neuralObd ? "Neural (OBD)" : "Neural";
@@ -2597,6 +2636,37 @@ string handleCv( const httplib::Request& req )
 				: evaldesign::PartitionMethod::OutcomeStratified;
 	}
 
+	// The declared sampling unit. It is parsed HERE, ahead of the locked-test
+	//    sizing and its preflight, because that preflight has a CLUSTER-specific
+	//    check -- and reading c.unit before it was assigned silently disabled it
+	//    (Sol, 2026-07-30: the block compiled, ran, and was unreachable). The
+	//    prerequisites that depend on the locked size are checked below, once it
+	//    is known; everything checkable now is checked now.
+	{
+		string ind = param( req, "independence" );
+		evaldesign::SamplingUnit u;
+		if ( !evaldesign::parseSamplingUnit( ind, u ) )
+			return jsonMsg( false, "independence (sampling unit) must be 'rows' "
+				"(independent observations), 'cluster', or unset" );
+		if ( u == evaldesign::SamplingUnit::Cluster && c.groupColumns.empty() )
+			return jsonMsg( false, "clustered inference needs a group= key naming the "
+				"clustering columns; without one there are no sampling units to cluster "
+				"on. Omit the sampling unit to get predictions and point AUCs without "
+				"ordinary DeLong, which would be invalid on clustered data." );
+		// Declaring independent ROWS over a group-disjoint design is a contradiction:
+		//    grouping stops leakage, it does not make the held-out rows independent.
+		//    Refused here rather than described as "descriptive grouping" and then
+		//    handed to ordinary DeLong. evaldesign::chooseInference enforces the same
+		//    rule downstream; this is the early, specific message.
+		if ( u == evaldesign::SamplingUnit::Row && !c.groupColumns.empty() )
+			return jsonMsg( false, "independence=rows contradicts a grouped design: "
+				"grouping prevents leakage but does not make rows independent, so "
+				"ordinary DeLong would not be valid. Omit the sampling unit for point "
+				"AUCs without inference, or drop group= if the rows really are "
+				"independent." );
+		c.unit = u;
+	}
+
 	unsigned nRows = dataPtr->getRawMatrix().rows();
 	{
 		string frac = param( req, "locked_fraction" ), cnt = param( req, "locked_n" );
@@ -2615,6 +2685,13 @@ string handleCv( const httplib::Request& req )
 			if ( v < 0 ) return jsonMsg( false, "locked_n cannot be negative" );
 			c.lockedN = ( unsigned ) v;
 		}
+		// Clustered inference is computed ON the locked test, so it needs one.
+		//    Checked here, where the size is finally known.
+		if ( c.unit == evaldesign::SamplingUnit::Cluster && c.lockedN == 0 )
+			return jsonMsg( false, "clustered inference is computed on the locked test "
+				"set; set locked_fraction or locked_n. Omit the sampling unit to get "
+				"predictions and point AUCs without ordinary DeLong, which would be "
+				"invalid on clustered data." );
 		if ( c.lockedN > 0 )
 		{
 			if ( nRows < c.lockedN + c.k )
@@ -2658,6 +2735,32 @@ string handleCv( const httplib::Request& req )
 			for ( unsigned i = 0; i < lockedTrain.size(); i++ )
 				( lab[ lockedTrain[ i ] ] ? dv1 : dv0 )++;
 
+			if ( lk0 < 2 || lk1 < 2 )
+			{
+				ostringstream m;
+				m << "the locked test has too few of a class (events=" << lk1
+					<< ", non-events=" << lk0 << "; need >= 2 of each). Use a larger "
+					"locked size.";
+				return jsonMsg( false, m.str() );
+			}
+			// The development set feeds a k-fold plan, so it needs enough of EACH
+			//    class that every outer fold can contain both -- i.e. >= k events and
+			//    >= k non-events (stratified k-fold deals each class round-robin, so
+			//    fewer than k of a class necessarily leaves some fold without it, and
+			//    that fold's ROC area cannot be computed). This is stricter than the
+			//    old ">= 2" check, which was independent of k (DLG-3). Nested OBD's
+			//    inner validation split is NOT proven feasible by this check -- if an
+			//    inner split is degenerate the adapter fails that fold and reports it
+			//    (graceful, never silent), which is the intended contract there.
+			if ( dv0 < c.k || dv1 < c.k )
+			{
+				ostringstream m;
+				m << "too few of a class remain for " << c.k << "-fold development "
+					"(events=" << dv1 << ", non-events=" << dv0 << "; each outer fold "
+					"needs both classes, so >= " << c.k << " of each is required). Use a "
+					"smaller locked size or fewer folds.";
+				return jsonMsg( false, m.str() );
+			}
 			// A grouped run folds the DEVELOPMENT groups, so there must be at
 			//    least k of them -- a check the row counts cannot make, because a
 			//    thousand development rows in three clusters still cannot fill
@@ -2700,75 +2803,7 @@ string handleCv( const httplib::Request& req )
 					}
 				}
 			}
-			if ( lk0 < 2 || lk1 < 2 )
-			{
-				ostringstream m;
-				m << "the locked test has too few of a class (events=" << lk1
-					<< ", non-events=" << lk0 << "; need >= 2 of each). Use a larger "
-					"locked size.";
-				return jsonMsg( false, m.str() );
-			}
-			// The development set feeds a k-fold plan, so it needs enough of EACH
-			//    class that every outer fold can contain both -- i.e. >= k events and
-			//    >= k non-events (stratified k-fold deals each class round-robin, so
-			//    fewer than k of a class necessarily leaves some fold without it, and
-			//    that fold's ROC area cannot be computed). This is stricter than the
-			//    old ">= 2" check, which was independent of k (DLG-3). Nested OBD's
-			//    inner validation split is NOT proven feasible by this check -- if an
-			//    inner split is degenerate the adapter fails that fold and reports it
-			//    (graceful, never silent), which is the intended contract there.
-			if ( dv0 < c.k || dv1 < c.k )
-			{
-				ostringstream m;
-				m << "too few of a class remain for " << c.k << "-fold development "
-					"(events=" << dv1 << ", non-events=" << dv0 << "; each outer fold "
-					"needs both classes, so >= " << c.k << " of each is required). Use a "
-					"smaller locked size or fewer folds.";
-				return jsonMsg( false, m.str() );
-			}
 		}
-	}
-
-	// The declared sampling unit (DLG-1). Ordinary DeLong assumes INDEPENDENT test
-	//    observations; a mechanically generated row holdout does not establish that,
-	//    so inference (CIs / p) is produced ONLY when the user consciously declares
-	//    it. Default (unset) still scores and reports point AUCs, but withholds
-	//    ordinary DeLong. "cluster" is reserved for the coming clustered estimator.
-	{
-		string ind = param( req, "independence" );
-		evaldesign::SamplingUnit u;
-		if ( !evaldesign::parseSamplingUnit( ind, u ) )
-			return jsonMsg( false, "independence (sampling unit) must be 'rows' "
-				"(independent observations) or unset" );
-		if ( u == evaldesign::SamplingUnit::Cluster )
-		{
-			// Clustered inference needs cluster identity and something to compute
-			//    it on. Say precisely which prerequisite is missing, so the refusal
-			//    is a map rather than a wall.
-			string why;
-			if ( c.groupColumns.empty() )
-				why = "clustered inference needs a group= key naming the clustering "
-					"columns; without one there are no sampling units to cluster on";
-			else if ( c.lockedN == 0 )
-				why = "clustered inference is computed on the locked test set; set "
-					"locked_fraction or locked_n";
-			if ( !why.empty() )
-				return jsonMsg( false, why + ". Omit the sampling unit to get "
-					"predictions and point AUCs without ordinary DeLong, which would "
-					"be invalid on clustered data." );
-		}
-		// Declaring independent ROWS over a group-disjoint design is a contradiction:
-		//    grouping stops leakage, it does not make the held-out rows independent.
-		//    Refused here rather than described as "descriptive grouping" and then
-		//    handed to ordinary DeLong. evaldesign::chooseInference enforces the same
-		//    rule downstream; this is the early, specific message.
-		if ( u == evaldesign::SamplingUnit::Row && !c.groupColumns.empty() )
-			return jsonMsg( false, "independence=rows contradicts a grouped design: "
-				"grouping prevents leakage but does not make rows independent, so "
-				"ordinary DeLong would not be valid. Omit the sampling unit for point "
-				"AUCs without inference, or drop group= if the rows really are "
-				"independent." );
-		c.unit = u;
 	}
 
 	// The prespecified DeLong contrast. Tokens (logistic|ldfa|qdfa|neural) resolve to

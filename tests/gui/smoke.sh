@@ -1761,6 +1761,59 @@ assert abs(lk["contrast"]["delta"] - 0.119658) < 1e-5, lk["contrast"]
 assert lk["contrast"]["p"] < 1e-3, lk["contrast"]  # clustered 8.7e-05 vs row 0.23
 PYCLUST
 
+#     The clustered PREFLIGHT must actually run. c.unit used to be parsed AFTER
+#     the locked-partition preflight, so the cluster check read an unset value
+#     and never fired (Sol, 2026-07-30). This request has ample rows of each
+#     class -- the identical request without the declaration runs fine -- and is
+#     refused solely on the CLUSTER counts, before any async job starts.
+cvclust_refusal=$(curl -s -X POST "$URL/api/cv" \
+    -d "folds=2&group=3,4,5&locked_fraction=0.08&independence=cluster&logistic=1&neural=0")
+echo "$cvclust_refusal" | grep -q '"ok":false' \
+    || fail "a locked sample with too few informative clusters must be refused"
+echo "$cvclust_refusal" | grep -q "two locked-test clusters carrying each outcome class" \
+    || fail "the clustered refusal must explain the cluster counts"
+curl -s "$URL/api/train/status" | grep -q '"running":false' \
+    || fail "the clustered refusal must happen BEFORE the async job starts"
+#     ...and the same locked sample is fine when no clustered inference is asked for,
+#     which is what makes the refusal a cluster condition rather than a row one.
+curl -s -X POST "$URL/api/cv" \
+    -d "folds=2&seed=42&group=3,4,5&locked_fraction=0.08&logistic=1&neural=0&maxiter=4000&autostop_tol=0.01" \
+    | grep -q '"ok":true' || fail "the same locked sample must run without a clustered declaration"
+for i in $(seq 1 200); do curl -s "$URL/api/train/status" > cv_pf.json; grep -q '"running":false' cv_pf.json && break; sleep 0.3; done
+
+#     ONE row-identity space across the two prediction files, and the structured
+#     per-fold diagnostics DLG-8 promised.
+curl -s -X POST "$URL/api/cv" \
+    -d "folds=3&seed=42&group=3,4,5&locked_fraction=0.25&logistic=1&neural=0&maxiter=4000&autostop_tol=0.01" \
+    | grep -q '"ok":true' || fail "identity/diagnostics CV did not start"
+for i in $(seq 1 300); do curl -s "$URL/api/train/status" > cv_ident.json; grep -q '"running":false' cv_ident.json && break; sleep 0.3; done
+$PY - <<'PYIDENT' || fail "raw-row identity or fold diagnostics malformed"
+import csv, json
+d = json.load(open("cv_ident.json", encoding="utf-8"))["result"]
+assert d["ok"], d
+
+# cv_predictions.csv's exemplar must be the ORIGINAL raw row, so the two files
+# share one identity space. With a locked test the comparison is indexed by
+# development row, and writing that index made row 7 a different patient in each.
+dev = [int(r["exemplar"]) for r in csv.DictReader(open("cv_predictions.csv", encoding="utf-8"))]
+lock = [int(r["row"]) for r in csv.DictReader(open("cv_locked_predictions.csv", encoding="utf-8"))]
+assert len(set(dev)) == len(dev), "development raw ids repeat"
+assert len(set(lock)) == len(lock), "locked raw ids repeat"
+assert not (set(dev) & set(lock)), sorted(set(dev) & set(lock))[:10]
+total = len(dev) + len(lock)
+assert set(dev) | set(lock) == set(range(total)), "dev + locked do not cover every original row once"
+
+# The per-fold diagnostics are present, recomputed, and consistent with the plan.
+fd = json.load(open("cv_run.json", encoding="utf-8"))["foldDesign"]
+k = fd["k"]
+assert len(fd["foldRows"]) == k and len(fd["foldEvents"]) == k, fd
+assert len(fd["foldGroups"]) == k, fd                 # a grouped plan reports clusters/fold
+assert sum(fd["foldRows"]) == len(dev), (fd["foldRows"], len(dev))
+assert sum(fd["foldGroups"]) == fd["groups"], fd      # every group in exactly one fold
+assert all(e <= r for e, r in zip(fd["foldEvents"], fd["foldRows"])), fd
+assert fd["largestGroup"] > 0 and fd["imbalance"] >= 0, fd
+PYIDENT
+
 # DLG-3 (k-aware development feasibility): a rare-event set where the locked test
 #    can hold >= 2 of each class, but the development set is left with fewer than k
 #    events -- so some outer fold could not contain an event. The request must be

@@ -206,12 +206,15 @@ group-aware; ids are **global** across both files, so they join. The locked size
 validated for achieved per-class counts (≥ 2 of each on both sides) **using the
 planner the run will actually use** — a grouped request previews a group holdout — and
 a grouped run additionally needs ≥ k development *groups*, which no row count can
-establish. **Ordinary DeLong assumes independent test rows** — not valid for clustered
-(e.g. county) data; cluster-aware test inference is a follow-on. Two combinations are
-refused outright rather than described away: `independence=rows` with `group=` (a
-group-disjoint design does not make rows independent), and `independence=cluster`,
-whose refusal names the missing prerequisite — no `group=` key, no locked test, or the
-estimator itself.
+establish. **Ordinary DeLong assumes independent test rows** — not valid when rows share a sampling
+unit. For that, declare `independence=cluster`, which runs **Obuchowski's clustered ROC
+covariance** over the `group=` key (requires a locked test; the refusal names whichever
+prerequisite is missing) and is never labelled "DeLong". Its locked sample is preflighted
+for ≥ 2 clusters carrying each outcome class — a cluster condition, not a row one.
+`independence=rows` with `group=` is refused outright rather than described away: a
+group-disjoint design does not make rows independent. Note the row-based SE is **not**
+reliably conservative or anti-conservative on clustered data — it can be too small or too
+large depending on the within-cluster covariance structure (`docs/roc_theory.md`).
 
 ## Logging (cross-cutting)
 

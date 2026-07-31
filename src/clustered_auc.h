@@ -1,13 +1,25 @@
 /* Obuchowski's nonparametric clustered ROC-area covariance (ROADMAP 4).
 
    The successor to ordinary DeLong for test data whose rows share a SAMPLING
-   UNIT -- two arteries in one patient, two pupils in one classroom, repeated
-   measurements on one subject, patients under one clinician. Rows within a
-   cluster are correlated, so the effective number of independent observations is
-   nearer the number of clusters than the number of rows; ordinary DeLong divides
-   by rows and is therefore anti-conservative on such data (intervals too narrow,
-   p too small). A cluster is whatever the caller's group key says it is; nothing
-   here knows or cares what it represents.
+   UNIT -- two measurements on one subject, two pupils in one classroom, patients
+   under one clinician, households in a survey. Rows within a cluster are
+   correlated, so the row count overstates how much independent information the
+   sample carries, and ordinary DeLong -- which divides by rows and has no term
+   for the within-cluster correlation -- simply does not estimate the right
+   covariance.
+
+   Its standard error can come out TOO SMALL OR TOO LARGE, depending on the
+   within-cluster covariance structure. Measured both ways here: when a cluster
+   effect shifts the two outcome classes together, within-cluster pairs become
+   more concordant and the row-based SE is too LARGE; when each cluster carries a
+   single outcome class, the positives and negatives clump and the row-based SE is
+   badly too SMALL (measured: 0.0428 against a correct 0.0967). The published
+   reference example has the cross term positive for one reader and negative for
+   the other. So "clustering widens the interval" is NOT the rule -- the rule is
+   that the row-based estimator is answering a different question.
+
+   A cluster is whatever the caller's group key says it is; nothing here knows or
+   cares what it represents.
 
    WHAT DOES NOT CHANGE. The point area is still the exact patient-ROW
    Mann-Whitney probability over all pairs, computed by the SAME placement code

@@ -654,10 +654,28 @@ clusters. Clustering changes nothing about what the area estimates. Do not
 cluster-weighted area) and answers a question nobody asked.
 
 **What clustering changes is the variance.** Rows sharing a sampling unit are
-correlated, so the effective number of independent observations is nearer the
-number of clusters than the number of rows. Ordinary DeLong divides by rows and is
-therefore anti-conservative on clustered data — intervals too narrow, *p* too
-small. The clusters, not the rows, are the independent units.
+correlated, so the row count overstates how much independent information the sample
+carries. Ordinary DeLong divides by rows and has no term for the within-cluster
+correlation, so on clustered data it **does not estimate the right covariance** —
+the clusters, not the rows, are the independent units.
+
+**Its error does not have a fixed direction.** The row-based standard error can be
+too small *or* too large, depending on the within-cluster covariance structure, and
+"clustering widens the interval" is not a rule you may rely on. Both directions are
+measured in `tests/clustered/check_clustered.cpp`:
+
+- when a cluster effect shifts both outcome classes together, within-cluster pairs
+  become *more* concordant and the row-based SE comes out **too large** (0.0188
+  against a correct 0.0164);
+- when each cluster carries a single outcome class, the positives clump and the
+  negatives clump, the effective sample size collapses to the cluster count, and the
+  row-based SE is badly **too small** (0.0428 against a correct 0.0967, confirmed by
+  a 2000-resample whole-cluster bootstrap at 0.0966) — a design effect of 2.26.
+
+The published worked example itself has the `S11` cross term **positive** for one
+reader and **negative** for the other. The correct statement is not that clustering
+inflates uncertainty; it is that the row-based estimator is answering a different
+question.
 
 **A cluster is whatever the caller says it is** — a clinic, a household, a school,
 a physician, a repeated subject, a geographic area. Nothing in the engine knows or

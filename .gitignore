@@ -3,7 +3,15 @@
 credentials.json
 client_secrets.json
 *.p8
-.claude/settings.local.json
+# Machine/session-local Claude Code permissions -- never shipped.
+# (gitignore has no trailing comments: a pattern is the whole line.)
+.claude/
+# Craig's own working notes -- untracked on purpose; do not sweep them into a commit
+NOTES.md
+gui_notes.md
+handoff.md
+large_cohort_evaluation_notes.md
+WALKTHROUGH_REFRESH.md
 .vscode/
 __pycache__/
 *.pyc

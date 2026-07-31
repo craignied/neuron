@@ -28,6 +28,21 @@ string cvreport::PlanInfo::foldPlanText() const
 	return folds.k ? evaldesign::describeFolds( folds ) : string();
 }
 
+string cvreport::PlanInfo::rawRowError( unsigned n ) const
+{
+	if ( rawRow.empty() ) return ""; // identity: the CV rows are the raw rows
+
+	if ( rawRow.size() != n )
+		return "raw row ids (" + to_string( rawRow.size() ) + ") do not pair with "
+			"the folded rows (" + to_string( n ) + ")";
+
+	set< unsigned > seen( rawRow.begin(), rawRow.end() );
+	if ( seen.size() != rawRow.size() )
+		return "raw row ids are not distinct";
+
+	return "";
+}
+
 string cvreport::LockedInfo::splitPlanText() const
 {
 	return evaldesign::describeHoldout( split );
@@ -329,6 +344,11 @@ string partitionJson( const evaldesign::Partition& p )
 		+ ", \"requested\": " + to_string( p.nRequested )
 		+ ", \"achieved\": " + to_string( p.nAchieved )
 		+ ", \"leakage\": " + to_string( p.leakage )
+		+ ", \"imbalance\": " + fixed3( p.imbalanceScore )
+		+ ", \"largestGroup\": " + to_string( p.largestGroup )
+		+ ", \"foldRows\": " + uintArray( p.foldRows )
+		+ ", \"foldEvents\": " + uintArray( p.foldEvents )
+		+ ", \"foldGroups\": " + uintArray( p.foldGroups )
 		+ ", \"refusal\": " + jsonStr( p.refusal )
 		+ ", \"warnings\": [";
 	for ( unsigned i = 0; i < p.warnings.size(); i++ )
@@ -748,12 +768,28 @@ vector< cvreport::ArtifactResult > cvreport::writeArtifacts(
 	vector< ArtifactResult > results;
 
 	// cv_predictions.csv -- one row per exemplar, one column per procedure.
+	//    Refused outright when the raw-row identity is malformed: predictions
+	//    written under the wrong patient ids are worse than no file.
+	const string rawBad = info.rawRowError( n );
+	if ( !rawBad.empty() )
+	{
+		ArtifactResult r;
+		r.name = "cv_predictions.csv";
+		r.path = ( dir.empty() ? string() : dir + "/" ) + r.name;
+		r.error = rawBad + " (not written)";
+		results.push_back( r );
+	}
+	else
 	results.push_back( writeOne( dir, "cv_predictions.csv", [&]( ostream& f )
 	{
 		// The cluster column appears ONLY for a group-aware fold plan, and only
 		//    when its identity pairs with the rows -- a mis-joined cluster id
 		//    would relabel which out-of-fold predictions are correlated.
 		const bool hasCluster = ( info.cluster.size() == n && n > 0 );
+		// exemplar is the ORIGINAL raw row id, so this file and
+		//    cv_locked_predictions.csv share ONE identity space and can be joined.
+		//    Absent rawRow means the CV rows are the raw rows.
+		const bool mapped = ( info.rawRow.size() == n && n > 0 );
 		f << "exemplar,outcome,fold";
 		if ( hasCluster ) f << ",cluster";
 		for ( unsigned p = 0; p < cmp.entries.size(); p++ )
@@ -761,7 +797,7 @@ vector< cvreport::ArtifactResult > cvreport::writeArtifacts(
 		f << "\n";
 		for ( unsigned r = 0; r < n; r++ )
 		{
-			f << r << "," << cmp.outcome[ r ] << ","
+			f << ( mapped ? info.rawRow[ r ] : r ) << "," << cmp.outcome[ r ] << ","
 				<< ( r < cmp.foldId.size() ? cmp.foldId[ r ] : 0 );
 			if ( hasCluster ) f << "," << info.cluster[ r ];
 			for ( unsigned p = 0; p < cmp.entries.size(); p++ )

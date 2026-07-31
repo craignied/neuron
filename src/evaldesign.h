@@ -102,6 +102,22 @@ struct Partition {
 	unsigned leakage = 0;              // rows/groups found on both sides (must be 0)
 	vector< string > warnings;
 	string refusal;                    // why the partition could not be built at all
+
+	// PER-FOLD achieved counts, for external auditing: rows, outcome-1 rows, and
+	//    (for a group plan) whole groups in each fold. Parallel vectors of length
+	//    k, empty for a holdout. These are RECOMPUTED by the planner from its
+	//    final assignment, never accumulated while dealing -- a reported balance
+	//    must be what was produced, not what the algorithm intended.
+	vector< unsigned > foldRows, foldEvents, foldGroups;
+
+	// Group-plan quality, when there is one. imbalanceScore is the worst relative
+	//    deviation of any fold's row or class count from its fair share (0.08 =
+	//    "the worst fold is 8% off"); largestGroup is the biggest cluster's row
+	//    count. Groups are indivisible, so a large imbalance is a fact about the
+	//    group sizes, not a defect -- reporting both is what lets a reader tell
+	//    those apart.
+	double imbalanceScore = 0;
+	unsigned largestGroup = 0;
 };
 
 // The fold plan / holdout as one line of prose, derived from the fields above.

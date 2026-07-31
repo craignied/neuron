@@ -2932,3 +2932,65 @@ general tests, and no external run is an implementation gate.
     three new controls (fold stratification columns/bins, group columns, clustered sampling
     unit). The automated smoke coverage for all three is complete; the browser pass is not
     mine to run.
+
+**2026-07-30 (repair pass) — Sol's review, and two bugs that mattered.**
+
+  - **The clustered preflight was dead code.** `c.unit` was read during the locked-partition
+    preflight but parsed *after* it, so it was always `Unspecified` and the cluster-count
+    check never ran. It compiled, it was executed, and it was unreachable — the worst shape
+    a guard can have. The sampling unit is now parsed *before* the locked sizing (syntax,
+    the missing-group-key refusal, and the rows-over-grouped contradiction), with the
+    locked-size prerequisite checked where the size becomes known. The row-count checks were
+    also moved ahead of the group ones, so a cluster refusal is now unambiguous evidence
+    that the rows *were* sufficient. Endpoint test: a locked sample with ample rows of each
+    class but one cluster carrying the event is refused **before the async job starts** with
+    the cluster counts — and the identical request without the declaration runs.
+  - **`cv_predictions.csv` and `cv_locked_predictions.csv` were in different identity
+    spaces.** With a locked test the Comparison is indexed by *development* row, and that
+    index was written as `exemplar`, while the locked file wrote raw row ids: row 7 meant a
+    different patient in each, and the two files could not be joined. `PlanInfo::rawRow`
+    now carries the original raw row per folded row (`devRows`, or identity for pure CV),
+    validated for length and distinctness, and the artifact is **refused** when it is
+    malformed. Smoke asserts the two id sets are disjoint and together cover every original
+    row exactly once.
+  - **The group-fold seed only renamed folds.** The packing score is symmetric in the folds,
+    so permuting fold labels left the same blocks of rows together — not a randomized CV
+    partition. Groups are now seed-shuffled *within runs of equal (size, outcome imbalance)*
+    after the canonical data-based order (size, imbalance, first row), so the seed changes
+    which groups are packed together while renumbering invariance survives — the shuffle
+    permutes only groups the algorithm cannot distinguish, from a canonical starting order.
+    Tested on a **label-free partition signature**, so "same blocks" and "same fold numbers"
+    are separated: the same seed reproduces the blocks, a different seed changes
+    co-membership. A dataset whose groups are all distinct in (size, imbalance) is
+    legitimately seed-invariant in its packing; that is a property of the data.
+  - **The per-fold diagnostics DLG-8 promised were computed and discarded.** `foldRows`,
+    `foldEvents`, `foldGroups`, `imbalanceScore` and `largestGroup` now reach
+    `evaldesign::Partition` and `cv_run.json`. The per-fold counts are recomputed in
+    `runCvJob` **from the final assignment** rather than taken from whichever planner ran —
+    every planner then reports the same way (the outcome-only path returns a bare vector and
+    has nothing to hand over), and a count derived from the finished plan cannot describe a
+    plan that was not produced.
+  - **Documentation corrected where my own measurement had already contradicted it.**
+    `src/clustered_auc.h` and `docs/roc_theory.md` still said ordinary DeLong is
+    *anti-conservative* on clustered data. It is not, in general: its SE can be too small or
+    too large depending on the within-cluster covariance structure, and both directions are
+    measured in the test suite (0.0188 vs a correct 0.0164 one way; 0.0428 vs 0.0967 the
+    other). The correct statement is that the row-based estimator does not estimate the
+    right covariance at all. `docs/evaluation_report_spec.md` and `docs/gui_cli_parity.md`
+    still described clustered inference as a refused future feature; both now carry its
+    shipped status. Three GUI help strings still promised an always-outcome-stratified split
+    and a DeLong contrast; they are design-neutral now, and the DeLong-specific comments in
+    `cvreport.h` and `gui.cpp` name the policy instead of one estimator.
+  - **Repository scope.** `.claude/settings.json` (machine-local permissions), `NOTES.md`
+    and `large_cohort_evaluation_notes.md` had been swept into commits by a careless
+    `git add -A`; all three are untracked and ignored now, and still on disk. The ignore
+    pattern needed a second pass: `.gitignore` has **no trailing comments** — a pattern is
+    the whole line — so `.claude/   # ...` matched nothing and the file stayed tracked.
+    `group-aware_plan.md` stays, at Craig's request.
+  - **Sabotage-proved, all four repairs:** disabling the clustered preflight, dropping the
+    raw-row mapping, removing the within-bucket shuffle, and discarding the per-fold arrays
+    each fail a specific new assertion.
+  - **The live GUI click-through is complete** (Sol): the three new CV controls are visible,
+    selectable and submitted, re-checked after the help-text corrections.
+  - Gates: zero-warning Release, 13/13 ctest, goldens byte-identical, smoke green, oracle
+    identical, tools green, `git diff --check` clean.

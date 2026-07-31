@@ -307,9 +307,10 @@ happened not to be extremal. Fixed in its own commit, with no golden re-bless re
 `gsl_vector` went with it. → HISTORY 2026-07-27.
 
 **Open work** is the one remaining ROADMAP 4 item under "What remains" below (B9, the
-GUI-wide strict-parsing pass). A live GUI click-through of the CV panel's three new
-controls — fold stratification columns/bins, group columns, and the clustered sampling
-unit — is **outstanding**; the automated smoke coverage for them is complete.
+GUI-wide strict-parsing pass). **No GUI click-through is outstanding:** Sol drove the CV
+panel's three new controls — fold stratification columns/bins, group columns, and the
+clustered sampling unit — confirming each is visible, selectable, and submitted by the
+page, and they were re-checked after the 2026-07-30 help-text corrections.
 
 ## Settled decisions — do not reopen
 

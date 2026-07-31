@@ -469,11 +469,11 @@ size-vs-error search appears in the chart below.</span></div>
     </select></label>
 </div>
 <div class="row">
-  <label title="Set aside an untouched, outcome-stratified locked test set (0 = none). Each procedure is refit on the development rows and scored once on the locked test; DeLong then compares the areas. The locked test never enters CV, OBD, or tuning.">Locked-test fraction
+  <label title="Set aside an untouched locked test set (0 = none), held ENTIRELY out of cross-validation. It is partitioned the same way the folds are -- outcome-stratified by default, or group-disjoint when you name group columns, so a cluster never straddles it. Each procedure is refit on the development rows and scored once on it; whether the areas are then compared inferentially, and by which estimator, is decided by the sampling unit below. The locked test never enters CV, OBD, or tuning.">Locked-test fraction
     <input class="num" type="number" id="cv_locked_fraction" value="0" step="0.05"
     min="0" max="0.9"></label>
   <span class="status">Contrast &mdash;</span>
-  <label title="The procedure under test. The prespecified DeLong contrast is AUC(primary) - AUC(reference) on the locked test, so a POSITIVE difference favors this one. Default = Neural vs Logistic when both are selected.">Primary
+  <label title="The procedure under test. The prespecified contrast is AUC(primary) - AUC(reference) on the locked test, so a POSITIVE difference favors this one. Which estimator supplies its p-value -- DeLong or Obuchowski clustered -- follows from the sampling unit you declare. Default = Neural vs Logistic when both are selected.">Primary
     <select id="cv_primary">
       <option value="">primary (auto)</option>
       <option value="neural">neural</option><option value="logistic">logistic</option>
@@ -517,23 +517,28 @@ Stratification and grouping cannot be combined yet.</span></div>
       <option value="cluster">clustered (Obuchowski) — needs a group key + locked test</option>
     </select></label>
 </div>
-<div class="row"><span class="status">Every procedure is scored over ONE shared,
-outcome-stratified k-fold plan, so their out-of-fold predictions are paired row
-for row. The nested-OBD pipeline reruns the whole architecture search inside each
-fold (no leakage). A standalone analysis &mdash; it does not touch the trained
-model above. The headline table, per-fold detail, and machine-readable files
-(cv_predictions.csv / cv_metrics.csv / cv_run.json, written beside your data)
-appear below. The CV &plusmn; is descriptive spread across dependent folds, not a
-confidence interval. With a locked-test fraction &gt; 0, an untouched
-outcome-stratified test set is held out of CV entirely; each procedure is refit on
-the development rows and scored once on it (cv_locked_predictions.csv is written
-too). DeLong produces the AUC 95% CIs and the prespecified contrast's p ONLY when
-you declare the sampling unit as independent rows &mdash; ordinary DeLong assumes
-independent observations, which a mechanical row holdout does not establish (on
-clustered data it would be invalid). Without the declaration you still get
-predictions and point AUCs. Declaring a <b>clustered</b> sampling unit &mdash; which
-needs a group key and a locked-test fraction &mdash; uses Obuchowski's clustered ROC
-covariance instead, treating the cluster rather than the row as the independent unit.</span></div>
+<div class="row"><span class="status">Every procedure is scored over <b>ONE shared
+fold plan</b>, so their out-of-fold predictions are paired row for row. That plan is
+outcome-stratified by default; naming stratification columns balances the named
+covariates too, and naming group columns makes the folds <b>group-disjoint</b> &mdash;
+whole clusters, so each fold measures transfer to groups the model never saw. The
+nested-OBD pipeline reruns the whole architecture search inside each fold, and under a
+grouped plan its own inner validation split is group-disjoint as well (no leakage into
+the architecture choice either). A standalone analysis &mdash; it does not touch the
+trained model above. The headline table, per-fold detail, and machine-readable files
+(cv_predictions.csv / cv_metrics.csv / cv_run.json, written beside your data) appear
+below. The CV &plusmn; is descriptive spread across dependent folds, not a confidence
+interval. With a locked-test fraction &gt; 0 an untouched test set is held out of CV
+entirely, partitioned the SAME way the folds are, and each procedure is refit on the
+development rows and scored once on it (cv_locked_predictions.csv is written too; both
+prediction files use the original row ids, so they join). <b>Inference is opt-in and the
+design chooses the estimator:</b> declare <i>independent rows</i> for ordinary DeLong
+&mdash; valid only when the observations really are independent, which a mechanical
+holdout does not establish &mdash; or <i>clustered</i>, which needs a group key and a
+locked-test fraction and runs Obuchowski's clustered covariance, treating the cluster
+rather than the row as the independent unit. Neither ever substitutes for the other, and
+declaring independent rows over a grouped design is refused. Without a declaration you
+still get predictions and point AUCs.</span></div>
 <div class="row action">
   <button id="cvbtn" onclick="runCv()">Run cross-validation</button>
   <span class="status" id="cvstatus"></span>

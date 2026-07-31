@@ -954,6 +954,28 @@ int main()
 		nsplit::GroupFoldPlan again = nsplit::stratifiedGroupKFold( label, group, k );
 		expect( again.foldId == p.foldId, "groups: a fixed seed reproduces the plan" );
 
+		// THE SEED MUST CHANGE THE PARTITION, not merely the fold NUMBERS. The
+		// scoring is symmetric in the folds, so permuting fold labels alone leaves
+		// the same blocks of rows together under different names -- which is not a
+		// randomized CV partition (Sol, 2026-07-30). Compared on a LABEL-FREE
+		// signature: for a set of anchor rows, which rows share their fold.
+		{
+			auto signature = []( const vector< unsigned >& f )
+			{
+				vector< char > sig;
+				for ( unsigned a = 0; a < 8 && a < f.size(); a++ )
+					for ( unsigned r = 0; r < f.size(); r++ )
+						sig.push_back( f[ r ] == f[ a ] ? 1 : 0 );
+				return sig;
+			};
+			util::set_seed( 22 );
+			nsplit::GroupFoldPlan other = nsplit::stratifiedGroupKFold( label, group, k );
+			expect( signature( again.foldId ) == signature( p.foldId ),
+				"groups: the same seed reproduces the same BLOCKS, not just the same labels" );
+			expect( other.ok && signature( other.foldId ) != signature( p.foldId ),
+				"groups: a different seed changes which groups share a fold, not just fold numbers" );
+		}
+
 		{
 			vector< unsigned > permuted( n );
 			for ( unsigned r = 0; r < n; r++ )

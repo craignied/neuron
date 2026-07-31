@@ -20,24 +20,34 @@
 > `AUC (test) [95% CI]` column and the prespecified DeLong verdict (ΔAUC + two-sided *p* →
 > significant/not; a deterministic area separation reports p≈0, equal areas "no testable
 > difference"); Tier 2 gains a locked-test section with sampling-unit/inference metadata; the
-> "frozen architecture" appears as each procedure's locked-test `arch`. `independence=cluster`
-> is refused — **cluster-aware test inference is a follow-on** and must never fall back to
-> ordinary DeLong.
+> "frozen architecture" appears as each procedure's locked-test `arch`.
+> **SHIPPED 2026-07-30 — fold policy and cluster-aware inference:** `/api/cv` takes its own
+> `strata=`/`strata_bins=`/`group=`, so the fold plan may be outcome-stratified (the default,
+> unchanged), outcome × covariate-stratified, or **group-disjoint** — and a grouped request's
+> key governs the locked holdout and the nested search's inner validation split as well.
+> `independence=cluster` runs **Obuchowski's clustered ROC covariance** (the cluster, not the
+> row, is the independent unit); it never falls back to ordinary DeLong, and
+> `independence=rows` over a grouped design is refused rather than relabelled. The design is
+> machine-readable (`foldDesign` / `lockedTest.splitDesign`, with per-fold rows/events/groups,
+> imbalance and largest-group counts recomputed from the final assignment), and both
+> prediction files share ONE raw-row identity space so they can be joined.
 > **NOT yet implemented (aspirational below):**
 > Tier-2 calibration; per-fold timing; Tier-3 download buttons; a fully metric-agnostic
-> Tier 1; composing the locked/CV split with the covariate-strata or group-aware modes.
+> Tier 1; composing `strata=` **and** `group=` into a single fold plan (refused today — there
+> is no tested joint balancing objective).
 > **Format note:**
 > `cv_predictions.csv` ships as **one row per exemplar with one prediction column per
 > procedure** (a paired wide format), NOT the "one row per (exemplar, procedure)" the body
-> describes. And Tier-2 detail is returned only when the async CV job finishes; it does not
-> stream fold-by-fold. The locked-test inference layer is a separate future feature.
+> describes. Its `exemplar` is the ORIGINAL raw row id, the same identity space as
+> `cv_locked_predictions.csv`'s `row`, so the two files join. And Tier-2 detail is returned
+> only when the async CV job finishes; it does not stream fold-by-fold.
 
 An automated evaluation run — several procedures, k outer folds, nested OBD, a per-exemplar
 out-of-fold prediction for every patient — generates a great deal of output. Without a
 deliberate structure it becomes a wall of numbers no one reads. This spec fixes the structure.
 
-It is **general** (SEER is the illustrative example, never the mold): every column and line
-below appears only when its data exists and its policy applies.
+It is **general** — no dataset is the mold: every column and line below appears only when
+its data exists and its policy applies.
 
 ## The governing principle: verbose underneath, ONE crisp table on top
 
@@ -57,7 +67,7 @@ everything), and **never let Tier 1 exceed one screen.**
 
 **The report has two audiences, by design.** Tier 1 is for a human at a glance. Tiers 2 and 3
 are for an **LLM fed the full report** to answer any deeper question ("how did fold 7 differ?",
-"which counties drove the neural net's edge?"). That is *why* Tier 2/3 must stay complete and
+"which clusters drove the neural net's edge?"). That is *why* Tier 2/3 must stay complete and
 self-describing rather than pre-summarized: the machine reader needs the raw material, and
 pre-digesting it would throw away exactly what it came for. Do not "helpfully" trim or
 LLM-summarize Tier 2/3 — a human never has to read them, and a machine wants them whole.
@@ -70,27 +80,29 @@ One row per procedure. A column appears only when it is meaningful:
 |---|---|---|
 | **Procedure** | always | `Logistic`, `LDFA`, `QDFA`, `Neural (OBD)`, … |
 | **AUC (CV)** | CV ran | mean ± sd across the outer folds. **The sd is descriptive spread across _dependent_ folds — NOT a confidence interval.** |
-| **AUC (test)** / **AUC (test) [95% CI]** | a locked test set exists | point AUC on the untouched test set; the Wald DeLong 95% CI is appended ONLY when the sampling unit was declared independent (`independence=rows`), else the point AUC alone. Needs both classes (≥ 2 each) and finite predictions. |
+| **AUC (test)** / **AUC (test) [95% CI]** | a locked test set exists | point AUC on the untouched test set; a 95% CI is appended ONLY when a sampling unit was declared AND the achieved design permits an estimator — the Wald DeLong interval for `independence=rows` over a row-wise design, the clustered interval for `independence=cluster` over a group-aware one — else the point AUC alone. Needs both classes and finite predictions. |
 | **Arch** | the procedure has architecture metadata | modal selection + frequency (e.g. `4-2 (7/10)`); `—` for procedures without it |
 | **Time** | always | wall-clock for that procedure |
 
 Directly beneath the table, a short verdict block (never prose paragraphs):
 
 - **Primary contrast (prespecified):** the single contrast declared *before* the run (e.g.
-  `Neural vs Logistic`) — ΔAUC + DeLong p **on the locked test set only**, with a plain verdict
-  (`significant` / `not significant`). Any other contrast is labelled *exploratory* or carries a
-  stated multiplicity correction.
+  `Neural vs Logistic`) — ΔAUC + the *p* of whichever estimator the design permitted (the line
+  names it: `DeLong p` or `clustered ROC p`, never one labelled as the other) **on the locked
+  test set only**, with a plain verdict (`significant` / `not significant`), and for a clustered
+  design the number of independent clusters it rests on. Any other contrast is labelled
+  *exploratory* or carries a stated multiplicity correction.
 - **Architecture footnote:** what OBD selected across folds (modal + range) and the frozen
   architecture used on the locked test.
 - **One standing caveat line, always:** *"CV ± is descriptive spread across dependent folds, not
   a confidence interval; the only inferential comparison is on the locked test set."*
 
-Illustrative rendering (SEER-flavoured; the spec is general):
+Illustrative rendering (the numbers are invented; the spec is general):
 
 ```
 ═══════════════════════════════════════════════════════════════════════════
  SUMMARY — 10-fold nested CV + locked test · 226,679 patients · 6,705 events (2.96%)
- Folds: outcome-stratified, group-aware (county), seed 42
+ Folds: group-disjoint outcome-stratified 10-fold, seed 42 grouped by columns 3, 4 (612 groups)
 ═══════════════════════════════════════════════════════════════════════════
  Procedure       AUC (CV)         AUC (test) [95% CI]      Arch          Time
  ───────────────────────────────────────────────────────────────────────────
@@ -177,5 +189,5 @@ The **comparison coordinator** owns the summary — it holds the results joined 
 fold, renders Tier 1 and Tier 2, and writes Tier 3. The runner/adapters produce per-fold metrics
 and procedure metadata; `DataSet`/`TwoSet` compute the metrics (`getStatROCarea`, sens/spec,
 calibration). **The renderer has no model-family switches** — it iterates procedures and whatever
-metadata each one carries. Nothing SEER-specific lives in the report; policy (locked-test vs
+metadata each one carries. Nothing dataset-specific lives in the report; policy (locked-test vs
 pure-CV, which metric, which contrast) decides which columns and lines appear, not the structure.

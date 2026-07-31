@@ -9,11 +9,12 @@
                cv_run.json), written beside the data and NEVER printed.
 
    With a locked test (a LockedInfo, has = true) Tier 1 gains an AUC(test) [95% CI]
-   column and the prespecified DeLong contrast verdict, Tier 2 a locked-test section,
+   column and the prespecified contrast verdict, Tier 2 a locked-test section,
    and Tier 3 a cv_locked_predictions.csv + a lockedTest block in cv_run.json; without
    one the report is CV-only and byte-identical. The locked-test summary is filled by
-   a policy layer above the mechanism (the GUI CV job: crossval::evaluateOnce + delong);
-   DeLong assumes independent test rows (see delong.h). Ownership (rule 6): the
+   a policy layer above the mechanism (the GUI CV job: crossval::evaluateOnce plus
+   whichever AUC covariance estimator the declared sampling unit and the achieved
+   partition method permit -- see evaldesign::chooseInference). Ownership (rule 6): the
    coordinator owns the summary; this renderer iterates procedures and whatever metadata
    each carries -- it has NO model-family switches, and nothing here is specific to any
    dataset. */
@@ -60,22 +61,37 @@ struct PlanInfo {
 	//    report interprets it.
 	vector< unsigned > cluster;
 
+	// ORIGINAL raw-row id per CV row, parallel to cmp.outcome. With a locked test
+	//    the Comparison covers the DEVELOPMENT rows only and is indexed 0..nDev-1,
+	//    so writing its index as the exemplar id put cv_predictions.csv and
+	//    cv_locked_predictions.csv (which carries raw ids) in two different
+	//    identity spaces -- the two files could not be joined, and row 7 meant a
+	//    different patient in each (Sol, 2026-07-30). Empty means the CV rows ARE
+	//    the raw rows (pure CV), which is the identity mapping.
+	vector< unsigned > rawRow;
+
 	// The one-line fold plan, derived. "" when no plan was described.
 	string foldPlanText() const;
+
+	// "" when rawRow is well formed for a comparison of n rows: absent (identity),
+	//    or exactly n distinct ids. Returns the defect otherwise, so the artifact
+	//    writer refuses rather than emitting predictions under wrong patient ids --
+	//    the same contract as the cluster column, for the same reason.
+	string rawRowError( unsigned n ) const;
 };
 
 // The locked-test inference results (ROADMAP 4 Phase 4). A policy layer above the
 //    CV mechanism (the GUI CV job) fills this from crossval::evaluateOnce + delong:
 //    each procedure refit by its own rule on the development set, scored once on an
-//    untouched locked test set, then DeLong on the paired predictions. When has is
-//    false the report is CV-only and byte-identical to a run without a locked test.
-//    A column is matched to a cmp.entries row by NAME, so column order is free.
-//    DeLong assumes the locked-test rows are INDEPENDENT (see delong.h) -- the
-//    renderer states that assumption; it does not decide the split method.
+//    untouched locked test set, then the permitted AUC covariance estimator on the
+//    paired predictions. When has is false the report is CV-only and byte-identical
+//    to a run without a locked test. A column is matched to a cmp.entries row by
+//    NAME, so column order is free. The renderer NAMES whichever estimator ran and
+//    states its assumption; it does not choose the estimator or the split method.
 struct LockedColumn {
 	string name;
 	bool hasAuc = false;   // a point AUC (Mann-Whitney area) is available
-	bool hasCi = false;    // a DeLong 95% interval is available (inference declared)
+	bool hasCi = false;    // a 95% interval is available, from whichever estimator ran
 	double auc = 0, lo = 0, hi = 0;
 	string arch;           // frozen architecture string ("" if none)
 	string note;           // reason when no AUC (a sparse / one-class locked test)
@@ -85,8 +101,8 @@ struct LockedColumn {
 
 // The prespecified primary contrast on the locked test. delta is always
 //    AUC(primary) - AUC(reference). hasDelta means a point difference is available;
-//    hasInference means a DeLong p was produced (inference was declared and
-//    estimable). p/significant/degenerate/separated apply ONLY when hasInference.
+//    hasInference means a p was produced by the permitted estimator (inference was
+//    declared and estimable). p/significant/degenerate/separated apply ONLY when hasInference.
 //    degenerate = equal areas with zero variance (no testable difference);
 //    separated = areas differ deterministically (p ~ 0). note carries the reason
 //    when inference or the contrast is unavailable.
@@ -153,7 +169,8 @@ struct LockedInfo {
 
 // Tier 1: the one-screen headline summary (box table + verdict block) as text.
 //    With a locked-test result (locked.has) the table gains an AUC (test) [95% CI]
-//    column and the verdict states the DeLong contrast; otherwise byte-identical.
+//    column and the verdict states the contrast, naming its estimator; otherwise
+//    byte-identical.
 string tier1( const crossval::Comparison& cmp, const PlanInfo& info,
 	const LockedInfo& locked = LockedInfo() );
 

@@ -365,29 +365,69 @@ nsplit::GroupFoldPlan nsplit::stratifiedGroupKFold( const vector< unsigned >& la
 	//    more outcome-lopsided group is harder and goes first.
 	vector< unsigned > order( G );
 	for ( unsigned g = 0; g < G; g++ ) order[ g ] = g;
+	// The difficulty of a group, as the packer sees it: its size, then how
+	//    outcome-lopsided it is. Groups equal on BOTH are interchangeable to the
+	//    algorithm -- which is exactly the freedom the seed gets to use.
+	auto imbalance = [ &gNeg, &gPos ]( unsigned g )
+	{
+		return gNeg[ g ] > gPos[ g ] ? gNeg[ g ] - gPos[ g ] : gPos[ g ] - gNeg[ g ];
+	};
+
 	sort( order.begin(), order.end(),
-		[ &gRows, &gNeg, &gPos ]( unsigned a, unsigned b )
+		[ &gRows, &imbalance ]( unsigned a, unsigned b )
 		{
 			if ( gRows[ a ].size() != gRows[ b ].size() )
 				return gRows[ a ].size() > gRows[ b ].size();
-			// |neg - pos| as a plain integer distance, no sign games on unsigned
-			unsigned ia = gNeg[ a ] > gPos[ a ] ? gNeg[ a ] - gPos[ a ] : gPos[ a ] - gNeg[ a ];
-			unsigned ib = gNeg[ b ] > gPos[ b ] ? gNeg[ b ] - gPos[ b ] : gPos[ b ] - gNeg[ b ];
+			unsigned ia = imbalance( a ), ib = imbalance( b );
 			if ( ia != ib ) return ia > ib;
 			// The last key is the group's FIRST ROW, not its id. Two groups with the
 			//    same size and the same outcome split are interchangeable to the
 			//    packer, so something must order them -- and if that something is
 			//    the id, renumbering the groups silently produces a different
 			//    partition of the same data. The first row is a property of the
-			//    data, so the plan depends on the grouping and not on its labels.
+			//    data, so the CANONICAL order depends on the grouping and not on
+			//    its labels.
 			return gRows[ a ][ 0 ] < gRows[ b ][ 0 ];
 		} );
 
+	// Now shuffle WITHIN each run of equal ( size, imbalance ). Without this the
+	//    seed changed only the fold NUMBERS: the scoring is symmetric in the folds,
+	//    so every seed produced the same blocks of rows under different labels --
+	//    which is not a randomized CV partition at all (Sol, 2026-07-30). Shuffling
+	//    the interchangeable groups changes the ORDER they are packed in, and
+	//    therefore which groups end up together.
+	//
+	//    Renumbering invariance survives because the shuffle starts from the
+	//    canonical first-row order above and permutes only groups the algorithm
+	//    cannot distinguish: relabelling the groups does not change which bucket a
+	//    group is in, nor its position in the bucket before the shuffle, so the
+	//    same seed still yields the same partition of the same data.
+	//
+	//    A dataset whose groups are all distinct in ( size, imbalance ) has no
+	//    interchangeable pairs and IS seed-invariant in its packing. That is a
+	//    property of the data, not a defect: there is only one canonical order.
+	{
+		unsigned i = 0;
+		while ( i < G )
+		{
+			unsigned j = i + 1;
+			while ( j < G && gRows[ order[ j ] ].size() == gRows[ order[ i ] ].size()
+				&& imbalance( order[ j ] ) == imbalance( order[ i ] ) ) j++;
+			if ( j - i > 1 )
+			{
+				vector< unsigned > bucket( order.begin() + i, order.begin() + j );
+				selectFront( bucket, ( unsigned ) bucket.size() );
+				for ( unsigned t = i; t < j; t++ ) order[ t ] = bucket[ t - i ];
+			}
+			i = j;
+		}
+	}
+
 	// The seeded permutation of the FOLD order: candidate folds are examined in
-	//    this order and only a STRICT improvement displaces the incumbent, so the
-	//    permutation decides exact ties and nothing else. This is the only draw
-	//    from the RNG stream, which keeps the plan reproducible under a seed
-	//    without letting randomness into the packing decisions themselves.
+	//    this order and only a STRICT improvement displaces the incumbent, so it
+	//    decides exact cost ties. Fold numbering is arbitrary, so this alone could
+	//    never change the partition -- which is why the bucket shuffle above
+	//    exists.
 	vector< unsigned > foldOrder( k );
 	for ( unsigned f = 0; f < k; f++ ) foldOrder[ f ] = f;
 	selectFront( foldOrder, k );
