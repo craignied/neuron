@@ -1376,7 +1376,9 @@ approach are all below or in the `docs/` files they cite.
     the deferred B9. **DLG-8** (structured cluster/sampling-unit artifact metadata) is a prerequisite
     for the group-aware phase — deferred there. Doc drift fixed in-commit (rule 1/5): CLAUDE.md
     "deferred" lines, `crossval.h` substream "index"→"name", the IID language across AGENTS/parity/
-    spec/README. Companion `group-aware_plan.md` (Sol) holds the group-aware + cluster-aware plan.
+    spec/README. Companion `group-aware_plan.md` (Sol) held the group-aware + cluster-aware plan;
+    it was removed on 2026-07-31 once the manifest and the 2026-07-30 entries below carried the
+    design as shipped.
   Gates every fix: zero-warning build, goldens byte-identical, oracle identical, 10/10 ctest, smoke
   green, **live in-browser** drive of the Sampling-unit dropdown (declared → CI+p; the debt cleared).
 
