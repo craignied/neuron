@@ -1045,6 +1045,37 @@ int main()
 				"an unestimable locked test reports the estimator's own reason" );
 		}
 
+		// Raw-row identity is validated the same way, and for the same reason:
+		// predictions written under the wrong patient ids are worse than no file.
+		{
+			cvreport::PlanInfo ri = info;
+			ri.rawRowCount = 500;
+			ri.rawRow.clear();
+			expect( ri.rawRowError( 10 ).empty(),
+				"an absent raw-row map is the identity mapping, not an error" );
+
+			ri.rawRow = { 3, 7, 11 };
+			expect( !ri.rawRowError( 10 ).empty(),
+				"a raw-row map that does not pair with the folded rows is rejected" );
+
+			ri.rawRow = { 3, 7, 7 };
+			expect( !ri.rawRowError( 3 ).empty(),
+				"repeated raw row ids are rejected" );
+
+			ri.rawRow = { 3, 7, 999 };
+			expect( ri.rawRowError( 3 ).find( "outside" ) != string::npos,
+				"a raw row id outside the original dataset is rejected" );
+
+			ri.rawRow = { 3, 7, 11 };
+			expect( ri.rawRowError( 3 ).empty(),
+				"three distinct in-range ids for three folded rows are well formed" );
+
+			ri.rawRowCount = 0; // unknown dataset size -> the range check is skipped
+			ri.rawRow = { 3, 7, 999 };
+			expect( ri.rawRowError( 3 ).empty(),
+				"without a known dataset size the range check is skipped, not guessed" );
+		}
+
 		// DLG-8: cluster identity is joined by POSITION, so a length or id defect
 		// would silently re-label which patients are correlated. The artifact
 		// writer must REFUSE the file rather than emit a mis-joined column.

@@ -40,6 +40,12 @@ string cvreport::PlanInfo::rawRowError( unsigned n ) const
 	if ( seen.size() != rawRow.size() )
 		return "raw row ids are not distinct";
 
+	if ( rawRowCount )
+		for ( unsigned i = 0; i < rawRow.size(); i++ )
+			if ( rawRow[ i ] >= rawRowCount )
+				return "raw row id " + to_string( rawRow[ i ] ) + " is outside the "
+					+ to_string( rawRowCount ) + "-row dataset";
+
 	return "";
 }
 

@@ -2427,6 +2427,7 @@ string runCvJob( CvConfig c )
 	//    Comparison is indexed by development row, and writing that index as the
 	//    exemplar id made row 7 mean a different patient in each file.
 	if ( locked ) info.rawRow = devRows;
+	info.rawRowCount = n; // the ORIGINAL dataset size, so the ids can be range-checked
 	if ( !locked && c.neural && c.logistic )
 	{
 		info.primary = c.neuralObd ? "Neural (OBD)" : "Neural";

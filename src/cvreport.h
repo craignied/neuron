@@ -70,13 +70,22 @@ struct PlanInfo {
 	//    the raw rows (pure CV), which is the identity mapping.
 	vector< unsigned > rawRow;
 
+	// How many rows the ORIGINAL dataset had, so rawRow can be range-checked as
+	//    well as counted. 0 = unknown, and the range check is then skipped. The
+	//    production path builds rawRow from the splitter's own indices and cannot
+	//    exceed this; the check is hardening, so that a future caller assembling
+	//    the mapping by hand cannot label a prediction with a row that does not
+	//    exist (Sol, 2026-07-30).
+	unsigned rawRowCount = 0;
+
 	// The one-line fold plan, derived. "" when no plan was described.
 	string foldPlanText() const;
 
 	// "" when rawRow is well formed for a comparison of n rows: absent (identity),
-	//    or exactly n distinct ids. Returns the defect otherwise, so the artifact
-	//    writer refuses rather than emitting predictions under wrong patient ids --
-	//    the same contract as the cluster column, for the same reason.
+	//    or exactly n distinct ids, each below rawRowCount when that is known.
+	//    Returns the defect otherwise, so the artifact writer refuses rather than
+	//    emitting predictions under wrong patient ids -- the same contract as the
+	//    cluster column, for the same reason.
 	string rawRowError( unsigned n ) const;
 };
 

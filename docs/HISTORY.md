@@ -2994,3 +2994,13 @@ general tests, and no external run is an implementation gate.
     selectable and submitted, re-checked after the help-text corrections.
   - Gates: zero-warning Release, 13/13 ctest, goldens byte-identical, smoke green, oracle
     identical, tools green, `git diff --check` clean.
+
+  - **Two hardening items from the same review.** `PlanInfo::rawRowError` now also
+    range-checks the ids against the original dataset size (`rawRowCount`), so a future
+    caller assembling the mapping by hand cannot label a prediction with a row that does
+    not exist; the production path builds it from the splitter's own indices and could not,
+    which makes this hardening rather than a fix. With the size unknown the range check is
+    skipped rather than guessed. Sabotage: removing the check fails *"a raw row id outside
+    the original dataset is rejected"*. And the report spec's "invented" Tier-1 example no
+    longer reuses recognisable real-cohort numbers — it is 40,000 exemplars in 250 groups,
+    which is what "invented" should look like.

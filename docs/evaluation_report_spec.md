@@ -101,8 +101,8 @@ Illustrative rendering (the numbers are invented; the spec is general):
 
 ```
 ═══════════════════════════════════════════════════════════════════════════
- SUMMARY — 10-fold nested CV + locked test · 226,679 patients · 6,705 events (2.96%)
- Folds: group-disjoint outcome-stratified 10-fold, seed 42 grouped by columns 3, 4 (612 groups)
+ SUMMARY — 10-fold nested CV + locked test · 40,000 exemplars · 1,200 events (3.00%)
+ Folds: group-disjoint outcome-stratified 10-fold, seed 42 grouped by columns 3, 4 (250 groups)
 ═══════════════════════════════════════════════════════════════════════════
  Procedure       AUC (CV)         AUC (test) [95% CI]      Arch          Time
  ───────────────────────────────────────────────────────────────────────────
