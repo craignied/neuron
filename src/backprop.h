@@ -60,8 +60,7 @@ private:
 		
 	unsigned nLayers; // number of hidden node layers
 
-	vector< double > in_bias, // input bias vector to add to input Matrix
-		I,                    // vector for single exemplar inputs
+	vector< double > I,   // vector for single exemplar inputs
 		y,                    // vector for single exemplar outputs
 		o_err;                // output error vector
 	

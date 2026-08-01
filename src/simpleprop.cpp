@@ -35,7 +35,6 @@ void SimpleProp::copy( const SimpleProp& rhs )
 	nH = rhs.nH;
 	hW = rhs.hW;
 	hWup = rhs.hWup;
-	in_bias = rhs.in_bias;
 	y = rhs.y;
 	I = rhs.I;
 	hO = rhs.hO;

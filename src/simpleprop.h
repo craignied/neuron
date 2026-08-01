@@ -90,8 +90,7 @@ private:
 		hWup,            // hidden weight update Matrix
 		hG;                 // hidden weight gradient Matrix
 
-	vector< double > in_bias, // input bias vector to add to input Matrix
-		y,                    // vector containing dataset outputs
+	vector< double > y,   // vector containing dataset outputs
 		I,                    // vector for single exemplar inputs
 		hO,                   // hidden output vector
 		oW,                   // output weight vector

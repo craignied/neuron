@@ -25,7 +25,6 @@ void BackProp::copy( const BackProp& rhs )
 	Network::copy( rhs ); // call immediate base object copy
 	nLayer = rhs.nLayer;
 	nLayers = rhs.nLayers;
-	in_bias = rhs.in_bias;
 	I = rhs.I;
 	y = rhs.y;
 	o_err = rhs.o_err;

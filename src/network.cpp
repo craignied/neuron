@@ -15,7 +15,6 @@ Network::Network()
 {
 	builtFlag = false; // the Network object hasn't yet been built
 	weightsSetFlag = false; // weights not set yet
-	finalFlag = false; // it isn't the last training iteration by default
 
 	// Good ideas for initial values
 	randomLimit = 0.5; // a good initial random limit
@@ -112,7 +111,6 @@ void Network::copy( const Network& rhs )
 	deltaError = rhs.deltaError;
 	gamma = rhs.gamma;
 	maxLoops = rhs.maxLoops;
-	finalFlag = rhs.finalFlag;
 	condNum = rhs.condNum;
 	condMaxEig = rhs.condMaxEig;
 	condMinEig = rhs.condMinEig;

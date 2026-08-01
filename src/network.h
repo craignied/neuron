@@ -135,14 +135,7 @@ protected:
 		biasFlag,              // flag indicates if bias nodes in network
 		batchEpochFlag,        // flag indicates if batch/epoch training
 		weightDecayFlag,       // flag indicates if weight decay is used
-		automaticStepSizeFlag, // flag indicates if automatic step size algorithm is used
-		finalFlag;             // RETIRED 2026-08-01: nothing sets or reads it.
-		                       //    It marked the gradient-harvesting call to
-		                       //    innerTrainSet() that the condition number
-		                       //    used to make; that whole mechanism is gone
-		                       //    (the diagnostic is now X'VX). Kept only
-		                       //    because Network::copy carries it; removing a
-		                       //    member is scheduled mechanical cleanup.
+		automaticStepSizeFlag; // flag indicates if automatic step size algorithm is used
 
 	unsigned trainingType, // training method ( canonical backprop = 0,
 		                   // conjugate gradient descent = 1,
