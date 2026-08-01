@@ -329,46 +329,16 @@ double BackProp::trainSet()
 	//    *requires* offline or batch/epoch training)
 	if ( batchEpochFlag && automaticStepSizeFlag )
 	{
-		unsigned nInput = theData.getInput(), // get the number of input nodes
-		nOutput = theData.getOutput(); // get number of output nodes
 		vector< double > lastGBuffer, lastFBuffer;
-		vector< vector< double > > vpackBuffer;
-		vector< Matrix< double > > WeightsBuffer;
 
-		// Resize WeightsBuffer
-		if ( Network::getBias() ) // true means we have bias nodes
-		{
-			// vector of WeightsBuffer matrix is resized to number of hidden layers and output layer
-			WeightsBuffer.resize( nLayers + 1 ); // all hidden layers and output layer
+		// Buffer the weights. Matrix::operator= resizes when the dimensions
+		//    differ, and vector assignment carries the element count, so the
+		//    whole buffer is one assignment. This was forty lines that branched
+		//    on bias, resized each layer with the two boundary cases spelled
+		//    out, and then copied element by element -- work the assignment
+		//    operator was already doing on the next line down.
+		vector< Matrix< double > > WeightsBuffer = Weights;
 
-			// Resizing all the matrices 
-			// Boundary case, first hidden layer
-			WeightsBuffer[ 0 ].resize( nLayer[ 0 ], nInput + 1 );
-			// Boundary case, output layer
-			WeightsBuffer[ nLayers ].resize( nOutput, nLayer[ nLayers - 1 ] + 1 );
-			// all the hidden layers between the first hidden layer and output layer
-			for ( unsigned l = 0; l < nLayers - 1; l++ )
-				WeightsBuffer[ l + 1 ].resize( nLayer[ l + 1 ], nLayer[ l ] + 1 ); 
-		}
-		else // case of no biases
-		{
-			// vector of Weights matrix is resized to number of hidden layers and output layer
-			WeightsBuffer.resize( nLayers + 1 ); // all hidden layers and output layer
-		
-			// Resizing all the matrices 
-			// Boundary case, first hidden layer
-			WeightsBuffer[ 0 ].resize( nLayer[ 0 ], nInput );
-			// Boundary case, output layer
-			WeightsBuffer[ nLayers ].resize( nOutput, nLayer[ nLayers - 1 ] );
-			// all the hidden layers between the first hidden layer and output layer
-			for ( unsigned k = 0; k < nLayers - 1; k++ )
-				WeightsBuffer[ k + 1 ]. resize( nLayer[ k + 1 ], nLayer[ k ] );
-		}
-
-		// Buffer the weights
-		for ( unsigned z = 0; z < ( nLayers + 1 ); z++ )
-			WeightsBuffer[ z ] = Weights[ z ];
-			
 		// Also buffer lastG and lastF for conjugate gradient descent / Shanno's
 		lastGBuffer = lastG;
 		lastFBuffer = lastF;
@@ -415,9 +385,8 @@ double BackProp::trainSet()
 	
 		// We have desired learning rate, lets finish the iteration
 		// Retrieve the saved weights
-		for ( unsigned x = 0; x < ( nLayers + 1 ); x++ )
-			Weights[ x ] = WeightsBuffer[ x ];
-				
+		Weights = WeightsBuffer;
+
 		lastG = lastGBuffer;
 		lastF = lastFBuffer;
 		

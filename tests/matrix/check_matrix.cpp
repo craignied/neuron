@@ -30,6 +30,67 @@ void expect( bool ok, const string& what )
 	}
 }
 
+
+// Helpers for the assignment tests
+static Matrix< double > filledMatrix( unsigned r, unsigned c, double base )
+{
+	Matrix< double > m( r, c );
+	for ( unsigned i = 0; i < r; i++ )
+		for ( unsigned j = 0; j < c; j++ )
+			m( i, j ) = base + i * 100 + j;
+	return m;
+}
+
+static bool matricesEqual( Matrix< double >& a, Matrix< double >& b )
+{
+	if ( a.rows() != b.rows() || a.cols() != b.cols() ) return false;
+	for ( unsigned i = 0; i < a.rows(); i++ )
+		for ( unsigned j = 0; j < a.cols(); j++ )
+			if ( a( i, j ) != b( i, j ) ) return false;
+	return true;
+}
+
+// --- operator= : resizing, self-assignment, and vector<Matrix> --------------
+//
+// BackProp's automatic-step-size buffer hand-built its weight buffer: forty
+// lines branching on bias, resizing every layer with the boundary cases spelled
+// out twice, then copying element by element -- to achieve what
+// Matrix::operator= already does, because it resizes when the dimensions
+// differ. Before relying on that, assert it: both directions of resize,
+// self-assignment, value preservation, and the vector<Matrix> case the buffer
+// actually is.
+static void test_assignment()
+{
+	Matrix< double > s = filledMatrix( 3, 4, 1 ), before = s;
+	s = s;
+	expect( matricesEqual( s, before ), "self-assignment leaves the matrix intact" );
+
+	Matrix< double > small = filledMatrix( 2, 2, 10 ), big = filledMatrix( 5, 7, 20 );
+	small = big;
+	expect( small.rows() == 5 && small.cols() == 7, "assigning a LARGER matrix resizes" );
+	expect( matricesEqual( small, big ), "and copies every value" );
+
+	Matrix< double > big2 = filledMatrix( 6, 6, 30 ), tiny = filledMatrix( 1, 2, 40 );
+	big2 = tiny;
+	expect( big2.rows() == 1 && big2.cols() == 2, "assigning a SMALLER matrix resizes" );
+	expect( matricesEqual( big2, tiny ), "and copies every value" );
+
+	vector< Matrix< double > > src, dst;
+	src.push_back( filledMatrix( 2, 3, 70 ) );
+	src.push_back( filledMatrix( 4, 1, 80 ) );
+	dst.push_back( filledMatrix( 9, 9, 90 ) ); // wrong shape AND wrong count
+	dst = src;
+	expect( dst.size() == 2, "vector<Matrix> assignment copies the element count" );
+	expect( matricesEqual( dst[ 0 ], src[ 0 ] ) && matricesEqual( dst[ 1 ], src[ 1 ] ),
+		"and each element resizes and copies" );
+
+	vector< Matrix< double > > orig = src, buf = src;
+	src[ 0 ]( 0, 0 ) = -1;
+	src = buf;
+	expect( matricesEqual( src[ 0 ], orig[ 0 ] ) && matricesEqual( src[ 1 ], orig[ 1 ] ),
+		"buffer / restore round trip" );
+}
+
 int main()
 {
 	// A 4x2 Matrix whose values encode their own position: A(r,c) = 10r + c
@@ -66,9 +127,11 @@ int main()
 	expect( C.rows() == 4 && C.cols() == 1 && C( 2, 0 ) == 21.0,
 		"includecols output is one column per included position" );
 
+	test_assignment();
+
 	if ( failures == 0 )
 	{
-		cout << "check_matrix: row gather and column include behave as documented" << endl;
+		cout << "check_matrix: row gather, column include and assignment behave as documented" << endl;
 		return 0;
 	}
 	cerr << "check_matrix: FAILED" << endl;
