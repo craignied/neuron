@@ -2,6 +2,14 @@ name: CI
 
 on: [push, pull_request]
 
+# Cancel a superseded run rather than leaving obsolete three-platform matrices
+# racing the current one. Successive pushes otherwise leave several full
+# matrices running at once, which wastes capacity and makes the commit status
+# display hard to read -- an old run going red says nothing about HEAD.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-test:
     strategy:
