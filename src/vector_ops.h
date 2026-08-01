@@ -25,6 +25,61 @@ namespace nvec {
 	// (random_positions -- a rejection-sampling permutation shuffle, O(n^2) --
 	//    was retired 2026-07-22 when the stratified splitter moved to a partial
 	//    Fisher-Yates on row indices; see src/split.cpp and ROADMAP 4.)
+
+	// --- The bounds contract of this layer (D5, 2026-08-01) ---------------
+	//
+	// These operations walk two containers in lockstep, or index into one by
+	//    position. Violating that is not a data condition to be handled -- it
+	//    is a programming error that reads or writes memory the operation does
+	//    not own. They are therefore checked UNCONDITIONALLY.
+	//
+	// Not by assert. The engine ships with NDEBUG defined (CMakeLists.txt
+	//    forces Release when no build type is given, and Release is
+	//    `-O3 -DNDEBUG`), so every ctest target already runs with assertions
+	//    compiled out: not one assertion in this file has ever executed in the
+	//    gate chain. This is the same argument that makes
+	//    Matrix< T >::operator() throw rather than assert (standing rule 4),
+	//    now applied to the layer beside it.
+	//
+	// The motivating defect: SimpleProp passed hO (nHidden + 1 elements, the
+	//    last one the bias slot) into h_err (nHidden) through the unranged
+	//    func(), which writes vec_in.size() elements into vec_out -- one past
+	//    the end of h_err in every shipped build. The fix was to make the
+	//    caller state its domain, func( hO, d_sigmoidal(), h_err, 0,
+	//    nHidden - 1 ); the contract has to keep forcing that.
+	//
+	// Declared here, in the vector layer. Reusing Matrix's BoundsViolation
+	//    would make vector_ops depend UPWARD on a sibling (neither header
+	//    includes the other; only matrix.cpp includes this one).
+	//
+	// Three types, flat, because they answer three different diagnostic
+	//    questions. See refactor_audit.md section 11.
+
+	// Parallel containers of incompatible length
+	class SizeMismatch : public std::exception
+	{
+		public:
+			const char * what() const noexcept override
+				{ return "vector size mismatch"; }
+	};
+
+	// A position or range outside the container it indexes
+	class RangeViolation : public std::exception
+	{
+		public:
+			const char * what() const noexcept override
+				{ return "vector range violation"; }
+	};
+
+	// An operation with no value on the empty set (minabs, maxabs). A sum has
+	//    an identity and is NOT in this category: squared(), dotprod() and
+	//    sumSquaredDifference() all return 0 over empty operands.
+	class EmptyVector : public std::exception
+	{
+		public:
+			const char * what() const noexcept override
+				{ return "empty vector has no value for this operation"; }
+	};
 }
 
 // Overloaded unary mathematical operators...

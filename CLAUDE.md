@@ -118,6 +118,26 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
    foot) so that this particular hole cannot silently reopen; nothing equivalent guards
    the other suites, so the practice is the guard.
 
+   **Memory-safety instrumentation is a targeted diagnostic, not a full-suite gate.**
+   ASan is currently unusable in this macOS agent environment: on 2026-08-01 three
+   separately built ASan executables, including a trivial `printf( "hello" )` control,
+   hung during startup even with leak detection disabled. This proves an execution-
+   environment limitation, not a neuron defect or necessarily a machine-wide defect.
+   **Do not retry ASan, increase its timeout, or launch broader ASan builds here unless
+   the agent environment changes and a trivial control first completes immediately.**
+   Terminate a timed-out diagnostic and verify that it did not remain in the background.
+
+   For vector/container bounds questions, a tiny libc++ hardened-mode harness is the
+   working local substitute (it ran immediately and independently caught D5's invalid
+   dereference as `SIGTRAP`). Run only the smallest relevant library and deterministic
+   cases, isolate expected-abort cases so one cannot hide the rest, and first prove a
+   valid control succeeds. Do not run all of `ctest`, GUI smoke, goldens, bootstrap-heavy
+   reports, or the oracle under ASan, UBSan, or hardened mode unless the task specifically
+   requires it. Permanent coverage belongs in ordinary Release/`NDEBUG` tests of the
+   public contract; instrumentation is supporting sabotage evidence. Verify that the
+   instrumented or hardened source was actually rebuilt before trusting any result, and
+   remove temporary harnesses and binaries afterward.
+
 3. **A doc that names a mechanism is a hypothesis, not a finding — measure before acting
    on it, including docs written here.** Also 2026-07-15: this file's own ROADMAP said
    "make the χ² p-value non-fatal, do this first", from a causal story ("zero-SD bins →

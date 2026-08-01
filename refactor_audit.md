@@ -1215,8 +1215,332 @@ Two corrections to the plan, found by building it:
 All 17 `ctest` names are byte-identical to the pre-refactor list, checked by
 diffing `ctest -N` across a `git stash`.
 
+---
+
+## 11. D5 — the bounds policy of the numerical vector layer
+
+**This section is the design. It was written before `vector_ops.h` was edited**
+(Sol's instruction, 2026-08-01), because the question is not "replace the assert
+in `func`" but "what does this layer promise, in the build we actually ship".
+
+### 11.1 The finding that forces it, and the finding that widens it
+
+**The motivating defect, proven.** `SimpleProp::trainSet` passes `hO`
+(`nHidden + 1` elements, last one the bias slot) into `h_err` (`nHidden`). Given
+the *unranged* `func( vec_in, fx, vec_out )`, `transform` writes `vec_in.size()`
+elements into `vec_out` — one past the end of `h_err`. The guard is
+`assert ( vec_in.size() == vec_out.size() )`. In a checked build the assert
+fires; in the shipped build it does not exist.
+
+**The wider finding, measured today.** `build/CMakeCache.txt`:
+
+```
+CMAKE_CXX_FLAGS_RELEASE:STRING=-O3 -DNDEBUG
+```
+
+and `CMakeLists.txt:11` forces `CMAKE_BUILD_TYPE=Release` when none is given. So
+**every one of the 19 `ctest` targets already runs with `NDEBUG` defined**. Not
+one `vector_ops` assertion has ever executed in the gate chain. The assertions
+are not a weaker guard than they appear — in the configuration this project
+builds, tests, and ships, they are *not a guard at all*.
+
+That also makes `CMakeLists.txt:8` wrong where it reassures:
+
+> asserts vanish under -DNDEBUG by design (handlers validate; Matrix bounds
+> checks are unconditional throws, not asserts)
+
+True of `Matrix`, and false of the layer beside it. Corrected in D5b.
+
+### 11.2 The inventory
+
+Every operation in `src/vector_ops.{h,cpp}`, not only the ones carrying an
+`assert`. **Class** is: **A** = a violation can construct an invalid iterator,
+read past a container, write past a destination, or dereference an empty one;
+**B** = a violation gives a mathematically undefined *value* but touches no
+memory it does not own; **—** = no precondition to violate.
+
+| # | Operation | Precondition | Debug today | Release today | Class | Proposed |
+|---|---|---|---|---|---|---|
+| 1 | `nvec::random( v, n )` | none — fills existing elements | ok | ok | — | unchanged |
+| 2 | `operator+= -= *= /=( vector<T>&, const vector<T>& )` (4) | `lhs.size() <= rhs.size()` — **prefix, deliberate**, see 11.3 | `assert` | **reads `lhs.size()` elements out of a shorter `rhs`** | A | `throw nvec::SizeMismatch` |
+| 3 | `operator+ - * /( vector<T>, const vector<T>& )` (4) | as #2; `lhs` is a by-value copy, so the result takes `lhs`'s size | via #2 | via #2 | A | inherited from #2 |
+| 4 | `operator+= -= *= /=( vector<T>&, const T )` (4) | none | ok | ok | B (`/=` by a zero scalar) | unchanged — see 11.4 |
+| 5 | scalar `+ - * /` (6 overloads, both operand orders for `+`/`*`) | none | ok | ok | — | unchanged |
+| 6 | `operator<<( ostream&, const vector<T>& )` | none | ok | ok | — | unchanged |
+| 7 | `operator>>( istream&, vector<T>& )` | none — reads into existing elements only, so it silently consumes `rhs.size()` items | ok | ok | — | unchanged |
+| 8 | `operator==`, `operator!=` | none — size difference is an explicit `if`, returning `false` | ok | ok | — | unchanged |
+| 9 | `dotprod( v1, v2 )` | `v1.size() == v2.size()` — **equality, deliberate**, see 11.3 | `assert` | **`inner_product` reads `v1.size()` from a shorter `v2`** | A | `throw nvec::SizeMismatch` |
+| 10 | `func( vec_in, fx, vec_out )` | `vec_in.size() == vec_out.size()` | `assert` | **writes `vec_in.size()` into a shorter `vec_out`** — the proven defect | A | `throw nvec::SizeMismatch` |
+| 11 | `func( vec_in, fx, vec_out, a, b )` | `a <= b`, `b < vec_out.size()`, **and `b < vec_in.size()`** | `assert` — **and the input bound is not asserted at all** | reads past `vec_in`; `a > b` forms a reversed range | A | `throw nvec::RangeViolation` on **both** sides |
+| 12 | `func( vec_in, fx )` | none — allocates `vec_in.size()`, so it always satisfies #10 | ok | ok | — | unchanged |
+| 13 | `func( vec_in, fx, a, b )` | `a <= b`, `b < vec_in.size()` | `assert` | reads past `vec_in` | A | `throw nvec::RangeViolation` |
+| 14 | `flatten( container, vec )` / `flatten( container )` | none — `clear()` then `push_back` | ok | ok | — | unchanged |
+| 15 | `squared( v )` | none — empty sums to `0`, the correct identity | ok | ok | — | unchanged |
+| 16 | `sumSquaredDifference( a, b )` | `a.size() == b.size()` | `assert` | **walks `b` in lockstep with `a`, past its end** | A | `throw nvec::SizeMismatch` |
+| 17 | `maxabs( v )` | non-empty — see 11.5 | none; empty returns `0` | same | A′ | `throw nvec::EmptyVector` |
+| 18 | `minabs( v )` | non-empty | none; **dereferences `*v.begin()` unconditionally** | same — UB on empty | A | `throw nvec::EmptyVector` |
+| 19 | `bin( v_in, b, binFlag, v )` | `b > 0`; empty input is harmless | `assert( b > 0 )`, `assert( v_in.size() > 0 )` | **`v_in.size() / b` with `b == 0` is integer division by zero** — UB, `SIGFPE` on both our targets | A | `throw nvec::SizeMismatch` on `b == 0`; empty input **accepted** (yields one empty bin, as today) |
+| 20 | `bin( v_in, b, binFlag )` | as #19 | via #19 | via #19 | A | inherited |
+
+Counting overloads, that is 36 functions, of which **13 can misuse memory in the
+shipped build** and are protected today by nothing.
+
+### 11.3 The `<=` / `==` asymmetry is intentional. Do not normalize it.
+
+Sol asked this to be settled from call sites and documented formulas rather than
+by taste. It is settled, and it is load-bearing:
+
+- `src/simpleprop.cpp:584` — *"Note also that although `oW` has 1 more element
+  than `h_err`, its last element will be ignored in `*=`"*. `oW` is
+  `nHidden + 1` (bias); `h_err` is `nHidden`.
+- `src/backprop.cpp:476` — *"in the case of bias, where size `HErrors[]` <
+  `Weights[]` cols, that the result of `dotprodt` will truncate to `HErrors[]`
+  size, and that the result of `func`, also > size `HErrors[]`, will truncate to
+  size of `HErrors[]` because `*=` results in the size of LHS"*.
+- `src/vector_ops.h:88` — the binary operators take `lhs` **by value**, so the
+  result carries `lhs`'s size. The prefix rule is the same rule.
+
+So the compound operators implement a deliberate **prefix** semantic that the
+bias-slot arithmetic of both networks depends on. `dotprod` requires **equality**
+because a dot product over a prefix is a *different scalar*, and silently
+returning it is the failure mode a bounds check exists to prevent.
+
+`func( in, fx, out )` keeps equality for the same reason, and this is the point
+of the whole exercise: the operation that truncates says so in its contract; the
+operation that does not, refuses. Had `func` quietly accepted a longer input as a
+prefix, `SimpleProp` would have been "correct" by definition and the bias slot
+would have been silently squared into the hidden error. The fix was to make the
+caller state its domain — `func( hO, d_sigmoidal(), h_err, 0, nHidden - 1 )` —
+and the contract must keep forcing that.
+
+### 11.4 What deliberately stays unchecked
+
+- **Scalar `/=` by zero** (#4). A mathematical result, not a memory access;
+  `double` gives IEEE infinity. Adding a branch would put a test inside a
+  per-element scalar loop for a case no caller has. `TwoSet`'s rate accessors
+  already show where a zero denominator genuinely needs refusing — at the
+  formula, not in the vector layer.
+- **Empty input to `squared`, `dotprod`, `sumSquaredDifference`** (#15, #9, #16).
+  A sum over an empty index set is `0`, and that identity is already asserted:
+  `tests/errorfunc/check_errorfunc.cpp:153`.
+- **Empty input to `bin`** (#19). Memory-safe today (`n = 0`, the short-input
+  branch appends the empty vector) and there is no reason to make it an error.
+  Note the `assert( v_in.size() > 0 )` currently there is stricter than the code
+  needs; it is dropped rather than promoted.
+
+### 11.5 Two judgement calls, stated rather than buried
+
+**`maxabs` on an empty vector.** It returns `0` today, because `result` is
+initialised to `0` and the loop simply does not run. That is memory-safe but it
+is a *lie*: the maximum of an empty set has no value, and `0` is the one value a
+caller acts on — `Network::getGradMax()` feeds it straight to the gradient
+stopping rule, where "the largest gradient is 0" means *converged*. A model with
+no parameters would be certified as having converged.
+
+I checked whether that path is live, rather than assuming either way. It is not:
+`maxabs` has four live call sites (`network.cpp:510, 535, 576, 763`; the two in
+the commented-out historical block do not count). Three take `stackG`, the packed
+gradient, whose size is `df()` — and no model returns `0` from `df()`
+(`Logistic::df()` is `getInput() + 1`, so even forward stepwise's empty baseline
+has the intercept). The fourth takes `eigenv`, sized `dimension`, and
+`conditionOf` returns early at `dimension == 0`. **So refusing empty changes no
+reachable behavior**, and it removes a false convergence signal from a future
+one. Proposed: `maxabs` and `minabs` both refuse, symmetrically.
+
+**`bin` has no production caller at all.** Grepped: the only match outside
+`vector_ops.h` is a local variable named `bin` in `tests/binormal/check_az.cpp:80`.
+It is guarded here because it is public API of the layer and D5's job is the
+layer's contract — but *whether it should exist* is a separate question for
+Craig, not one to settle inside a bounds commit.
+
+### 11.6 The exception contract
+
+Declared in the vector layer, in the `nvec` namespace that already exists there:
+
+```cpp
+namespace nvec {
+    // A vector operation refuses operands it cannot compute over without
+    //    reading or writing outside them. These are CONTRACT violations --
+    //    programming errors, not data conditions -- and they are checked
+    //    unconditionally, because the engine ships with NDEBUG defined.
+    class SizeMismatch    : public std::exception { ... };  // parallel containers of incompatible length
+    class RangeViolation  : public std::exception { ... };  // positions outside the container they index
+    class EmptyVector     : public std::exception { ... };  // an operation with no value on the empty set
+}
+```
+
+Three flat types, no hierarchy beyond `std::exception`. They are distinguished
+because they answer different diagnostic questions — *"your two vectors disagree"*,
+*"your indices are outside"*, *"there is nothing to compute"* — which is the
+condition Sol set for splitting them.
+
+- **No upward dependency.** `vector_ops.h` and `matrix.h` are siblings (neither
+  includes the other; only `matrix.cpp` includes `vector_ops.h`), so reusing
+  `Matrix<T>::BoundsViolation` would invert the layering. Verified, not assumed.
+- **They derive from `std::exception` and carry a `what()`**, unlike
+  `Matrix::BoundsViolation`, whose `: public std::exception` is commented out at
+  `matrix.h:121`. That is deliberate: `catch ( ... )` still works everywhere it
+  works today, and the GUI's existing `catch ( const exception& e )` handlers
+  (e.g. `gui.cpp:1070`) newly get a message instead of letting the throw reach
+  cpp-httplib. Bringing `Matrix::BoundsViolation` into line is a **separate
+  commit**, not smuggled into this one.
+
+### 11.7 Policy, in the form it will be applied
+
+1. Every Class-A precondition is checked **unconditionally**, in Release.
+2. **The replaced asserts are removed, not kept beside the throws.** An `assert`
+   next to an unconditional check adds nothing and re-teaches the reader the
+   exact misconception that produced this defect — that these are debug-only
+   concerns. After D5b, `vector_ops.h` contains no assertions.
+3. **Checks happen once, before the loop, never per element.** All of them are
+   integer comparisons ahead of an O(n) transform. Rule 7 says measure rather
+   than assert that this is free; the measurement is in D5b's plan below.
+4. **No destination is silently resized.** A destination-taking operation
+   *rejects* an incompatible destination. Automatic resizing would hide exactly
+   the model-shape defect this is here to surface.
+5. **The successful path is untouched** — same equations, same iteration
+   domains, same allocations. Goldens byte-identical, model files byte-identical.
+6. Exact-size requirements are not weakened, and prefix requirements are not
+   tightened (11.3).
+
+### 11.8 The test, and why an ordinary test target would not do
+
+A `ctest` case that passes proves nothing here unless it is compiled the way the
+engine ships. `check_vector_bounds` therefore sets `NDEBUG` **explicitly**:
+
+```cmake
+add_executable(check_vector_bounds tests/vectorops/check_vector_bounds.cpp)
+target_link_libraries(check_vector_bounds PRIVATE neuron_core)
+target_compile_definitions(check_vector_bounds PRIVATE NDEBUG)
+add_test(NAME vector_ops_bounds COMMAND check_vector_bounds)
+```
+
+Release already defines it, but a `Debug` configuration would not, and the
+guarantee must not depend on how someone configured their build directory.
+
+**One case per process.** Run with no argument it runs every case and is an
+ordinary ctest case. Run as `check_vector_bounds <n>` it runs exactly one. That
+second mode exists for the *demonstration*: against the current assert-only code
+these cases do not throw, they corrupt memory, and a crash in case 3 would
+otherwise hide cases 4–13. The driver runs each in its own process and records
+the exit status.
+
+Cases: the twelve Class-A violations of 11.2, plus the one Sol singled out
+(`b` outside the **input** of the destination-range `func`, which no assert
+covers today), plus positive controls — boundary-valid ranges, single-element
+ranges, equal empty vectors where the contract permits them, a **longer** right
+operand on each compound operator (the prefix semantic of 11.3, which must keep
+working), and ordinary calculations.
+
+**Three proofs of meaning, per Sol:**
+
+1. the focused target is shown to have been rebuilt with `NDEBUG` (compile line
+   recorded, not assumed — stale binaries have produced false results three
+   times in this refactor);
+2. the shipped assert-only `func` is restored and the Release-focused test is
+   shown to fail, or a sanitizer is shown to catch the invalid access;
+3. the input-bound check and the destination-bound check are sabotaged
+   **independently**, so the test is proven to hold both contracts and not one
+   twice.
+
+Proofs 1 and 2 are measured in 11.12 — D5a *is* the restored state, so the
+harness runs against the assert-only operations directly. Proof 3 belongs to
+D5b, where there are checks to sabotage.
+
+Sanitizers are a one-time memory-safety proof. The permanent suite asserts the
+public exception contract and does not depend on their availability — the same
+split used for the `TwoSet` denominator fix.
+
+### 11.12 D5a, measured
+
+**The compile line, read rather than assumed** (`build/CMakeFiles/check_vector_bounds.dir/flags.make`):
+
+```
+CXX_DEFINES = -DNDEBUG
+CXX_FLAGS   = -O3 -DNDEBUG -std=c++17 -arch arm64
+```
+
+**`tests/vectorops/run_bounds_demo.sh`, against the unchanged operations:**
+
+```
+held: 10    unprotected: 15    crashed: 2
+```
+
+**All seventeen Class-A contracts are unenforced in the shipped build.** Fifteen
+ran silently outside their operands and returned a value; two —
+`func( in, f, out, a, b )` and `func( in, f, a, b )` with `a > b`, which form a
+reversed iterator range — killed the process with `SIGBUS`. **All ten positive
+controls held**, including both prefix cases: a longer right operand on `*=` and
+`+=` still truncates to the left-hand size, which is what `SimpleProp`'s
+`h_err *= oW` and `BackProp`'s hidden-error chain depend on.
+
+**A second microscope, and one that is not available.** The same source built
+with libc++'s hardened mode
+(`-D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG -DNDEBUG -O1`)
+additionally traps case 15, `minabs` on an empty vector, with `SIGTRAP` — an
+independent confirmation that `*v.begin()` there is a real invalid dereference
+and not merely an unchecked contract. It does not catch the `transform` cases:
+hardening validates a dereference, not the relationship between two iterators
+handed to an algorithm.
+
+**AddressSanitizer does not work on this machine, and the finding is that it is
+broken, not that it is slow.** An ASan build of
+
+```cpp
+#include <cstdio>
+int main(){ printf("hello\n"); return 0; }
+```
+
+compiles and then hangs at startup, producing no output, with and without the
+tool sandbox. That is not instrumentation overhead — Sol's rule applies:
+*"if even a tiny focused target times out, that indicates a broken invocation, a
+hung program, or an overbroad build."* It was the runtime itself. ASan is
+therefore not used here; proof 2 is satisfied by its other branch, the
+Release-focused test failing, which it does on every one of the seventeen. Note
+that `-fsanitize=float-divide-by-zero` **did** work earlier in this refactor (the
+`TwoSet` ordering proof) — UBSan-style checks are inline instrumentation and need
+no shadow-memory remapping, so "sanitizers" is not one capability here.
+
+### 11.9 Commits
+
+- **D5a** — this section; the `nvec` exception vocabulary; the harness, built
+  under `NDEBUG` against the *unchanged* operations and recorded as failing every
+  Class-A contract. **Not registered with `add_test` yet**, so the gate chain
+  stays green while the gap is on the record.
+- **D5b** — the checks; the harness wired into `ctest`; `CMakeLists.txt:8`'s
+  claim corrected; the obsolete assert-only commentary removed; `CLAUDE.md`
+  rule 4 amended (11.10); manifest updated only if the layer's documented public
+  contracts change, in its established vertical method-by-method format.
+
+### 11.10 Rule 4 needs one sentence
+
+Rule 4 argues bounds safety entirely through `Matrix::operator()`, and
+`CMakeLists.txt` repeats it. Both read as though `Matrix` were the whole
+guarantee. The amendment states that **both** `Matrix` and the numerical vector
+operations reject bounds and dimension violations in Release — which is what
+makes the class layer worth staying inside.
+
+### 11.11 Carried forward: an unverified observation, not a finding
+
+Recorded so compaction cannot lose it. **Not investigated, and not to be
+investigated until D5 is reviewed.**
+
+While proving commit D (the `BackProp` weight buffer, `c70788a`) behavior-
+preserving, the fixture — `BackProp`, batch + epoch, automatic step size, two
+hidden layers, seeded — produced **the identical final training-set error
+`0.58003708523755504` under all three optimizers** (canonical, CGD, Shanno).
+Three different algorithms should not agree to seventeen digits.
+
+It does not affect commit D's proof: the value is the same in both binaries, and
+the buffer was separately shown to be load-bearing (deleting the restore moves it
+to `0.57396971890726223`), so the before/after comparison did exercise the changed
+code. But either the fixture does not discriminate between optimizers, or
+`Network::engine` dispatch is inert on that path. Both are worth knowing. Neither
+is claimed.
+
 
 ---
 
 *Prepared by Claude (Opus 5). Reviewed by Sol (2026-07-31); revised §8 in response.
-Nothing in `src/` has been modified.*
+§9–§11 are the implementation record: §§8.7–8.8 and 9–10 describe work now
+committed, and §11 is the D5 design, written before its code.*

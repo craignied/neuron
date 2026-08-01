@@ -282,3 +282,21 @@ add_test(NAME error_function COMMAND check_errorfunc)
 add_executable(check_rates tests/twoset/check_rates.cpp)
 target_link_libraries(check_rates PRIVATE neuron_core)
 add_test(NAME twoset_rates COMMAND check_rates)
+
+# The bounds contract of the numerical vector layer (D5).
+#
+# NDEBUG is set EXPLICITLY, not inherited. Every precondition in vector_ops.h
+# was an assert, and this project forces Release (-O3 -DNDEBUG) when no build
+# type is given -- so all nineteen ctest targets already ran with assertions
+# compiled out and not one of those assertions had ever executed in the gate
+# chain. A checked build would let this target pass while leaving the shipped
+# defect intact, so it must not depend on how the build directory was
+# configured.
+#
+# NOT registered with add_test in this commit (D5a). The operations are still
+# assert-only, so these cases do not throw -- they corrupt memory, which is the
+# point. tests/vectorops/run_bounds_demo.sh runs each case in its own process
+# and records the gap; the ctest registration lands with the checks (D5b).
+add_executable(check_vector_bounds tests/vectorops/check_vector_bounds.cpp)
+target_link_libraries(check_vector_bounds PRIVATE neuron_core)
+target_compile_definitions(check_vector_bounds PRIVATE NDEBUG)
