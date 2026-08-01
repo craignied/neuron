@@ -537,6 +537,12 @@ static void roundTrip( DataSet& d, unsigned hidden, const string& file,
 	util::chopEndl( line1 );
 	util::chopEndl( line2 );
 	expect( line1 == typeName, label + " saves its type name on line 1" );
+	// The saved identifier IS Model::getType(): the same string the engine
+	//    reports, the factory recreates from, and RegressNet/the GUI now read
+	//    instead of re-deriving by typeid. Checked on the SAVER here and on the
+	//    LOADER below, because a type name that survived construction but not a
+	//    round trip would be a model-format defect.
+	expect( saved.getType() == typeName, label + " reports that type name" );
 	expect( line2 == biasLine, label + " saves its bias convention on line 2" );
 
 	PROBE loaded;
@@ -556,6 +562,9 @@ static void roundTrip( DataSet& d, unsigned hidden, const string& file,
 	// is a property of the shipped format, not of this test, and any extraction
 	// must leave it exactly as it is: the first two lines of the file are read
 	// back by load(), and the oracle comparison forward-passes these same files.
+	expect( loaded.getType() == typeName,
+		label + " still reports its type name after loading" );
+
 	double after = outputSignature( loaded );
 	expect( fabs( after - before ) / fabs( before ) < 1e-6,
 		label + " round trip reproduces every output to the format's precision" );
@@ -574,6 +583,21 @@ static void test_saveload()
 		"Bias nodes on all layers by definition", "SimpleProp" );
 	roundTrip< ProbeBare >( d, 3, "check_props_bare.net", "BareProp",
 		"No bias nodes by definition", "BareProp" );
+
+	// A COPY reports the same type. Model::copy carries objType, and the clone
+	//    path (netclone) is what stepwise regression, autoalgo and OBD build
+	//    their working models with -- all three now read getType() rather than
+	//    dispatching on typeid.
+	{
+		ProbeSimple original;
+		original.setDataSet( d );
+		original.setHidden( 3 );
+		quieten( original );
+		util::set_seed( 7 );
+		original.randomize();
+		ProbeSimple copied( original );
+		expect( copied.getType() == "SimpleProp", "a copy reports its type name" );
+	}
 }
 
 // --- 7. Validation-set monitoring, every model type that claims it --------

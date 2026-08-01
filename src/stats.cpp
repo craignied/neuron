@@ -828,7 +828,7 @@ void XY::fit()
 			ss = 0.0;
 			for ( i = 0; i < ndata; i++ )
 			{
-				wt = 1.0 / sqr( sig[ i ] );
+				wt = 1.0 / stats::sqr( sig[ i ] );
 				ss += wt;
 				sx += x[ i ] * wt;
 				sy += y[ i ] * wt;
@@ -870,7 +870,7 @@ void XY::fit()
 		if ( !mwt )
 		{
 			for ( i = 0; i < ndata; i++ )
-				_chi2 += sqr( y[ i ] - _a - _b * x[ i ] );
+				_chi2 += stats::sqr( y[ i ] - _a - _b * x[ i ] );
 			_q = 1.0;
 			sigdat = sqrt( _chi2 / ( ndata - 2 ) );
 			_siga *= sigdat;
@@ -879,7 +879,7 @@ void XY::fit()
 		else
 		{
 			for ( i = 0; i < ndata; i++ )
-				_chi2 += sqr( ( y[ i ] - _a - _b * x[ i ] ) / sig[ i ] );
+				_chi2 += stats::sqr( ( y[ i ] - _a - _b * x[ i ] ) / sig[ i ] );
 			_q = fitProbability( _chi2, ndata );
 		}
 		_r = ( -sx / ( ss * st2 ) ) / ( _siga * _sigb );
@@ -929,7 +929,7 @@ XY::XY( vector< double >& __x, vector< double >& __y, vector< double >& sigx,
 	{
 		yy[ j ] = y[ j ] * scale;
 		sy[ j ] = sigy[ j ] * scale;
-		ww[ j ] = sqrt( sqr( sx[ j ] ) + sqr( sy[ j ] ) );
+		ww[ j ] = sqrt( stats::sqr( sx[ j ] ) + stats::sqr( sy[ j ] ) );
 	}
 	sig = ww;
 	ndata = ndat;
@@ -1019,7 +1019,7 @@ XY::XY( vector< double >& __x, vector< double >& __y, vector< double >& sigx,
 			bmn = f3.zbrent( b, b - bmn, ACC ) - b;
 			amn = aa - a;
 			sigb = sqrt( 0.5 * ( bmx * bmx + bmn * bmn ) ) /
-				( scale * sqr( cos ( b ) ) );
+				( scale * stats::sqr( cos ( b ) ) );
 			siga = sqrt( 0.5 * ( amx * amx + amn * amn ) + r2 ) / scale;
 		}
 		else
@@ -1045,7 +1045,7 @@ double XY::chixy( double bang )
 	b = tan( bang );
 	for ( j = 0; j < nn; j++ )
 	{
-		ww[ j ] = sqr( b * sx[ j ] ) + sqr( sy[ j ] );
+		ww[ j ] = stats::sqr( b * sx[ j ] ) + stats::sqr( sy[ j ] );
 		sumw += (ww[ j ] = ( ww[ j ] == 0.0 ? BIG : 1.0 / ww[ j ] ) );
 		avex += ww[ j ] * xx[ j ];
 		avey += ww[ j ] * yy[ j ];
@@ -1056,7 +1056,7 @@ double XY::chixy( double bang )
 	avey /= sumw;
 	aa = avey - b * avex;
 	for ( ans = -offs, j = 0; j < nn; j++ )
-		ans += ww[ j ] * sqr( yy[ j ] - aa - b * xx[ j ] );
+		ans += ww[ j ] * stats::sqr( yy[ j ] - aa - b * xx[ j ] );
 	return ans;
 }
 

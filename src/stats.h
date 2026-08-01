@@ -247,8 +247,8 @@ private:
 	bool mwt; // flag indicates if dataset has std deviations
 
 	// Utility functions
-	// Returns the square of a value
-	inline double sqr( double x ) { return x * x; }
+	// ( sqr lives once, in namespace stats -- this class had its own identical
+	//   copy until 2026-08-01 )
 	// Utility function for modeling straight line
 	void fit(); // Numerical Recipes in C p.665
 	// Captive function of fitexy, see Numerical Recipes in C p.670

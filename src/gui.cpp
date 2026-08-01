@@ -1023,9 +1023,10 @@ string handleModel( const httplib::Request& req )
 		modelPtr = modelfactory::build( spec, *dataPtr, err );
 		if ( !modelPtr ) return jsonMsg( false, err );
 
-		// The concrete class the factory chose, for the readback message.
-		string kind = dynamic_cast< SimpleProp* >( modelPtr.get() ) ? "SimpleProp"
-			: dynamic_cast< BareProp* >( modelPtr.get() ) ? "BareProp" : "BackProp";
+		// The concrete class the factory chose, for the readback message. The
+		//    model knows its own type name -- it is the same string saved as the
+		//    first line of a model file -- so this does not re-derive it.
+		string kind = modelPtr->getType();
 
 		ostringstream msg;
 		msg << kind << " " << dataPtr->getInput() << "-";

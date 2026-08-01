@@ -247,23 +247,15 @@ bool RegressNet::copy_network()
 	return success;
 }
 
-// Returns the name of the type of Network
+// Returns the name of the type of Network -- which the Model already knows.
+//    This was seventeen lines of typeid dispatch returning exactly the objType
+//    strings the four constructors set, with "unknown" for anything else. Model
+//    carries that string, saves it as the first line of every model file, and
+//    reads it back on load; getType() is therefore the authoritative answer and
+//    a new Network type now reports its real name instead of "unknown".
 string RegressNet::network_name() const
 {
-	string network_type;
-
-	if ( typeid( *netPtr ) == typeid( BareProp ) ) // it's a BareProp network
-		network_type = "BareProp";
-	else if ( typeid( *netPtr ) == typeid( SimpleProp ) ) // it's a SimpleProp network
-		network_type = "SimpleProp";
-	else if ( typeid( *netPtr ) == typeid( BackProp ) ) // it's a BackProp network
-		network_type = "BackProp";
-	else if ( typeid( *netPtr ) == typeid( Logistic ) ) // it's a Binary logistic network
-		network_type = "Binary logistic";
-	else
-		network_type = "unknown";
-
-	return network_type; // return string now containing name
+	return netPtr->getType();
 }
 
 // Stepwise reverse regression
