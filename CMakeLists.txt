@@ -108,6 +108,22 @@ target_include_directories(check_obd PRIVATE src)
 target_link_libraries(check_obd PRIVATE GSL::gsl GSL::gslcblas)
 add_test(NAME obd_sizing COMMAND check_obd)
 
+# CHARACTERIZATION test: what SimpleProp and BareProp observably do, pinned
+# BEFORE the shared-mechanism extraction (refactor_audit.md 8.2) so that
+# extraction can be proven behavior-preserving. Asserts forward outputs, exact
+# errors on the batch/non-batch, auto-step-size and CGD/Shanno paths, the saved
+# file format, a save/load round trip, and validation-set monitoring for all
+# four model types. Run with --capture to print the literals it compares
+# against; re-capturing is not a fix (see the header).
+add_executable(check_props
+    tests/props/check_props.cpp
+    src/simpleprop.cpp src/bareprop.cpp src/backprop.cpp src/logistic.cpp
+    src/network.cpp src/iterative.cpp src/model.cpp src/dataset.cpp src/split.cpp
+    src/twoset.cpp src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
+target_include_directories(check_props PRIVATE src)
+target_link_libraries(check_props PRIVATE GSL::gsl GSL::gslcblas)
+add_test(NAME prop_characterization COMMAND check_props)
+
 # Unit test: DeLong's test for correlated ROC areas (ROADMAP 4 Phase 4, the
 # locked-test inference layer). AUC == the engine's exact Mann-Whitney area, a
 # 2-classifier fixture pinned to an independent Python DeLong, and structural
