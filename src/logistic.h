@@ -75,6 +75,12 @@ private:
 
 	double o_err; // output error term
 
+	// Fill grads with one column per training exemplar -- that exemplar's
+	//    gradient of the objective with respect to the beta weights. Read-only
+	//    with respect to the model: it forward propagates and writes only the
+	//    grads Matrix. See Network::collectGradients for why that matters.
+	virtual bool collectGradients();
+
 	// Copy utility
 	void copy( const Logistic& rhs );
 

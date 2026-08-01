@@ -140,7 +140,12 @@ protected:
 		batchEpochFlag,        // flag indicates if batch/epoch training
 		weightDecayFlag,       // flag indicates if weight decay is used
 		automaticStepSizeFlag, // flag indicates if automatic step size algorithm is used
-		finalFlag;             // flag identifies a final innerTrainSet()
+		finalFlag;             // RETIRED 2026-08-01: nothing sets it. It marked
+		                       //    the gradient-harvesting call to
+		                       //    innerTrainSet() that computeCondNum() used
+		                       //    to make; collectGradients() replaced that.
+		                       //    Kept only because Network::copy carries it
+		                       //    and removing a member is a separate change.
 
 	unsigned trainingType, // training method ( canonical backprop = 0,
 		                   // conjugate gradient descent = 1,
@@ -187,9 +192,29 @@ protected:
 	//    is the exemplar number
 	void storeGrads( unsigned );
 
-	// Compute the condition number of the B matrix (runs the final training
-	//    pass and the eigenvalue calculation), storing condNum/condMaxEig/
-	//    condMinEig; reportCondNum prints those stored values
+	// Fill the grads Matrix with one column per training exemplar, each column
+	//    that exemplar's gradient of the objective with respect to the model's
+	//    parameters -- the raw material for the B matrix below.
+	//
+	//    IT MUST NOT TRAIN. Until 2026-08-01 computeCondNum() obtained these by
+	//    setting finalFlag and calling innerTrainSet(), which forward
+	//    propagates and computes gradients -- and then also runs the optimizer
+	//    transformation and UPDATES THE WEIGHTS. Reporting a diagnostic
+	//    therefore moved the model: an audible Logistic run ended one gradient
+	//    step past the weights whose error it had just reported, while a quiet
+	//    run did not. It also disturbed G, stackG, lastG/lastF and the
+	//    step-size accumulators, so a continued run diverged from a control.
+	//
+	//    Returns false when this model does not supply gradients for a
+	//    condition number, which is the default: only Logistic reports one, and
+	//    a premature generic interface would oblige every network to implement
+	//    something nothing calls. computeCondNum() reports "not available"
+	//    rather than inventing a number.
+	virtual bool collectGradients() { return false; }
+
+	// Compute the condition number of the B matrix from collectGradients()'s
+	//    columns, storing condNum/condMaxEig/condMinEig; reportCondNum prints
+	//    those stored values. Leaves the model exactly as it found it.
 	void computeCondNum();
 
 	// Utility to report out the condition number

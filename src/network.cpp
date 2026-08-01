@@ -448,10 +448,13 @@ void Network::classAccuracy( ostream& outputStream )
 //    before the training loop and outside every reporting guard.
 //
 //    These two statements used to open runHeader(), which train() called only
-//    when the run was NOT quiet -- so a quiet run (every stepwise regression
-//    candidate refit; Network's default has weight decay ON) multiplied its
-//    weights by an uninitialised decayTerm and added an uninitialised
-//    regularizer to its reported error. Neither constructor set them. Measured
+//    when the run was NOT quiet -- so a quiet run (Network's default has weight
+//    decay ON) multiplied its weights by an uninitialised decayTerm and added an
+//    uninitialised regularizer to its reported error. Neither constructor set
+//    them. Reachable by a fresh model trained quietly or a clone of an untrained
+//    template; NOT by the known stepwise path, whose candidates clone an
+//    already-trained model and inherit both constants through Network::copy.
+//    Latent undefined behaviour rather than a corrupted shipped result. Measured
 //    2026-08-01: NaN under -ftrivial-auto-var-init=pattern, and a stable but
 //    wrong 0.673 instead of 0.0223 under an ordinary Release build -- the same
 //    source and seed giving a different fit depending on the stack.
@@ -704,12 +707,17 @@ void Network::storeGrads( unsigned n )
 //    prints exactly these stored values.
 void Network::computeCondNum()
 {
-	// Run final iteration through training set to obtain gradients
-	//    which prevents necessity of calculating gradients at every iteration
-	//    which would be *very* inefficient
-	finalFlag = true; // define this as the final iteration using finalFlag
-	innerTrainSet(); // ...then run the final iteration
-	finalFlag = false; // ...then reset finalFlag
+	// Gather the per-exemplar gradients WITHOUT training. This used to be
+	//    `finalFlag = true; innerTrainSet(); finalFlag = false;` -- a real
+	//    training iteration, run to harvest its gradients, which also stepped
+	//    the weights and disturbed the optimizer state. See collectGradients.
+	if ( !collectGradients() )
+	{
+		// This model supplies no gradients for a condition number
+		condMaxEig = condMinEig = condNum
+			= numeric_limits< double >::quiet_NaN();
+		return;
+	}
 
 	// Now that the gradients have been calculated during the final iteration,
 	//    calculate the B matrix = G . G^T

@@ -221,10 +221,16 @@ protected:
 	//    This exists because runHeader() below did two unrelated jobs: it
 	//    printed the run's parameters AND computed two constants the training
 	//    math reads (Network's regularizer and decayTerm). train() called it
-	//    from inside `if ( !quietFlag )`, so a quiet run -- every stepwise
-	//    regression candidate refit -- trained on uninitialised doubles
-	//    whenever weight decay was on. Measured: NaN under a pattern-
-	//    initialised build, a wrong-but-stable number under an ordinary one.
+	//    from inside `if ( !quietFlag )`, so a quiet run trained on
+	//    uninitialised doubles whenever weight decay was on. Measured: NaN
+	//    under a pattern-initialised build, a wrong-but-stable number under an
+	//    ordinary one.
+	//
+	//    Reachable by a fresh model trained quietly, or by a clone of a
+	//    template that never trained. NOT by the known stepwise path: those
+	//    candidates clone a model that has already trained audibly, and
+	//    Network::copy carries the two constants across, so they inherited
+	//    valid values. Latent undefined behaviour, not a corrupted result.
 	//
 	//    THE RULE, which is CLAUDE.md's settled decision on setQuiet: a
 	//    reporting guard may never contain a calculation the fit depends on.

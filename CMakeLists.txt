@@ -204,3 +204,20 @@ add_executable(check_quietprep
 target_include_directories(check_quietprep PRIVATE src)
 target_link_libraries(check_quietprep PRIVATE GSL::gsl GSL::gslcblas)
 add_test(NAME iterative_quiet_prepare COMMAND check_quietprep)
+
+# Regression test: reporting a diagnostic must not move the model (D2).
+# Network::computeCondNum() obtained its per-exemplar gradients by running a
+# real training iteration (finalFlag + innerTrainSet), which also stepped the
+# weights and disturbed G/stackG/lastG/lastF -- so an audible Logistic run
+# ended one gradient step past the weights whose error it reported, and a
+# continued run diverged from a control. Asserts bit-identical predictions
+# across a report, an unaffected continuation for canonical/CGD/Shanno, an
+# idempotent diagnostic, and the preserved canonical value.
+add_executable(check_condnum
+    tests/iterative/check_condnum.cpp
+    src/simpleprop.cpp src/bareprop.cpp src/backprop.cpp src/logistic.cpp
+    src/network.cpp src/iterative.cpp src/model.cpp src/dataset.cpp src/split.cpp
+    src/twoset.cpp src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
+target_include_directories(check_condnum PRIVATE src)
+target_link_libraries(check_condnum PRIVATE GSL::gsl GSL::gslcblas)
+add_test(NAME iterative_condition_number COMMAND check_condnum)

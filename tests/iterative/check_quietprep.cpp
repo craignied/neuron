@@ -257,23 +257,11 @@ int main()
 
 	// Logistic reads regularizer on the same path, and is the model stepwise
 	// regression is most often run over.
-	// Logistic: error, stop reason, convergence and iteration count only.
-	//
-	//    THE WEIGHT COMPARISON IS DELIBERATELY EXCLUDED, and this is a hole
-	//    that must be closed, not a contract. A SECOND defect, found by this
-	//    test on 2026-08-01: Network::computeCondNum() calls innerTrainSet(),
-	//    which APPLIES a weight update -- it wants the per-exemplar gradients
-	//    but takes a gradient step to get them. Logistic::reportAccuracy is the
-	//    only caller of reportCondNum, so an AUDIBLE Logistic run ends one step
-	//    past the weights whose error it just reported, while a quiet run does
-	//    not. Verified by deleting that one call: all six assertions then pass.
-	//
-	//    Reporting must not change the fit -- the same family as the prepareRun
-	//    defect above and legacy bug #10. When computeCondNum is fixed to leave
-	//    the model as it found it, delete the `false` below and this comment;
-	//    the assertion should then hold.
+	// Logistic, now including the weight comparison: D2 (computeCondNum's
+	//    mutating gradient harvest) is fixed, so an audible run no longer ends
+	//    a gradient step past a quiet one. See tests/iterative/check_condnum.cpp.
 	compare( runLogistic( d, true, true ), runLogistic( d, false, true ),
-		"Logistic, weight decay ON", false );
+		"Logistic, weight decay ON" );
 
 	cout << endl << ( failures ? "FAILURES: " : "all passed (" ) << failures
 		<< ( failures ? "" : " failures)" ) << endl;
