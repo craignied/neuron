@@ -941,16 +941,17 @@ needs. That takes 149 compilations to about 67 and speeds every platform.
    AGENTS.md + Manifest 2.1 + `manifest_maintenance.md` authority row).
 2. ~~Characterization tests and sabotage proofs~~ — **done**; `tests/props/`
    (34 assertions) and `tests/iterative/check_quietprep.cpp`.
-3. Scoped screen redirection — `util::ScreenCapture` (§4.4). **Next.**
+3. ~~Scoped screen redirection~~ — **done**, `util::ScreenCapture`; all six
+   manual pairs and the GUI capture replaced (§4.4).
 4. ~~BareProp validation decision~~ — **closed, no defect** (§8.3).
 5. ~~D1 quiet-run fix~~ — **done, `113da40`**.
    ~~D2 condition-number mutation~~ — **done, `de16396`**.
    ~~D4 weight decay~~ — **done, `37585c5`**.
    ~~Condition-number definition (X'VX)~~ — **done, `75e6f64`**.
    `errorFunction` and the `TwoSet` division-ordering hardening — outstanding.
-6. **D8 — the build's repeated compilation** (see above). Mitigated in
-   `f330469` / `ba15b93`; the layered-library fix comes next, before the broader
-   DRY work, per Sol.
+6. ~~D8 — the build's repeated compilation~~ — **done, `f0c3006`**: 208
+   compilation units to 31, layered so the no-GSL boundary is structural.
+   Green on all three CI platforms.
 7. Mechanical DRY: §3.1, §3.2, §3.4, §3.3, §3.5, §8.6.1, plus the members the
    retired mechanisms left behind (`finalFlag`; `grads`/`storeGrads` are already
    gone with `75e6f64`).

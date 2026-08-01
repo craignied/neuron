@@ -107,17 +107,17 @@ autoalgo::Result autoalgo::pick( const Network& start, unsigned budgetMs,
 		probe->setObserver( &meter );
 
 		double finalError;
-		util::set_screen( discard );
-		try
 		{
-			finalError = probe->train();
-		}
-		catch ( ... ) // a diverged probe is a result, not a failure
-		{
-			finalError = numeric_limits< double >::quiet_NaN();
-		}
-		util::set_screen( callerScreen );
-		discard.str( "" ); // release the probe's report text
+			ScreenCapture quiet; // restores on the throw path too
+			try
+			{
+				finalError = probe->train();
+			}
+			catch ( ... ) // a diverged probe is a result, not a failure
+			{
+				finalError = numeric_limits< double >::quiet_NaN();
+			}
+		} // the probe's report text is released with the capture
 		probe->setObserver( nullptr );
 
 		Probe p;

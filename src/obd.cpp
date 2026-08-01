@@ -186,11 +186,10 @@ Iterative::StopReason trainToValidationMin( SimpleProp& net, const obd::Config& 
 	//    iteration budget as the backstop.
 	net.setAutoStop( true, cfg.plateauTol, cfg.plateauWindow );
 
-	ostream& screen = util::screen();
-	util::set_screen( discard );
-	net.train();
-	util::set_screen( screen );
-	discard.str( "" ); // drop the per-size report
+	{
+		ScreenCapture quiet; // scoped: net.train() can throw
+		net.train();
+	} // the per-size report is dropped with the capture's buffer
 	net.setObserver( nullptr );
 
 	// The score is the tracked minimum; fall back to a final sample if the run
@@ -322,10 +321,11 @@ obd::Result obd::run( DataSet& data, const Config& cfg,
 		//    yet, so the numeric fields say "not sampled" (-1) rather than 0.
 		if ( progress )
 			progress( "probing optimizers", cfg.hStart, 0, -1, -1 );
-		util::set_screen( discard );
-		autoalgo::Result pick = autoalgo::pick( *net, 750, cancel );
-		util::set_screen( screen );
-		discard.str( "" );
+		autoalgo::Result pick;
+		{
+			ScreenCapture quiet;
+			pick = autoalgo::pick( *net, 750, cancel );
+		}
 		if ( pick.cancelled )
 		{
 			result.cancelled = true;

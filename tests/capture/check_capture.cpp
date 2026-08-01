@@ -7,6 +7,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <stdexcept>
 #include <thread>
 
 #include "dataset.h"
@@ -26,6 +27,96 @@ void expect( bool ok, const string& what )
 		cout << "FAIL - " << what << endl;
 		failures++;
 	}
+}
+
+
+// --- ScreenCapture: the SCOPED redirection (2026-08-01) --------------------
+//
+// Six places in the engine did save/restore by hand around a call that can
+// throw (autoalgo's probe, obd's per-size train and optimizer probe,
+// cvadapters' quiet fit and nested OBD). On the throw path the restore never
+// ran, leaving the engine's stream pointing at an ostringstream about to be
+// destroyed -- every later engine print in that process writing through a
+// dangling reference. The GUI's own capture restored unconditionally to cout,
+// so nesting silently lost the outer scope's output.
+//
+// SABOTAGE (each watched to fail, then restored):
+//   * destructor restoring `cout` instead of `previous`  -> nesting fails;
+//   * restore moved out of the destructor into a trailing statement
+//     -> exception restoration fails;
+//   * constructor saving nothing (previous = &cout)      -> nesting fails.
+
+static void test_scoped_capture()
+{
+	// (1) It captures, and it restores the PREVIOUS stream -- not cout
+	ostringstream outer;
+	util::set_screen( outer );
+	{
+		ScreenCapture inner;
+		util::screen() << "inner text";
+		expect( inner.text() == "inner text", "ScreenCapture captures" );
+	}
+	expect( &util::screen() == &outer,
+		"ScreenCapture restores the stream that was current, not cout" );
+
+	// (2) NESTING: the outer buffer must still receive outer writes afterwards
+	util::screen() << "after";
+	expect( outer.str() == "after", "a nested capture does not steal outer output" );
+
+	// (3) EXCEPTION UNWINDING: the restore must happen on the throw path
+	try
+	{
+		ScreenCapture guard;
+		util::screen() << "swallowed";
+		throw runtime_error( "boom" );
+	}
+	catch ( const runtime_error& ) { }
+	expect( &util::screen() == &outer,
+		"ScreenCapture restores while an exception unwinds" );
+
+	// (4) Deep nesting restores in order
+	ostringstream a, b;
+	{
+		ScreenCapture one( a );
+		{
+			ScreenCapture two( b );
+			expect( &util::screen() == &b, "innermost capture is active" );
+		}
+		expect( &util::screen() == &a, "restores to the enclosing capture" );
+	}
+	expect( &util::screen() == &outer, "and back out to the original" );
+
+	util::set_screen( cout );
+}
+
+// (5) THREAD-LOCAL ISOLATION: a capture on one thread must not redirect
+// another. The engine relies on this -- each GUI request thread and the async
+// training worker capture independently.
+static void test_thread_isolation()
+{
+	ostringstream mine;
+	ScreenCapture capture( mine );
+	util::screen() << "main thread";
+
+	bool otherSawCout = false;
+	bool otherLeakedIntoMine = false;
+	thread t( [ & ]
+	{
+		// A fresh thread starts at cout, NOT at the capturing thread's stream
+		otherSawCout = ( &util::screen() == &cout );
+		{
+			ostringstream theirs;
+			ScreenCapture theirCapture( theirs );
+			util::screen() << "worker";
+			otherLeakedIntoMine = ( theirs.str() != "worker" );
+		}
+	} );
+	t.join();
+
+	expect( otherSawCout, "a new thread starts at cout, not the capturing stream" );
+	expect( !otherLeakedIntoMine, "another thread's capture is its own" );
+	expect( mine.str() == "main thread",
+		"and the other thread wrote nothing into this one's capture" );
 }
 
 int main()
@@ -128,6 +219,10 @@ int main()
 	expect( workerSaw.find( "worker line" ) != string::npos
 		&& mainCap.str().empty(),
 		"concurrent main-thread capture did not swallow the worker's output" );
+
+	// The SCOPED guard that replaced every manual save/restore pair
+	test_scoped_capture();
+	test_thread_isolation();
 
 	return failures == 0 ? 0 : 1;
 }

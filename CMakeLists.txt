@@ -225,23 +225,28 @@ add_test(NAME iterative_quiet_copy COMMAND check_quietcopy)
 # Regression test: a QUIET run is a SILENT run, never a DIFFERENT one.
 # Network::runHeader() computed regularizer and decayTerm -- two constants the
 # TRAINING math reads -- and Iterative::train() called it inside its quiet
-# guard, so a quiet run with weight decay on trained on uninitialised doubles
-# (stepwise regression's candidate refits are all quiet). Asserts that quiet
-# and audible runs agree exactly on error, weights, stop reason, convergence
-# and iteration count. Found 2026-08-01 by tests/props.
+# guard, so a quiet run with weight decay on trained on uninitialised doubles.
+# Reachable by a fresh model trained quietly, or a clone of a template that
+# never trained; NOT by the known stepwise path, whose candidates clone an
+# already-trained model and inherit both constants through Network::copy.
+# Asserts that quiet and audible runs agree exactly on error, weights, stop
+# reason, convergence and iteration count. Found 2026-08-01 by tests/props.
 add_executable(check_quietprep
     tests/iterative/check_quietprep.cpp)
 target_link_libraries(check_quietprep PRIVATE neuron_engine)
 add_test(NAME iterative_quiet_prepare COMMAND check_quietprep)
 
-# Regression test: reporting a diagnostic must not move the model (D2).
-# Network::computeCondNum() obtained its per-exemplar gradients by running a
-# real training iteration (finalFlag + innerTrainSet), which also stepped the
-# weights and disturbed G/stackG/lastG/lastF -- so an audible Logistic run
-# ended one gradient step past the weights whose error it reported, and a
-# continued run diverged from a control. Asserts bit-identical predictions
-# across a report, an unaffected continuation for canonical/CGD/Shanno, an
-# idempotent diagnostic, and the preserved canonical value.
+# Regression test: the condition number, and the rule that reporting must not
+# move the model. The gradient-harvesting mechanism this originally guarded is
+# gone -- the diagnostic is now the unpenalized observed Fisher information
+# X'VX, shared with the Wald covariance. What it guards now:
+#   * reporting leaves the fitted and optimizer state untouched, so a continued
+#     run matches a control that never reported (canonical, CGD and Shanno);
+#   * the reported ratio and both extreme eigenvalues agree with an independent
+#     analytic fixture -- one input makes X'VX 2x2, whose eigenvalues are
+#     closed-form, computed there without Matrix::dotprod or GSL;
+#   * weight decay cannot move the design condition number when the fit is held
+#     fixed, which is the property that makes it a collinearity diagnostic.
 add_executable(check_condnum
     tests/iterative/check_condnum.cpp)
 target_link_libraries(check_condnum PRIVATE neuron_engine)

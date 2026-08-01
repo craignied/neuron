@@ -47,11 +47,12 @@ static bool fitQuietly( Model& m, double* finalError = nullptr )
 	unsigned n = te.getNumElements();
 	for ( unsigned i = 0; i < n; i++ ) te.test( i ) = GUESS_SENTINEL;
 
-	ostream& saved = util::screen();
-	ostringstream discard;
-	util::set_screen( discard );
-	double err = m.train(); // epilogue writes the guesses -- unless the fit failed
-	util::set_screen( saved );
+	double err;
+	{
+		// Scoped: m.train() can throw, and a manual restore would not run
+		ScreenCapture quiet;
+		err = m.train(); // epilogue writes the guesses -- unless the fit failed
+	}
 	if ( finalError ) *finalError = err;
 
 	if ( n == 0 ) return false;
@@ -289,11 +290,11 @@ crossval::Procedure cvadapters::nestedObdProcedure( const obd::Config& cfg,
 		//    cancel stops it promptly. progress (when the caller wired one) carries
 		//    the phase and hidden-node trial out of the search -- the only view a
 		//    long nested run has of what it is doing inside the current fold.
-		ostream& saved = util::screen();
-		ostringstream discard;
-		util::set_screen( discard );
-		obd::Result r = obd::run( foldData, cfg, progress, cancel );
-		util::set_screen( saved );
+		obd::Result r;
+		{
+			ScreenCapture quiet; // restores even if obd::run throws
+			r = obd::run( foldData, cfg, progress, cancel );
+		}
 
 		if ( r.cancelled ) { pr.cancelled = true; return pr; }
 		if ( !r.ok || !r.winner )
