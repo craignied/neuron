@@ -308,6 +308,22 @@ add_test(NAME twoset_rates COMMAND check_rates)
 # tests/vectorops/run_bounds_demo.sh runs each case in its own process. That is
 # a demonstration driver for use against sabotaged or historical builds, where
 # a case that takes a SIGBUS would otherwise hide every case after it.
+# Characterization test: the automatic step-size search, in all four models.
+#
+# SimpleProp, BareProp, BackProp and Logistic each carry their own copy of the
+# eta search at the top of trainSet(). Pinned BEFORE consolidation. Portable by
+# construction -- innerTrainSet() call counts and the selected eta (a small
+# power of gamma), never multi-iteration floating point, which check_bpoptimizer
+# proved is not portable across AppleClang/GCC/MSVC. Restoration is asserted
+# without literals: a run that SEARCHED and settled on eta* must land where a
+# run that never searched and was GIVEN eta* lands, for all three optimizers.
+# Also pins the guard asymmetry -- Logistic searches on autoStep alone, the
+# three nets need batch too -- including the Logistic on-line case that no
+# interface can reach.
+add_executable(check_autostep tests/network/check_autostep.cpp)
+target_link_libraries(check_autostep PRIVATE neuron_engine)
+add_test(NAME network_auto_step_size COMMAND check_autostep)
+
 # Characterization test: the last-operation file, from all three writers.
 #
 # Iterative::train(), LDFA::train() and QDFA::train() each opened
