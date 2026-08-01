@@ -1,6 +1,16 @@
 # DRY / architecture audit — neuron-3.0 engine
 
-**Status: proposal only. No code was changed.** Prepared 2026-07-31 for Sol's review.
+**Status: part proposal, part implementation record.** Prepared 2026-07-31 as a
+proposal; from §8.7's list onward, most of it has shipped. §8.7 carries the
+authoritative per-item state with commit hashes — read that, not this line, for
+what is done. The findings in §§1–7 are preserved **as originally written**, so
+that what was proposed can be compared with what was built; where a finding has
+since shipped or been corrected, §8 and §8.7 govern.
+
+**One open defect is recorded here and is NOT fixed: legacy bug #12, §11.11** —
+`BackProp` discards the conjugate direction in batch/epoch mode, so CGD and
+Shanno are silently plain gradient descent there. Diagnosed 2026-08-01, escalated
+for a decision before any production edit.
 
 > **REVISED after Sol's review, 2026-07-31.** Read **§8** before acting on anything below.
 > It corrects finding 1.1 (which overstated equivalence), corrects §7's verification protocol
@@ -26,8 +36,9 @@ Two rules govern every item here and are restated once rather than repeated:
   naturally owns the mechanism* — never into a generic god object, never collapsing distinct
   polymorphic responsibilities. Per-class model math is not a consolidation target.
 - **Behavior-preserving first.** Every item below is an extraction that must leave the three
-  golden transcripts, `ctest`, `tests/gui/smoke.sh` and `tests/oracle/verify_oracle.sh`
-  byte-identical. Where an item *cannot* be byte-identical, it says so.
+  golden transcripts, all configured tests, `tests/gui/smoke.sh` and
+  `tests/oracle/verify_oracle.sh` byte-identical. Where an item *cannot* be byte-identical,
+  it says so.
 
 ---
 
@@ -641,7 +652,8 @@ Non-negotiable, per `CLAUDE.md` rules 2 and 6, for **every** commit above:
 1. Zero-warning Release build.
 2. `tests/golden/run_golden.sh` — **byte-identical**, all three transcripts. Any diff means the
    extraction changed behavior; read it, do not bless it.
-3. `ctest` — 13 tests.
+3. `ctest` — all configured tests. (Do not write the count here: it changes with
+   every batch of work. `ctest -N` answers it.)
 4. `tests/gui/smoke.sh`.
 5. `tests/oracle/verify_oracle.sh` — numerically identical.
 6. **Prove the guard.** For each item, before believing the goldens cover it: `git stash push --
@@ -948,13 +960,34 @@ needs. That takes 149 compilations to about 67 and speeds every platform.
    ~~D2 condition-number mutation~~ — **done, `de16396`**.
    ~~D4 weight decay~~ — **done, `37585c5`**.
    ~~Condition-number definition (X'VX)~~ — **done, `75e6f64`**.
-   `errorFunction` and the `TwoSet` division-ordering hardening — outstanding.
+   ~~`errorFunction` allocation/DRY~~ — **done**; the temporary `( y - o )`
+   vector became `vector_ops::sumSquaredDifference`.
+   ~~`errorFunction` bounds aggregation~~ — **done**, as its own correctness
+   commit: the multi-output cross-entropy loop cleared `boundsErrorFlag` in its
+   ordinary branch, so an in-range component *after* a boundary one erased the
+   record of it; the flag is an aggregate and was also never initialised before
+   the loop. `tests/errorfunc/check_errorfunc.cpp` tests both orderings.
+   ~~`TwoSet` division ordering~~ — **done**; `checkedRate()` validates the
+   denominator before dividing, all four rates, with the ordering demonstrated
+   under `-fsanitize=float-divide-by-zero` and the four zero-denominator throws
+   and the no-threshold contract pinned in `tests/twoset/check_rates.cpp`.
 6. ~~D8 — the build's repeated compilation~~ — **done, `f0c3006`**: 208
    compilation units to 31, layered so the no-GSL boundary is structural.
    Green on all three CI platforms.
-7. Mechanical DRY: §3.1, §3.2, §3.4, §3.3, §3.5, §8.6.1, plus the members the
-   retired mechanisms left behind (`finalFlag`; `grads`/`storeGrads` are already
-   gone with `75e6f64`).
+7. ~~Mechanical DRY~~ — **done, commits A–D**: `0edbb93` (three dead members —
+   `finalFlag`, both `in_bias`), `c87a35c` (§3.1 `RegressNet::network_name`,
+   §3.2 the GUI's third dispatch copy, §3.5 `XY::sqr`), `cf0b1df` (§3.4
+   `SimpleProp::nH`), `c70788a` (§3.3 the `BackProp` weight buffer).
+   `grads`/`storeGrads` went with `75e6f64`.
+7a. ~~D5 — the `vector_ops` bounds policy~~ — **done, `de6f00c` (inventory and
+   measured gap) + `5c94cd2` (the checks)**: seventeen contracts that could read
+   or write outside a container were assert-only in a project that builds Release
+   by default; they now throw `nvec::SizeMismatch` / `RangeViolation` /
+   `EmptyVector`. Full inventory and policy in §11.
+7b. **LEGACY BUG #12 — OPEN, escalated, §11.11.** `BackProp` discards the
+   conjugate direction in batch/epoch mode. Diagnosed and measured; production
+   code deliberately untouched pending a decision. Must be its own commit and
+   must precede item 9, which touches all four training implementations.
 8. `DataSet::metricsReport` / `Iterative::announceStop` / `Model::writeLastop`.
 9. Auto step-size template method (§1.2, §8.5).
 10. Bounded SimpleProp/BareProp sharing (§8.2).
@@ -1212,7 +1245,7 @@ Two corrections to the plan, found by building it:
   ten that did not, still do not — verified by reading each target's generated
   link line, not by assuming.
 
-All 17 `ctest` names are byte-identical to the pre-refactor list, checked by
+Every `ctest` name at that time was byte-identical to the pre-refactor list, checked by
 diffing `ctest -N` across a `git stash`.
 
 ---
@@ -1583,23 +1616,110 @@ operators, `dotprod`/`sumSquaredDifference`, all four `func` forms, and
 public contracts changed, which is the condition for touching it. Rebuilt and
 text-checked: 202 pages, both new cross-references resolving.
 
-### 11.11 Carried forward: an unverified observation, not a finding
+### 11.11 The parked observation, resolved: LEGACY BUG #12
 
-Recorded so compaction cannot lose it. **Not investigated, and not to be
-investigated until D5 is reviewed.**
+The observation was: while proving commit D (`c70788a`) behavior-preserving, a
+`BackProp` fixture — batch + epoch, automatic step size, two hidden layers,
+seeded — gave **the identical final error `0.58003708523755504` under canonical,
+CGD and Shanno**. It was recorded as unverified. It is now diagnosed, and it is
+a defect.
 
-While proving commit D (the `BackProp` weight buffer, `c70788a`) behavior-
-preserving, the fixture — `BackProp`, batch + epoch, automatic step size, two
-hidden layers, seeded — produced **the identical final training-set error
-`0.58003708523755504` under all three optimizers** (canonical, CGD, Shanno).
-Three different algorithms should not agree to seventeen digits.
+**`BackProp` computes the conjugate direction in batch/epoch mode and then
+throws it away.** `src/backprop.cpp:606-616`:
 
-It does not affect commit D's proof: the value is the same in both binaries, and
-the buffer was separately shown to be load-bearing (deleting the restore moves it
-to `0.57396971890726223`), so the before/after comparison did exercise the changed
-code. But either the fixture does not discriminate between optimizers, or
-`Network::engine` dispatch is inert on that path. Both are worth knowing. Neither
-is claimed.
+```cpp
+// Set the gradients to the accumulators so that pack() & unpack() work
+for ( unsigned l = 0; l < Gradient.size(); l++ )
+    Gradient[ l ] = WeightsAccumulate[ l ] /= ( double ) nTrain;
+
+engine( trainingType, iteration );      // writes its result into Gradient
+
+for ( unsigned m = 0; m < WeightsAccumulate.size(); m++ )
+    Weights[ m ] -= ( WeightsAccumulate[ m ] *= eta );   // reads WeightsAccumulate
+```
+
+`Gradient[ l ] = ...` is a `Matrix` **copy**, so `Gradient` and
+`WeightsAccumulate` are distinct objects holding equal values. `Network::CGD` /
+`Network::shanno` `pack()` from `Gradient`, compute the direction, and `unpack()`
+back into `Gradient`. The weight update then reads `WeightsAccumulate`, which the
+optimizer never touched. Under CGD and Shanno, batch `BackProp` performs
+**plain gradient descent**.
+
+**It is not inert dispatch, and not a weak fixture.** Both were checked rather
+than assumed:
+
+- A temporary `fprintf` probe in `Network::CGD` and `Network::shanno` (snapshot,
+  inserted, rebuilt with the compile line confirmed, restored byte-identical)
+  shows **2720 entries each** during the batch runs. The optimizers run.
+- A discriminating fixture — two hidden layers, batch, automatic step size
+  **off**, fixed `eta`, gradient and plateau stopping off, all three optimizers
+  loaded from **one saved weights file** rather than a re-seeded `randomize()`,
+  weights compared bitwise as `%a` after 1, 2, 5 and 20 iterations — gives
+  identical values at **every** checkpoint, from the first iteration.
+- The same fixture in **on-line** mode diverges immediately (canonical
+  `0x1.3739bae822973p+6`, CGD `0x1.1e20d1981552fp+6`, Shanno `0x0p+0` after one
+  iteration). So the fixture discriminates and the dispatch works; on-line
+  `BackProp` updates from `Gradient` (`backprop.cpp:542-545`) and is correct.
+
+**Reach, measured.**
+
+| configuration | canonical / CGD / Shanno |
+|---|---|
+| BackProp, batch, auto step size off | **identical** |
+| BackProp, batch, auto step size **on** (the parked fixture) | **identical** |
+| BackProp, batch, gradient stopping on | **identical** |
+| BackProp, **on-line** | distinct |
+| **SimpleProp**, batch, 3 hidden | distinct |
+| **BareProp**, batch, 3 hidden | distinct |
+
+So the defect is exactly **BackProp × batch/epoch × (CGD or Shanno)**.
+`SimpleProp` and `BareProp` update from `oG`/`hG` *after* `engine()`
+(`simpleprop.cpp:731-732`, `bareprop.cpp:471-472`) and are correct in both modes.
+Canonical with gradient stopping takes the same separate-gradient branch but
+dispatches to a `switch` with no `case 0`, so `Gradient` is unchanged and the
+update is numerically right — measured identical to canonical without gradient
+stopping.
+
+**Reachable in production**, not a laboratory case. `autoalgo::pick` clones the
+current model, sets each `trainingType`, and **forces `setBatchEpoch( true )` for
+CGD and Shanno** (`autoalgo.cpp:98-100`) — precisely the defective combination.
+On a `BackProp`, `algorithm=auto` therefore probes three optimizers that are all
+secretly the same one, and selects a winner among identical fits. Any GUI user
+who builds a multi-layer network and chooses CGD or Shanno with batch/epoch gets
+canonical gradient descent under a different name.
+
+**Why it survived.** `tests/props/check_props.cpp:404` covers CGD and Shanno for
+**SimpleProp and BareProp only** — the `Case` struct literally has one expected
+value per those two models and none for `BackProp`. No test, golden, or smoke
+check has ever run CGD or Shanno on a `BackProp` and compared it against
+canonical. This is standing rule 2 again: the optimizer tests execute the
+dispatch, pass, and guard nothing for the one model where it does not work.
+
+**It is legacy, not a regression.** The same six lines are in
+`../distro/src/backprop.cpp:630-634`, and `git log -L` puts them in the initial
+carry-forward commit `f87e9dd`. Commit D (`c70788a`) touched
+`innerTrainSet`'s weight buffer and is not implicated — its own before/after
+identity was separately proven load-bearing.
+
+**Proposed correction — NOT applied.** Per Sol's instruction, production code is
+untouched pending review. The one-line shape of it is to update from the
+structure the optimizer actually wrote, as the other two models already do:
+
+```cpp
+for ( unsigned m = 0; m < Gradient.size(); m++ )
+    Weights[ m ] -= ( Gradient[ m ] * eta );
+```
+
+Three things to settle before writing it:
+
+1. It **changes numerical output** for BackProp + batch + CGD/Shanno. Whether any
+   golden covers that combination must be established first — a re-bless, if
+   needed, has to be proven with two binaries (the standing trap).
+2. `WeightsAccumulate` is then dead after the division in that branch; whether
+   the copy into `Gradient` should remain, or the branch should work in one
+   structure, is a small design question that belongs with the fix.
+3. It must be its **own** commit, not folded into the auto-step-size template
+   method (§1.2), which touches all four training implementations.
 
 
 ---
