@@ -267,8 +267,14 @@ logistic, LDFA / QDFA, RegressNet stepwise. Statistics: exact non-parametric tra
 AUC and binormal Az (least-squares z-ROC fit via fitexy over distinct operating points),
 stratified bootstrap CI plus Hanley-McNeil, Kolmogorov-Smirnov, Pearson X² (statistic
 only — see settled decisions), Hosmer-Lemeshow Ĉ on 10 fixed deciles, Wald tests,
-condition number. **Eleven numbered legacy bugs** were found and fixed during the
-reanimation; each is written up in HISTORY with the measurement that proved it.
+condition number. **Twelve numbered legacy bugs** were found and fixed during the
+reanimation; each is written up in HISTORY with the measurement that proved it. The
+twelfth (2026-08-01) is the one to read if you are about to trust a passing test:
+batch `BackProp` computed the CGD/Shanno search direction and then updated its weights
+from the raw accumulator instead, so **selecting an optimizer was nominal rather than
+computational** for twenty years — while the optimizer tests executed the dispatch and
+passed, because they carry expected values for SimpleProp and BareProp only and no
+golden fixture uses `BackProp` at all.
 
 **Interfaces.** The CLI menus are **frozen** but fully working — they remain the
 authoritative feature list rule 5 measures the GUI against. `neuron --gui` (embedded

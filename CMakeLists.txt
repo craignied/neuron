@@ -308,6 +308,18 @@ add_test(NAME twoset_rates COMMAND check_rates)
 # tests/vectorops/run_bounds_demo.sh runs each case in its own process. That is
 # a demonstration driver for use against sabotaged or historical builds, where
 # a case that takes a SIGBUS would otherwise hide every case after it.
+# Characterization + regression test: DataSet::metricsReport, BOTH halves.
+#
+# The training and test blocks were the same forty lines written twice. A golden
+# transcript proves the bytes it contains did not move; it does not prove which
+# branch produced them, and a report run without a test set exercises only one.
+# This drives each half explicitly, plus the four division-by-zero catch blocks
+# (half the duplicated body) and the two refusals, so the extraction can be shown
+# to change nothing a reader sees. No GSL needed.
+add_executable(check_metricsreport tests/dataset/check_metricsreport.cpp)
+target_link_libraries(check_metricsreport PRIVATE neuron_data)
+add_test(NAME dataset_metrics_report COMMAND check_metricsreport)
+
 # Regression test: the chosen optimizer must reach BackProp's weights.
 #
 # LEGACY BUG #12. In batch/epoch mode BackProp::innerTrainSet() copied the

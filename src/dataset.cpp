@@ -1363,6 +1363,109 @@ bool DataSet::addHistory( ostringstream& outputStream )
 	return success; // return flag to indicate if operation successful
 }
 
+// One set's block of the metrics report: the heading and its rule, the four
+//    classification rates, the classification table, the ROC area, and the
+//    three goodness-of-fit statistics -- in that order.
+//
+//    The training and test blocks were this same body written out twice,
+//    differing only in which TwoSet they read and in two strings. The caller
+//    supplies both, because a DataSet block is named by the set it describes
+//    and nothing here should be deciding that.
+//
+//    The heading's rule is the heading's own width, which is what the two
+//    hand-written rules were ("Training set:" under thirteen dashes, "Test
+//    set:" under nine). Deriving it keeps them from drifting apart; the
+//    emitted bytes are unchanged.
+void DataSet::setMetrics( ostream& outputStream, TwoSet& theSet,
+	const string& heading, const string& tableLabel )
+{
+	// Format the stream for %s
+	outputStream << resetiosflags( ios::scientific )
+		<< setiosflags( ios::fixed | ios::showpoint ) << setprecision( 1 );
+
+	outputStream << endl << heading << endl
+		<< string( heading.size(), '-' ) << endl
+		<< "Classification accuracy: " << theSet.getClassAcc() * 100 << "%" << endl
+		<< "Sensitivity: ";
+	try // calculate sensitivity, but catch division by zero error
+	{
+		outputStream << theSet.getSens() * 100 << "%";
+	}
+	catch ( TwoSet::DivisionByZero& e )
+	{
+		outputStream << e.what();
+	}
+
+	outputStream << endl << "Specificity: ";
+	try // calculate specificity, but catch division by zero error
+	{
+		outputStream << theSet.getSpec() * 100 << "%";
+	}
+	catch ( TwoSet::DivisionByZero& e )
+	{
+		outputStream << e.what();
+	}
+
+	outputStream << endl << "Predictive value positive: ";
+	try // calculate PVP, but catch division by zero error
+	{
+		outputStream << theSet.getPVP() * 100 << "%";
+	}
+	catch ( TwoSet::DivisionByZero& e )
+	{
+		outputStream << e.what();
+	}
+
+	outputStream << endl << "Predictive value negative: ";
+	try // calculate PVN, but catch division by zero error
+	{
+		outputStream << theSet.getPVN() * 100 << "%";
+	}
+	catch ( TwoSet::DivisionByZero& e )
+	{
+		outputStream << e.what();
+	}
+
+	outputStream << endl;
+
+	// Output the classification table
+	outputStream << tableLabel << endl;
+	theSet.ClassTable( outputStream );
+
+	// Output the ROC area
+	theSet.ROCarea( outputStream );
+
+	// Output Kolmogorov-Smirnov test results
+	// Craig Niederberger modified 3/12/2009 to catch exceptions
+	try
+	{
+		outputStream << "Kolmogorov-Smirnov goodness of fit D = " <<
+			theSet.getKSD() << ", p = " << theSet.getKSP() << endl;
+	}
+	catch ( TwoSet::twoSetErr& e )
+	{
+		outputStream << "Could not calculate Kolmogorov-Smirnov goodness of fit: " << e.what() << endl;
+	}
+
+	// The Pearson statistic carries no p on purpose: no valid chi-squared
+	//    reference exists at the individual level (see TwoSet::PKX2calc);
+	//    under a good fit X2 is about n
+	outputStream << "Pearson X2 = " << theSet.getPearsonX2()
+		<< " (n = " << theSet.getNumElements()
+		<< "; no valid p at the individual level - see Hosmer-Lemeshow)" << endl;
+
+	// Output Hosmer-Lemeshow test results Hui Liu added 08/16/2004
+	// Craig Niederberger modified 3/12/2009 to catch exceptions
+	try
+	{
+		outputStream << "Hosmer-Lemeshow goodness of fit p = " << theSet.getHLX2() << endl;
+	}
+	catch ( TwoSet::twoSetErr& e )
+	{
+		outputStream << "Could not calculate Hosmer-Lemeshow goodness of fit: " << e.what() << endl;
+	}
+}
+
 // Outputs TwoSet metrics for a 1-output model, takes ostream as argument
 void DataSet::metricsReport( ostream& outputStream )
 {
@@ -1378,179 +1481,13 @@ void DataSet::metricsReport( ostream& outputStream )
 	{
 		// DataSet training set TwoSet object must have been loaded
 		if ( TrainTwoSet.loaded() )
-		{
-			// Format the stream for %s
-			outputStream << resetiosflags( ios::scientific )
-				<< setiosflags( ios::fixed | ios::showpoint ) << setprecision( 1 );
-
-			outputStream << endl << "Training set:" << endl << "-------------" << endl
-				<< "Classification accuracy: " << TrainTwoSet.getClassAcc() * 100 << "%" << endl
-				<< "Sensitivity: ";
-			try // calculate sensitivity, but catch division by zero error
-			{ 
-				outputStream << TrainTwoSet.getSens() * 100 << "%";
-			}
-			catch ( TwoSet::DivisionByZero& e )
-			{
-				outputStream << e.what();
-			}
-			
-			outputStream << endl << "Specificity: ";			
-			try // calculate specificity, but catch division by zero error
-			{
-				outputStream << TrainTwoSet.getSpec() * 100 << "%";
-			}
-			catch ( TwoSet::DivisionByZero& e )
-			{
-				outputStream << e.what();
-			}
-			
-			outputStream << endl << "Predictive value positive: ";			
-			try // calculate PVP, but catch division by zero error
-			{ 
-				outputStream << TrainTwoSet.getPVP() * 100 << "%";
-			}
-			catch ( TwoSet::DivisionByZero& e )
-			{
-				outputStream << e.what();
-			}
-
-			outputStream << endl << "Predictive value negative: ";			
-			try // calculate PVN, but catch division by zero error
-			{
-				outputStream << TrainTwoSet.getPVN() * 100 << "%";
-			}
-			catch ( TwoSet::DivisionByZero& e )
-			{
-				outputStream << e.what();
-			}
-
-			outputStream << endl;
-
-			// Output classification table for training set
-			outputStream << "Classification table for training set:" << endl;
-			TrainTwoSet.ClassTable( outputStream );
-
-			// Output training set ROC area
-			TrainTwoSet.ROCarea( outputStream );
-
-			// Output training set Kolmogorov-Smirnov test results
-			// Craig Niederberger modified 3/12/2009 to catch exceptions
-			try
-			{
-				outputStream << "Kolmogorov-Smirnov goodness of fit D = " <<
-					TrainTwoSet.getKSD() << ", p = " << TrainTwoSet.getKSP() << endl;
-			}
-			catch ( TwoSet::twoSetErr& e )
-			{
-				outputStream << "Could not calculate Kolmogorov-Smirnov goodness of fit: " << e.what() << endl;
-			}	
-
-			// The Pearson statistic carries no p on purpose: no valid
-			//    chi-squared reference exists at the individual level (see
-			//    TwoSet::PKX2calc); under a good fit X2 is about n
-			outputStream << "Pearson X2 = " << TrainTwoSet.getPearsonX2()
-				<< " (n = " << TrainTwoSet.getNumElements()
-				<< "; no valid p at the individual level - see Hosmer-Lemeshow)" << endl;
-		
-			// Output training set Hosmer-Lemeshow test results Hui Liu added 08/16/2004
-			// Craig Niederberger modified 3/12/2009 to catch exceptions
-			try
-			{
-				outputStream << "Hosmer-Lemeshow goodness of fit p = " << TrainTwoSet.getHLX2() << endl;
-			}
-			catch ( TwoSet::twoSetErr& e )
-			{
-				outputStream << "Could not calculate Hosmer-Lemeshow goodness of fit: " << e.what() << endl;
-			}			
-		}
+			setMetrics( outputStream, TrainTwoSet, "Training set:",
+				"Classification table for training set:" );
 
 		// Do the same if the DataSet test set TwoSet object was loaded
 		if ( TestTwoSet.loaded() )
-		{
-			// Format the stream for %s
-			outputStream << resetiosflags( ios::scientific )
-				<< setiosflags( ios::fixed | ios::showpoint ) << setprecision( 1 );
-
-			outputStream << endl << "Test set:" << endl << "---------" << endl
-				<< "Classification accuracy: " << TestTwoSet.getClassAcc() * 100 << "%" << endl
-				<< "Sensitivity: ";
-			try // calculate sensitivity, but catch division by zero error
-			{ 
-				outputStream << TestTwoSet.getSens() * 100 << "%";
-			}
-			catch ( TwoSet::DivisionByZero& e )
-			{
-				outputStream << e.what();
-			}
-			
-			outputStream << endl << "Specificity: ";			
-			try // calculate specificity, but catch division by zero error
-			{
-				outputStream << TestTwoSet.getSpec() * 100 << "%";
-			}
-			catch ( TwoSet::DivisionByZero& e )
-			{
-				outputStream << e.what();
-			}
-			
-			outputStream << endl << "Predictive value positive: ";			
-			try // calculate PVP, but catch division by zero error
-			{ 
-				outputStream << TestTwoSet.getPVP() * 100 << "%";
-			}
-			catch ( TwoSet::DivisionByZero& e )
-			{
-				outputStream << e.what();
-			}
-
-			outputStream << endl << "Predictive value negative: ";			
-			try // calculate PVN, but catch division by zero error
-			{
-				outputStream << TestTwoSet.getPVN() * 100 << "%";
-			}
-			catch ( TwoSet::DivisionByZero& e )
-			{
-				outputStream << e.what();
-			}
-
-			outputStream << endl;
-
-			// Output classification table for test set
-			outputStream << "Classification table for test set:" << endl;
-			TestTwoSet.ClassTable( outputStream );
-
-			// Output test set ROC area
-			TestTwoSet.ROCarea( outputStream );
-
-			// Output test set Kolmogorov-Smirnov test results
-			// Craig Niederberger modified 3/12/2009 to catch exceptions
-			try
-			{
-				outputStream << "Kolmogorov-Smirnov goodness of fit D = " <<
-					TestTwoSet.getKSD() << ", p = " << TestTwoSet.getKSP() << endl;
-			}
-			catch ( TwoSet::twoSetErr& e )
-			{
-				outputStream << "Could not calculate Kolmogorov-Smirnov goodness of fit: " << e.what() << endl;
-			}
-			
-			// See the training-set Pearson note above: a statistic, never a p
-			outputStream << "Pearson X2 = " << TestTwoSet.getPearsonX2()
-				<< " (n = " << TestTwoSet.getNumElements()
-				<< "; no valid p at the individual level - see Hosmer-Lemeshow)" << endl;
-		
-			// Output test set Hosmer-Lemeshow test results Hui Liu added 08/16/2004
-			// Craig Niederberger modified 3/12/2009 to catch exceptions
-			try
-			{
-				outputStream << "Hosmer-Lemeshow goodness of fit p = " << TestTwoSet.getHLX2() << endl;
-			}
-			catch ( TwoSet::twoSetErr& e )
-			{
-				outputStream << "Could not calculate Hosmer-Lemeshow goodness of fit: " << e.what() << endl;
-			}	
-		}
+			setMetrics( outputStream, TestTwoSet, "Test set:",
+				"Classification table for test set:" );
 	}
 }
 

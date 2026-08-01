@@ -214,6 +214,16 @@ public:
 	// Output TwoSet metrics for a 1-output model, takes an ostream as argument
 	void metricsReport( ostream& );
 
+private:
+	// One set's block of that report -- heading, the four classification rates,
+	//    classification table, ROC area, and the three goodness-of-fit
+	//    statistics. The training and test blocks are this body, twice; the
+	//    caller names the set because only it knows which one this is.
+	void setMetrics( ostream&, TwoSet&, const string& heading,
+		const string& tableLabel );
+
+public:
+
 	// Method to remove inputs from a dataset
 	void removeInputs( const vector< unsigned >& );
 
