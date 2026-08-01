@@ -229,6 +229,56 @@ specification later in this chapter:
       that condition number.
 \end{itemize}
 
+\texttt{OneHiddenNet} sits between \texttt{Network} and the two
+one-hidden-layer models.
+\index{OneHiddenNet}
+\index{OneHiddenNet!setHidden}
+\index{OneHiddenNet!randomize}
+\index{OneHiddenNet!save}
+\index{OneHiddenNet!load}
+\index{SimpleProp!shared implementation}
+\index{BareProp!shared implementation}
+\texttt{SimpleProp} and \texttt{BareProp} describe the same architecture ---
+one hidden layer and one output node --- differing only in whether bias nodes
+are present.  They therefore carry identical state, and several of their
+methods differed by nothing but the class name.  \texttt{OneHiddenNet} owns
+that state (the hidden weight, update, and gradient matrices; the input,
+hidden-output, output-weight, hidden-error, and output-gradient vectors; the
+output error term; and the hidden-unit count) and implements what does not
+depend on the bias architecture:
+
+\begin{itemize}
+\item \texttt{virtual void setHidden(unsigned n)}: pure virtual.  Sizing is the
+      bias architecture, so each concrete model sizes its own structures;
+      \texttt{load} calls this method rather than deciding widths itself.
+\item \texttt{virtual void randomize()}: assigns uniform random weights within
+      the configured limit and marks the weights set.
+\item \texttt{virtual bool save(string\& filename)}: writes the model file ---
+      the concrete class's \texttt{outputHeader}, the hidden layer, then the
+      output layer.
+\item \texttt{virtual bool load(string\& filename)}: reads that file back,
+      refusing a file whose input count disagrees with the loaded dataset.
+\item \texttt{virtual void pack()}: flattens the hidden and output gradients
+      into the packed gradient vector the conjugate-direction optimizers use.
+\end{itemize}
+
+Three things deliberately remain in the concrete classes.  \texttt{df()} is
+two published parameter counts, $((n_{\mathrm{input}}+2)n_{\mathrm{hidden}})+1$
+with biases and $(n_{\mathrm{input}}+1)n_{\mathrm{hidden}}$ without.
+\texttt{outputHeader()} writes a model-file format line that \texttt{load}
+reads back.  Every width that follows from the bias column and the pinned bias
+slot --- \texttt{setDataSet}, \texttt{setHidden}, \texttt{forward},
+\texttt{innerTrainSet}, \texttt{unpack}, and \texttt{removeInputs} --- stays
+where the biased and unbiased equations can be read side by side.
+
+Two notes matter to callers.  \texttt{SimpleProp} and \texttt{BareProp} remain
+distinct concrete types: type identity drives cloning, the model factory, and
+the first line of every saved model file, and neither is assignable to the
+other.  Nothing in the shared implementation reads
+\texttt{Network::biasFlag}; that flag is publicly settable, and a shared method
+that consulted it could reshape a live model or change what it writes to disk.
+The bias architecture is a property of the concrete type.
+
 \texttt{SimpleProp} adds the following OBD mechanisms:
 
 \begin{itemize}

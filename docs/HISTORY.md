@@ -3207,3 +3207,49 @@ general tests, and no external run is an implementation gate.
   - **It defines the starting value only.** `train()` still owns iteration progression and
     `trainSet()` increments nothing, so a direct caller wanting a later optimizer step still
     establishes it explicitly — `check_autostep` and `check_onehidden` both keep doing so.
+
+**2026-08-01 (later still) — `OneHiddenNet`, commit 1: the state and the six identical bodies.**
+
+  - **The bounded version of §1.1, not the original one.** The audit's first finding called
+    `SimpleProp` and `BareProp` "the same class twice"; §8.2 corrected that to a
+    method-by-method table, and only **category A** — bodies differing by nothing but the
+    class name in the signature — moves in this commit: `randomize()`, `save()`, `load()`,
+    `pack()`, the copy utility, and the now-identical `WeightSnapshot`. The shared state
+    (`nHidden`, `hW`, `hWup`, `hG`, `y`, `I`, `hO`, `oW`, `h_err`, `oG`, `o_err`) moves
+    with them. The two concrete models lose **456 lines and gain 44**; the new
+    `src/onehidden.{h,cpp}` is 285, two thirds of it the class note and the moved
+    comments. Net **−127 lines**, and one copy of each mechanism instead of two.
+  - **What did NOT move, and why each stays.** `df()` is two published parameter counts;
+    `outputHeader()` writes a **model-file format line that `load()` reads back**; and every
+    width that follows from the bias column and the pinned bias slot — `setDataSet`,
+    `setHidden`, `forward`, `innerTrainSet`, `unpack`, `removeInputs` — stays where the
+    biased and unbiased equations can be read side by side (rule 7). `trainSet()` was
+    already shared through `Network::searchStepSize`; no second layer was added for it.
+    OBD (`growHidden` / `removeHidden` / `hiddenSaliency`) stays `SimpleProp`-only, per
+    Sol: moving it would advertise `BareProp` support that nothing tests.
+  - **Nothing shared reads `Network::biasFlag`.** That flag is publicly settable through
+    `setBias()`, so a shared `save()` or a shared layout decision that consulted it could
+    reshape a live model or change what it writes to disk. The bias architecture is a
+    property of the concrete type. `load()` sizes the object through a narrow pure virtual
+    `setHidden( unsigned )` on the base — not a switch on the type name and not on the flag.
+  - **Two concrete types, still.** `typeid` dispatch in `netclone.cpp`,
+    `modelfactory::createByTypeName`, the first line of every saved model file and the
+    golden transcripts all depend on it. The base declares no public `operator=`, so the
+    four `static_assert`s in the characterization — no cross-type assignment, no cross-type
+    construction — still hold; they are the one failure mode a runtime test cannot catch,
+    because the program it guards against **compiles**.
+  - **Sabotaged after the extraction, not only before it.** §8.4 is explicit that a
+    behavior-preserving commit must *not* be required to fail against the old binary, so the
+    proof that the guard still bites is a sabotage of the new shared code: dropping
+    `oW = rhs.oW` from `OneHiddenNet::copy` fails **4** assertions (copy-constructed and
+    assigned saved bytes, both types); making the shared `save()` branch on `biasFlag`
+    fails **2** — exactly the two that flip the flag and require the file not to move.
+  - **All five gates green, nothing re-blessed**: zero-warning Release build, three goldens
+    byte-identical, `ctest` 27/27, `tests/gui/smoke.sh`, `verify_oracle.sh` numerically
+    identical. The manifest documents the base (Chapter 12, with index entries and a source-map
+    row); `docs/manifest.pdf` rebuilt.
+  - **Commit 2 — `innerTrainSet()` and `forward()` — is deliberately not in this commit**
+    and is stopped for review. Those are category B: one mechanism with bias-dependent
+    dimensions, where the shared form must be *provably* the same expression and the
+    equations must stay legible. If they would vanish behind generic indexing, the
+    instruction is to stop and report rather than to ship it.

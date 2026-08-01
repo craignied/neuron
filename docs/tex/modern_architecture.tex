@@ -183,7 +183,10 @@ their distinct mathematics:
 
 \begin{description}
 \item[SimpleProp] One hidden layer with bias nodes.
-\item[BareProp] One hidden layer without bias nodes.
+\item[BareProp] One hidden layer without bias nodes.  \texttt{SimpleProp}
+and \texttt{BareProp} share their state and their bias-independent
+mechanisms through \texttt{OneHiddenNet}, and remain distinct concrete
+types.
 \item[BackProp] Multiple hidden layers and multi-output networks.
 \item[Logistic] Binary logistic regression, including Wald tests and
 the design-matrix condition number.
@@ -333,6 +336,9 @@ statistical reporting. \\ \hline
 \texttt{iterative.*} &
 Core model contract, network structure, and authoritative training
 loop. \\ \hline
+\texttt{onehidden.*} &
+State and bias-independent mechanisms shared by the two
+one-hidden-layer models. \\ \hline
 \texttt{matrix.*},
 \texttt{vector\_ops.*},
 \texttt{stats.*} &

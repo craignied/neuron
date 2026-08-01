@@ -1003,7 +1003,18 @@ needs. That takes 149 compilations to about 67 and speeds every platform.
    its own guard at the call site and a private `WeightSnapshot`. 283 lines
    removed for 196 added, four models' behavior byte-identical on the
    refactoring machine, five sabotages each failing a distinct set.
-10. Bounded SimpleProp/BareProp sharing (§8.2).
+10. Bounded SimpleProp/BareProp sharing (§8.2). **Commit 1 done**: `OneHiddenNet`
+    (`src/onehidden.{h,cpp}`) owns the shared state and category A — `randomize`,
+    `save`, `load`, `pack`, the copy utility and the now-identical
+    `WeightSnapshot`. The two concrete models lose 456 lines and gain 44. Bias
+    architecture is the concrete type's, never the mutable `biasFlag`; `load()`
+    sizes through a narrow pure virtual `setHidden( unsigned )`. Proven by
+    sabotaging the NEW shared code (§8.4): dropping `oW` from `copy()` fails 4
+    assertions, letting `save()` read `biasFlag` fails 2. All five gates green,
+    nothing re-blessed; the Manifest documents the base.
+    **Commit 2 — `innerTrainSet()` + `forward()`, category B — is not started**,
+    and stops for review if the biased/unbiased formulae would vanish behind
+    generic indexing.
 11. DFA extraction, then the measured per-exemplar scoring optimization.
 12. Stepwise extraction — only after forward coverage exists.
 13. GUI async launcher, with its concurrency tests.

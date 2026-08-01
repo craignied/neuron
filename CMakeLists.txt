@@ -71,7 +71,8 @@ target_link_libraries(neuron_infer PUBLIC neuron_core)
 # GSL transitively; that is the boundary, stated once.
 add_library(neuron_engine STATIC
     src/model.cpp src/iterative.cpp src/network.cpp
-    src/simpleprop.cpp src/bareprop.cpp src/backprop.cpp src/logistic.cpp
+    src/onehidden.cpp src/simpleprop.cpp src/bareprop.cpp
+    src/backprop.cpp src/logistic.cpp
     src/dfa.cpp src/ldfa.cpp src/qdfa.cpp
     src/netclone.cpp src/modelfactory.cpp src/regressnet.cpp
     src/autoalgo.cpp src/obd.cpp)
