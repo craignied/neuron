@@ -31,6 +31,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -38,6 +39,13 @@
 #include <type_traits>
 #include <vector>
 #include <memory>
+
+#ifdef _WIN32
+#include <process.h>
+#define getpid _getpid
+#else
+#include <unistd.h>
+#endif
 
 #include "simpleprop.h"
 #include "bareprop.h"
@@ -154,10 +162,36 @@ static string slurp( const string& path )
 	return all.str();
 }
 
-static string tmp( const char* name )
-{
-	return string( "/tmp/neuron_onehidden_" ) + name + ".txt";
-}
+// A private directory under the platform's own temporary root. /tmp is NOT a
+//    temporary directory on Windows -- check_writelastop had exactly this
+//    defect and it was fixed hours before this file was written; repeating it
+//    here cost a red CI run. The per-process name also keeps concurrent runs
+//    from colliding on a shared filename.
+class TempDir {
+public:
+	TempDir()
+	{
+		namespace fs = std::filesystem;
+		root = fs::temp_directory_path()
+			/ ( "neuron_onehidden_" + to_string( ( long ) getpid() ) );
+		fs::create_directories( root );
+	}
+	~TempDir()
+	{
+		std::error_code ec;
+		std::filesystem::remove_all( root, ec );
+	}
+	string file( const char* name ) const
+	{
+		return ( root / ( string( name ) + ".txt" ) ).string();
+	}
+private:
+	std::filesystem::path root;
+};
+
+static TempDir tempDir;
+
+static string tmp( const char* name ) { return tempDir.file( name ); }
 
 // --- 1. construction, copying, assignment ---------------------------------
 
@@ -189,9 +223,15 @@ static void test_copying( const char* who )
 		copied.save( pc );
 		assigned.save( pas );
 	}
-	expect( slurp( pa ) == slurp( pc ),
+	// NON-EMPTY FIRST. Two failed saves both slurp to "" and every equality
+	//    below then passes while proving nothing -- which is exactly what
+	//    happened on Windows when this file hardcoded /tmp: only the one
+	//    assertion that looked at CONTENT caught it.
+	string bytesA = slurp( pa );
+	expect( !bytesA.empty(), string( who ) + ": the model file has content" );
+	expect( bytesA == slurp( pc ),
 		string( who ) + ": a copy-constructed model saves identical bytes" );
-	expect( slurp( pa ) == slurp( pas ),
+	expect( bytesA == slurp( pas ),
 		string( who ) + ": an assigned model saves identical bytes" );
 
 	remove( pa.c_str() ); remove( pc.c_str() ); remove( pas.c_str() );
@@ -214,6 +254,7 @@ static void test_file_identity( const char* who, const char* firstLine )
 		a.save( p1 );
 	}
 	string bytes = slurp( p1 );
+	expect( !bytes.empty(), string( who ) + ": the model file has content" );
 
 	// The first line IS the format's type identifier, and load() reads it back
 	expect( bytes.compare( 0, string( firstLine ).size(), firstLine ) == 0,
