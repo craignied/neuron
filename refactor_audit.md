@@ -2086,6 +2086,129 @@ case now throws the expected type → **then sabotage the implemented policy** a
 watch the corresponding cases go red. The last step is the one that proves the
 new checks are what the tests are reading, and it is not optional.
 
+### 12.6 The characterization, measured (2026-08-01)
+
+`tests/matrix/check_matrix_bounds.cpp`, 52 cases, built with `NDEBUG` — the file
+refuses to compile without it — and run **one process per case** by
+`tests/matrix/run_matrix_bounds_demo.sh`. Every case runs a legal operation of
+its own family and checks the answer *before* the invalid call.
+
+```
+held:            9
+no exception:   39
+wrong type:      0
+crashed:         4
+control failed:  0
+```
+
+**No control failed**, so every verdict below is about a contract rather than
+about the harness.
+
+**The eight HOLDS cases all held**, as they must: `operator()` on a row, a column
+and the const overload; `includerows` on a gather position; `BadSize` on a
+zero-row construction; `Singular` from the inverse family; and the two positive
+controls — the deliberate `<=` prefix of `dotprod( iVec, oVec )` with a shorter
+destination, and ordinary arithmetic / transpose / dot product answers.
+
+**Thirty-nine absent contracts returned with no exception at all.** They are the
+Class-A rows of §12.2, and the list is now executable rather than a reading:
+`row` (index and destination width), `col` (index and destination height),
+`replacerow` and `replacecol` (index — the *write* cases), `submatrix` (range and
+destination), all four compound operators and the binary form, `t`, `dotprod`
+(input length, over-long destination, both ranged violations), `dotprodt` and its
+ranged form, `dotprod_row` (row index and disagreeing widths), the matrix product
+(inner dimensions and destination shape), `colsums`, `rowindex`, `toVector`,
+both `toMatrix` forms, the free `func`, `includecols` (bad position and the empty
+vector), `excludecols`, `addrow`, `addcol`, `covariance`, and the outer-product
+constructor on empty vectors.
+
+**Four killed their process outright**, all with **SIGTRAP** (exit 133) and no
+message of their own — which is exactly why the driver reads the case list up
+front and records exit status rather than trusting the program to report:
+
+| case | operation |
+|---|---|
+| 15 | `replacerow` with a source wider than the matrix — **writes** past the allocation |
+| 36 | `outprod` with a left vector longer than `nrows_` — **writes**, and this is the per-exemplar training path (`hWup.outprod( h_err, I )`) |
+| 37 | `outprod` with a right vector longer than `ncols_` — **writes** |
+| 48 | `addcol` with a column taller than the matrix |
+
+**Two results that change what the policy has to say.**
+
+1. **`inverse( I )` on a non-square matrix is safe only by accident.** Case 50 (a
+   2 × 3 input) **threw `BoundsViolation`** — but not from a precondition. LU
+   decomposition loops over `ncols_` and indexes rows by that bound, so a wider
+   than tall matrix runs `operator()` off the end and the one contract this class
+   does enforce refuses it. Case 52 is the same call on a 3 × 2 matrix: **more**
+   rows than the loop bound, every index in range, and it **runs to completion**
+   on a matrix that has no inverse. The pair is the evidence that the safety is
+   incidental. A shape check cannot be skipped on the grounds that "it throws
+   anyway".
+2. **`includecols` with an empty position vector does not fail in Release** (case
+   45). The pathology is in the guard, not the operation: the `assert`
+   dereferences `max_element` over an empty range, so a **checked** build has
+   undefined behavior exactly where Release has no check at all. Whatever the
+   policy does here, it must not reproduce that shape.
+
+### 12.7 The catch sites, enumerated — and the fact they force into the design
+
+Sol asked for these before any policy is proposed. They are decisive, and they
+are the reason this section stops here rather than recommending a type.
+
+**`Matrix`'s three exception classes do not derive from `std::exception`.** In
+`matrix.h` each is written `class BoundsViolation /* : public std::exception */`
+— inheritance present, commented out, for all of `BadSize`, `BoundsViolation` and
+`Singular`. `nvec::SizeMismatch`, `RangeViolation` and `EmptyVector`, added by
+D5, **do** derive from it.
+
+Every site that catches a `Matrix` exception today, in the whole repository:
+
+| Site | Catches | Notes |
+|---|---|---|
+| `src/ldfa.cpp:71`, `src/qdfa.cpp:85`, `src/logistic.cpp:323` | `Matrix< double >::Singular&` | by exact type; reports "singular matrix" and returns |
+| `src/matrix.cpp:455, 541, 576` | `Singular&` | internal, inside the inverse family |
+| `tests/matrix/check_matrix.cpp:120` | `Matrix< double >::BoundsViolation&` | the only `BoundsViolation` catch anywhere |
+
+**Nothing in `src/` catches `BoundsViolation`.** And the generic handlers cannot:
+
+- `src/gui.cpp:1070` (`dfa->train()`) and `src/gui.cpp:1150`
+  (`modelPtr->train()`) catch **`const exception&`**. A `BoundsViolation` is not
+  one, so it passes straight through both.
+- The GUI's long jobs run on a **`std::thread`** (`src/gui.cpp:1469`, `:1777`).
+  An exception that escapes a thread's function calls `std::terminate`. So an
+  uncaught `BoundsViolation` inside async training, OBD, stepwise or CV **kills
+  the server process**, with the page still polling a status endpoint that will
+  never answer.
+- Synchronous handlers are luckier: `third_party/httplib.h:7158` wraps routing in
+  `catch (...)` and returns **500 with `EXCEPTION_WHAT: UNKNOWN`** — no message,
+  because the `std::exception` branch above it is the one that reads `what()`.
+- `src/neuron.cpp`'s `main` has no top-level catch; the CLI would terminate.
+
+**This is not hypothetical, and it predates D9.** `Network::computeCondNum`
+already throws `Matrix< double >::BoundsViolation` on a non-square argument
+(`src/network.cpp:711`), and `src/utility.h:101` documents that `train()` can
+throw it. One live throw site with no catcher is a latent defect; **forty-three
+more, spread across the class the whole engine computes with, is a design
+decision about process lifetime** — and it turns "silent memory corruption" into
+"the server dies", which is better but is not automatically acceptable and is not
+mine to choose quietly.
+
+So the policy question is larger than picking a type name, and it has at least
+these parts, all of which Sol's step 3 should settle together:
+
+1. Whether `Matrix`'s exceptions derive from `std::exception`. **Deferred by Sol
+   and still deferred here** — but the enumeration above shows it is load-bearing
+   rather than cosmetic: it is the difference between the GUI reporting "training
+   failed: …" and the GUI process dying.
+2. Whether a cross-object **dimension mismatch** is `BoundsViolation` (an index
+   outside *this* matrix) or a new sibling of `BadSize`. The characterization
+   currently expects `BoundsViolation` everywhere, which is a placeholder, not a
+   recommendation — 26 of the 39 are dimension mismatches, not bad indices.
+3. Which boundaries acquire a catch, and what each reports.
+
+Nothing in `matrix.h` or `matrix.cpp` has been changed.
+
+
 *Prepared by Claude (Opus 5). Reviewed by Sol (2026-07-31); revised §8 in response.
 §9–§12 are the implementation record: §§8.7–8.8 and 9–10 describe work now
 committed, §11 is the D5 design, written before its code, and §12 is D9's,

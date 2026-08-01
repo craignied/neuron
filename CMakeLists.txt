@@ -413,3 +413,15 @@ add_executable(check_vector_bounds tests/vectorops/check_vector_bounds.cpp)
 target_link_libraries(check_vector_bounds PRIVATE neuron_core)
 target_compile_definitions(check_vector_bounds PRIVATE NDEBUG)
 add_test(NAME vector_ops_bounds COMMAND check_vector_bounds)
+
+# D9 characterization of the Matrix bounds and dimension contract, in the build
+# we ship (NDEBUG, as above). DELIBERATELY NOT an add_test yet: forty-three of
+# its cases are contracts that DO NOT EXIST in matrix.h today, so the suite
+# cannot pass and registering it would put the gate chain permanently red. It is
+# built (so it cannot rot) and driven by tests/matrix/run_matrix_bounds_demo.sh,
+# which runs each case in its own process. The add_test line lands in the commit
+# that implements the policy -- that ordering is the evidence, not an oversight.
+# See refactor_audit.md sections 12.4 and 12.5.
+add_executable(check_matrix_bounds tests/matrix/check_matrix_bounds.cpp)
+target_link_libraries(check_matrix_bounds PRIVATE neuron_core)
+target_compile_definitions(check_matrix_bounds PRIVATE NDEBUG)
