@@ -516,17 +516,17 @@ string safeBasename( const string& name )
 }
 
 // RAII engine-output capture: restores cout even if the engine throws
-// The per-request engine-output capture. A thin name over ScreenCapture, kept
+// The per-request engine-output capture. A thin name over util::ScreenCapture, kept
 //    because `cap.text.str()` reads through this whole file.
 //
 //    It used to restore unconditionally to cout, which is wrong twice: a
 //    capture inside a capture sent the outer scope's remaining output to the
 //    console instead of the outer buffer, and a worker thread's capture reset
-//    that thread's stream to cout rather than to whatever it had. ScreenCapture
+//    that thread's stream to cout rather than to whatever it had. util::ScreenCapture
 //    restores the stream that was current when it was constructed.
 struct Capture
 {
-	ScreenCapture scoped;
+	util::ScreenCapture scoped;
 	ostringstream& text;
 	Capture() : text( scoped.buffer() ) {}
 };

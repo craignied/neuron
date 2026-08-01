@@ -30,7 +30,7 @@ void expect( bool ok, const string& what )
 }
 
 
-// --- ScreenCapture: the SCOPED redirection (2026-08-01) --------------------
+// --- util::ScreenCapture: the SCOPED redirection (2026-08-01) --------------------
 //
 // Six places in the engine did save/restore by hand around a call that can
 // throw (autoalgo's probe, obd's per-size train and optimizer probe,
@@ -52,12 +52,12 @@ static void test_scoped_capture()
 	ostringstream outer;
 	util::set_screen( outer );
 	{
-		ScreenCapture inner;
+		util::ScreenCapture inner;
 		util::screen() << "inner text";
-		expect( inner.text() == "inner text", "ScreenCapture captures" );
+		expect( inner.text() == "inner text", "util::ScreenCapture captures" );
 	}
 	expect( &util::screen() == &outer,
-		"ScreenCapture restores the stream that was current, not cout" );
+		"util::ScreenCapture restores the stream that was current, not cout" );
 
 	// (2) NESTING: the outer buffer must still receive outer writes afterwards
 	util::screen() << "after";
@@ -66,20 +66,20 @@ static void test_scoped_capture()
 	// (3) EXCEPTION UNWINDING: the restore must happen on the throw path
 	try
 	{
-		ScreenCapture guard;
+		util::ScreenCapture guard;
 		util::screen() << "swallowed";
 		throw runtime_error( "boom" );
 	}
 	catch ( const runtime_error& ) { }
 	expect( &util::screen() == &outer,
-		"ScreenCapture restores while an exception unwinds" );
+		"util::ScreenCapture restores while an exception unwinds" );
 
 	// (4) Deep nesting restores in order
 	ostringstream a, b;
 	{
-		ScreenCapture one( a );
+		util::ScreenCapture one( a );
 		{
-			ScreenCapture two( b );
+			util::ScreenCapture two( b );
 			expect( &util::screen() == &b, "innermost capture is active" );
 		}
 		expect( &util::screen() == &a, "restores to the enclosing capture" );
@@ -95,7 +95,7 @@ static void test_scoped_capture()
 static void test_thread_isolation()
 {
 	ostringstream mine;
-	ScreenCapture capture( mine );
+	util::ScreenCapture capture( mine );
 	util::screen() << "main thread";
 
 	bool otherSawCout = false;
@@ -106,7 +106,7 @@ static void test_thread_isolation()
 		otherSawCout = ( &util::screen() == &cout );
 		{
 			ostringstream theirs;
-			ScreenCapture theirCapture( theirs );
+			util::ScreenCapture theirCapture( theirs );
 			util::screen() << "worker";
 			otherLeakedIntoMine = ( theirs.str() != "worker" );
 		}

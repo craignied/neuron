@@ -84,58 +84,56 @@ namespace util {
 
 	// Removes carriage return from end of string if exists, returns string
 	string& chopEndl( string& );
-}
 
-// SCOPED redirection of the engine's output stream. Construct one and every
-//    util::screen() write in this thread goes to the supplied stream until it
-//    goes out of scope; then the PREVIOUS stream is restored -- not cout.
-//
-//    Why this exists rather than a save/restore pair at each site. Six places
-//    in the engine did it by hand:
-//
-//        ostream& saved = util::screen();
-//        ostringstream discard;
-//        util::set_screen( discard );
-//        ... train() / obd::run() ...        <-- can throw
-//        util::set_screen( saved );
-//
-//    train() can throw (Matrix::BoundsViolation, stats::statsErr,
-//    RegressNetErr). When it did, the restore never ran and the engine's stream
-//    was left pointing at an ostringstream that was about to be destroyed --
-//    every subsequent engine print in that process writing through a dangling
-//    reference. A destructor runs during unwinding; an assignment does not.
-//
-//    Restoring the PREVIOUS stream rather than cout is what makes nesting
-//    correct. The GUI's own capture restored unconditionally to cout, so a
-//    capture inside a capture silently sent the outer scope's remaining output
-//    to the console instead of into the outer buffer.
-//
-//    Thread-local, like the stream it guards: each engine thread owns its own
-//    redirection and starts at cout (see utility.cpp).
-class ScreenCapture
-{
-public:
-	// Redirect to the caller's stream
-	explicit ScreenCapture( ostream& to );
-	// Redirect to an internal buffer, readable through text()
-	ScreenCapture();
-	~ScreenCapture();
+	// SCOPED redirection of the engine's output stream. Construct one and every
+	//    util::screen() write in this thread goes to the supplied stream until it
+	//    goes out of scope; then the PREVIOUS stream is restored -- not cout.
+	//
+	//    Why this exists rather than a save/restore pair at each site. Six places
+	//    in the engine did it by hand:
+	//
+	//        ostream& saved = util::screen();
+	//        ostringstream discard;
+	//        util::set_screen( discard );
+	//        ... train() / obd::run() ...        <-- can throw
+	//        util::set_screen( saved );
+	//
+	//    train() can throw (Matrix::BoundsViolation, stats::statsErr,
+	//    RegressNetErr). When it did, the restore never ran and the engine's stream
+	//    was left pointing at an ostringstream that was about to be destroyed --
+	//    every subsequent engine print in that process writing through a dangling
+	//    reference. A destructor runs during unwinding; an assignment does not.
+	//
+	//    Restoring the PREVIOUS stream rather than cout is what makes nesting
+	//    correct. The GUI's own capture restored unconditionally to cout, so a
+	//    capture inside a capture silently sent the outer scope's remaining output
+	//    to the console instead of into the outer buffer.
+	//
+	//    Thread-local, like the stream it guards: each engine thread owns its own
+	//    redirection and starts at cout (see utility.cpp).
+	class ScreenCapture
+	{
+	public:
+		// Redirect to the caller's stream
+		explicit ScreenCapture( ostream& to );
+		// Redirect to an internal buffer, readable through text()
+		ScreenCapture();
+		~ScreenCapture();
 
-	// Non-copyable and non-movable: two objects restoring one saved stream
-	//    would restore it twice, in an order nothing guarantees
-	ScreenCapture( const ScreenCapture& ) = delete;
-	ScreenCapture& operator= ( const ScreenCapture& ) = delete;
+		// Non-copyable and non-movable: two objects restoring one saved stream
+		//    would restore it twice, in an order nothing guarantees
+		ScreenCapture( const ScreenCapture& ) = delete;
+		ScreenCapture& operator= ( const ScreenCapture& ) = delete;
 
-	// What was captured, when the default constructor was used
-	string text() const { return own.str(); }
-	ostringstream& buffer() { return own; }
+		// What was captured, when the default constructor was used
+		string text() const { return own.str(); }
+		ostringstream& buffer() { return own; }
 
-private:
-	ostringstream own;      // used only by the default constructor
-	ostream* previous;      // the stream to put back
-};
+	private:
+		ostringstream own;      // used only by the default constructor
+		ostream* previous;      // the stream to put back
+	};
 
-namespace util {
 
 	// Method which parses a string to determine variable representation from
 	//    nodes, and returns a *new* vector of vector of unsigned

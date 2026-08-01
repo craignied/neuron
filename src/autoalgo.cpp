@@ -108,7 +108,7 @@ autoalgo::Result autoalgo::pick( const Network& start, unsigned budgetMs,
 
 		double finalError;
 		{
-			ScreenCapture quiet; // restores on the throw path too
+			util::ScreenCapture quiet; // restores on the throw path too
 			try
 			{
 				finalError = probe->train();

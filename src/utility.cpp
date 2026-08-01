@@ -392,18 +392,18 @@ void util::set_screen( ostream& newScreen )
 
 // Scoped redirection -- see utility.h for why the engine may not do this by
 //    hand. Saves the stream that is current AT CONSTRUCTION, so captures nest.
-ScreenCapture::ScreenCapture( ostream& to ) : previous( screenPtr )
+util::ScreenCapture::ScreenCapture( ostream& to ) : previous( screenPtr )
 {
 	screenPtr = &to;
 }
 
-ScreenCapture::ScreenCapture() : previous( screenPtr )
+util::ScreenCapture::ScreenCapture() : previous( screenPtr )
 {
 	screenPtr = &own;
 }
 
 // Runs during exception unwinding too, which is the whole point
-ScreenCapture::~ScreenCapture()
+util::ScreenCapture::~ScreenCapture()
 {
 	screenPtr = previous;
 }

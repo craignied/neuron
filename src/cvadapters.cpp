@@ -50,7 +50,7 @@ static bool fitQuietly( Model& m, double* finalError = nullptr )
 	double err;
 	{
 		// Scoped: m.train() can throw, and a manual restore would not run
-		ScreenCapture quiet;
+		util::ScreenCapture quiet;
 		err = m.train(); // epilogue writes the guesses -- unless the fit failed
 	}
 	if ( finalError ) *finalError = err;
@@ -292,7 +292,7 @@ crossval::Procedure cvadapters::nestedObdProcedure( const obd::Config& cfg,
 		//    long nested run has of what it is doing inside the current fold.
 		obd::Result r;
 		{
-			ScreenCapture quiet; // restores even if obd::run throws
+			util::ScreenCapture quiet; // restores even if obd::run throws
 			r = obd::run( foldData, cfg, progress, cancel );
 		}
 

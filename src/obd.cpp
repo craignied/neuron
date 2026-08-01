@@ -187,7 +187,7 @@ Iterative::StopReason trainToValidationMin( SimpleProp& net, const obd::Config& 
 	net.setAutoStop( true, cfg.plateauTol, cfg.plateauWindow );
 
 	{
-		ScreenCapture quiet; // scoped: net.train() can throw
+		util::ScreenCapture quiet; // scoped: net.train() can throw
 		net.train();
 	} // the per-size report is dropped with the capture's buffer
 	net.setObserver( nullptr );
@@ -323,7 +323,7 @@ obd::Result obd::run( DataSet& data, const Config& cfg,
 			progress( "probing optimizers", cfg.hStart, 0, -1, -1 );
 		autoalgo::Result pick;
 		{
-			ScreenCapture quiet;
+			util::ScreenCapture quiet;
 			pick = autoalgo::pick( *net, 750, cancel );
 		}
 		if ( pick.cancelled )
