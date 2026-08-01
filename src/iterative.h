@@ -132,6 +132,18 @@ public:
 	void setObserver( Observer* obs ) { observerPtr = obs; }
 	Observer* getObserver() { return observerPtr; }
 	StopReason getStopReason() { return stopReason; }
+
+protected:
+	// Publish a stop and record its reason. The caller composes its own message
+	//    into screenStream first -- each stopping condition states itself, and
+	//    this does not decide whether one fired. Only the publication repeats:
+	//    quiet says nothing, audible writes to the log and the screen, and the
+	//    reason is recorded either way. train()'s streams are locals, hence the
+	//    parameters.
+	void announceStop( StopReason why, ostringstream& screenStream,
+		ostringstream& fileStream );
+
+public:
 	// How many iterations the last train() ran. A caller that has to explain
 	//    WHY it is rejecting a fit needs the count alongside the reason ("ended
 	//    as max_iterations after 2000 iterations"); the number was previously

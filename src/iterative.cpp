@@ -18,6 +18,36 @@ Iterative::Iterative() : maxIterations ( 1000000 ), printCount ( 1000 ),
 	autoStopWindow ( 100 ), observerPtr ( nullptr ), quietFlag ( false ),
 	stopReason ( STOP_NONE ) { }
 
+// Publish a stop and record its reason.
+//
+//    The CALLER has already composed its own message into screenStream: each
+//    stopping condition states itself, in its own words and its own stream
+//    formatting, and this must never become a table of messages. Nor does this
+//    decide whether a condition fired -- the formulae and their order stay
+//    written out in train(), where they can be read against the manual.
+//
+//    What repeated six times, and is here instead, is only the publication: a
+//    quiet run says nothing at all -- not even why it stopped, its caller
+//    reporting the reason itself from getStopReason() -- while an audible run
+//    writes the same text to the history file and the screen. Either way the
+//    reason is recorded.
+//
+//    The streams are train()'s locals, so they are passed rather than reached
+//    for. Guarded by tests/iterative/check_announcestop.cpp, which pins the
+//    reason, its token, converged(), the exact text and the quiet contract for
+//    every exit.
+void Iterative::announceStop( StopReason why, ostringstream& screenStream,
+	ostringstream& fileStream )
+{
+	if ( !quietFlag )
+	{
+		fileStream << screenStream.str(); // stream line into file stream
+		util::screen() << screenStream.str(); // then print to screen
+	}
+
+	stopReason = why;
+}
+
 const char* Iterative::stopReasonToken( StopReason r )
 {
 	switch ( r )
@@ -365,16 +395,7 @@ double Iterative::train()
 				screenStream << "The error became lower than " << minError
 					<< "." << endl;
 
-				// A quiet run says nothing at all -- not even why it stopped.
-				//    Its caller reports the stop reason itself, from
-				//    getStopReason(), which this does not touch.
-				if ( !quietFlag )
-				{
-					fileStream << screenStream.str(); // stream line into file stream
-					util::screen() << screenStream.str(); // then print to screen
-				}
-
-				stopReason = STOP_MIN_ERROR;
+				announceStop( STOP_MIN_ERROR, screenStream, fileStream );
 				break;
 			}
 
@@ -389,16 +410,7 @@ double Iterative::train()
 				screenStream << "The change in error became lower than " << delta
 					<< "." << endl;
 
-				// A quiet run says nothing at all -- not even why it stopped.
-				//    Its caller reports the stop reason itself, from
-				//    getStopReason(), which this does not touch.
-				if ( !quietFlag )
-				{
-					fileStream << screenStream.str(); // stream line into file stream
-					util::screen() << screenStream.str(); // then print to screen
-				}
-
-				stopReason = STOP_CHANGE;
+				announceStop( STOP_CHANGE, screenStream, fileStream );
 				break;
 			}
 			else
@@ -420,16 +432,7 @@ double Iterative::train()
 					screenStream << "The error increased over the window width of "
 						<< window << "." << endl;
 
-					// A quiet run says nothing at all -- not even why it stopped.
-					//    Its caller reports the stop reason itself, from
-					//    getStopReason(), which this does not touch.
-					if ( !quietFlag )
-					{
-						fileStream << screenStream.str(); // stream line into file stream
-						util::screen() << screenStream.str(); // then print to screen
-					}
-
-					stopReason = STOP_WINDOW;
+					announceStop( STOP_WINDOW, screenStream, fileStream );
 					break;
 				}
 				else // set error did not increase, so advance window
@@ -452,16 +455,7 @@ double Iterative::train()
 					<< resetiosflags( ios::fixed ) << setiosflags( ios::scientific )
 					<< gradMaxLimit << "." << endl;
 
-				// A quiet run says nothing at all -- not even why it stopped.
-				//    Its caller reports the stop reason itself, from
-				//    getStopReason(), which this does not touch.
-				if ( !quietFlag )
-				{
-					fileStream << screenStream.str(); // stream line into file stream
-					util::screen() << screenStream.str(); // then print to screen
-				}
-
-				stopReason = STOP_GRADMAX;
+				announceStop( STOP_GRADMAX, screenStream, fileStream );
 				break;
 			}
 		}
@@ -478,16 +472,7 @@ double Iterative::train()
 			screenStream << "The error plateaued over a window of "
 				<< autoStopWindow << " iterations." << endl;
 
-			// A quiet run says nothing at all -- not even why it stopped.
-			//    Its caller reports the stop reason itself, from
-			//    getStopReason(), which this does not touch.
-			if ( !quietFlag )
-			{
-				fileStream << screenStream.str(); // stream line into file stream
-				util::screen() << screenStream.str(); // then print to screen
-			}
-
-			stopReason = STOP_PLATEAU;
+			announceStop( STOP_PLATEAU, screenStream, fileStream );
 			break;
 		}
 
@@ -511,16 +496,7 @@ double Iterative::train()
 			else
 				screenStream << "Training was stopped by request." << endl;
 
-			// A quiet run says nothing at all -- not even why it stopped.
-			//    Its caller reports the stop reason itself, from
-			//    getStopReason(), which this does not touch.
-			if ( !quietFlag )
-			{
-				fileStream << screenStream.str(); // stream line into file stream
-				util::screen() << screenStream.str(); // then print to screen
-			}
-
-			stopReason = why;
+			announceStop( why, screenStream, fileStream );
 			break;
 		}
 	}

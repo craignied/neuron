@@ -308,6 +308,19 @@ add_test(NAME twoset_rates COMMAND check_rates)
 # tests/vectorops/run_bounds_demo.sh runs each case in its own process. That is
 # a demonstration driver for use against sabotaged or historical builds, where
 # a case that takes a SIGBUS would otherwise hide every case after it.
+# Characterization test: every way Iterative::train() can stop, and what it says.
+#
+# Six stopping conditions published themselves with the same five-line block --
+# compose a message, write it to the log and screen unless quiet, record the
+# reason, break. Pins the StopReason, its machine-readable token, converged(),
+# the exact message, and the quiet contract for all six, PLUS the observer's
+# three distinct reasons and the iteration ceiling (which is not a stopping
+# condition and reports through the epilogue instead). A scripted Iterative, so
+# each exit is reached in isolation rather than racing a real model's rules.
+add_executable(check_announcestop tests/iterative/check_announcestop.cpp)
+target_link_libraries(check_announcestop PRIVATE neuron_engine)
+add_test(NAME iterative_announce_stop COMMAND check_announcestop)
+
 # Characterization + regression test: DataSet::metricsReport, BOTH halves.
 #
 # The training and test blocks were the same forty lines written twice. A golden
