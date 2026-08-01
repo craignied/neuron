@@ -276,10 +276,14 @@ Present tense, rewritten each session — **not** a log. The dated record is
 **The engine.** The legacy neUROn2++ C++ source carried forward and modernized in place
 (C++17, zero-warning Release build, `unique_ptr` ownership, seedable `std::mt19937` behind
 `util::d_random()`). Models: SimpleProp / BareProp / BackProp feed-forward nets, binary
-logistic, LDFA / QDFA, RegressNet stepwise. SimpleProp and BareProp share their state and
-their bias-independent mechanisms through **`OneHiddenNet`** (2026-08-01) and remain two
-concrete types; nothing shared reads the mutable `biasFlag`, and every bias-dependent width
-and both parameter-count formulae stay in the concrete classes. Statistics: exact non-parametric trapezoidal
+logistic, LDFA / QDFA, RegressNet stepwise. SimpleProp and BareProp share their state, file
+handling, training pass and forward equations through **`OneHiddenNet`** (2026-08-01) and
+remain two concrete types. The sharing carries **no bias parameter at all**: the one
+statement that differed is the same formula once its domain is written as a range
+(`0 .. nHidden - 1` is every hidden unit, and a biased `hO` carries the pinned bias slot
+after them). Nothing shared reads the mutable `biasFlag`; both parameter-count formulae,
+`outputHeader`'s frozen file line, every bias-dependent width, and SimpleProp's bias pin
+stay in the concrete classes. Statistics: exact non-parametric trapezoidal
 AUC and binormal Az (least-squares z-ROC fit via fitexy over distinct operating points),
 stratified bootstrap CI plus Hanley-McNeil, Kolmogorov-Smirnov, Pearson X² (statistic
 only — see settled decisions), Hosmer-Lemeshow Ĉ on 10 fixed deciles, Wald tests,

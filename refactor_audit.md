@@ -1012,9 +1012,23 @@ needs. That takes 149 compilations to about 67 and speeds every platform.
     sabotaging the NEW shared code (§8.4): dropping `oW` from `copy()` fails 4
     assertions, letting `save()` read `biasFlag` fails 2. All five gates green,
     nothing re-blessed; the Manifest documents the base.
-    **Commit 2 — `innerTrainSet()` + `forward()`, category B — is not started**,
-    and stops for review if the biased/unbiased formulae would vanish behind
-    generic indexing.
+    **Commit 2 done**: `innerTrainSet()` and the forward equations, category B,
+    shared with **zero parameterization** — with comments discounted the two
+    `innerTrainSet` bodies are now identical and `forward` differs only in
+    `hO[ nHidden ] = 1;`. The single executable difference is one formula once
+    its domain is written as a range: elements 0 .. `nHidden - 1` are the hidden
+    units, every element of an unbiased `hO` and all but the pinned bias slot of
+    a biased one. The forward equations live in a non-virtual
+    `OneHiddenNet::propagate()` — no dispatch added to a per-exemplar path
+    (rule 7) — and each `forward()` keeps reading its exemplar, SimpleProp's
+    keeping the bias pin. Proven the same expression BEFORE moving anything:
+    giving BareProp the ranged forms alone reproduces every `check_props`
+    literal captured at `02870fd`. Sabotages of the new shared code: narrowing
+    the range to `nHidden - 2` fails 19 assertions across both models; deleting
+    SimpleProp's bias pin fails 9 SimpleProp and **0** BareProp. The three dead
+    `finalFlag` / `storeGrads` comment blocks went with the move (§8.2 asymmetry
+    D) — both identifiers were already deleted and the condition number is X'VX.
+    All gates green including `tests/tools/run_tools.sh`; nothing re-blessed.
 11. DFA extraction, then the measured per-exemplar scoring optimization.
 12. Stepwise extraction — only after forward coverage exists.
 13. GUI async launcher, with its concurrency tests.

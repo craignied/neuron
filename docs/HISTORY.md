@@ -3253,3 +3253,54 @@ general tests, and no external run is an implementation gate.
     dimensions, where the shared form must be *provably* the same expression and the
     equations must stay legible. If they would vanish behind generic indexing, the
     instruction is to stop and report rather than to ship it.
+
+**2026-08-01 (later still) — `OneHiddenNet`, commit 2: the training pass and the forward
+equations, shared with zero parameterization.**
+
+  - **The scope test was "provably the same expression", and it passed.** With comments and
+    whitespace discounted the two `innerTrainSet` bodies are now **identical**, and
+    `forward` differs in exactly one statement, `hO[ nHidden ] = 1;`. The single executable
+    difference the audit predicted — the hidden error term — is one formula once its domain
+    is written out rather than assumed: `func( hO, d_sigmoidal(), h_err, 0, nHidden - 1 )`
+    says *elements 0 .. nHidden-1 are the hidden units*, which is **every** element of an
+    unbiased `hO` and all but the pinned bias slot of a biased one. Same for the ranged
+    `dotprod`/`func` of the forward pass. **No flag, no bias parameter, no generic
+    indexing.**
+  - **Proven numerically BEFORE anything moved.** Giving BareProp the ranged forms alone —
+    two lines, in its own class — reproduces every literal `tests/props/check_props.cpp`
+    captured from the engine at `02870fd`, before any refactoring: forward signature, error
+    and output after one iteration, 2000 iterations batch and on-line, 100 with auto step
+    size on and off, 50 CGD, 50 Shanno, and 500 on-line with weight decay. That is the
+    equivalence claim tested as its own step, not inferred from a passing suite afterward.
+  - **The bias statement stays in the class that has one.** `OneHiddenNet::propagate()` is
+    **non-virtual** and holds equations #2-#5; each concrete `forward()` reads its exemplar
+    and SimpleProp's pins its bias slot, then calls it. A virtual hook would have put an
+    indirect call on a per-exemplar path to remove source duplication, which rule 7 forbids;
+    a `biasFlag` test would have been the failure mode §8.2 category C names.
+  - **Two sabotages, each failing a distinct set.** Narrowing the shared range to
+    `nHidden - 2` fails **19** assertions across both models. Deleting SimpleProp's
+    `hO[ nHidden ] = 1;` fails **9 SimpleProp and 0 BareProp** — the per-class statement is
+    load-bearing and the shared code does not quietly re-establish it. (The pure
+    forward-signature assertion survives that second one, correctly: `setHidden` pins the
+    slot at construction and only a weight update disturbs it.)
+  - **An assert-enabled build is now part of this work, and it found something.**
+    `Matrix`'s ranged `dotprod` and `row` guard with `assert`, which vanishes under `NDEBUG`
+    — this project builds Release. A Debug build of the two prop suites confirmed the ranged
+    contracts hold for BareProp, and aborted on `tests/onehidden/check_onehidden.cpp`, whose
+    `signature()` helper passed the **DataSet's** training matrix to `forward()` instead of
+    the model's own `Model::Train`. On this fixture a SimpleProp's input width equals that
+    matrix's width, so the **label was being read into the bias slot**; a BareProp's is
+    narrower, so the row copy was short. Both invisible in Release. No assertion changed its
+    verdict — every comparison is relational and both sides used the same wrong matrix — but
+    the fingerprint was of the wrong thing. Fixed in its own commit (`174e76e`) and still
+    proven to bite.
+  - **The dead `finalFlag` / `storeGrads` comment blocks went with the move** (§8.2 asymmetry
+    D). Both identifiers were deleted earlier, and the condition number is X'VX and harvests
+    no gradients, so carrying "if this is to be implemented in the future" into shared code
+    would have propagated a stale instruction to BareProp as well. Sol's call, confirmed.
+  - **Net −472 / +288** across the six files. All gates green — zero-warning Release build,
+    three goldens byte-identical, `ctest` 27/27, `smoke.sh`, `verify_oracle.sh` numerically
+    identical, `tests/tools/run_tools.sh`, `git diff --check` — and nothing re-blessed. The
+    Manifest's method ownership was corrected and `docs/manifest.pdf` rebuilt; the added
+    source-map row had pushed that table onto a near-empty page, which the visual inspection
+    caught and the wording now avoids.

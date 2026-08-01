@@ -68,11 +68,10 @@ public:
 	// Trains one iteration through the training set
 	virtual double trainSet(); // returns set error
 
-	// Inner training set algorithm for automatic stepsize selection
-	virtual double innerTrainSet(); // returns set error
-
 	// Forward propagates for one input vector in dataset
 	// Takes dataset Matrix as first argument, position in dataset as 2nd argument
+	//    Reads the exemplar and pins the bias slot, then calls
+	//    OneHiddenNet::propagate() for the equations
 	virtual void forward( Matrix< double >&, const unsigned );
 
 	// Remove input nodes from this network

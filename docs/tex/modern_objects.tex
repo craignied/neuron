@@ -236,6 +236,9 @@ one-hidden-layer models.
 \index{OneHiddenNet!randomize}
 \index{OneHiddenNet!save}
 \index{OneHiddenNet!load}
+\index{OneHiddenNet!innerTrainSet}
+\index{OneHiddenNet!propagate}
+\index{Forward propagation!shared implementation}
 \index{SimpleProp!shared implementation}
 \index{BareProp!shared implementation}
 \texttt{SimpleProp} and \texttt{BareProp} describe the same architecture ---
@@ -260,16 +263,34 @@ depend on the bias architecture:
       refusing a file whose input count disagrees with the loaded dataset.
 \item \texttt{virtual void pack()}: flattens the hidden and output gradients
       into the packed gradient vector the conjugate-direction optimizers use.
+\item \texttt{virtual double innerTrainSet()}: performs one training pass over
+      the training set and returns the set error.  This is the training loop
+      itself --- on-line and batch, canonical descent and the separate-gradient
+      path, weight decay, and the optimizer call --- for both models.
+\item \texttt{void propagate()}: applies the forward equations to the exemplar
+      already in the input vector, with the hidden bias slot already
+      established if the model has one.  Non-virtual, and called directly by
+      each concrete \texttt{forward()}: this is a per-exemplar path and may not
+      acquire indirect calls in order to remove source duplication.
 \end{itemize}
+
+The training loop and the forward equations are shared with no
+parameterization at all, rather than with a bias flag.  Their one differing
+statement, the hidden error term, is the same formula once its domain is
+written out: elements $0$ through $n_{\mathrm{hidden}}-1$ are the hidden units,
+which is every element of an unbiased hidden-output vector and all but the
+pinned bias slot of a biased one.  The ranged operations of \texttt{Matrix} and
+the vector operators express that domain directly.
 
 Three things deliberately remain in the concrete classes.  \texttt{df()} is
 two published parameter counts, $((n_{\mathrm{input}}+2)n_{\mathrm{hidden}})+1$
 with biases and $(n_{\mathrm{input}}+1)n_{\mathrm{hidden}}$ without.
 \texttt{outputHeader()} writes a model-file format line that \texttt{load}
 reads back.  Every width that follows from the bias column and the pinned bias
-slot --- \texttt{setDataSet}, \texttt{setHidden}, \texttt{forward},
-\texttt{innerTrainSet}, \texttt{unpack}, and \texttt{removeInputs} --- stays
-where the biased and unbiased equations can be read side by side.
+slot --- \texttt{setDataSet}, \texttt{setHidden}, \texttt{unpack},
+\texttt{removeInputs}, and the statements of \texttt{forward()} that read the
+exemplar and, in \texttt{SimpleProp} alone, pin the bias slot --- stays where
+the biased and unbiased architectures can be read side by side.
 
 Two notes matter to callers.  \texttt{SimpleProp} and \texttt{BareProp} remain
 distinct concrete types: type identity drives cloning, the model factory, and

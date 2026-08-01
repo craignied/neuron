@@ -7,6 +7,14 @@
 // category A. Those live here once: randomize(), save(), load(), pack(), the
 // copy utility, and the automatic step-size weight snapshot.
 //
+// The training loop and the forward equations live here too (category B, one
+// mechanism with bias-dependent dimensions). They are shared with ZERO
+// parameterization, not with a flag: innerTrainSet() was ~185 lines written
+// out twice whose executable difference was a single line, and that line is
+// the same formula once its domain is written as a range -- elements
+// 0 .. nHidden - 1 are the hidden units, which is every element of an
+// unbiased hO and all but the pinned bias slot of a biased one.
+//
 // WHAT DELIBERATELY DOES NOT LIVE HERE:
 //
 //   * SimpleProp and BareProp REMAIN TWO CONCRETE TYPES. typeid dispatch in
@@ -17,9 +25,10 @@
 //     counts and two model-file format lines that load() reads back -- genuine
 //     per-class mathematics and frozen bytes, not duplication (rule 7).
 //   * THE BIAS ARCHITECTURE. Every width that depends on the bias column or the
-//     pinned bias slot -- setHidden(), setDataSet(), forward(), innerTrainSet(),
-//     unpack(), removeInputs() -- stays in the concrete class, where the biased
-//     and unbiased equations remain legible side by side. Nothing here reads
+//     pinned bias slot -- setHidden(), setDataSet(), unpack(), removeInputs(),
+//     and the one statement in each forward() that reads the exemplar and pins
+//     the bias slot -- stays in the concrete class, where the biased and
+//     unbiased architectures remain legible side by side. Nothing here reads
 //     Network::biasFlag: that flag is publicly settable through setBias(), so a
 //     shared implementation that consulted it could be made to reshape a live
 //     model or change what it writes to disk. The architecture is fixed by the
@@ -58,7 +67,20 @@ public:
 	//    takes filename as ( string ) argument
 	virtual bool load( string& );
 
+	// Inner training set algorithm for automatic stepsize selection.
+	//    One implementation for both architectures -- the hidden error term is
+	//    the same formula once its domain is written as a range. See the note
+	//    at that line in onehidden.cpp.
+	virtual double innerTrainSet(); // returns set error
+
 protected:
+	// Forward propagation from the exemplar ALREADY IN I, with the hidden bias
+	//    slot ALREADY PINNED if this model has one. Each concrete forward()
+	//    does those two things and calls this. Non-virtual and called directly:
+	//    this is a per-exemplar path, which may not acquire indirect calls to
+	//    remove source duplication (rule 7).
+	void propagate();
+
 	unsigned nHidden; // number of hidden nodes
 
 	Matrix< double > hW, // hidden weight Matrix
