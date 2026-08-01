@@ -150,7 +150,15 @@ protected:
 	// Copy utility
 	void copy( const Network& rhs );
 
-	// Utility to output Network specific parameters prior to an Iterative run
+	// Derive the per-run weight-decay constants (regularizer, decayTerm) from
+	//    the CURRENT eta and decay. Training reads both, so this must run for
+	//    every run, quiet or not -- see Iterative::prepareRun. It stays a
+	//    per-run calculation rather than a one-time constructor assignment
+	//    because eta and decay may change between runs.
+	virtual void prepareRun();
+
+	// Utility to output Network specific parameters prior to an Iterative run.
+	//    REPORTING ONLY: it must not compute anything the fit depends on.
 	virtual void runHeader( ostream& );
 
 	// Convert weight gradient structure to single vector

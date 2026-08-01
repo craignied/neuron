@@ -46,6 +46,17 @@ Network::Network()
 	//    if training is off-line (batch/epoch) or on-line
 	eta = 0.05;
 
+	// The DERIVED decay constants, set here as defence only -- a caller that
+	//    reaches innerTrainSet() without going through train() must not read
+	//    indeterminate storage. prepareRun() remains the authoritative
+	//    calculation, because eta and decay may both change between
+	//    construction and a run. Deliberately placed AFTER eta and decay are
+	//    assigned: derived state must be computed from initialized inputs, and
+	//    putting it above eta would reproduce, in the fix, the very defect
+	//    being fixed. Explicitly qualified: a virtual call from a constructor
+	//    dispatches to this class anyway, and saying so removes the question.
+	Network::prepareRun();
+
 	// Start with canonical backprop
 	trainingType = 0;
 
@@ -433,14 +444,29 @@ void Network::classAccuracy( ostream& outputStream )
 	}
 }
 
-// Utility to output Network specific parameters prior to an Iterative run
-void Network::runHeader( ostream& outputStream )
+// Derive the per-run weight-decay constants. Called by Iterative::train()
+//    before the training loop and outside every reporting guard.
+//
+//    These two statements used to open runHeader(), which train() called only
+//    when the run was NOT quiet -- so a quiet run (every stepwise regression
+//    candidate refit; Network's default has weight decay ON) multiplied its
+//    weights by an uninitialised decayTerm and added an uninitialised
+//    regularizer to its reported error. Neither constructor set them. Measured
+//    2026-08-01: NaN under -ftrivial-auto-var-init=pattern, and a stable but
+//    wrong 0.673 instead of 0.0223 under an ordinary Release build -- the same
+//    source and seed giving a different fit depending on the stack.
+//    See tests/iterative/check_quietprep.cpp.
+void Network::prepareRun()
 {
-	// A great place to initialize the actual weight multipliers for decay, as this needs
-	//    only to be calculated once, right before innerTrainSet() is called iteratively
 	regularizer = decay / 2; // the regularization term lambda
 	decayTerm = 1 - ( eta * decay ); // 1 - 2*eta*lambda
+}
 
+// Utility to output Network specific parameters prior to an Iterative run.
+//    REPORTING ONLY -- the decay constants it used to derive now live in
+//    prepareRun(), because the training math reads them.
+void Network::runHeader( ostream& outputStream )
+{
 	switch ( trainingType ) // the training algorithm
 	{
 		case 0:

@@ -181,6 +181,13 @@ double Iterative::train()
 	//    exit overwrites this at its break
 	stopReason = STOP_MAX_ITERATIONS;
 
+	// PREPARE the run before anything else, and OUTSIDE every reporting guard
+	//    (the quiet branch below, and the REGRESS_DEBUG switch). Network derives
+	//    its weight-decay constants here; those are training inputs, and until
+	//    2026-08-01 they were computed inside the quiet branch, which meant a
+	//    quiet run trained on uninitialised memory. See Iterative::prepareRun.
+	prepareRun();
+
 	deque< double > errorsWindow; // window of error values, use deque for speed
 
 	// Plateau auto-stop detector (inert unless autoStopFlag; constructed from

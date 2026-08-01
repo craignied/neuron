@@ -188,3 +188,19 @@ add_executable(check_quietcopy
 target_include_directories(check_quietcopy PRIVATE src)
 target_link_libraries(check_quietcopy PRIVATE GSL::gsl GSL::gslcblas)
 add_test(NAME iterative_quiet_copy COMMAND check_quietcopy)
+
+# Regression test: a QUIET run is a SILENT run, never a DIFFERENT one.
+# Network::runHeader() computed regularizer and decayTerm -- two constants the
+# TRAINING math reads -- and Iterative::train() called it inside its quiet
+# guard, so a quiet run with weight decay on trained on uninitialised doubles
+# (stepwise regression's candidate refits are all quiet). Asserts that quiet
+# and audible runs agree exactly on error, weights, stop reason, convergence
+# and iteration count. Found 2026-08-01 by tests/props.
+add_executable(check_quietprep
+    tests/iterative/check_quietprep.cpp
+    src/simpleprop.cpp src/bareprop.cpp src/backprop.cpp src/logistic.cpp
+    src/network.cpp src/iterative.cpp src/model.cpp src/dataset.cpp src/split.cpp
+    src/twoset.cpp src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
+target_include_directories(check_quietprep PRIVATE src)
+target_link_libraries(check_quietprep PRIVATE GSL::gsl GSL::gslcblas)
+add_test(NAME iterative_quiet_prepare COMMAND check_quietprep)

@@ -214,8 +214,28 @@ protected:
 	// Copy utility
 	void copy( const Iterative& rhs );
 
+	// PREPARE the run. Called by train() exactly once, BEFORE the loop and
+	//    OUTSIDE every reporting guard, so a quiet run and an audible one
+	//    prepare identically.
+	//
+	//    This exists because runHeader() below did two unrelated jobs: it
+	//    printed the run's parameters AND computed two constants the training
+	//    math reads (Network's regularizer and decayTerm). train() called it
+	//    from inside `if ( !quietFlag )`, so a quiet run -- every stepwise
+	//    regression candidate refit -- trained on uninitialised doubles
+	//    whenever weight decay was on. Measured: NaN under a pattern-
+	//    initialised build, a wrong-but-stable number under an ordinary one.
+	//
+	//    THE RULE, which is CLAUDE.md's settled decision on setQuiet: a
+	//    reporting guard may never contain a calculation the fit depends on.
+	//    Anything a run needs COMPUTED goes here; anything it needs SAID goes
+	//    in runHeader(). Default no-op: Network is the only subclass that has
+	//    per-run constants to derive, and a pure virtual would burden every
+	//    future one that does not.
+	virtual void prepareRun() { }
+
 	// Utility to output parameters specific to objects derived from Iterative
-	//    preceeding an Iterative run
+	//    preceeding an Iterative run. REPORTING ONLY -- see prepareRun above.
 	virtual void runHeader( ostream& ) = 0; // pure virtual
 
 	// Returns maximum gradient of derived object
