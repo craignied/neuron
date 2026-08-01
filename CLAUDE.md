@@ -152,8 +152,15 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
 4. **Engine code lives in the class layer.** The computational core was built on
    `Matrix` / `vector_ops` / `Population` so that (a) the code reads like the matrix
    notation in the paper it came from — you can go from the page to the code and back —
-   and (b) every element access is bounds-checked (`Matrix::operator()` throws
-   `BoundsViolation` even in release builds, where asserts vanish). New engine or
+   and (b) **both** classes reject bounds and dimension violations in Release, where
+   asserts vanish: `Matrix::operator()` throws `BoundsViolation`, and every
+   `vector_ops` operation that walks two containers in lockstep or indexes one by
+   position throws `nvec::SizeMismatch` / `RangeViolation` / `EmptyVector`. This
+   is why staying inside the layer is worth it. It was half true until 2026-08-01:
+   `vector_ops` guarded its preconditions with `assert` alone, and because this
+   project builds Release by default, **not one of those assertions had ever
+   executed in the gate chain** — seventeen contracts, measured, unenforced in the
+   shipped binary (D5; `refactor_audit.md` §11). New engine or
    statistics code uses those classes; when the layer lacks a primitive, **extend the
    layer** (as `includerows` was added 2026-07-16 for the bootstrap resample) rather
    than dropping to raw arrays or hand-rolled recounts. Scalar code is sometimes

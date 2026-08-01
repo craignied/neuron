@@ -1136,14 +1136,19 @@ applied while code is written, not after.  Constness applied as a
 patch to already written code is uniformly considered to be very poor
 programming practice.}
 
-\section{Validate invariants at the appropriate boundary}
+\section{Validate invariants at the appropriate boundary}\label{validate_invariants}
 
 Assertions remain useful for programmer invariants in development
 builds, but Release builds define \texttt{NDEBUG} and therefore cannot
 depend on them for user input or memory safety.  Public handlers
 validate request values before calling the engine.  Matrix element
 access performs unconditional bounds checks and throws
-\texttt{BoundsViolation} in every build.
+\texttt{BoundsViolation} in every build, and the vector operations of
+section \ref{nvec_exceptions} likewise reject bounds and dimension
+violations in every build.  Both halves of the numerical layer are
+required: until 2026, every precondition in ``vector\_ops.h'' was an
+assertion, and because Release is the default configuration none of
+them had ever executed in the test suite.
 
 An assertion can still document an internal precondition such as
 equal matrix dimensions:
@@ -1171,6 +1176,34 @@ file ``matrix.h'' implements a matrix class for simplified
 Inclusion of the header file ``vector\_ops.h'' overloads operators and
 adds methods to the $<$vector$>$ STL.  Please see $<$vector$>$ STL
 documentation for standard $<$vector$>$ STL methods.
+
+\subsection{Bounds and dimension violations}\label{nvec_exceptions}
+
+Many of the operations below walk two vectors in lockstep, or index
+into a vector by position.  Violating such a precondition is not a
+data condition to be handled; it is a programming error that reads or
+writes memory the operation does not own.  These preconditions are
+therefore checked {\em unconditionally}, and the checks are not
+assertions: Release builds define \texttt{NDEBUG} (see section
+\ref{validate_invariants}), so an assertion cannot protect memory in
+the shipped binary.
+
+Three exception types are declared in {\bf namespace nvec}:
+
+\begin{itemize}
+\item \texttt{nvec::SizeMismatch}: two parallel containers have
+	incompatible lengths.
+\item \texttt{nvec::RangeViolation}: a position, range or extent lies
+	outside the container it indexes.
+\item \texttt{nvec::EmptyVector}: the operation has no value on an
+	empty set.  This applies to maxabs and minabs only; a {\em sum}
+	has an identity, so squared, dotprod and sumSquaredDifference
+	all return 0 over empty operands.
+\end{itemize}
+
+Each operation below states its own precondition and which of these it
+throws.  The checks are performed once, before the elementwise loop,
+never per element.
 
 \subsection{Unary mathematical operators}
 
@@ -1210,6 +1243,13 @@ side (rhs) vector size {\em must be} greater than the left hand side
 (lhs) vector.  If the vectors have different sizes, the remaining
 elements at the end of the rhs vector that are not represented in the
 lhs vector will be ignored.
+
+This inequality is deliberate and is relied upon: the result carries
+the lhs size, which is how the bias slot is dropped when a hidden
+error vector of $n$ elements is multiplied by an output weight vector
+of $n+1$.  A rhs {\em shorter} than the lhs is the error, because the
+operation would then read past its end, and throws
+\texttt{nvec::SizeMismatch} (section \ref{nvec_exceptions}).
 
 \subsection{Unary mathematical operators with scalars}
 
@@ -1387,7 +1427,17 @@ x = dotprod( v1, v2 );
 \end{verbatim}
 
 \subsubsection{Notes}
-$v_1$ and $v_2$ {\em must have} the same number of elements.
+$v_1$ and $v_2$ {\em must have} the same number of elements, and
+\texttt{nvec::SizeMismatch} (section \ref{nvec_exceptions}) is thrown
+if they do not.  Note that this is {\em equality}, not the inequality
+the unary operators accept: a dot product taken over a prefix of the
+longer vector is a different scalar, and returning it silently is
+precisely what the check exists to prevent.  Two {\em empty} vectors
+are accepted and give 0, the identity of a sum.
+
+The method sumSquaredDifference( vector\& $v_1$, vector\& $v_2$ )
+returns $\|v_1 - v_2\|^2$ under the same contract, without
+constructing the difference vector.
 
 \subsection{Function passing}
 
@@ -1509,6 +1559,31 @@ y = sigmoidal()( x );
 
 is valid if sigmoidal is defined as described above.
 
+\subsubsection{Notes}
+The two forms taking $v_{out}$ write into a vector the caller supplies;
+neither ever resizes it, because silently growing a destination would
+conceal a defect in the shape of the model that supplied it.  Their
+preconditions, and the exceptions of section \ref{nvec_exceptions}:
+
+\begin{itemize}
+\item func( $v_{in}$, $f$, $v_{out}$ ): $v_{in}$ and $v_{out}$ {\em
+	must have} the same number of elements, and
+	\texttt{nvec::SizeMismatch} is thrown if they do not.  This is
+	equality rather than the inequality the unary operators take,
+	deliberately: the operation writes $v_{in}$.size() elements into
+	$v_{out}$, so a longer input runs off the end of the
+	destination.  A caller that wants only part of a vector says
+	which part, through the ranged form below.
+\item func( $v_{in}$, $f$, $v_{out}$, $begin$, $end$ ): $begin$ {\em
+	must not exceed} $end$, and $end$ {\em must be} within {\em
+	both} $v_{in}$ and $v_{out}$.  \texttt{nvec::RangeViolation}
+	is thrown otherwise.
+\item func( $v$, $f$, $begin$, $end$ ): $begin$ {\em must not exceed}
+	$end$, and $end$ {\em must be} within $v$; the returned vector
+	is allocated at the correct size and cannot be overrun.
+	\texttt{nvec::RangeViolation} is thrown otherwise.
+\end{itemize}
+
 \subsection{Calculating the sum of squares of a vector elements}
 
 The method squared( vector\& $v$ ) returns the value of the sum of
@@ -1533,6 +1608,13 @@ double max;
 max = maxabs( v );
 \end{verbatim}
 
+\subsubsection{Notes}
+$v$ {\em must not be} empty, and \texttt{nvec::EmptyVector} (section
+\ref{nvec_exceptions}) is thrown if it is.  The maximum of an empty set
+has no value, and returning 0 would be acted upon: this method supplies
+the largest absolute gradient to the training stopping rule, where a
+value of 0 means {\em converged}.
+
 \subsection{Calculating the minimum absolute value of vector elements}
 
 The method minabs( vector\& $v$ ) returns the minimum absolute value
@@ -1544,6 +1626,10 @@ vector< double > v; // v is then populated with double values...
 double min;
 min = minabs( v );
 \end{verbatim}
+
+\subsubsection{Notes}
+$v$ {\em must not be} empty, and \texttt{nvec::EmptyVector} (section
+\ref{nvec_exceptions}) is thrown if it is.
 
 \subsection{Randomization}
 

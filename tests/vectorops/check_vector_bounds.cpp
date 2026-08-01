@@ -254,9 +254,12 @@ static bool c16()
 }
 
 // 17. bin with a zero bin size: v_in.size() / b is integer division by zero.
+//     RangeViolation, not SizeMismatch -- b is not a container length, it is
+//     the extent of each output bin, and 0 is outside the extents a container
+//     can be partitioned into.
 static bool c17()
 {
-	return throws< nvec::SizeMismatch >( []
+	return throws< nvec::RangeViolation >( []
 	{
 		vector< double > in = seq( 6 );
 		vector< vector< double > > out = bin( in, 0u, false );

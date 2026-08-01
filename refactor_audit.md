@@ -1279,7 +1279,7 @@ memory it does not own; **—** = no precondition to violate.
 | 16 | `sumSquaredDifference( a, b )` | `a.size() == b.size()` | `assert` | **walks `b` in lockstep with `a`, past its end** | A | `throw nvec::SizeMismatch` |
 | 17 | `maxabs( v )` | non-empty — see 11.5 | none; empty returns `0` | same | A′ | `throw nvec::EmptyVector` |
 | 18 | `minabs( v )` | non-empty | none; **dereferences `*v.begin()` unconditionally** | same — UB on empty | A | `throw nvec::EmptyVector` |
-| 19 | `bin( v_in, b, binFlag, v )` | `b > 0`; empty input is harmless | `assert( b > 0 )`, `assert( v_in.size() > 0 )` | **`v_in.size() / b` with `b == 0` is integer division by zero** — UB, `SIGFPE` on both our targets | A | `throw nvec::SizeMismatch` on `b == 0`; empty input **accepted** (yields one empty bin, as today) |
+| 19 | `bin( v_in, b, binFlag, v )` | `b > 0`; empty input is harmless | `assert( b > 0 )`, `assert( v_in.size() > 0 )` | **`v_in.size() / b` with `b == 0` is integer division by zero** — UB, `SIGFPE` on both our targets | A | `throw nvec::RangeViolation` on `b == 0` (`b` is an *extent*, not a container length); empty input **accepted** (yields one empty bin, as today) |
 | 20 | `bin( v_in, b, binFlag )` | as #19 | via #19 | via #19 | A | inherited |
 
 Counting overloads, that is 36 functions, of which **13 can misuse memory in the
@@ -1507,10 +1507,11 @@ no shadow-memory remapping, so "sanitizers" is not one capability here.
   under `NDEBUG` against the *unchanged* operations and recorded as failing every
   Class-A contract. **Not registered with `add_test` yet**, so the gate chain
   stays green while the gap is on the record.
-- **D5b** — the checks; the harness wired into `ctest`; `CMakeLists.txt:8`'s
-  claim corrected; the obsolete assert-only commentary removed; `CLAUDE.md`
-  rule 4 amended (11.10); manifest updated only if the layer's documented public
-  contracts change, in its established vertical method-by-method format.
+- **D5b** — the checks; the harness wired into `ctest` (`vector_ops_bounds`,
+  making it 20 cases); `CMakeLists.txt:8`'s claim corrected; the obsolete
+  assert-only commentary removed; `CLAUDE.md` rule 4 amended (11.10); manifest
+  updated, in its established vertical method-by-method format, because the
+  layer's documented public contracts did change. Results in 11.13.
 
 ### 11.10 Rule 4 needs one sentence
 
@@ -1519,6 +1520,68 @@ Rule 4 argues bounds safety entirely through `Matrix::operator()`, and
 guarantee. The amendment states that **both** `Matrix` and the numerical vector
 operations reject bounds and dimension violations in Release — which is what
 makes the class layer worth staying inside.
+
+### 11.13 D5b, measured
+
+**Which assertions remain in `vector_ops.h`: none.** `#include <cassert>` went
+with them. An `assert` beside an unconditional check adds nothing and re-teaches
+the exact misconception that produced the defect — that these are debug-only
+concerns.
+
+**No exercised production caller violated the newly explicit contract.** The
+goldens are byte-identical (three transcripts covering SimpleProp, BareProp,
+BackProp, Logistic, stepwise and the binormal path), 20 `ctest` cases pass
+including OBD, CV, the characterization suite and all three optimizers, the full
+GUI smoke passes every endpoint, and the oracle is numerically identical. Had any
+live call site been relying on a violated precondition, it would now throw rather
+than overrun. That is evidence about *exercised* callers, which is what a test
+suite can give.
+
+**Cost: none measurable.** Rule 7 says measure rather than assert that a check is
+free. A hot-loop benchmark at SimpleProp's shapes (`hO` = nHidden + 1, `h_err` =
+nHidden, `oW` = nHidden + 1, nHidden = 10), four guarded calls per iteration —
+the ranged destination `func`, the prefix `*=`, the equal-size `func`, and
+`dotprod` — 20 M iterations, A/B interleaved five times:
+
+| | ns per iteration |
+|---|---|
+| before (assert-only, asserts compiled out) | 8.36, 8.40, 8.46, 8.48, 8.46 |
+| after (unconditional checks) | 7.65, 7.80, 7.79, 7.73, 7.75 |
+
+The checked build is reproducibly **~8% faster**, with an identical checksum.
+**I have not explained that and am not claiming it as a benefit** — plausibly the
+size comparison hands the optimizer a proven relationship, or it is code layout.
+The claim that survives measurement is the one that matters: a check performed
+once before an O(n) loop costs nothing detectable, even at n ≈ 10 on the hottest
+path in the engine.
+
+*(Two traps worth recording. The first three "before" runs read 16.3 ns — double
+the truth — because a build was running concurrently; interleaving A/B is what
+exposed it. And the "after" binary was confirmed to contain the checks by
+`nm`: 12 `nvec` exception symbols against 0 in the "before" binary. Stale
+binaries have produced false results three times in this refactor.)*
+
+**Sabotage, both bounds independently** (proof 3). Snapshot-restore by file copy,
+never `git checkout`, and each rebuild confirmed by its own `Building CXX object`
+line:
+
+| sabotage | case 4 (input bound) | case 5 (destination bound) |
+|---|---|---|
+| `b >= vec_in.size()` removed | **FAIL** | ok |
+| `b >= vec_out.size()` removed | ok | **FAIL** |
+
+Each check is therefore held by its own case, and the test is not asserting one
+contract twice. Restored and verified byte-identical against the snapshot;
+`grep -c SABOTAGE` returns 0.
+
+**Documentation.** `CMakeLists.txt`'s reassurance and `CLAUDE.md` rule 4 both
+named `Matrix` alone as the bounds guarantee; both now state that the numerical
+vector operations refuse in Release too. The manifest gains
+§"Bounds and dimension violations" plus per-method `Notes` on the unary
+operators, `dotprod`/`sumSquaredDifference`, all four `func` forms, and
+`maxabs`/`minabs`, in its established vertical format — the layer's documented
+public contracts changed, which is the condition for touching it. Rebuilt and
+text-checked: 202 pages, both new cross-references resolving.
 
 ### 11.11 Carried forward: an unverified observation, not a finding
 

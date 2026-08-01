@@ -4,9 +4,15 @@ project(neuron VERSION 3.0.0 LANGUAGES CXX)
 # Default to Release: a bare `cmake -B build` otherwise builds with NO
 # optimization at all, and the engine runs ~15x slower -- discovered 2026-07-21
 # when a locally reconfigured build dir had an empty CMAKE_BUILD_TYPE and every
-# timing measured against it was wrong. CI builds Release explicitly; asserts
-# vanish under -DNDEBUG by design (handlers validate; Matrix bounds checks are
-# unconditional throws, not asserts). Single-config generators only -- MSVC
+# timing measured against it was wrong. CI builds Release explicitly.
+#
+# Asserts vanish under -DNDEBUG, so nothing the engine must not do may be
+# guarded by one: handlers validate, Matrix bounds checks are unconditional
+# throws, and since 2026-08-01 so are the bounds and dimension checks in
+# vector_ops (D5). This comment used to name Matrix alone, which read as
+# though it were the whole guarantee -- every vector_ops precondition was an
+# assert, and because this project builds Release by default, not one of them
+# had ever executed in the gate chain. Single-config generators only -- MSVC
 # picks its config at build time (--config Release, as CI does).
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
@@ -293,10 +299,16 @@ add_test(NAME twoset_rates COMMAND check_rates)
 # defect intact, so it must not depend on how the build directory was
 # configured.
 #
-# NOT registered with add_test in this commit (D5a). The operations are still
-# assert-only, so these cases do not throw -- they corrupt memory, which is the
-# point. tests/vectorops/run_bounds_demo.sh runs each case in its own process
-# and records the gap; the ctest registration lands with the checks (D5b).
+# Asserts the exception contract of every operation whose precondition, if
+# violated, can read or write outside a container -- and the positive controls
+# that the successful path is unchanged, including the deliberate PREFIX
+# semantics of the compound operators (a longer right operand is legal and the
+# bias-slot arithmetic of SimpleProp and BackProp depends on it).
+#
+# tests/vectorops/run_bounds_demo.sh runs each case in its own process. That is
+# a demonstration driver for use against sabotaged or historical builds, where
+# a case that takes a SIGBUS would otherwise hide every case after it.
 add_executable(check_vector_bounds tests/vectorops/check_vector_bounds.cpp)
 target_link_libraries(check_vector_bounds PRIVATE neuron_core)
 target_compile_definitions(check_vector_bounds PRIVATE NDEBUG)
+add_test(NAME vector_ops_bounds COMMAND check_vector_bounds)
