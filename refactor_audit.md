@@ -989,7 +989,14 @@ needs. That takes 149 compilations to about 67 and speeds every platform.
    Four invariants captured from the unfixed engine are bit-identical after it;
    `tests/backprop/check_bpoptimizer.cpp` is the guard, and was proven to fail
    against the unfixed engine before the fix was written. No golden re-blessed.
-8. `DataSet::metricsReport` / `Iterative::announceStop` / `Model::writeLastop`.
+8. ~~`DataSet::metricsReport` / `Iterative::announceStop` / `Model::writeLastop`~~
+   — **done**, three separate commits (`7c5d653`, `2fb6212`, `a553db4`), each
+   with its characterization test written and passing BEFORE the extraction:
+   `check_metricsreport` (both halves proven to execute, report proven
+   byte-identical), `check_announcestop` (all SEVEN exits — reason, token,
+   `converged()`, exact text, quiet contract — with two independent sabotages),
+   `check_writelastop` (all three writers, truncation over a 20 KB leftover,
+   the disabled case, the unopenable path).
 9. Auto step-size template method (§1.2, §8.5).
 10. Bounded SimpleProp/BareProp sharing (§8.2).
 11. DFA extraction, then the measured per-exemplar scoring optimization.

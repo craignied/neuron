@@ -3081,3 +3081,44 @@ general tests, and no external run is an implementation gate.
     hex floats. Proven to fail: against the unfixed engine, 12 failures with group 1 passing;
     restoring the old `WeightsAccumulate` update reproduces exactly those 12.
   - **No golden was re-blessed** — none covers this path, and none moved.
+
+**2026-08-01 (later) — the lower-risk DRY group: three extractions, three tests written first.**
+
+  - **`DataSet::setMetrics`** (`7c5d653`). The training and test blocks of `metricsReport`
+    were the same forty lines twice, differing only in the `TwoSet`, the heading and the
+    table label; 277 lines became 117. **Proven byte-identical**, not assumed: a `--capture`
+    mode emits the full report for three configurations, 99 lines including both
+    classification tables and both bootstrap intervals, diffed across the extraction.
+    *That comparison was unsound on the first attempt* — `util::d_random()` seeds itself
+    from `time( 0 )` when nobody else has, so the 2000-resample CI made the capture
+    reproducible within a second and not across a rebuild, showing three "differences" that
+    were the clock. Caught by rebuilding the **original** code and finding it disagreed with
+    its own earlier capture. The test seeds before each report now. Sol's condition — *prove
+    both halves execute; goldens alone are insufficient* — is met by driving each half
+    explicitly, plus the four division-by-zero catch blocks (half the duplicated body, and
+    otherwise never run in this suite) and both refusals.
+  - **`Iterative::announceStop`** (`2fb6212`). Six stopping exits each ended with the same
+    five-line publication block. The helper owns **only** that: it does not decide whether a
+    condition fired, and carries no table of messages — each condition still states itself,
+    in its own words and its own stream formatting, with the formulae and their order
+    written out where they can be read against the manual. The test pins **seven** exits,
+    not the six extracted: for each, the `StopReason`, its machine-readable token,
+    `converged()`, the exact text, and the quiet contract — including the observer's three
+    distinct facts and the iteration ceiling, which is *not* a stopping condition and
+    reports through the epilogue. **Two independent sabotages**: a wrong reason assignment
+    fails 3 assertions (all reason/token) while every message and quiet assertion passes;
+    publishing regardless of `quietFlag` fails 14 (all quiet-contract) while every reason
+    and message assertion passes. Neither moves the other's, which is what proves the test
+    holds both contracts rather than one twice.
+  - **`Model::writeLastop`** (`a553db4`). The same fifteen lines at the end of
+    `Iterative::train`, `LDFA::train` and `QDFA::train`. Two properties now stated once
+    instead of implied three times: `ios::trunc` is load-bearing (this file is the *last*
+    operation, not a log of every one — appending would grow `model.txt` unboundedly and
+    nobody would notice for months), and an unopenable path is reported while the run
+    **continues**, because the fit is already valid and losing a convenience file must not
+    destroy it.
+  - **Two flaws in that last test, found by running it against the UNCHANGED code** — the
+    practice standing rule 2 exists for. Its truncation check used a repeated `'X'` as a
+    sentinel, and the reports contain `"Pearson X2 = "`; and each writer lambda captured the
+    screen internally, so the outer capture saw nothing and the "names itself" assertion
+    could never pass. Both would have produced a green test that guarded nothing.
