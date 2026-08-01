@@ -187,8 +187,120 @@ protected:
 	//    gone with it. See docs/tex and refactor_audit.md.
 	void conditionOf( const Matrix< double >& symmetric );
 
+	// THE AUTOMATIC STEP-SIZE SEARCH -- the one implementation, for every model
+	//    that has one. It was the same forty lines at the top of
+	//    SimpleProp::trainSet(), BareProp::trainSet(), BackProp::trainSet() and
+	//    Logistic::trainSet(), differing in exactly two things:
+	//
+	//    THE GUARD, which the CALLER passes, because it is genuinely not the
+	//       same. Logistic searches whenever automaticStepSizeFlag is set; the
+	//       three feed-forward nets require batchEpochFlag as well. That
+	//       asymmetry stays visible at each call site rather than hiding behind
+	//       a virtual policy method -- a shared guard would silently stop
+	//       Logistic searching, and no interface can reach that combination to
+	//       notice (tests/network/check_autostep.cpp is the only thing that
+	//       would).
+	//    THE WEIGHTS, which the model owns: hW/oW, Weights, or W. Each model
+	//       declares a private WeightSnapshot, and this constructs one as a
+	//       LOCAL of the search block. So no model carries a second copy of its
+	//       weights between calls -- which for BackProp would be a whole extra
+	//       vector< Matrix > -- and with the search off nothing is copied at
+	//       all: trainSet() is then exactly one innerTrainSet().
+	//
+	//    Network keeps lastG and lastF, which are ITS members and are what CGD
+	//    and Shanno carry between iterations. Nothing else is restored: eta,
+	//    the gradients, the accumulators and currGradMax are all left as the
+	//    trial passes left them, exactly as before.
+	//
+	//    A template, not std::function or a virtual hook: this is called once
+	//    per training iteration and must not add allocation or indirect calls
+	//    to it. innerTrainSet() below is still a virtual call on this, so a
+	//    subclass that counts passes counts the production dispatch.
+	template < class MODEL >
+	double searchStepSize( MODEL& model, const bool search );
+
 	// Utility to report out the condition number
 	void reportCondNum( ostream& );
 };
+
+// The search itself. Read it against the manual's step-size section: the shape
+//    is a snapshot, a loop that scales eta by gamma while the error keeps
+//    improving, a restoration, and then one real pass.
+template < class MODEL >
+double Network::searchStepSize( MODEL& model, const bool search )
+{
+	if ( search )
+	{
+		// Buffer the weights -- a local, alive only for this search
+		typename MODEL::WeightSnapshot weights( model );
+
+		// Also buffer lastG and lastF for conjugate gradient descent / Shanno's
+		vector< double > lastGBuffer = lastG, lastFBuffer = lastF;
+
+		// Initialize conditions for automatic stepsize selection
+		unsigned loopCounter = 1;
+		double newError = 1.0; // current calculated error
+		double oldError; // previous calculated error
+		double ErrorDifference = 1.0; // initially set to 1 to pass the while condition first time
+		eta = 1.0; // learning rate
+		//    Note that eta is reset ABOVE the loop, so it moves off whatever the
+		//    caller set even when the condition below is false and no trial pass
+		//    runs at all (a deltaError above 1.0 does exactly that).
+
+		// Main loop for automatic stepsize selection
+		while( ( loopCounter <= maxLoops ) && ( ErrorDifference > deltaError ) )
+		{
+			// If we have an old error to compute ErrorDifference
+			if( ! ( ( iteration == 0 ) && ( loopCounter == 1 ) ) )
+			{
+				// Get the previous error
+				oldError = oldErrorAccumulate; // from network data member
+				// Use current learning rate and compute new error
+				innerTrainSet();
+				// Get the new error stored in network member
+				newError = o_errAccumulate; // get from network member
+				// Compute error difference
+				ErrorDifference = ( oldError - newError );
+				// Set the new error as previous error
+				oldErrorAccumulate = o_errAccumulate;
+
+				// Check for loop condition
+				if( ( loopCounter > maxLoops ) || ( ErrorDifference < deltaError ) )
+					break;
+				else
+					eta *= gamma; // calculate learning rate
+			}
+			// For first iteration just iterate through training set and compute error
+			else
+			{
+				innerTrainSet();
+				oldErrorAccumulate = o_errAccumulate; // set new error as previous error
+			}
+
+			loopCounter++; // increment loop counter
+		}
+
+		// We have desired learning rate, lets finish the iteration
+		// Retrieve the saved weights, and the optimizer's history with them.
+		//    Restoration is EXPLICIT and not a destructor: an exception out of
+		//    innerTrainSet() left trial weights installed before this extraction
+		//    and still does, so the behavior is unchanged. Making it automatic
+		//    would be a correctness change and belongs in its own commit.
+		weights.restore( model );
+		lastG = lastGBuffer;
+		lastF = lastFBuffer;
+	}
+
+	// Now actual update of weights takes place
+	double returnError;
+	returnError = innerTrainSet();
+
+	// Set the new error as previous error
+	if ( search )
+		oldErrorAccumulate = o_errAccumulate;
+
+	// Return the set error
+	return returnError;
+}
 
 #endif

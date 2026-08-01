@@ -3122,3 +3122,56 @@ general tests, and no external run is an implementation gate.
     sentinel, and the reports contain `"Pearson X2 = "`; and each writer lambda captured the
     screen internally, so the outer capture saw nothing and the "names itself" assertion
     could never pass. Both would have produced a green test that guarded nothing.
+
+**2026-08-01 (later still) — the automatic step-size search, once instead of four times.**
+
+  - **The four copies differed in exactly two things.** `SimpleProp`, `BareProp`, `BackProp`
+    and `Logistic` each carried the same forty-line η search at the top of `trainSet()`,
+    varying only in the activation guard and in which weights they snapshotted.
+    `Network::searchStepSize` — a protected member **template** — is now the one
+    implementation; 283 lines removed for 196 added.
+  - **The guard asymmetry is real and stays visible at each call site.** `Logistic`
+    searches on `automaticStepSizeFlag` alone; the three feed-forward nets require
+    `batchEpochFlag` too, because the search compares one whole pass against the previous
+    one and that only means something when a pass makes a single weight update. A shared
+    guard would have silently stopped `Logistic` searching, and **no menu or GUI control
+    can reach that combination** — `tests/network/check_autostep.cpp` is the only thing
+    that would ever have noticed.
+  - **A template rather than `std::function` or a virtual hook** (rule 7): this runs once
+    per training iteration and must not acquire allocation or indirect calls. Each model
+    declares a private `WeightSnapshot` holding just its own weights, and `searchStepSize`
+    constructs one as a **local of the search block** — so no model carries a duplicate of
+    its weights between calls (for `BackProp` that would be a whole extra
+    `vector< Matrix >`), and with the search off nothing is copied at all. `innerTrainSet()`
+    stays a virtual call, so the characterization subclass counts the production dispatch.
+    Cost of the four instantiations, measured: **+2688 bytes** on `libneuron_engine.a`
+    (0.5%), with the compilation-unit count unchanged, so D8's consolidation is intact.
+  - **Restoration is explicit, not a destructor.** An exception out of `innerTrainSet()`
+    left trial weights installed before this extraction and still does; making it automatic
+    would be a behavior change and belongs in its own commit. `Network` restores `lastG`
+    and `lastF` because they are its members and are what CGD and Shanno carry between
+    iterations; nothing else is restored.
+  - **Characterization first, and portable by construction** (`7bc89b8`). After
+    `check_bpoptimizer`'s cross-platform failure, this test pins **no multi-iteration
+    floating-point literals at all** — instead the `innerTrainSet()` call count (an
+    integer), the selected η (a small power of γ), the guard in all four batch/auto
+    combinations, and restoration stated **without any literal**: a run that searched and
+    settled on η\\* must land where a run that never searched and was *given* η\\* lands.
+  - **Three things about the loop I had wrong**, each found by running the test rather than
+    reading the code. Setting `iteration` is **not** a substitute for establishing prior
+    error state — the loop compares against `oldErrorAccumulate`, so faking the counter
+    makes `ErrorDifference` negative and the loop exits on its first pass, a different exit
+    than the one under test. An unreachable `deltaError` runs **no** trial pass rather than
+    one, because `ErrorDifference` starts at 1.0 only to get the `while` past its first
+    evaluation — yet η is still reset to 1.0, which happens above the loop. And the
+    restoration control has to be primed with the search **on**, or it enters the second
+    iteration from different weights and the comparison means nothing.
+  - **Five sabotages, each failing a distinct set**: removing a model's weight restoration
+    (3 assertions, all restoration); giving `Logistic` the batch guard (**exactly 1** — the
+    unreachable on-line case, and nothing else); omitting `lastG`/`lastF` restoration (7,
+    every one a CGD or Shanno case, every canonical case still passing); omitting the final
+    real `innerTrainSet()`; and moving the `oldErrorAccumulate` update (15). One of them
+    tripped the "was it actually rebuilt?" guard — the template instantiates in the *engine*
+    translation units, so the test's own object file legitimately does not recompile. The
+    guard was over-strict rather than the build stale, confirmed by reading the build log
+    instead of assuming.

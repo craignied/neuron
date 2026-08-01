@@ -73,6 +73,19 @@ private:
 		HErrors, // vector containing a vector of errors for each hidden layer
 		vpack; // vectors containing hidden gradients for (un)pack
 
+	// The weights Network::searchStepSize puts back after its trial passes.
+	//    Constructed as a LOCAL of the search, so this model never carries a
+	//    second copy of its weights between calls, and nothing is copied at all
+	//    when the search is off. Restoration is explicit rather than a
+	//    destructor: automatic rollback would change what happens when
+	//    innerTrainSet() throws, which is a separate question.
+	struct WeightSnapshot {
+		vector< Matrix< double > > Weights;
+		explicit WeightSnapshot( const BackProp& n ) : Weights ( n.Weights ) { }
+		void restore( BackProp& n ) const { n.Weights = Weights; }
+	};
+	friend class Network; // reaches WeightSnapshot, and nothing else
+
 	// Copy utility
 	void copy( const BackProp& rhs );
 

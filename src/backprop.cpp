@@ -325,83 +325,13 @@ void BackProp::randomize()
 //    returns set error
 double BackProp::trainSet()
 {
-	// First check if automatic stepsize selection is chosen (which
-	//    *requires* offline or batch/epoch training)
-	if ( batchEpochFlag && automaticStepSizeFlag )
-	{
-		vector< double > lastGBuffer, lastFBuffer;
-
-		// Buffer the weights. Matrix::operator= resizes when the dimensions
-		//    differ, and vector assignment carries the element count, so the
-		//    whole buffer is one assignment. This was forty lines that branched
-		//    on bias, resized each layer with the two boundary cases spelled
-		//    out, and then copied element by element -- work the assignment
-		//    operator was already doing on the next line down.
-		vector< Matrix< double > > WeightsBuffer = Weights;
-
-		// Also buffer lastG and lastF for conjugate gradient descent / Shanno's
-		lastGBuffer = lastG;
-		lastFBuffer = lastF;
-	
-		// Initialize conditions for automatic stepsize selection
-		unsigned loopCounter = 1;
-		double newError = 1.0; // current calculated error
-		double oldError; // previous calculated error
-		double ErrorDifference = 1.0; // initially set to 1 to pass the while condition first time
-		eta = 1.0; // learning rate
-
-		// Main loop for automatic stepsize selection
-		while( ( loopCounter <= maxLoops ) && ( ErrorDifference > deltaError ) )
-		{
-			// If we have an old error to compute ErrorDifference
-			if ( ! ( ( iteration == 0 ) && ( loopCounter == 1 ) ) )
-			{
-				// Get the previous error
-				oldError = oldErrorAccumulate; // from network data member
-				// Use current learning rate and compute new error
-				innerTrainSet();
-				// Get the new error stored in network member
-				newError = o_errAccumulate; // get from network member
-				// Compute error difference
-				ErrorDifference = ( oldError - newError );
-				// Set the new error as previous error
-				oldErrorAccumulate = o_errAccumulate;
-
-				// Check for loop condition
-				if( ( loopCounter > maxLoops ) || ( ErrorDifference < deltaError ) )
-					break;
-				else
-					eta *= gamma; // calculate learning rate
-			}
-			// For first iteration just iterate through training set and compute error
-			else
-			{ 
-				innerTrainSet();
-				oldErrorAccumulate = o_errAccumulate; // set new error as previous error
-			}
-		
-			loopCounter++; // increment loop counter
-		}
-	
-		// We have desired learning rate, lets finish the iteration
-		// Retrieve the saved weights
-		Weights = WeightsBuffer;
-
-		lastG = lastGBuffer;
-		lastF = lastFBuffer;
-		
-	} // end of if loop
-
-	// Now actual update of weights takes place
-	double returnError;
-	returnError = innerTrainSet();
-
-	// Set the new error as previous error
-	if ( batchEpochFlag && automaticStepSizeFlag )
-		oldErrorAccumulate = o_errAccumulate;
-
-	// Return the set error 
-	return returnError;
+	// The eta search lives once, in Network::searchStepSize. What is written
+	//    here is what differs between models: the GUARD, and the model type
+	//    from which the search builds its local weight snapshot.
+	//    The batchEpochFlag half is real: the search compares the error of a
+	//    whole pass against the previous pass, which only means anything when
+	//    a pass makes ONE weight update. Logistic omits it -- see logistic.cpp.
+	return searchStepSize( *this, batchEpochFlag && automaticStepSizeFlag );
 }
 
 

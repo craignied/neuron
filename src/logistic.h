@@ -75,6 +75,19 @@ private:
 
 	double o_err; // output error term
 
+	// The weights Network::searchStepSize puts back after its trial passes.
+	//    Constructed as a LOCAL of the search, so this model never carries a
+	//    second copy of its weights between calls, and nothing is copied at all
+	//    when the search is off. Restoration is explicit rather than a
+	//    destructor: automatic rollback would change what happens when
+	//    innerTrainSet() throws, which is a separate question.
+	struct WeightSnapshot {
+		vector< double > W;
+		explicit WeightSnapshot( const Logistic& n ) : W ( n.W ) { }
+		void restore( Logistic& n ) const { n.W = W; }
+	};
+	friend class Network; // reaches WeightSnapshot, and nothing else
+
 	// Copy utility
 	void copy( const Logistic& rhs );
 

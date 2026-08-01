@@ -371,69 +371,15 @@ void Logistic::reportAccuracy( ostream& outputStream )
 //    returns set error
 double Logistic::trainSet()
 {
-	// First check if automatic stepsize selection is chosen
-	if ( automaticStepSizeFlag )
-	{
-		// Buffer the weights
-		vector< double > WBuffer = W, lastGBuffer = lastG, lastFBuffer = lastF;
-	
-		// Initialize conditions for automatic stepsize selection
-		unsigned loopCounter = 1;
-		double newError = 1.0; // current calculated error
-		double oldError; // previous calculated error
-		double ErrorDifference = 1.0; // initially set to 1 to pass the while condition first time
-		eta = 1.0; // learning rate
-
-		// Main loop for automatic stepsize selection
-		while( ( loopCounter <= maxLoops ) && ( ErrorDifference > deltaError ) )
-		{
-			// If we have an old error to compute ErrorDifference
-			if( ! ( ( iteration == 0 ) && ( loopCounter == 1 ) ) )
-			{
-				// Get the previous error
-				oldError = oldErrorAccumulate; // from network data member
-				// Use current learning rate and compute new error
-				innerTrainSet();
-				// Get the new error stored in network member
-				newError = o_errAccumulate; // get from network member
-				// Compute error difference
-				ErrorDifference = ( oldError - newError );
-				// Set the new error as previous error
-				oldErrorAccumulate = o_errAccumulate;
-
-				// Check for loop condition
-				if( ( loopCounter > maxLoops ) || ( ErrorDifference < deltaError ) )
-					break;
-				else
-					eta *= gamma; // calculate learning rate
-			}
-			// For first iteration just iterate through training set and compute error
-			else
-			{ 
-				innerTrainSet();
-				oldErrorAccumulate = o_errAccumulate; // set new error as previous error
-			}
-		
-			loopCounter++; // increment loop counter
-		}
-	
-		// We have desired learning rate, lets finish the iteration
-		// Retrieve the saved weights
-		W = WBuffer;
-		lastG = lastGBuffer;
-		lastF = lastFBuffer;
-	}
-
-	// Now actual update of weights takes place
-	double returnError;
-	returnError = innerTrainSet();
-
-	// Set the new error as previous error
-	if ( automaticStepSizeFlag )
-		oldErrorAccumulate = o_errAccumulate;
-
-	// Return the set error 
-	return returnError;
+	// The eta search lives once, in Network::searchStepSize. What is written
+	//    here is what differs between models: the GUARD, and the model type
+	//    from which the search builds its local weight snapshot.
+	//    NO batchEpochFlag here, unlike the three feed-forward nets. That is
+	//    deliberate and long-standing, and no menu or GUI control can reach
+	//    the on-line + automatic combination -- so nothing but
+	//    tests/network/check_autostep.cpp would notice if a consolidation
+	//    quietly gave this model the stricter guard.
+	return searchStepSize( *this, automaticStepSizeFlag );
 }
 
 // Inner training set algorithm called for automatic stepsize selection

@@ -6374,6 +6374,34 @@ increase. See SimpleProp::innerTrainSet, BareProp::innerTrainSet and
 BackProp::innerTrainSet as examples of the way trainSet and
 innerTrainSet are coded to work together.
 
+The search itself is written once, as {\em Network}::searchStepSize --- a
+protected member template.  Each concrete model's trainSet supplies two
+things and nothing else:
+
+\begin{itemize}
+\item its own {\bf activation guard}, which is {\em not} the same in every
+      model.  {\em Logistic} searches whenever automaticStepSizeFlag is
+      set; {\em SimpleProp}, {\em BareProp} and {\em BackProp} require
+      batchEpochFlag as well, because the search compares the error of a
+      whole pass against the previous pass and that only means something
+      when a pass makes one weight update.  The guard is written out at
+      each call site rather than delegated to a policy method, so the
+      asymmetry cannot be lost.
+\item its own {\bf WeightSnapshot}, a private nested type holding just that
+      model's weights: hW and oW for {\em SimpleProp} and {\em BareProp},
+      Weights for {\em BackProp}, W for {\em Logistic}.
+      searchStepSize constructs one as a local of the search, so no model
+      carries a duplicate of its weights between calls and nothing is
+      copied at all when the search is off.
+\end{itemize}
+
+{\em Network} restores lastG and lastF itself, since those are its own
+members and are the history conjugate gradient descent and Shanno carry
+between iterations.  Nothing else is restored: $\eta$, the gradients, the
+accumulators and currGradMax are left as the trial passes leave them.
+Restoration is explicit rather than a destructor, so an exception out of
+innerTrainSet leaves trial weights installed exactly as it always has.
+
 Richard Golden has suggested the following automatic stepsize
 selection algorithm, which he terms the ``Crummy Back-tracking Line
 Search Algorithm'':

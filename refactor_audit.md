@@ -997,7 +997,12 @@ needs. That takes 149 compilations to about 67 and speeds every platform.
    `converged()`, exact text, quiet contract — with two independent sabotages),
    `check_writelastop` (all three writers, truncation over a 20 KB leftover,
    the disabled case, the unopenable path).
-9. Auto step-size template method (§1.2, §8.5).
+9. ~~Auto step-size template method (§1.2, §8.5)~~ — **done**, in two commits:
+   `7bc89b8` (characterization, test-only) and the extraction that follows it.
+   `Network::searchStepSize`, a protected member template; each model supplies
+   its own guard at the call site and a private `WeightSnapshot`. 283 lines
+   removed for 196 added, four models' behavior byte-identical on the
+   refactoring machine, five sabotages each failing a distinct set.
 10. Bounded SimpleProp/BareProp sharing (§8.2).
 11. DFA extraction, then the measured per-exemplar scoring optimization.
 12. Stepwise extraction — only after forward coverage exists.
