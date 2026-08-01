@@ -3175,3 +3175,35 @@ general tests, and no external run is an implementation gate.
     translation units, so the test's own object file legitimately does not recompile. The
     guard was over-strict rather than the build stale, confirmed by reading the build log
     instead of assuming.
+
+**2026-08-01 (later still) — `Iterative::iteration` was never initialised.**
+
+  - The constructor's initialiser list set nineteen members and not this one, so a fresh
+    model held indeterminate memory in its iteration counter.
+  - **Not a training regression, and it should not be described as one.** The only caller of
+    `trainSet()` in `src/` sits inside `train()`'s `for ( iteration = 0; ... )`, so the
+    normal path always assigned the counter before anything read it. All three goldens are
+    byte-identical across the fix.
+  - **What was reachable is the public object contract**: `getIterations()` on an untrained
+    model (`RegressNet` reads it for its audit trail); `Iterative::copy()`, which propagated
+    the member, so copy-constructing or assigning from a fresh model copied indeterminate
+    memory into a second object; and a **direct `trainSet()` call**, which the class layer
+    permits. `Network::engine()` branches on `t == 0 || t == df()`, so an indeterminate
+    value took the **conjugate-direction** branch on the very first call, where `lastF` and
+    `lastG` are still empty, and `dotprod()` read `df()` doubles out of an empty vector.
+  - **D5 is why this was found at all.** That read was silent until the bounds work made it
+    throw `nvec::SizeMismatch`; it surfaced while writing `tests/onehidden/check_onehidden.cpp`,
+    from five CGD iterations. The lesson is the one Sol drew: the fix is to define the
+    member, never to weaken the check.
+  - **Same family as two earlier findings**: the settled decision that *"'not copied' must be
+    WRITTEN in `copy()`, never left out"*, and the uninitialised `Model::errorType` scalar
+    that turned out to be the real cause behind the reverted `Matrix` value-initialisation
+    misdiagnosis. Three now.
+  - **Proven to fail two ways.** Against the old constructor an ordinary Release build
+    already failed 7 assertions here — but that is luck, since the stack could as easily
+    have held zero. The deterministic evidence is `-ftrivial-auto-var-init=pattern`, which
+    fills a stack-constructed model's un-initialised members with a pattern: **the same 7
+    fail**, and both builds pass after the one-line fix.
+  - **It defines the starting value only.** `train()` still owns iteration progression and
+    `trainSet()` increments nothing, so a direct caller wanting a later optimizer step still
+    establishes it explicitly — `check_autostep` and `check_onehidden` both keep doing so.

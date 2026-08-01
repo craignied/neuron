@@ -10,7 +10,25 @@
 // #define REGRESS_DEBUG // turns a lot of the printing off for stepwise regression debugging
 
 // Default constructor with initial conditions
-Iterative::Iterative() : maxIterations ( 1000000 ), printCount ( 1000 ),
+//
+//    iteration is FIRST and is not decoration. It was omitted here until
+//    2026-08-01, so a fresh model held indeterminate memory in it. Not a
+//    training defect -- train()'s own `for ( iteration = 0; ... )` assigns it
+//    before the only call to trainSet() in the engine, and that path is
+//    unchanged -- but it was reachable through the public contract:
+//    getIterations() on an untrained model (RegressNet reads it for its audit
+//    trail), copy() propagating it into a second object, and a direct
+//    trainSet() call, where Network::engine() branches on `t == 0` and an
+//    indeterminate value took the conjugate-direction branch with lastF and
+//    lastG still empty. That last one read past the end of an empty vector
+//    until D5 made it throw, which is how this was found.
+//
+//    This defines the STARTING value only. train() still owns iteration
+//    progression, and trainSet() still increments nothing: a caller driving
+//    trainSet() directly and wanting a later optimizer step must set the
+//    counter itself (tests/network/check_autostep.cpp, tests/onehidden).
+Iterative::Iterative() : iteration ( 0 ),
+	maxIterations ( 1000000 ), printCount ( 1000 ),
 	window ( 1000 ), minStopFlag ( false ), windowStopFlag ( false ),
 	changeStopFlag ( false ), gradMaxFlag ( true ), autoStopFlag ( false ),
 	logPrintFlag ( true ), boundsErrorFlag ( false ), minError ( 1e-30 ),

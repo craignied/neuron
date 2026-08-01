@@ -1738,7 +1738,7 @@ The three questions raised before writing it, resolved:
 3. It landed as its **own** commit, before the three DRY extractions and before
    the auto-step-size template method (§1.2).
 
-### 11.15 OPEN, escalated: `Iterative::iteration` is not initialised
+### 11.15 FIXED: `Iterative::iteration` was not initialised
 
 Found 2026-08-01 while writing `tests/onehidden/check_onehidden.cpp`, by D5's
 own bounds check firing: five CGD iterations threw `nvec::SizeMismatch`.
@@ -1771,10 +1771,24 @@ branch on the very first call, where `lastF` and `lastG` are still empty, and
 D5 that was a silent out-of-bounds read; it is now a thrown `SizeMismatch`,
 which is the only reason this was noticed at all.
 
-**Not fixed here.** A one-line initialiser is a correctness change and belongs in
-its own commit with its own test, not folded into a DRY extraction — the same
-rule that kept legacy bug #12 separate. The test that found it sets the counter
-explicitly, as `train()` would.
+**Fixed 2026-08-01** in its own commit, not folded into the DRY extraction — the
+same rule that kept legacy bug #12 separate. `iteration ( 0 )` is now first in
+the initialiser list. It defines the **starting** value only: `train()` still
+owns iteration progression, `trainSet()` still increments nothing, and a caller
+driving `trainSet()` directly must still set the counter itself, which is why the
+tests that establish an optimizer step keep doing so explicitly.
+
+**Proven to fail two ways.** Against the old constructor an ordinary Release
+build already failed 7 assertions on this machine — but that is luck, since the
+stack could as easily have held zero. The deterministic evidence is a build with
+`-ftrivial-auto-var-init=pattern`, which fills a stack-constructed model's
+un-initialised members with a recognisable pattern: **the same 7 assertions
+fail**, and both builds pass after the fix. (Not ASan, which does not work in
+this environment — CLAUDE.md rule 2.) That is the same diagnostic that made the
+earlier uninitialised-state defect deterministic.
+
+**`train()` is untouched**, and the goldens say so: all three transcripts
+byte-identical.
 
 ### 11.14 The measured values — evidence, not a contract
 

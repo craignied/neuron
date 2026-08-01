@@ -308,6 +308,21 @@ add_test(NAME twoset_rates COMMAND check_rates)
 # tests/vectorops/run_bounds_demo.sh runs each case in its own process. That is
 # a demonstration driver for use against sabotaged or historical builds, where
 # a case that takes a SIGBUS would otherwise hide every case after it.
+# Regression test: a fresh iterative model has a DEFINED iteration count.
+#
+# Iterative's constructor set nineteen members and not `iteration`. Not a
+# training regression -- train()'s loop assigns it before the first trainSet(),
+# and that path is byte-identical -- but reachable through the public object
+# contract: getIterations() on an untrained model (RegressNet reads it), copies
+# of fresh objects, and a direct trainSet() call, where Network::engine()
+# branches on the counter and an indeterminate value took the
+# conjugate-direction branch with lastF/lastG still empty. D5's bounds check
+# turned that silent out-of-bounds read into a thrown exception, which is how it
+# was found.
+add_executable(check_iterinit tests/iterative/check_iterinit.cpp)
+target_link_libraries(check_iterinit PRIVATE neuron_engine)
+add_test(NAME iterative_iteration_init COMMAND check_iterinit)
+
 # Characterization test: SimpleProp and BareProp, before they share a base.
 #
 # The two one-hidden-layer models carry byte-identical state and six methods
