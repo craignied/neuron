@@ -118,6 +118,21 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
    foot) so that this particular hole cannot silently reopen; nothing equivalent guards
    the other suites, so the practice is the guard.
 
+   **Artifact comparisons require existence evidence.** Before comparing two generated
+   files, reports, arrays, or parsed results, assert *independently* that each production
+   operation succeeded and that each artifact exists and is non-empty where non-empty
+   output is required. **Equality between two absent, empty, default, null, or failed
+   results is vacuous and guards nothing** — it is the same hole as a test that executes a
+   mechanism and asserts something the mechanism cannot affect. This applies to files, to
+   empty JSON results, to empty prediction arrays, and to default numerical values alike.
+   Test paths must also be portable and isolated: use the platform temporary-directory API
+   rather than a hardcoded `/tmp`, and avoid shared fixed filenames that collide between
+   concurrent runs. *Why this is a rule:* on 2026-08-01 `check_onehidden` hardcoded `/tmp`,
+   which is not a temporary directory on Windows, so every save silently failed there — and
+   **three of its four save-comparison assertions passed on two empty strings**. Only the
+   one assertion that inspected *content* failed. The portability slip was a repeat; the
+   vacuous comparison is the defect worth the rule.
+
    **Memory-safety instrumentation is a targeted diagnostic, not a full-suite gate.**
    ASan is currently unusable in this macOS agent environment: on 2026-08-01 three
    separately built ASan executables, including a trivial `printf( "hello" )` control,
