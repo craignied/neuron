@@ -167,12 +167,83 @@ static void test_copy_preserves_value()
 	expectNear( assigned.value(), E.value(), "assignment carries the value" );
 }
 
+
+// --- boundsErrorFlag: "any component needed a boundary approximation" -------
+//
+// THE BUG. The multi-output cross-entropy loop set the flag per element:
+//
+//     if      ( *po == 1 ) { boundsErrorFlag = true;  ... }
+//     else if ( *po == 0 ) { boundsErrorFlag = true;  ... }
+//     else                 { boundsErrorFlag = false; ... }   <-- resets
+//
+// so an ordinary output AFTER a boundary one erased the record of it. The flag
+// is an aggregate -- Iterative::train reads it once per run to print "WARNING:
+// Numerical out of bounds encountered when calculating error" -- so it must
+// mean "any component required an approximation", not "the last one did".
+//
+// Order is what exposes it, which is why both orderings are tested. It was also
+// never initialized before the loop, so an empty vector left it indeterminate.
+//
+// SABOTAGE: restore the per-element `boundsErrorFlag = false` in the ordinary
+// branch and "boundary first, then ordinary" fails while the reverse passes.
+
+static void test_bounds_flag_is_an_aggregate()
+{
+	cout << "-- boundsErrorFlag aggregates over components --" << endl;
+
+	// A boundary component (o exactly 1) followed by an ordinary one
+	{
+		vector< double > y, o, x;
+		y.push_back( 0.0 ); o.push_back( 1.0 ); x.push_back( 4.0 );   // boundary
+		y.push_back( 1.0 ); o.push_back( 0.25 ); x.push_back( logit( 0.25 ) );
+		errorFunction E( y, o, x, true );
+		expect( E.boundsErr(), "boundary FIRST, then ordinary: still reported" );
+	}
+
+	// The reverse order, which passed even before the fix
+	{
+		vector< double > y, o, x;
+		y.push_back( 1.0 ); o.push_back( 0.25 ); x.push_back( logit( 0.25 ) );
+		y.push_back( 0.0 ); o.push_back( 1.0 ); x.push_back( 4.0 );   // boundary
+		errorFunction E( y, o, x, true );
+		expect( E.boundsErr(), "ordinary first, then BOUNDARY: reported" );
+	}
+
+	// A boundary at o == 0, likewise followed by ordinary components
+	{
+		vector< double > y, o, x;
+		y.push_back( 1.0 ); o.push_back( 0.0 ); x.push_back( -4.0 );  // boundary
+		y.push_back( 0.0 ); o.push_back( 0.60 ); x.push_back( logit( 0.60 ) );
+		y.push_back( 1.0 ); o.push_back( 0.90 ); x.push_back( logit( 0.90 ) );
+		errorFunction E( y, o, x, true );
+		expect( E.boundsErr(), "o = 0 boundary followed by two ordinary outputs" );
+	}
+
+	// THE CONTROL: no component is at a boundary, so no error is reported
+	{
+		vector< double > y, o, x;
+		y.push_back( 1.0 ); o.push_back( 0.25 ); x.push_back( logit( 0.25 ) );
+		y.push_back( 0.0 ); o.push_back( 0.60 ); x.push_back( logit( 0.60 ) );
+		errorFunction E( y, o, x, true );
+		expect( !E.boundsErr(), "all ordinary: no bounds error reported" );
+	}
+
+	// LMS never approximates, whatever the outputs
+	{
+		vector< double > y, o, x;
+		y.push_back( 0.0 ); o.push_back( 1.0 ); x.push_back( 4.0 );
+		errorFunction E( y, o, x, false );
+		expect( !E.boundsErr(), "LMS reports no bounds error at o = 1" );
+	}
+}
+
 int main()
 {
 	test_single_output();
 	test_multi_matches_single();
 	test_sum_squared_difference();
 	test_copy_preserves_value();
+	test_bounds_flag_is_an_aggregate();
 
 	cout << endl << ( failures ? "FAILURES: " : "all passed (" ) << failures
 		<< ( failures ? "" : " failures)" ) << endl;

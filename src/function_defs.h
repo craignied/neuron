@@ -128,6 +128,18 @@ public:
 
 			E = 0; // initialize accumulated error
 
+			// ONCE, before the loop. The flag is an AGGREGATE -- "did any
+			//    component need a boundary approximation?" -- because that is
+			//    how it is consumed: Iterative::train reads it a single time
+			//    per run to print the numerical-bounds warning. Setting it per
+			//    element (as the ordinary branch below used to, with
+			//    boundsErrorFlag = false) let an ordinary output erase the
+			//    record of a boundary output before it, so whether the run
+			//    warned depended on the ORDER of the output nodes. It was also
+			//    never initialized before the loop at all, so an empty vector
+			//    left it indeterminate.
+			boundsErrorFlag = false;
+
 			// Let's do this through iterators
 			vector< double >::const_iterator py, po, px;
 	
@@ -143,12 +155,9 @@ public:
 					boundsErrorFlag = true;
 					E += -1 * *px * *py; // approximate error
 				}
-				else // no approximation necessary
-				{
-					boundsErrorFlag = false;
+				else // no approximation necessary; the flag is NOT cleared here
 					E += ( -1 * *py * log( *po ) ) - ( ( 1 - *py ) * log( 1 - *po ) );
-				}			
-			}	
+			}
 		}
 		else // 0 = LMS
 		{
