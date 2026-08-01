@@ -102,13 +102,20 @@ public:
 	//    of quietly reading rubbish, which is how this surfaced at all.
 	void setIteration( unsigned t ) { this->iteration = t; }
 
+	// forward() takes the MODEL's own input matrix -- Model::Train, which each
+	//    model built for itself in setDataSet, with the bias column appended
+	//    where its architecture has one. It is NOT the DataSet's training
+	//    matrix: that one still carries the outcome in its last column, and its
+	//    width happens to equal a SimpleProp's input width, so passing it read
+	//    the LABEL into the bias slot and an assert-enabled build aborted on
+	//    BareProp, whose input vector is narrower still. Both were true of this
+	//    file as first written.
 	double signature()
 	{
 		double sum = 0;
-		Matrix< double >& m = this->theData.getTrainMatrix();
-		for ( unsigned r = 0; r < m.rows(); r++ )
+		for ( unsigned r = 0; r < this->Train.rows(); r++ )
 		{
-			this->forward( m, r );
+			this->forward( this->Train, r );
 			sum += this->o;
 		}
 		return sum;
