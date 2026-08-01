@@ -30,8 +30,8 @@ python3 tools/mkdataset.py --key key.txt --inputs inputs.txt -o data.txt mydata.
 - Improvement over the Perl: input is parsed with Python's `csv` module, so
   quoted Excel fields (embedded commas) are handled correctly.
 
-Beyond the Perl original (added for real-world exports like the UCI
-bank-marketing data — see `docs/datasets/bank-marketing/WALKTHROUGH.md`):
+Beyond the Perl original (added for real-world exports such as the UCI
+bank-marketing data):
 
 - `--delimiter ';'` — semicolon- (or tab-: `'\t'`) delimited input.
 - `--onehot` — encode categorical text columns as one-hot indicator groups,

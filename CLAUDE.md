@@ -38,7 +38,7 @@ GSL 1.9–1.10; modern GSL is 2.x — untested).
 
 ### Other legacy assets
 
-- `../distro/doc/manifest.pdf` — the full manual (manifest.tex source). `spin.html` is a tutorial.
+- `../distro/doc/manifest.pdf` — the full manual (manifest.tex source).
   **Copied into `docs/` here** (see below).
 - `../distro/scripts/` — model exporters: `neuron2html.pl` (model → standalone HTML calculator),
   `neuron2palm.pl`, `neuron2iphone.rb`, plus `mkdataset.pl`. Documented in manifest.pdf ch. 11.
@@ -91,8 +91,6 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   Perl/Palm/iPhone exporters, and the pre-menu file/header configuration are omitted
   from the published PDF; the retained mathematical and class chapters are explicitly
   labeled as the foundational design record.
-- `docs/spin.html` — tutorial (self-contained, no external assets)
-- `docs/maths.pdf`, `bareprop.pdf`, `network.pdf`, `driver.pdf` — algorithm/design docs
 - `docs/tex/` — buildable LaTeX sources (grep-able; `manifest.tex` is the root) +
   `figures/` with PDF versions of the manifest figures. Build the manual from that
   directory with `latexmk -pdf manifest.tex`.
@@ -416,8 +414,7 @@ Re-proposing one is rework, not initiative. Full reasoning at the cited HISTORY 
   replaced it. → HISTORY 2026-07-15 (later); `docs/roc_theory.md`.
 - **`Matrix` value-initialization was a MISDIAGNOSIS and was reverted.** The nested-OBD
   flake was an uninitialized `Model::errorType` scalar. A fix that only *reduces* a
-  heap-layout-sensitive flake is a suspect, not a cure. → HISTORY 2026-07-23;
-  `docs/nested_obd_nondeterminism_resolution_report.md`.
+  heap-layout-sensitive flake is a suspect, not a cure. → HISTORY 2026-07-23.
 - **Do not replace the RNG's raw-output-to-double mapping with
   `std::uniform_real_distribution`** — its implementation varies between stdlibs and would
   break cross-platform seeded reproducibility. → HISTORY 2026-07-12 (later).

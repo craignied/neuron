@@ -29,8 +29,8 @@ mkdir -p runs && cd runs
     ../sample_categorical.csv > ref_stdout.txt 2>&1
 
 # neuron2web.py: deploy the committed XOR reference network. The scaling
-# and guesses files were produced by the engine itself (raw2train on
-# docs/xor.csv; eta-0 pass over tests/oracle/xor_net.txt).
+# and guesses files were produced by the engine itself (raw2train on the
+# four XOR rows; eta-0 pass over tests/oracle/xor_net.txt).
 "$PY" ../../../tools/neuron2web.py --network ../../oracle/xor_net.txt \
     --scales ../xor_scales.txt --spec ../xor_spec.txt \
     -o xor.html > xor_stdout.txt 2>&1

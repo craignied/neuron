@@ -717,7 +717,6 @@ the run does not change the neural net's numbers). See
 | `src/`, `build/neuron` | The C++ engine (menus: dataset → model → train → stats) |
 | `tools/mkdataset.py` | CSV → neuron-ready dataset (this file, §1) |
 | `tools/neuron2web.py` | trained model → standalone HTML calculator (§3) |
-| `docs/datasets/bank-marketing/WALKTHROUGH.md` | The full pipeline, every step verified with real output |
 | `docs/deploy.md` | Label-spec reference for deployment |
 | `docs/roc_theory.md` | What the ROC statistics mean and how to cite them |
 | `docs/manifest.pdf` | The complete manual (menu-by-menu) |

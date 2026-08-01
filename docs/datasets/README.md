@@ -10,5 +10,4 @@ Example datasets for learning and testing neuron 3.0.
 
 See each directory's README for columns, provenance, and how to use it.
 
-The tiny `xor.csv` used by the tutorial lives in `docs/`, and the ROC/statistics
-background is in `docs/roc_theory.md`.
+ROC/statistics background is in `docs/roc_theory.md`.
