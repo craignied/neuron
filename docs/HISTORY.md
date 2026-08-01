@@ -3320,19 +3320,29 @@ deliver. OPEN; inventory written before any code.**
     `toVector`, the free `func` and `toMatrix`, `includecols`, `excludecols`, `submatrix`,
     `covariance`, and the `inverse` family's shape checks — carry `assert` alone. Under
     `-DNDEBUG`, which is how every `ctest` target and the shipped binary are built, an
-    invalid argument is an out-of-bounds read or write, not an exception. Two of those
-    write (`replacerow`, `replacecol`, `outprod` — and `outprod` is on the per-exemplar
-    training path).
+    invalid argument is an out-of-bounds read or write, not an exception. **Three** of
+    them write (`replacerow`, `replacecol`, `outprod` — and `outprod` is on the
+    per-exemplar training path).
   - **One assert is worse than absent.** `includecols` and `excludecols` bound-check with
     `*max_element( pos.begin(), pos.end() )`, which **dereferences `end()` on an empty
     `pos`**. A Debug build therefore has undefined behavior exactly where Release has no
     check at all.
   - **It falsifies a sentence of standing rule 4**, which claimed *both* numerical classes
-    reject violations in Release. True of `vector_ops` since `5c94cd2`; true of one `Matrix`
-    method. The sentence had been generalized from the accessor that was checked — the same
+    reject violations in Release. True of `vector_ops` since `5c94cd2`; true of exactly two
+    `Matrix` mechanisms — `operator()` and `includerows` — out of the whole class. The sentence had been generalized from the accessor that was checked — the same
     move rule 3 exists to catch, in the constitution itself. Rule 4 now states what is
     enforced and what is not, and says that until D9 lands an assert-enabled build is the
     only thing that tests a `Matrix` precondition.
+  - **The red tests get one process per case, with a valid control inside each.** An absent
+    contract here does not return quietly — it reads or writes outside an allocation, so
+    several cases can crash under Release, and a sequential suite would let case 3 hide
+    cases 4 through 45. The mechanism `check_vector_bounds` established for D5 is reused:
+    one case per process, a legal operation of the same family asserted **before** the
+    invalid call in every case, positive controls for the deliberate `<=` prefix rule and
+    for the four contracts that already hold, and `NDEBUG` asserted by the test itself.
+    (Sol's correction, and a second one with it: the characterization has two halves that
+    must not be conflated. `operator()`, `includerows`, `BadSize` and `Singular` already
+    pass and must keep passing — only the absent contracts are watched failing first.)
   - **Recorded as its own bounded phase (§12), sequenced BEFORE the DFA extraction** because
     DFA leans heavily on `Matrix`. Deliberately **not** folded into either `OneHiddenNet`
     commit. Three constraints carried in from Sol: do not touch `BoundsViolation`'s

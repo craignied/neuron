@@ -176,7 +176,11 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
    in the shipped binary (D5; `refactor_audit.md` §11).
 
    **`Matrix` has NOT reached it, measured 2026-08-01 (D9, `refactor_audit.md`
-   §12, OPEN).** Only `operator()` and `includerows` throw. Roughly forty-five
+   §12, OPEN).** Exactly two of its mechanisms enforce a bounds or dimension
+   contract in Release — `operator()` and `includerows`, both throwing
+   `BoundsViolation`. (`BadSize` and `Singular` are enforced too, but they report
+   a construction and a numerical failure, not a bounds or dimension violation.)
+   Roughly forty-five
    other public entry points — `row`, `col`, `replacerow`, `replacecol`, the
    arithmetic shape checks, `t`, all nine `dotprod`/`dotprodt`/`dotprod_row`
    overloads, `outprod`, `colsums`, `toVector`, `toMatrix`, `includecols`,

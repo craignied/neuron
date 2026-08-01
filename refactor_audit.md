@@ -1897,13 +1897,19 @@ It surfaced from the Commit-2 verification. `Matrix`'s ranged `dotprod` is
 be tested in the shipped configuration; an assert-enabled build was needed to
 check it, and that build *also* aborted on a defect in
 `tests/onehidden/check_onehidden.cpp` that Release had hidden (`174e76e`).
-Sol then widened it, correctly: this is not two methods.
+Sol then widened it, correctly: this is not a defect in two methods, it is the
+class's policy.
 
-**`Matrix::operator()` throws `BoundsViolation` unconditionally, and almost
-nothing else in the class does.** Every other dimension and range contract —
-row and column access, row and column replacement, the arithmetic shape checks,
-the transpose, all nine `dotprod`/`dotprodt`/`dotprod_row` overloads, the outer
-product, the conversions, the column sums — is guarded by `assert` alone.
+**Exactly two mechanisms enforce a bounds or dimension contract in Release:**
+`Matrix::operator()`, which throws `BoundsViolation` on an out-of-range element,
+and `includerows`, which throws the same on an out-of-range gather position.
+(Counting mechanisms, not overloads, deliberately: `operator()` has a const and
+a non-const form and `includerows` has a destination and a returning form, and
+counting those separately would muddy the claim in either direction.) Every
+other dimension and range contract — row and column access, row and column
+replacement, the arithmetic shape checks, the transpose, all nine
+`dotprod`/`dotprodt`/`dotprod_row` overloads, the outer product, the
+conversions, the column sums — is guarded by `assert` alone.
 `CMakeLists.txt` forces `CMAKE_BUILD_TYPE=Release` when none is given, and
 `CMAKE_CXX_FLAGS_RELEASE` carries `-DNDEBUG`, so **none of those assertions has
 ever executed in the gate chain**. Under `NDEBUG` an invalid argument is not an
@@ -1917,9 +1923,9 @@ classes reject bounds and dimension violations in Release:
 > `vector_ops` operation that walks two containers in lockstep or indexes one by
 > position throws `nvec::SizeMismatch` / `RangeViolation` / `EmptyVector`.
 
-That sentence is true of `vector_ops` since `5c94cd2`, and true of exactly one
-`Matrix` method. It was written from the element accessor and generalized to the
-class. Same defect class as D5 — a measured contract that the shipped binary does
+That sentence is true of `vector_ops` since `5c94cd2`, and true of those two
+`Matrix` mechanisms out of the whole class. It was written from the element
+accessor and generalized to the class. Same defect class as D5 — a measured contract that the shipped binary does
 not enforce — and the same origin: a rule stated from the part that was checked.
 
 ### 12.2 The inventory
@@ -1982,9 +1988,12 @@ no precondition to violate.
 | 48 | `begin()`, `end()` ×2 | documented "DO NOT USE THESE" | raw pointers, by design | out of scope |
 
 Counting overloads, **roughly 60 public entry points, of which about 45 can read
-or write outside an allocation in the shipped build.** Three are already correct
-and are the precedent to follow: `operator()`, `includerows`, and the
-`BadSize` / `Singular` value-failure throws.
+or write outside an allocation in the shipped build.** Two mechanisms already
+enforce a bounds or dimension contract and are the precedent to follow —
+`operator()` and `includerows`, both throwing `BoundsViolation`. `BadSize` and
+`Singular` are enforced in Release as well, but they report a construction
+failure and a numerical one; they are the precedent for *how* this class raises
+a refusal, not for bounds coverage.
 
 ### 12.3 What this phase must NOT do
 
@@ -2008,11 +2017,23 @@ and are the precedent to follow: `operator()`, `includerows`, and the
 ### 12.4 The shape of the work, in order
 
 1. **This inventory** (done, above) — reviewed before any code changes.
-2. **Characterize under Release.** A test that calls each contract with an
-   invalid argument and asserts the *exception*, built the way we ship. It must
-   be proven to fail first: against today's `matrix.h` every one of those
-   expectations fails, which is the D5 pattern and is the evidence that the
-   contract is absent rather than merely untested.
+2. **Characterize under Release, in two halves that must not be conflated.**
+
+   - **The contracts that already hold** — `operator()`'s `BoundsViolation`,
+     `includerows`' `BoundsViolation`, `Matrix( r, c, value )`'s `BadSize`, and
+     the `Singular` throws of the `inverse` / `ludcmp` / `lubksb` family. These
+     **pass today and must keep passing**: they are the existing behavior this
+     phase may not regress, and they belong in the characterization for that
+     reason, not as red-test evidence.
+   - **The contracts that are absent** — the Class-A rows of §12.2. Each of
+     these is written as an expectation of a throw, and each must be **watched
+     failing against today's `matrix.h`** before any policy is implemented. That
+     is the D5 pattern, and it is what distinguishes an absent contract from an
+     untested one.
+
+   Stating it as "every expectation fails" would have been wrong and is
+   corrected here: the first half cannot fail, and if it ever does, the phase has
+   broken something rather than proved something.
 3. **The smallest coherent exception policy.** `BoundsViolation` already exists
    and already means "an index or range is outside this matrix". A dimension
    mismatch between two objects is a different fact and probably wants its own
@@ -2020,10 +2041,50 @@ and are the precedent to follow: `operator()`, `includerows`, and the
    catch sites enumerated first.
 4. **Then implement**, one commit, with the goldens, the oracle, `smoke.sh`,
    `run_tools.sh` and the scale probe as the evidence that nothing legal changed.
-5. **Then correct standing rule 4's sentence** to state what is true, as D5b did
-   for `CMakeLists.txt`'s comment.
+5. **Then rewrite standing rule 4 again.** Its second paragraph currently records
+   the measured gap (corrected in `6f327a6`, before any code — the claim was
+   false and could not be left standing while the phase ran). When `Matrix`
+   reaches the goal, that paragraph collapses back into the single sentence about
+   both numerical classes, which will then be true. D5b did the same for
+   `CMakeLists.txt`'s comment.
 
 **Only then, DFA.**
+
+### 12.5 How the red tests are executed, so that one crash cannot hide the rest
+
+Sol's third correction, and it is a test-*design* constraint rather than a
+wording one. An absent contract in this class does not politely return without
+throwing: it reads or writes outside an allocation. Several cases can therefore
+**corrupt memory or terminate the process** under Release. Running them
+sequentially in one executable would let an early overflow hide every later
+case — and a suite that stops at case 3 and reports nothing about cases 4–45 is
+the vacuous-comparison hole in another costume.
+
+The mechanism `check_vector_bounds` already established (§11.8) is the one to
+reuse, because it was built for exactly this:
+
+- **One case per process.** With no argument the binary runs every case and is an
+  ordinary `ctest` target; with `check_matrix_bounds <n>` it runs precisely one.
+  A driver runs each dangerous case in its own process and records its exit
+  status, so a crash is a *recorded result for that case* rather than the end of
+  the run.
+- **A valid control first, in every process.** Each case performs a legal
+  operation of the same family and asserts the correct answer **before** it makes
+  the invalid call. A case that dies before its control proves nothing about the
+  contract — it proves the harness is broken — and this is what separates the
+  two.
+- **Positive controls as their own cases**: boundary-valid indices, single-row
+  and single-column matrices, the deliberate `<=` prefix of
+  `dotprod( iVec, oVec )` with a shorter destination (§11.3's rule, which must
+  keep working), and the already-enforced contracts of step 2's first half.
+- **`NDEBUG` asserted by the test itself**, as `check_vector_bounds` does, so the
+  guarantee cannot silently become "we happened to build Debug".
+
+**Order of evidence**: control passes → invalid call watched **failing to throw**
+(or crashing) against today's `matrix.h`, per case → policy implemented → every
+case now throws the expected type → **then sabotage the implemented policy** and
+watch the corresponding cases go red. The last step is the one that proves the
+new checks are what the tests are reading, and it is not optional.
 
 *Prepared by Claude (Opus 5). Reviewed by Sol (2026-07-31); revised §8 in response.
 §9–§12 are the implementation record: §§8.7–8.8 and 9–10 describe work now
