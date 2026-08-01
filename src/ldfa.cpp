@@ -79,20 +79,7 @@ double LDFA::train()
 
 	addHistory( fileStream ); // append to history file if specified by flag
 
-	if ( lastopFlag ) // make sure flag for last operation output is set
-	{
-		// Open last operation file for output, overwrite if it exists
-		string logPath = util::run_path( lastopFilename );
-		ofstream lastopFile( logPath.c_str(), ios::out | ios::trunc );
-
-		if ( !lastopFile.is_open() ) // test to insure it was opened
-			util::screen() << "Error in opening " << logPath << "!" << endl;
-		else
-		{
-			lastopFile << fileStream.str(); // write the file stream
-			lastopFile.close(); // and close the file
-		}
-	}
+	writeLastop( fileStream.str() );
 
 	return -1; // DFA does not return a set error
 }

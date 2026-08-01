@@ -308,6 +308,19 @@ add_test(NAME twoset_rates COMMAND check_rates)
 # tests/vectorops/run_bounds_demo.sh runs each case in its own process. That is
 # a demonstration driver for use against sabotaged or historical builds, where
 # a case that takes a SIGBUS would otherwise hide every case after it.
+# Characterization test: the last-operation file, from all three writers.
+#
+# Iterative::train(), LDFA::train() and QDFA::train() each opened
+# util::run_path( lastopFilename ) with ios::trunc and wrote the run's file
+# stream into it. Model owns lastopFlag and lastopFilename, so Model owns the
+# write. Asserts the file contents, the DISABLED case leaving an existing file
+# alone, the unopenable-path message (which must not abort the run), and
+# TRUNCATION -- the property an extraction most easily loses and a reader would
+# not notice for months, because model.txt would simply keep growing.
+add_executable(check_writelastop tests/model/check_writelastop.cpp)
+target_link_libraries(check_writelastop PRIVATE neuron_engine)
+add_test(NAME model_write_lastop COMMAND check_writelastop)
+
 # Characterization test: every way Iterative::train() can stop, and what it says.
 #
 # Six stopping conditions published themselves with the same five-line block --

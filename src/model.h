@@ -43,6 +43,13 @@ public:
 	void setLastopFilename( const string& filename ) { lastopFilename = filename; }
 	string getLastopFilename() { return lastopFilename; } // get last operation file name
 
+	// Write a finished run's report to the last-operation file. Does nothing
+	//    when last-operation logging is off; reports an unopenable path through
+	//    util::screen() and returns, because the fit is already valid and
+	//    losing a convenience file must not destroy it. TRUNCATES: this file is
+	//    the last operation, not a log of every one.
+	void writeLastop( const string& text );
+
 	// Set output error function
 	void setLMSerror(); // least mean squared
 	void setXEerror(); // X-entropy

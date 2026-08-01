@@ -203,3 +203,35 @@ void Model::extractOutputMatrices()
 			nInput, ( nInput + nOutput - 1 ) );
 	}
 }
+
+// Write the run's report to the last-operation file -- model.txt by default.
+//
+//    Model owns lastopFlag and lastopFilename, so Model owns the write. It was
+//    the same block at the end of Iterative::train(), LDFA::train() and
+//    QDFA::train().
+//
+//    ios::trunc, deliberately and load-bearing: this file is the LAST
+//    operation, not a log of every operation -- that is what neuron.log and
+//    addHistory() are for. Appending here would grow model.txt without bound
+//    and nobody would notice for months.
+//
+//    A path that will not open is reported and the run continues: the fit is
+//    already finished and valid, and losing a convenience file must not
+//    destroy it. Guarded by tests/model/check_writelastop.cpp.
+void Model::writeLastop( const string& text )
+{
+	if ( !lastopFlag ) // make sure flag for last operation output is set
+		return;
+
+	// Open last operation file for output, overwrite if it exists
+	string logPath = util::run_path( lastopFilename );
+	ofstream lastopFile( logPath.c_str(), ios::out | ios::trunc );
+
+	if ( !lastopFile.is_open() ) // test to insure it was opened
+		util::screen() << "Error in opening " << logPath << "!" << endl;
+	else
+	{
+		lastopFile << text; // write the file stream to the file
+		lastopFile.close(); // and close the file
+	}
+}
