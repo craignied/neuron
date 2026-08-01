@@ -2104,6 +2104,13 @@ control failed:  0
 **No control failed**, so every verdict below is about a contract rather than
 about the harness.
 
+**Read "held: 9" carefully — it is 8, not 9** (Sol's correction). Eight are the
+declared positive contracts. The ninth is **case 50**, an ABSENT contract that
+happened to throw the placeholder type from `operator()` downstream; case 52
+shows the same call succeeding on a matrix shaped the other way. The honest
+totals are **8 contracts held and 44 absent** — 39 silent, 4 fatal, 1
+incidentally throwing. See §12.8.
+
 **The eight HOLDS cases all held**, as they must: `operator()` on a row, a column
 and the const overload; `includerows` on a gather position; `BadSize` on a
 zero-row construction; `Singular` from the inverse family; and the two positive
@@ -2207,6 +2214,239 @@ these parts, all of which Sol's step 3 should settle together:
 3. Which boundaries acquire a catch, and what each reports.
 
 Nothing in `matrix.h` or `matrix.cpp` has been changed.
+
+### 12.8 The per-case exception mapping (Sol's policy, applied case by case)
+
+The policy, decided by Sol 2026-08-01 and not reopened here:
+
+- **`BoundsViolation`** — an invalid index, range or gather position: one number
+  outside one container.
+- **`DimensionMismatch`** — *new* — two shapes that cannot be combined:
+  matrix/vector/destination disagreements, **including a non-square input to the
+  inverse family**.
+- **`BadSize`** — an invalid construction size.
+- **`Singular`** — numerical non-invertibility.
+- All four derive **directly from `std::exception`**, with
+  `const char* what() const noexcept override`. Not from a more specialized
+  standard exception. Existing exact-type catches stay valid.
+
+**A correction to how §12.6 reported its total, per Sol.** The aggregate line
+"held: 9" is eight declared positive contracts **plus case 50**, and case 50 is
+not a ninth. It is an ABSENT contract that happened to throw the placeholder type
+from `operator()` *downstream* — case 52, the same call on a taller-than-wide
+matrix, runs to completion. Read the totals as **8 contracts held, 44 absent**
+(39 silent + 4 fatal + 1 incidentally-throwing), 0 wrong type, 0 control failed.
+
+| # | Operation and violation | Type | Today |
+|---|---|---|---|
+| 1 | `operator()`: row index | `BoundsViolation` | held |
+| 2 | `operator()`: column index | `BoundsViolation` | held |
+| 3 | `operator() const`: both | `BoundsViolation` | held |
+| 4 | `includerows`: gather position | `BoundsViolation` | held |
+| 5 | `Matrix( 0, c, value )` | `BadSize` | held |
+| 6 | `inverse`: a singular matrix | `Singular` | held |
+| 7 | `dotprod( in, out )`: a SHORTER destination | **legal** | held |
+| 8 | ordinary arithmetic, transpose, dot product | **legal** | held |
+| 9 | `row( r, v )`: row index | `BoundsViolation` | silent |
+| 10 | `row( r, v )`: destination width ≠ `ncols_` | `DimensionMismatch` | silent |
+| 11 | `row( r )`: row index | `BoundsViolation` | silent |
+| 12 | `col( c, v )`: column index | `BoundsViolation` | silent |
+| 13 | `col( c, v )`: destination height ≠ `nrows_` | `DimensionMismatch` | silent |
+| 14 | `replacerow`: row index | `BoundsViolation` | silent |
+| 15 | `replacerow`: source width ≠ `ncols_` | `DimensionMismatch` | **SIGTRAP** |
+| 16 | `replacecol`: column index | `BoundsViolation` | silent |
+| 17 | `replacecol`: source height ≠ `nrows_` | `DimensionMismatch` | silent |
+| 18 | `submatrix`: row range past the end | `BoundsViolation` | silent |
+| 19 | `submatrix`: destination ≠ the block | `DimensionMismatch` | silent |
+| 20 | `operator+=`: differing dimensions | `DimensionMismatch` | silent |
+| 21 | `operator-=`: differing dimensions | `DimensionMismatch` | silent |
+| 22 | `operator*=`: differing dimensions | `DimensionMismatch` | silent |
+| 23 | `operator/=`: differing dimensions | `DimensionMismatch` | silent |
+| 24 | `operator+`: differing dimensions (inherits) | `DimensionMismatch` | silent |
+| 25 | `t( M_in )`: destination ≠ transpose shape | `DimensionMismatch` | silent |
+| 26 | `dotprod( in, out )`: input length ≠ `ncols_` | `DimensionMismatch` | silent |
+| 27 | `dotprod( in, out )`: destination LONGER than `nrows_` | `DimensionMismatch` | silent |
+| 28 | `dotprod` ranged: extent ≠ `nrows_` | `DimensionMismatch` | silent |
+| 29 | `dotprod` ranged: range outside the destination | `BoundsViolation` | silent |
+| 30 | `dotprodt( in, out )`: input length ≠ `nrows_` | `DimensionMismatch` | silent |
+| 31 | `dotprodt` ranged: extent ≠ `ncols_` | `DimensionMismatch` | silent |
+| 32 | `dotprod_row`: row index into the dataset | `BoundsViolation` | silent |
+| 33 | `dotprod_row`: the two matrices disagree | `DimensionMismatch` | silent |
+| 34 | `dotprod( B, C )`: inner dimensions | `DimensionMismatch` | silent |
+| 35 | `dotprod( B, C )`: destination shape | `DimensionMismatch` | silent |
+| 36 | `outprod`: left vector ≠ `nrows_` | `DimensionMismatch` | **SIGTRAP** |
+| 37 | `outprod`: right vector ≠ `ncols_` | `DimensionMismatch` | **SIGTRAP** |
+| 38 | `colsums`: destination ≠ `ncols_` | `DimensionMismatch` | silent |
+| 39 | `rowindex`: destination ≠ `nrows_` | `DimensionMismatch` | silent |
+| 40 | `toVector( v )`: destination ≠ `nrows_ * ncols_` | `DimensionMismatch` | silent |
+| 41 | `toMatrix( M, v )`: source ≠ `rows * cols` | `DimensionMismatch` | silent |
+| 42 | `toMatrix( v, r, c )`: source ≠ `r * c` | `DimensionMismatch` | silent |
+| 43 | `func( Mi, fx, Mo )`: the two matrices disagree | `DimensionMismatch` | silent |
+| 44 | `includecols`: position past the last column | `BoundsViolation` | silent |
+| 45 | `includecols`: an EMPTY selection | `BadSize` — **see below** | silent |
+| 46 | `excludecols`: position past the last column | `BoundsViolation` | silent |
+| 47 | `addrow`: new row width ≠ `ncols_` | `DimensionMismatch` | silent |
+| 48 | `addcol`: new column height ≠ `nrows_` | `DimensionMismatch` | **SIGTRAP** |
+| 49 | `covariance( V )`: destination ≠ `ncols_` × `ncols_` | `DimensionMismatch` | silent |
+| 50 | `inverse( I )`: a WIDER-than-tall matrix | `DimensionMismatch` | held, **incidentally** |
+| 51 | `Matrix( Q, Pt )`: empty vectors | `BadSize` | silent |
+| 52 | `inverse( I )`: a TALLER-than-wide matrix | `DimensionMismatch` | silent |
+| **53** | `covariance`: fewer than two columns (**new case**) | `DimensionMismatch` | to be measured |
+| **54** | `excludecols`: an EMPTY selection (**new case**) | **legal** — see below | to be measured |
+
+Totals: **14 `BoundsViolation`**, **33 `DimensionMismatch`**, **3 `BadSize`**,
+**1 `Singular`**, **3 deliberately legal**.
+
+**The empty include/exclude selections, resolved explicitly** — Sol's
+instruction, and the one place where I am deciding rather than classifying. They
+are *not* symmetric, and inheriting either from the broken `max_element` assert
+would have hidden that:
+
+- **`includecols( {} )` is refused, as `BadSize`.** The request is "keep no
+  columns", whose result is an *n* × 0 matrix — an object no operation in this
+  class can use, which will fail later and further from the caller that asked for
+  it. `BadSize` is the existing name for a zero dimension, and this is one.
+- **`excludecols( {} )` is legal and returns a copy.** "Exclude nothing" is a
+  well-defined request with a well-defined answer, and refusing it would break a
+  caller that computes a removal list which legitimately comes out empty —
+  `removeInputs` is exactly that shape. Case 54 pins it as a positive control.
+
+**Deliberately not cased, with reasons.** `Matrix( filename, ncols )`,
+`loadfile`, and `operator>>` have preconditions about file contents and about a
+zero-sized destination; their failure is a construction size and is already the
+`BadSize` contract, and casing them needs fixture files whose absence would test
+the fixture rather than the class. The allocation asserts (`data_ != 0` in the
+constructors and `resize`) are not caller-reachable contracts. `begin()` /
+`end()` are documented "DO NOT USE THESE" and stay out of scope.
+
+**What does not move**, restated because the mapping is where it would slip:
+the short-destination prefix rule of `dotprod( iVec, oVec )` (case 7) stays
+legal, and case 27 refuses only the *longer* destination.
+
+### 12.9 The process boundary, proposed shape
+
+Sol's policy: `Matrix` methods never catch their own contract exceptions; every
+GUI worker-thread entry point stops an exception escaping the thread, publishes a
+structured failure, and always clears `job.running`; one narrow helper rather
+than four catch blocks; `catch ( const std::exception& )` for the message and
+`catch ( ... )` as the process-survival boundary; an equivalent CLI boundary; and
+the exact `Singular` catches stay where singularity is an expected analytical
+outcome.
+
+**Why a helper and not four blocks.** All four launch sites are the same six
+lines today (`src/gui.cpp:1469`, `:1777`, `:2872`, `:3103`):
+
+```cpp
+job.worker = thread( [ cfg ]
+{
+    string result = runObdJob( cfg );
+    {
+        lock_guard< mutex > lock( job.progressMutex );
+        job.result = result; // publish BEFORE running goes false
+    }
+    job.running = false;
+} );
+```
+
+The publish-then-clear ordering is an invariant the status endpoint depends on,
+and it is currently maintained in four places. Proposed:
+
+```cpp
+// THE WORKER BOUNDARY -- one implementation, four callers.
+//
+// Every long job runs on a std::thread, and an exception that escapes a
+//    thread's function calls std::terminate: the server dies while the page is
+//    still polling /api/train/status. Until D9 that was reachable --
+//    Matrix's contract exceptions did not derive from std::exception, so
+//    runTrainingAndBuildResult's catch( const exception& ) could not see one
+//    (Network::computeCondNum throws BoundsViolation on a non-square argument).
+//    They derive from it now, so the inner handlers report properly; this is
+//    the last resort, and it exists so that the answer to "what if something
+//    else throws" is never "the process".
+//
+// It also owns the publish-then-clear ordering that the status endpoint
+//    depends on -- job.result under the mutex FIRST, job.running cleared
+//    afterward, on every path including the throwing ones.
+static void runOnWorker( const function< string() >& body )
+{
+    string result;
+
+    try
+    {
+        result = body();
+    }
+    catch ( const exception& e )
+    {
+        result = jsonMsg( false, string( "the run failed: " ) + e.what() );
+    }
+    catch ( ... )
+    {
+        result = jsonMsg( false, "the run failed with an unrecognized error" );
+    }
+
+    {
+        lock_guard< mutex > lock( job.progressMutex );
+        job.result = result; // publish BEFORE running goes false
+    }
+    job.running = false;
+}
+```
+
+and each site becomes one line:
+
+```cpp
+job.worker = thread( [ cfg ] { runOnWorker( [ cfg ] { return runObdJob( cfg ); } ); } );
+```
+
+Notes on the shape, each of which is a decision rather than a detail:
+
+- **`std::function` is correct here** and not a rule-7 violation: this is called
+  once per job, not once per exemplar. The hot path is inside `body`.
+- **`jsonMsg` escapes its own message**, so the handler must not escape it again.
+- **The inner handlers stay.** `runTrainingAndBuildResult`'s
+  `catch ( const exception& )` gives the *specific* message and the captured
+  output; this boundary is the last resort, not a replacement for it.
+- **Cancellation is not an exception** in this engine (it is a flag the observer
+  reads), so nothing here changes cancellation behavior.
+- **It is not the async-launcher refactor.** The joinable/reset/lock sequence
+  above each launch is untouched; only the thread body moves.
+
+**The CLI boundary** (`src/neuron.cpp`) is the same idea at the other entry
+point. `main` has no top-level catch today, so a contract failure terminates
+opaquely. The minimal form keeps the menus untouched:
+
+```cpp
+static int neuronMain( int argc, char* argv[] ) { ...today's main body... }
+
+int main( int argc, char* argv[] )
+{
+    try { return neuronMain( argc, argv ); }
+    catch ( const exception& e )
+    {
+        cerr << "neuron: fatal: " << e.what() << endl;
+        return 1;
+    }
+    catch ( ... )
+    {
+        cerr << "neuron: fatal: unrecognized error" << endl;
+        return 1;
+    }
+}
+```
+
+**One consequence of the inheritance change, flagged rather than assumed.**
+Making the four classes derive from `std::exception` means every existing
+`catch ( const exception& )` starts seeing `Matrix` failures it previously let
+past. That is the point, and at `src/gui.cpp:1070` and `:1150` it is a strict
+improvement — a DFA or training run that hits a contract now returns
+`{"ok":false,"message":"..."}` instead of httplib's `500 EXCEPTION_WHAT:
+UNKNOWN`. Two sites already swallow everything and are unchanged by it:
+`src/autoalgo.cpp:116` (`catch ( ... )`, "a diverged probe is a result, not a
+failure") and `src/crossval.cpp:86-90` (`catch ( ... ) {}` around optional
+metrics). Neither becomes *more* permissive, but both would now swallow a
+`Matrix` contract failure that today crosses them — worth stating, and worth a
+look during implementation, though changing them is not part of this phase.
+
 
 
 *Prepared by Claude (Opus 5). Reviewed by Sol (2026-07-31); revised §8 in response.
