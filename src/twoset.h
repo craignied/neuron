@@ -248,6 +248,18 @@ public:
 	//    as argument
 	void calculate( const double );
 
+	// numerator / denominator, with the denominator checked FIRST. The four
+	//    rate accessors used to compute the ratio and then ask whether the
+	//    denominator was zero -- the guard running after the thing it guards
+	//    against. A double divided by zero does not trap, it yields an infinity
+	//    or a NaN, which is why that survived: the throw still happened, but
+	//    only after an undefined quantity had been formed.
+	//
+	//    Deliberately this small. Sensitivity is tp / ( tp + fn ) and the call
+	//    sites still say so; a general "compute a rate" abstraction would have
+	//    hidden which four ratios these are.
+	static double checkedRate( unsigned numerator, unsigned denominator );
+
 	// Utility function to check that all real outcomes are discrete
 	bool checkDiscrete( const Matrix< double >& ) const;
 

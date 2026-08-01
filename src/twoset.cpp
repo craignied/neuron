@@ -327,9 +327,7 @@ double TwoSet::getSens()
 	else // calculate sensitivity
 	{
 		calculate( threshold ); // calculate tp, fp, tn, fn
-		result = static_cast< double >( tp ) / ( tp + fn );
-		if ( ( tp + fn ) == 0 ) // check division by zero
-			throw DivisionByZero();
+		result = checkedRate( tp, tp + fn ); // the denominator is checked first
 	}
 
 	return result;
@@ -345,9 +343,7 @@ double TwoSet::getSpec()
 	else // calculate specificity
 	{
 		calculate( threshold ); // calculate tp, fp, tn, fn
-		result = static_cast< double >( tn ) / ( tn + fp );
-		if ( ( tn + fp ) == 0 ) // check division by zero
-			throw DivisionByZero();
+		result = checkedRate( tn, tn + fp ); // the denominator is checked first
 	}
 
 	return result;
@@ -363,9 +359,7 @@ double TwoSet::getPVP()
 	else // calculate PVP
 	{
 		calculate( threshold ); // calculate tp, fp, tn, fn
-		result = static_cast< double >( tp ) / ( tp + fp );
-		if ( ( tp + fp ) == 0 ) // check division by zero
-			throw DivisionByZero();
+		result = checkedRate( tp, tp + fp ); // the denominator is checked first
 	}
 
 	return result;
@@ -381,9 +375,7 @@ double TwoSet::getPVN()
 	else // calculate PVN
 	{
 		calculate( threshold ); // calculate tp, fp, tn, fn
-		result = static_cast< double >( tn ) / ( tn + fn );
-		if ( ( tn + fn ) == 0 ) // check division by zero
-			throw DivisionByZero();
+		result = checkedRate( tn, tn + fn ); // the denominator is checked first
 	}
 
 	return result;
@@ -489,6 +481,15 @@ double TwoSet::getTrapROCarea()
 	}
 
 	return rocArea; // return the ROC area
+}
+
+// numerator / denominator with the denominator checked first -- see twoset.h
+double TwoSet::checkedRate( unsigned numerator, unsigned denominator )
+{
+	if ( denominator == 0 ) // no division is attempted on an empty class
+		throw DivisionByZero();
+
+	return static_cast< double >( numerator ) / denominator;
 }
 
 // Utility function to calculate true positives, true negatives,

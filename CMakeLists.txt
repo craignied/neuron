@@ -272,3 +272,13 @@ add_test(NAME iterative_weight_decay COMMAND check_decay)
 add_executable(check_errorfunc tests/errorfunc/check_errorfunc.cpp)
 target_link_libraries(check_errorfunc PRIVATE neuron_core)
 add_test(NAME error_function COMMAND check_errorfunc)
+
+# Unit test: TwoSet's four classification rates and their zero denominators.
+# Each computed the ratio and THEN checked whether the denominator was zero --
+# a guard running after the thing it guards against (a double over zero does
+# not trap, so the throw still happened, but only after forming an infinity).
+# Asserts all four zero-denominator throws, exact ordinary ratios against a
+# hand-built confusion matrix, and the unchanged no-threshold contract.
+add_executable(check_rates tests/twoset/check_rates.cpp)
+target_link_libraries(check_rates PRIVATE neuron_core)
+add_test(NAME twoset_rates COMMAND check_rates)
