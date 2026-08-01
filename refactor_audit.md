@@ -7,10 +7,10 @@ what is done. The findings in §§1–7 are preserved **as originally written**,
 that what was proposed can be compared with what was built; where a finding has
 since shipped or been corrected, §8 and §8.7 govern.
 
-**One open defect is recorded here and is NOT fixed: legacy bug #12, §11.11** —
-`BackProp` discards the conjugate direction in batch/epoch mode, so CGD and
-Shanno are silently plain gradient descent there. Diagnosed 2026-08-01, escalated
-for a decision before any production edit.
+**Legacy bug #12 (§11.11) is FIXED** — `BackProp` discarded the conjugate
+direction in batch/epoch mode, so CGD and Shanno were silently plain gradient
+descent there. Diagnosed, escalated, and corrected as a standalone commit on
+2026-08-01, guarded by `tests/backprop/check_bpoptimizer.cpp`.
 
 > **REVISED after Sol's review, 2026-07-31.** Read **§8** before acting on anything below.
 > It corrects finding 1.1 (which overstated equivalence), corrects §7's verification protocol
@@ -984,10 +984,11 @@ needs. That takes 149 compilations to about 67 and speeds every platform.
    or write outside a container were assert-only in a project that builds Release
    by default; they now throw `nvec::SizeMismatch` / `RangeViolation` /
    `EmptyVector`. Full inventory and policy in §11.
-7b. **LEGACY BUG #12 — OPEN, escalated, §11.11.** `BackProp` discards the
-   conjugate direction in batch/epoch mode. Diagnosed and measured; production
-   code deliberately untouched pending a decision. Must be its own commit and
-   must precede item 9, which touches all four training implementations.
+7b. ~~LEGACY BUG #12 (§11.11)~~ — **done**, as its own correctness commit:
+   `BackProp`'s batch weight update now consumes the post-`engine()` `Gradient`.
+   Four invariants captured from the unfixed engine are bit-identical after it;
+   `tests/backprop/check_bpoptimizer.cpp` is the guard, and was proven to fail
+   against the unfixed engine before the fix was written. No golden re-blessed.
 8. `DataSet::metricsReport` / `Iterative::announceStop` / `Model::writeLastop`.
 9. Auto step-size template method (§1.2, §8.5).
 10. Bounded SimpleProp/BareProp sharing (§8.2).
@@ -1701,8 +1702,7 @@ carry-forward commit `f87e9dd`. Commit D (`c70788a`) touched
 `innerTrainSet`'s weight buffer and is not implicated — its own before/after
 identity was separately proven load-bearing.
 
-**Proposed correction — NOT applied.** Per Sol's instruction, production code is
-untouched pending review. The one-line shape of it is to update from the
+**The correction, applied 2026-08-01** as its own commit. It updates from the
 structure the optimizer actually wrote, as the other two models already do:
 
 ```cpp
@@ -1710,16 +1710,21 @@ for ( unsigned m = 0; m < Gradient.size(); m++ )
     Weights[ m ] -= ( Gradient[ m ] * eta );
 ```
 
-Three things to settle before writing it:
+Multiplied **by value**, not with `*=`: `Gradient` is read again by
+`getGradMax()` and by the next iteration's optimizer state, and must not be
+scaled by `eta` in place.
 
-1. It **changes numerical output** for BackProp + batch + CGD/Shanno. Whether any
-   golden covers that combination must be established first — a re-bless, if
-   needed, has to be proven with two binaries (the standing trap).
-2. `WeightsAccumulate` is then dead after the division in that branch; whether
-   the copy into `Gradient` should remain, or the branch should work in one
-   structure, is a small design question that belongs with the fix.
-3. It must be its **own** commit, not folded into the auto-step-size template
-   method (§1.2), which touches all four training implementations.
+The three questions raised before writing it, resolved:
+
+1. It changes numerical output for BackProp + batch + CGD/Shanno. **No golden
+   covers that combination** — no golden fixture references `BackProp` at all —
+   so nothing was re-blessed and nothing moved.
+2. `WeightsAccumulate` **keeps its lifetime and storage** (Sol's ruling). It is
+   still the per-exemplar batch accumulator, reset at the top of every pass;
+   becoming dead after the average is copied out does not justify changing it in
+   a correctness commit.
+3. It landed as its **own** commit, before the three DRY extractions and before
+   the auto-step-size template method (§1.2).
 
 
 ---

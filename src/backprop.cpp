@@ -604,16 +604,41 @@ double BackProp::innerTrainSet()
 		}
 		else // routines where gradient is calculated separately
 		{
-			// Set the gradients to the accumulators so that pack() & unpack() work
+			// THE THREE STRUCTURES, AND WHICH ONE THE UPDATE MUST CONSUME.
+			//
+			//    WeightsAccumulate holds the per-exemplar sum built over the
+			//       epoch above; dividing by nTrain makes it the averaged RAW
+			//       batch gradient, Methodology equation 2.14
+			//       ${\bf g} = (1/N)\sum_{k=1}^N {\bf g}_k$.
+			//    Gradient receives that average -- a Matrix copy, so the two
+			//       are distinct objects from here on.
+			//    engine() transforms Gradient into the SELECTED OPTIMIZER'S
+			//       SEARCH DIRECTION: CGD and shanno pack() from Gradient,
+			//       compute $\vec f(t)$, and unpack() back into Gradient.
+			//       WeightsAccumulate is not part of that and never changes.
+			//    The weight update must therefore consume GRADIENT.
+			//
+			//    It consumed WeightsAccumulate until 2026-08-01, which threw
+			//    the search direction away and made batch BackProp under CGD or
+			//    Shanno plain gradient descent -- announcing itself as
+			//    something else in its own run header. Legacy bug #12; the same
+			//    lines are in ../distro/src/backprop.cpp:630-634. SimpleProp
+			//    (simpleprop.cpp) and BareProp (bareprop.cpp) update from
+			//    oG/hG after engine() and never had it, and the on-line branch
+			//    above already updates from Gradient.
+			//    Guarded by tests/backprop/check_bpoptimizer.cpp.
 			for ( unsigned l = 0; l < Gradient.size(); l++ )
 				Gradient[ l ] = WeightsAccumulate[ l ] /= ( double ) nTrain;
 
 			// Whatever additional algorithm is chosen
 			engine( trainingType, iteration );
 
-			// Update the output and hidden weights
-			for ( unsigned m = 0; m < WeightsAccumulate.size(); m++ )
-				Weights[ m ] -= ( WeightsAccumulate[ m ] *= eta );
+			// Update the output and hidden weights, from the direction engine()
+			//    just wrote. Multiplied by value, NOT with *=: Gradient is read
+			//    again by getGradMax() and by the next iteration's optimizer
+			//    state, and must not be scaled by eta here.
+			for ( unsigned m = 0; m < Gradient.size(); m++ )
+				Weights[ m ] -= ( Gradient[ m ] * eta );
 		}
 	}
 

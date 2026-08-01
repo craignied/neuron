@@ -308,6 +308,23 @@ add_test(NAME twoset_rates COMMAND check_rates)
 # tests/vectorops/run_bounds_demo.sh runs each case in its own process. That is
 # a demonstration driver for use against sabotaged or historical builds, where
 # a case that takes a SIGBUS would otherwise hide every case after it.
+# Regression test: the chosen optimizer must reach BackProp's weights.
+#
+# LEGACY BUG #12. In batch/epoch mode BackProp::innerTrainSet() copied the
+# averaged gradient into Gradient, let engine() turn it into the selected search
+# direction, and then updated the weights from WeightsAccumulate -- which the
+# optimizer never touches. Batch BackProp under CGD or Shanno was plain gradient
+# descent announcing itself as something else. SimpleProp, BareProp and on-line
+# BackProp all update from the post-engine() gradient and were correct.
+#
+# Nothing caught it because tests/props' CGD/Shanno case covers SimpleProp and
+# BareProp only and no golden fixture uses BackProp. Pins the invariants the
+# correction must not move (canonical batch, all three on-line paths) alongside
+# the corrected behavior.
+add_executable(check_bpoptimizer tests/backprop/check_bpoptimizer.cpp)
+target_link_libraries(check_bpoptimizer PRIVATE neuron_engine)
+add_test(NAME backprop_optimizer COMMAND check_bpoptimizer)
+
 add_executable(check_vector_bounds tests/vectorops/check_vector_bounds.cpp)
 target_link_libraries(check_vector_bounds PRIVATE neuron_core)
 target_compile_definitions(check_vector_bounds PRIVATE NDEBUG)

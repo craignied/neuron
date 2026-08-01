@@ -7430,8 +7430,6 @@ for all {\em Network} objects.
       nodes on each layer indicated by the corresponding vector
       element in $nLayer$
 \item unsigned $nLayers$: number of hidden layers
-\item vector$<$ double $>$ $in\_bias$: input bias vector to add to
-      input Matrix if bias nodes present
 \item vector$<$ double $>$ $I$: vector for single exemplar inputs
 \item vector$<$ double $>$ $y$: vector containing dataset outputs
 \item vector$<$ double $>$ $o\_err$: vector containing output errors
@@ -7440,8 +7438,26 @@ for all {\em Network} objects.
 \item vector$<$ Matrix$<$ double $>$ $>$ $WeightsUp$: vector of
       Matrices to hold updated weights one for each weights Matrix
 \item vector$<$ Matrix$<$ double $>$ $>$ $WeightsAccumulate$: vector
-      of Matrices to hold accumulated weight updates for batch/epoch
-      learning\index{Backpropagation!Off-line}
+      of Matrices holding the per-exemplar sum accumulated across a
+      batch/epoch pass\index{Backpropagation!Off-line}.  Divided by the
+      number of training exemplars it is the averaged {\em raw} batch
+      gradient of Methodology equation 2.14.  It is not the quantity the
+      weight update consumes when a search algorithm is selected --- see
+      $Gradient$ below.
+\item vector$<$ Matrix$<$ double $>$ $>$ $Gradient$: vector of Matrices
+      holding the gradient as a separate structure, which is required
+      whenever an algorithm other than canonical backpropagation is
+      chosen, or gradient stopping is armed.  The averaged batch
+      gradient is copied into it; {\em engine} then transforms it into
+      the selected optimizer's search direction, by way of {\em pack}
+      and {\em unpack}.  {\bf The weight update must therefore be taken
+      from $Gradient$}, in batch/epoch mode as well as on-line.  Taking
+      it from $WeightsAccumulate$ discards the search direction and
+      silently reduces conjugate gradient descent and Shanno to plain
+      gradient descent (corrected 2026-08-01; see
+      \texttt{tests/backprop/check\_bpoptimizer.cpp}).
+\item vector$<$ vector$<$ double $>$ $>$ $vpack$: per-layer holding
+      vectors used by {\em unpack} to rebuild $Gradient$ from $stackG$
 \item vector$<$ vector$<$ double $>$ $>$ $HOutputs$: vector containing
       a vector of outputs for each hidden layer
 \item vector$<$ vector$<$ double $>$ $>$ $HErrors$: vector containing

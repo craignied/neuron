@@ -3017,3 +3017,67 @@ general tests, and no external run is an implementation gate.
     is that checkpoint, not a repeat of it. ROADMAP 4 items 1 and 2 are now done *and*
     accepted; **B9** (the GUI-wide strict-parsing pass) is the only remaining item.
   - `CLAUDE.md` updated in both places that carried the status.
+
+**2026-08-01 — legacy bug #12: BackProp computed the search direction and threw it away.**
+
+  - **The finding.** In batch/epoch mode `BackProp::innerTrainSet()` copied the averaged
+    raw gradient into `Gradient`, called `engine()` — which turns `Gradient` into the
+    selected optimizer's search direction, via `pack()`/`unpack()` — and then updated the
+    weights from **`WeightsAccumulate`**, which the optimizer never touches. `Gradient[l] =
+    WeightsAccumulate[l] /= nTrain` is a `Matrix` **copy**, so the two are distinct objects
+    from that line onward. **Batch `BackProp` under CGD or Shanno was plain gradient
+    descent, announcing another algorithm's name in its own run header.**
+  - **Both innocent explanations were excluded by measurement, not by reading the source.**
+    (a) A temporary `fprintf` probe in `Network::CGD` and `Network::shanno` — snapshot,
+    inserted, rebuilt with the compile line confirmed, restored byte-identical — logged
+    **2720 entries each** during the batch runs, so dispatch was reached. (b) A
+    discriminating fixture (two hidden layers, batch, automatic step size *off*, fixed
+    `eta`, no early exits, all three optimizers loaded from **one saved weights file**
+    rather than a re-seeded `randomize()`, weights compared **bitwise** as `%a` after 1, 2,
+    5 and 20 iterations) was identical at **every** checkpoint from the first iteration,
+    while the **same fixture on-line diverged immediately**. So the fixture discriminated
+    and the dispatch worked; only the batch weight update was wrong.
+  - **Reach, measured.** Exactly `BackProp` × batch/epoch × (CGD or Shanno). `SimpleProp`
+    and `BareProp` update from `oG`/`hG` after `engine()` and were always correct; on-line
+    `BackProp` updates from `Gradient` and was always correct. Canonical with gradient
+    stopping takes the same separate-gradient branch but dispatches to a `switch` with no
+    `case 0`, so `Gradient` is unchanged and its update was numerically right — measured
+    identical to canonical without gradient stopping.
+  - **Reachable in production.** `autoalgo::pick` clones the current model, sets each
+    `trainingType`, and **forces `setBatchEpoch( true )` for CGD and Shanno**
+    (`autoalgo.cpp:98-100`) — precisely the defective combination. On a `BackProp`,
+    `algorithm=auto` therefore compared three optimizers that were all secretly the same
+    one and picked a winner among identical fits. Any GUI user building a multi-layer
+    network and choosing CGD or Shanno with batch/epoch got canonical.
+  - **Why it survived twenty years and every gate here.** `tests/props`' CGD/Shanno case
+    carries expected values for **SimpleProp and BareProp only** — the `Case` struct has one
+    field per those two models and none for `BackProp` — and **no golden fixture uses
+    `BackProp` at all**. The optimizer tests executed the dispatch, passed, and guarded
+    nothing for the one model where it did not work. Standing rule 2, exactly: a test that
+    has never failed is a hypothesis.
+  - **Legacy, not a regression.** The same six lines are in
+    `../distro/src/backprop.cpp:630-634` and entered 3.0 in the initial carry-forward
+    `f87e9dd`. The 2026-08-01 `BackProp` weight-buffer commit (`c70788a`) touched
+    `innerTrainSet`'s buffer and is not implicated; its own before/after identity was
+    separately proven load-bearing.
+  - **How it was found.** Not by looking for it. While proving `c70788a` behavior-
+    preserving, the fixture produced the identical final error `0.58003708523755504` under
+    all three optimizers. That was recorded in `refactor_audit.md` as an explicitly
+    **unverified** observation rather than explained away or dropped, and diagnosed when the
+    bounds work was finished. The characterization campaign found a shipped optimizer
+    selection that was nominal rather than computational.
+  - **The correction**, its own commit: the update consumes `Gradient`, by value rather than
+    `*=` so the direction is not scaled in place for the next iteration's optimizer state.
+    `WeightsAccumulate` keeps its lifetime and storage — it is still the per-exemplar batch
+    accumulator, reset at the top of every pass.
+  - **The guard**, written before the fix: `tests/backprop/check_bpoptimizer.cpp`. Four
+    invariants captured from the **unfixed** engine (canonical batch, and all three on-line
+    paths) are **bit-identical** after the correction, which is what proves the fix did not
+    reach further than it should. Batch CGD and Shanno now differ from canonical and from
+    each other with automatic step size off *and* on, at iteration 20 — deliberately not at
+    iteration 1, where Golden's step 1 sets *f*(0) = −*g*(0) and equality is legitimate. The
+    run header is asserted **together with** a weight difference, because asserting the name
+    alone is the mistake that let this ship. Post-correction values are recorded as C99
+    hex floats. Proven to fail: against the unfixed engine, 12 failures with group 1 passing;
+    restoring the old `WeightsAccumulate` update reproduces exactly those 12.
+  - **No golden was re-blessed** — none covers this path, and none moved.
