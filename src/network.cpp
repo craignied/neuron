@@ -703,6 +703,15 @@ void Network::conditionOf( const Matrix< double >& symmetric )
 {
 	unsigned dimension = symmetric.rows();
 
+	// The contract is a SQUARE symmetric matrix, and gsl_matrix_view_array
+	//    below reads dimension x dimension doubles from the storage it is
+	//    handed. A non-square argument would make it read past the end -- an
+	//    unconditional check, not an assert, because asserts vanish under
+	//    NDEBUG and this is a bounds question (standing rule 4's argument for
+	//    Matrix::operator() throwing in release builds).
+	if ( symmetric.cols() != dimension )
+		throw Matrix< double >::BoundsViolation();
+
 	// A model with no estimated parameters has no information matrix and
 	//    therefore no condition number. Not hypothetical: forward stepwise
 	//    regression begins by training a BASELINE network with every input

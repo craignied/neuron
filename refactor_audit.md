@@ -1117,5 +1117,105 @@ definition. Changing it is a separate, and arguable, improvement.
 
 ---
 
+## 10. D8 — the build compiles the engine 208 times. The layered plan.
+
+Sol's step 6, written before any CMake edit.
+
+### 10.1 Baseline, measured 2026-08-01
+
+| | |
+|---|---|
+| Unique engine sources (`src/*.cpp`) | **31** |
+| Engine compilation units across all targets | **208** (19 targets) |
+| Redundancy | **6.7x** |
+| Clean build, `--parallel 4` (CI's setting) | **36.4 s** wall, **128 s** CPU |
+| Clean build, `--parallel` unbounded (24 cores) | **16.0 s** wall, **179 s** CPU |
+
+The CPU figure is the one that matters: it is the work, and it is what stalled
+the hosted macOS runner when 19 targets' worth of it ran at once.
+
+### 10.2 The dependency map
+
+Derived from the actual `#include` graph of every `.cpp` and its own header.
+
+**The single fact that governs the design: only `network.cpp` includes GSL.**
+Everything below it in the graph is GSL-free, and several tests are documented
+as proving exactly that. A monolithic library would erase the proof; a layered
+one *enforces* it, because a target that links only the lower layers cannot
+acquire GSL even by accident.
+
+```
+neuron_core     utility  vector_ops  matrix  stats  twoset          (no GSL)
+                        |
+neuron_data     split  dataset                                      (no GSL)
+                        |
+neuron_infer    auccov  delong  clustered_auc  evaldesign           (no GSL)
+                        |
+neuron_engine   model iterative network* simpleprop bareprop        (* GSL enters here)
+                backprop logistic dfa ldfa qdfa netclone
+                modelfactory regressnet autoalgo obd
+                        |
+neuron_eval     crossval  cvadapters  cvreport
+                        |
+                neuron  ( gui.cpp + neuron.cpp )
+```
+
+`neuron_infer` sits beside `neuron_data` rather than above it: `auccov` needs
+only `matrix` and `stats`, and `evaldesign` needs nothing at all.
+
+### 10.3 Target -> library
+
+| Target | Links | GSL |
+|---|---|---|
+| `check_matrix`, `check_az`, `check_wickens`, `check_hl` | `neuron_core` | no |
+| `check_plateau` | (header-only, unchanged) | no |
+| `check_capture`, `check_split` | `neuron_data` | no |
+| `check_delong`, `check_clustered`, `scale_probe` | `neuron_infer` | no |
+| `check_obd`, `check_props`, `check_gradcadence`, `check_quietcopy`, `check_quietprep`, `check_condnum`, `check_decay` | `neuron_engine` | yes |
+| `check_crossval` | `neuron_eval` | yes |
+| `neuron` | `neuron_eval` + `gui.cpp` + `neuron.cpp` | yes |
+
+The nine targets that link GSL today are exactly the nine that link
+`neuron_engine` or above tomorrow. The ten that do not, still do not.
+
+### 10.4 Constraints this refactor must not break
+
+- Every executable and every `add_test` NAME survives, unchanged.
+- No lower layer acquires GSL because a higher one uses it.
+- The no-GSL targets keep proving that boundary — now structurally.
+- C++17, and the warning configuration, stay as they are (there are no
+  per-target compile definitions or options today; verified).
+- No engine behavior, report, model format or public interface changes. This is
+  a CMake-only commit.
+- `gui.cpp` keeps its private include directories (the generated `gui_page.h`
+  and `third_party/`), which no library needs.
+
+### 10.5 Result, measured
+
+| | before | after |
+|---|---|---|
+| Engine compilation units | 208 | **31** |
+| Clean build, `--parallel 4` | 36.4 s wall / 128 s CPU | **13.4 s / 32 s** |
+| Clean build, unbounded (24 cores) | 16.0 s wall / 179 s CPU | **9.6 s / 34 s** |
+
+CPU work drops **4x**. That is the number that mattered: it is what 19 targets
+were duplicating, and what stalled the hosted macOS runner when they ran at once.
+
+Two corrections to the plan, found by building it:
+
+- **`scale_probe` spans two SIBLING layers.** It uses the clustered estimator
+  (`neuron_infer`) *and* the group fold planner (`nsplit`, in `neuron_data`),
+  and neither sits above the other, so it names both. The link failure was the
+  map being wrong, not the layering.
+- Nothing else moved. The nine targets that linked GSL before link it now; the
+  ten that did not, still do not — verified by reading each target's generated
+  link line, not by assuming.
+
+All 17 `ctest` names are byte-identical to the pre-refactor list, checked by
+diffing `ctest -N` across a `git stash`.
+
+
+---
+
 *Prepared by Claude (Opus 5). Reviewed by Sol (2026-07-31); revised §8 in response.
 Nothing in `src/` has been modified.*

@@ -24,11 +24,64 @@ file(READ src/gui_page.html GUI_PAGE_CONTENT)
 configure_file(src/gui_page.h.in generated/gui_page.h @ONLY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS src/gui_page.html)
 
-file(GLOB ENGINE_SOURCES src/*.cpp)
-add_executable(neuron ${ENGINE_SOURCES})
+# --- The engine, as LAYERED static libraries -------------------------------
+#
+# Each source is compiled ONCE and linked wherever it is needed. Before this,
+# every test target listed its own copy of the engine sources: 208 compilation
+# units for 31 files, which is what stalled the hosted macOS CI runner when they
+# all built at once (refactor_audit.md section 10).
+#
+# The layering is not decoration, and it is not one library on purpose. ONLY
+# network.cpp includes GSL. Several tests are documented as proving that the
+# statistics and data layers do not depend on it -- "Links only the statistics
+# core, no GSL needed" -- and a monolithic library would erase that proof by
+# handing GSL to everything. Here the dependency graph ENFORCES it: a target
+# that links neuron_core cannot acquire GSL, because nothing below
+# neuron_engine has it to give.
+#
+# Dependencies point downward, as everywhere else in this project (rule 6):
+#
+#     neuron_core     numerical primitives + the statistics container
+#     neuron_data     splitting and dataset materialization
+#     neuron_infer    ROC covariance and evaluation-design types
+#     neuron_engine   models and training            <-- GSL enters here
+#     neuron_eval     cross-validation and reporting
+#     neuron          the driver and the embedded GUI
+
+add_library(neuron_core STATIC
+    src/utility.cpp src/vector_ops.cpp src/matrix.cpp src/stats.cpp
+    src/twoset.cpp)
+target_include_directories(neuron_core PUBLIC src)
+
+add_library(neuron_data STATIC src/split.cpp src/dataset.cpp)
+target_link_libraries(neuron_data PUBLIC neuron_core)
+
+add_library(neuron_infer STATIC
+    src/auccov.cpp src/delong.cpp src/clustered_auc.cpp src/evaldesign.cpp)
+target_link_libraries(neuron_infer PUBLIC neuron_core)
+
+# The first layer that needs GSL -- network.cpp's eigenvalue routines -- and so
+# the first that passes it on. PUBLIC because a caller linking the engine links
+# GSL transitively; that is the boundary, stated once.
+add_library(neuron_engine STATIC
+    src/model.cpp src/iterative.cpp src/network.cpp
+    src/simpleprop.cpp src/bareprop.cpp src/backprop.cpp src/logistic.cpp
+    src/dfa.cpp src/ldfa.cpp src/qdfa.cpp
+    src/netclone.cpp src/modelfactory.cpp src/regressnet.cpp
+    src/autoalgo.cpp src/obd.cpp)
+target_link_libraries(neuron_engine PUBLIC neuron_data GSL::gsl GSL::gslcblas)
+
+add_library(neuron_eval STATIC
+    src/crossval.cpp src/cvadapters.cpp src/cvreport.cpp)
+target_link_libraries(neuron_eval PUBLIC neuron_engine neuron_infer)
+
+# The driver and the embedded GUI. gui.cpp is the only translation unit that
+# needs the generated page header and the vendored httplib, so those include
+# directories stay PRIVATE to this target rather than leaking into a library.
+add_executable(neuron src/neuron.cpp src/gui.cpp)
 target_include_directories(neuron PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}/generated third_party)
-target_link_libraries(neuron PRIVATE GSL::gsl GSL::gslcblas Threads::Threads)
+target_link_libraries(neuron PRIVATE neuron_eval Threads::Threads)
 if(WIN32)
     target_link_libraries(neuron PRIVATE ws2_32)
 endif()
@@ -37,33 +90,30 @@ endif()
 # Links only the statistics core — no GSL needed.
 enable_testing()
 add_executable(check_az
-    tests/binormal/check_az.cpp
-    src/twoset.cpp src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
-target_include_directories(check_az PRIVATE src)
+    tests/binormal/check_az.cpp)
+target_link_libraries(check_az PRIVATE neuron_core)
 add_test(NAME binormal_az COMMAND check_az)
 
 # Literature acceptance test: the engine's binormal ROC against Wickens' own
 # published worked example (Table 5.1, analysed by hand through chapter 5).
 # Self-verifying against the literature, like the Hosmer-Lemeshow log likelihood.
 add_executable(check_wickens
-    tests/binormal/check_wickens.cpp
-    src/twoset.cpp src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
-target_include_directories(check_wickens PRIVATE src)
+    tests/binormal/check_wickens.cpp)
+target_link_libraries(check_wickens PRIVATE neuron_core)
 add_test(NAME binormal_wickens COMMAND check_wickens)
 
 # Unit test: the Matrix row-gather primitive (includerows -- repeats and
 # arbitrary order allowed, bounds throw) and includecols' output dimension.
 add_executable(check_matrix
-    tests/matrix/check_matrix.cpp src/matrix.cpp src/utility.cpp)
-target_include_directories(check_matrix PRIVATE src)
+    tests/matrix/check_matrix.cpp)
+target_link_libraries(check_matrix PRIVATE neuron_core)
 add_test(NAME matrix_gather COMMAND check_matrix)
 
 # Regression test: Hosmer-Lemeshow on datasets past 10,000 rows (fixed-size
 # stack arrays segfaulted there until 2026-07-16). No GSL needed.
 add_executable(check_hl
-    tests/twoset/check_hl.cpp
-    src/twoset.cpp src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
-target_include_directories(check_hl PRIVATE src)
+    tests/twoset/check_hl.cpp)
+target_link_libraries(check_hl PRIVATE neuron_core)
 add_test(NAME hosmer_lemeshow_large COMMAND check_hl)
 
 # Unit test: the plateau early-stop detector (ROADMAP 2 Phase 3). Header-only
@@ -76,10 +126,8 @@ add_test(NAME plateau_detector COMMAND check_plateau)
 # Unit test: engine output is capturable via util::set_screen() (the
 # GUI/server contract). No GSL needed.
 add_executable(check_capture
-    tests/capture/check_capture.cpp
-    src/dataset.cpp src/split.cpp src/twoset.cpp src/stats.cpp src/matrix.cpp
-    src/vector_ops.cpp src/utility.cpp)
-target_include_directories(check_capture PRIVATE src)
+    tests/capture/check_capture.cpp)
+target_link_libraries(check_capture PRIVATE neuron_data)
 add_test(NAME screen_capture COMMAND check_capture)
 
 # Unit test: the stratified test-set splitter (ROADMAP 4 Phase 1). Pins exact
@@ -88,10 +136,8 @@ add_test(NAME screen_capture COMMAND check_capture)
 # pass (correct row gather, training-set-limit normalization of both sets,
 # loaded-state flags, and the all-test / zero-test boundaries). No GSL.
 add_executable(check_split
-    tests/split/check_split.cpp
-    src/split.cpp src/dataset.cpp src/twoset.cpp src/stats.cpp
-    src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
-target_include_directories(check_split PRIVATE src)
+    tests/split/check_split.cpp)
+target_link_libraries(check_split PRIVATE neuron_data)
 add_test(NAME split_stratified COMMAND check_split)
 
 # Unit test: the OBD hidden-layer resizing primitives AND the grow-then-prune
@@ -99,13 +145,8 @@ add_test(NAME split_stratified COMMAND check_split)
 # the driver (which clones via netclone and probes via autoalgo), so it links
 # the training engine and those helpers (and GSL, which network.cpp references).
 add_executable(check_obd
-    tests/obd/check_obd.cpp
-    src/obd.cpp src/netclone.cpp src/autoalgo.cpp
-    src/simpleprop.cpp src/bareprop.cpp src/backprop.cpp src/logistic.cpp
-    src/network.cpp src/iterative.cpp src/model.cpp src/dataset.cpp src/split.cpp
-    src/twoset.cpp src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
-target_include_directories(check_obd PRIVATE src)
-target_link_libraries(check_obd PRIVATE GSL::gsl GSL::gslcblas)
+    tests/obd/check_obd.cpp)
+target_link_libraries(check_obd PRIVATE neuron_engine)
 add_test(NAME obd_sizing COMMAND check_obd)
 
 # CHARACTERIZATION test: what SimpleProp and BareProp observably do, pinned
@@ -116,12 +157,8 @@ add_test(NAME obd_sizing COMMAND check_obd)
 # four model types. Run with --capture to print the literals it compares
 # against; re-capturing is not a fix (see the header).
 add_executable(check_props
-    tests/props/check_props.cpp
-    src/simpleprop.cpp src/bareprop.cpp src/backprop.cpp src/logistic.cpp
-    src/network.cpp src/iterative.cpp src/model.cpp src/dataset.cpp src/split.cpp
-    src/twoset.cpp src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
-target_include_directories(check_props PRIVATE src)
-target_link_libraries(check_props PRIVATE GSL::gsl GSL::gslcblas)
+    tests/props/check_props.cpp)
+target_link_libraries(check_props PRIVATE neuron_engine)
 add_test(NAME prop_characterization COMMAND check_props)
 
 # Unit test: DeLong's test for correlated ROC areas (ROADMAP 4 Phase 4, the
@@ -130,10 +167,8 @@ add_test(NAME prop_characterization COMMAND check_props)
 # identities (identical classifiers -> Var(delta)==0; degeneracy refused). Links
 # the twoset stack for the Mann-Whitney cross-check; no GSL.
 add_executable(check_delong
-    tests/delong/check_delong.cpp
-    src/delong.cpp src/auccov.cpp src/twoset.cpp src/stats.cpp src/matrix.cpp
-    src/vector_ops.cpp src/utility.cpp)
-target_include_directories(check_delong PRIVATE src)
+    tests/delong/check_delong.cpp)
+target_link_libraries(check_delong PRIVATE neuron_infer)
 add_test(NAME delong_areas COMMAND check_delong)
 
 # Literature acceptance test: Obuchowski's nonparametric CLUSTERED ROC-area
@@ -145,10 +180,8 @@ add_test(NAME delong_areas COMMAND check_delong)
 # singleton clusters, a paired whole-cluster bootstrap cross-check, and the
 # degeneracy/refusal contracts. Links delong for the side-by-side comparison.
 add_executable(check_clustered
-    tests/clustered/check_clustered.cpp
-    src/clustered_auc.cpp src/delong.cpp src/auccov.cpp
-    src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
-target_include_directories(check_clustered PRIVATE src)
+    tests/clustered/check_clustered.cpp)
+target_link_libraries(check_clustered PRIVATE neuron_infer)
 add_test(NAME clustered_auc COMMAND check_clustered)
 
 # A reproducible SCALE probe for the partition + clustered-inference layer, on
@@ -157,25 +190,17 @@ add_test(NAME clustered_auc COMMAND check_clustered)
 # assertion in the suite would be a flake generator. Run it deliberately:
 #   ./build/scale_probe [rows] [clusters]
 add_executable(scale_probe
-    tests/clustered/scale_probe.cpp
-    src/split.cpp src/clustered_auc.cpp src/auccov.cpp
-    src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
-target_include_directories(scale_probe PRIVATE src)
+    tests/clustered/scale_probe.cpp)
+# Spans two SIBLING layers: the clustered estimator (infer) and the group fold
+# planner (data). Neither sits above the other, so it names both.
+target_link_libraries(scale_probe PRIVATE neuron_infer neuron_data)
 
 # Unit test: the generic cross-validation runner (ROADMAP 4 Phase 4b-CV). Runs a
 # train procedure over a stratified fold plan and checks every row gets one
 # out-of-fold prediction, the pooled OOF AUC beats chance, and it is reproducible.
 add_executable(check_crossval
-    tests/crossval/check_crossval.cpp
-    src/crossval.cpp src/cvadapters.cpp src/cvreport.cpp src/evaldesign.cpp
-    src/netclone.cpp
-    src/obd.cpp src/autoalgo.cpp
-    src/simpleprop.cpp src/bareprop.cpp src/backprop.cpp src/logistic.cpp
-    src/ldfa.cpp src/qdfa.cpp src/dfa.cpp
-    src/network.cpp src/iterative.cpp src/model.cpp src/dataset.cpp src/split.cpp
-    src/twoset.cpp src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
-target_include_directories(check_crossval PRIVATE src)
-target_link_libraries(check_crossval PRIVATE GSL::gsl GSL::gslcblas)
+    tests/crossval/check_crossval.cpp)
+target_link_libraries(check_crossval PRIVATE neuron_eval)
 add_test(NAME crossval_runner COMMAND check_crossval)
 
 # Unit test: stopping conditions are evaluated independently of REPORTING
@@ -186,23 +211,15 @@ add_test(NAME crossval_runner COMMAND check_crossval)
 # A scripted Iterative double pins the crossing; seeded SimpleProp runs pin
 # real-model invariance across all three optimizers (GSL is linked for those).
 add_executable(check_gradcadence
-    tests/iterative/check_gradcadence.cpp
-    src/simpleprop.cpp src/bareprop.cpp src/backprop.cpp src/logistic.cpp
-    src/network.cpp src/iterative.cpp src/model.cpp src/dataset.cpp src/split.cpp
-    src/twoset.cpp src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
-target_include_directories(check_gradcadence PRIVATE src)
-target_link_libraries(check_gradcadence PRIVATE GSL::gsl GSL::gslcblas)
+    tests/iterative/check_gradcadence.cpp)
+target_link_libraries(check_gradcadence PRIVATE neuron_engine)
 add_test(NAME iterative_grad_cadence COMMAND check_gradcadence)
 
 # A clone must never inherit the quiet flag -- "not copied" implemented as an
 # explicit assignment, not as an omission that reads indeterminate memory.
 add_executable(check_quietcopy
-    tests/iterative/check_quietcopy.cpp
-    src/simpleprop.cpp src/bareprop.cpp src/backprop.cpp src/logistic.cpp
-    src/network.cpp src/iterative.cpp src/model.cpp src/dataset.cpp src/split.cpp
-    src/twoset.cpp src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
-target_include_directories(check_quietcopy PRIVATE src)
-target_link_libraries(check_quietcopy PRIVATE GSL::gsl GSL::gslcblas)
+    tests/iterative/check_quietcopy.cpp)
+target_link_libraries(check_quietcopy PRIVATE neuron_engine)
 add_test(NAME iterative_quiet_copy COMMAND check_quietcopy)
 
 # Regression test: a QUIET run is a SILENT run, never a DIFFERENT one.
@@ -213,12 +230,8 @@ add_test(NAME iterative_quiet_copy COMMAND check_quietcopy)
 # and audible runs agree exactly on error, weights, stop reason, convergence
 # and iteration count. Found 2026-08-01 by tests/props.
 add_executable(check_quietprep
-    tests/iterative/check_quietprep.cpp
-    src/simpleprop.cpp src/bareprop.cpp src/backprop.cpp src/logistic.cpp
-    src/network.cpp src/iterative.cpp src/model.cpp src/dataset.cpp src/split.cpp
-    src/twoset.cpp src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
-target_include_directories(check_quietprep PRIVATE src)
-target_link_libraries(check_quietprep PRIVATE GSL::gsl GSL::gslcblas)
+    tests/iterative/check_quietprep.cpp)
+target_link_libraries(check_quietprep PRIVATE neuron_engine)
 add_test(NAME iterative_quiet_prepare COMMAND check_quietprep)
 
 # Regression test: reporting a diagnostic must not move the model (D2).
@@ -230,12 +243,8 @@ add_test(NAME iterative_quiet_prepare COMMAND check_quietprep)
 # across a report, an unaffected continuation for canonical/CGD/Shanno, an
 # idempotent diagnostic, and the preserved canonical value.
 add_executable(check_condnum
-    tests/iterative/check_condnum.cpp
-    src/simpleprop.cpp src/bareprop.cpp src/backprop.cpp src/logistic.cpp
-    src/network.cpp src/iterative.cpp src/model.cpp src/dataset.cpp src/split.cpp
-    src/twoset.cpp src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
-target_include_directories(check_condnum PRIVATE src)
-target_link_libraries(check_condnum PRIVATE GSL::gsl GSL::gslcblas)
+    tests/iterative/check_condnum.cpp)
+target_link_libraries(check_condnum PRIVATE neuron_engine)
 add_test(NAME iterative_condition_number COMMAND check_condnum)
 
 # Regression test: weight decay is a property of lambda and eta, not of N (D4).
@@ -245,10 +254,6 @@ add_test(NAME iterative_condition_number COMMAND check_condnum)
 # duplicating every observation (which leaves the mean gradient identical)
 # leaves the fit identical, for all four models.
 add_executable(check_decay
-    tests/iterative/check_decay.cpp
-    src/simpleprop.cpp src/bareprop.cpp src/backprop.cpp src/logistic.cpp
-    src/network.cpp src/iterative.cpp src/model.cpp src/dataset.cpp src/split.cpp
-    src/twoset.cpp src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
-target_include_directories(check_decay PRIVATE src)
-target_link_libraries(check_decay PRIVATE GSL::gsl GSL::gslcblas)
+    tests/iterative/check_decay.cpp)
+target_link_libraries(check_decay PRIVATE neuron_engine)
 add_test(NAME iterative_weight_decay COMMAND check_decay)
