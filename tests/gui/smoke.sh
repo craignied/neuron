@@ -811,6 +811,12 @@ PY
 #    number and the condition number is exactly 1 -- a perfectly conditioned
 #    model, reported for data that is nothing of the kind. Measured pre-fix on
 #    the 1-input logistic below: maxEig = minEig = 0.047, cond = 1.0.
+#
+#    The MATRIX changed on 2026-08-01 -- it is now the unpenalized observed
+#    Fisher information X'VX, shared with the Wald covariance, rather than an
+#    outer product of per-exemplar gradients -- so the label and the magnitudes
+#    moved. The property asserted here did not: a 2-parameter design has two
+#    eigenvalues, and consuming only one collapses the ratio to exactly 1.
 $PY - <<'PY'
 import random
 random.seed(5)
@@ -828,14 +834,14 @@ $PY - <<'PY' || fail "the condition number must use every eigenvalue"
 import json, re
 d = json.load(open("cond2.json", encoding="utf-8"))
 o = d["output"]
-m = re.search(r"B matrix maximum eigenvalue = (\S+)\n\s+minimum eigenvalue = (\S+)\n"
+m = re.search(r"Information matrix maximum eigenvalue = (\S+)\n\s+minimum eigenvalue = (\S+)\n"
               r"Condition number = (\S+)", o)
 assert m, o[-600:]
 hi, lo, cond = (float(x.rstrip(".")) for x in m.groups())
 # A 2-parameter model has TWO eigenvalues. If only one is consumed they
 #    collapse and the ratio is exactly 1.
 assert hi != lo, "max and min eigenvalue are identical: an eigenvalue was dropped"
-assert cond > 1.0, "condition number is %r; a 2-parameter B is not perfectly conditioned" % cond
+assert cond > 1.0, "condition number is %r; a 2-parameter design is not perfectly conditioned" % cond
 # The reported ratio must be the reported eigenvalues' ratio
 assert abs(cond - hi / lo) < 0.05 * cond, (cond, hi, lo)
 # ... and the JSON diagnostic must agree with the report

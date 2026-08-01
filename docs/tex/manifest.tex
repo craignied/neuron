@@ -6774,60 +6774,55 @@ Network::CGD(unsigned $iteration$), $lastF$ refers to
 $-\vec{f}(t-1)$.
 
 \subsection{Calculation of the condition number}
+\index{Condition number!design conditioning}
+\index{Fisher information!observed}
 
-The overloaded storeGrads($\ldots$) method, the reportCondNum(
-ostream\&
-$outputStream$) method and the $finalFlag$ flag may be used to compute
-the condition number of a {\em Network} object.  The condition number
-is the ratio of the largest to the smallest eigenvalue of the
-symmetric matrix ${\bf B}$ computed by the outer product of the
-average gradient vector and its transpose:
+The condition number neuron reports is a {\em design} diagnostic: it
+answers whether the estimation problem is well posed, or whether the
+columns of the design are close enough to collinear that the
+coefficients are poorly identified.  It is the ratio of the largest to
+the smallest absolute eigenvalue of the observed Fisher information of
+the {\em unpenalized} log likelihood,
 
 \begin{displaymath}
-{\bf B} = {\bf g} {\cdot} {\bf g}^T
+{\bf X}^T {\bf V} {\bf X}, \qquad
+{\bf V} = \mathrm{diag}\left( \pi_i ( 1 - \pi_i ) \right)
 \end{displaymath}
 
-The {\em Gnu Scientific Library (GSL)} eigenvalue routines were ported
-for use in these methods.  Note that condition numbers of neural
-networks are highly experimental, and in the current driver, the
-condition number is calculated automatically only for logistic
-regression (e.g. {\em Logistic}) type {\em Network} objects.  However,
-implementation of condition number calculation is as general utility
-methods in the {\em Network} class so that future programmers may
-report
-condition numbers of {\em Network} objects if desired.
+where $\pi_i$ is the fitted probability for exemplar $i$.  This is the
+same matrix the Wald analysis inverts for the coefficient covariance
+(Hosmer \& Lemeshow equation 2.8), and
+{\em Logistic::reportAccuracy} forms it exactly once and uses it for
+both.  {\em Network::conditionOf( const Matrix$<$double$>$\& )} takes
+that matrix and stores the two extreme absolute eigenvalues and their
+ratio; {\em Network::reportCondNum( ostream\& )} prints what it stored
+and computes nothing.  The {\em Gnu Scientific Library} symmetric
+eigenvalue routines are used.
 
-Computation of the condition number for a {\em Network} derived object
-proceeds as follows:
+The penalty is deliberately excluded.  Weight decay adds
+$\lambda {\bf I}$ to the curvature, which improves the conditioning of
+{\em any} design by construction, so a penalized condition number could
+be driven downward simply by regularizing more heavily --- concealing
+exactly the collinearity the diagnostic exists to expose.  If a
+penalized-curvature condition number is ever wanted, it belongs
+alongside this one under its own name, not in place of it.
 
-\begin{enumerate}
-\item The overloaded storeGrads( unsigned $d$, unsigned $n$ ) method
-is
-      first used to initialize a gradient accumulator matrix ($grads$,
-      which is transparent to the programmer and does not need to be
-      included in added code) which will ultimately be used to compute
-      the ${\bf B}$ matrix.  Arguments for this overloaded method are
-      $d$, the dimension (size) of the gradient vector, and $n$, the
-      number of exemplars in the dataset.
-\item The gradient vector $stackG$ must be created using the $pack()$
-      method.
-\item Because methods involved in computation of the condition number
-      are highly intensive, and because the condition number only
-      requires
-      the final average gradient vector, the $finalFlag$ flag is used
-      to indicate a final iteration for the following step $\ldots$
-\item The overloaded storeGrads( unsigned $n$ ) method is used to
-      accumulate exemplar $n$'s gradient $stackG$ (which does {\em
-      not} need to be passed as an argument, as it must be generated
-      in code prior to use of this method.)  Note that the {\em
-      Network} method reportCondNum(ostream\& $outputStream$) will
-      automatically compute the average gradient, hence that
-      particular exemplar's gradient is loaded (again, transparent to
-      the programmer.)
-\item reportCondNum(ostream\& $outputStream$) is used in methods which
-      report results to the user, e.g. reportAccuracy( ostream\&
-      $outputStream$ )
-\end{enumerate}
+\medskip
+
+\noindent{\bf Historical note.}  Through 2026 this quantity was instead
+the outer product ${\bf B} = {\bf g} \cdot {\bf g}^T$ of per-exemplar
+gradient vectors, accumulated by the overloaded {\em storeGrads}
+methods under a $finalFlag$ that marked a {\em final training
+iteration} run for the purpose.  That construction was retired in
+August 2026 for four independent reasons: it trained the model as a
+side effect of reporting it; under conjugate gradient descent and
+Shanno's algorithm it stored search {\em directions} rather than
+gradients, because the optimizer transformation had already been
+applied; under canonical backpropagation with gradient stopping
+disabled it read a matrix that had never been written; and it included
+the weight-decay penalty, so regularization improved the reported
+conditioning.  {\em storeGrads}, $finalFlag$ and the gradient
+accumulator are gone with it.
 
 See {\em Logistic} for example code, and see {\em SimpleProp} for
 comments which indicate where code would be placed in a neural network
@@ -7016,7 +7011,7 @@ o = 1/(1+e^{-x})
       for code to be run only during the final iteration \endcolor
 \item Matrix $<$ double $>$ $grads$: a matrix to hold exemplar
 gradients
-      to be used to compute the B matrix to calculate the condition
+      formerly used to compute the {\bf B} matrix for the condition
       number
 
 \end{itemize}
@@ -7055,18 +7050,17 @@ which
       1996, MIT Press, ISBN 0-262-07174-6}
 \item void shanno( unsigned $iteration$ ): implements Shanno algorithm
       (see Golden pp. 217--218)
-\item void storeGrads( unsigned $d$, unsigned $n$ ): (used in
-      computing condition number) overloaded utility method (see
-      below), with 2 arguments $d$ and $n$, initializes $grads$ matrix
-      with dimension $d$ of packed gradient (size), and number of
-      exemplars $n$
-\item void storeGrads( unsigned $n$ ): (used in computing condition
-      number) overloaded utility method (see above), with 1 argument
-      $n$ accumulate grads matrix with that exemplar $n$'s gradient
-      $stackG$ (note that $stackG$ must have been previously packed
-      using pack()
+\item void conditionOf( const Matrix$<$double$>$\& $symmetric$ ):
+      stores the largest and smallest absolute eigenvalues of the
+      passed symmetric matrix and their ratio, the condition number.
+      The caller supplies the matrix, because which matrix the
+      condition number describes is a statistical decision belonging
+      to the caller; {\em Logistic} passes ${\bf X}^T{\bf V}{\bf X}$
+      (see above).  Replaced the overloaded storeGrads($\ldots$)
+      methods and the $grads$ accumulator in August 2026
 \item void reportCondNum( ostream\& $outputStream$ ): utility method
-      to report out the condition number to $outputStream$
+      to report the stored condition number to $outputStream$.  It
+      prints; it does not compute
 
 \end{itemize}
 

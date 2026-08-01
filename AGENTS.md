@@ -187,6 +187,12 @@ Harvest from `session.out` and report to the user:
 - For logistic: notable Wald rows (smallest p-values) — translate the
   input numbers to variable names via the key file — and the condition
   number (≫1e5 suggests collinearity; did they forget `--refcat`?).
+  The condition number is the ratio of the extreme absolute eigenvalues of
+  the **information matrix** `X'VX` — the same matrix the Wald standard
+  errors invert. It measures the *design*, so it is deliberately computed
+  **without** the weight-decay penalty: regularization improves conditioning
+  by construction, and a penalized number could hide the collinearity this
+  exists to reveal. Turning weight decay up will not move it.
 - Warn if training accuracy ≫ test accuracy (overfitting), and if any
   input is something the user couldn't know at prediction time (like call
   `duration` in the bank demo — see WALKTHROUGH.md §8).

@@ -293,10 +293,25 @@ void Logistic::reportAccuracy( ostream& outputStream )
 			XtV( p, n ) = I[ p ] * o * ( 1 - o );
 	}
 
+	// X'VX ONCE. It is the observed Fisher information of the log likelihood,
+	//    and BOTH statistics below are functions of it: the Wald covariance is
+	//    its inverse, and the condition number is the ratio of its extreme
+	//    absolute eigenvalues. Building it twice would be two implementations
+	//    of one matrix (rule 6), and they could disagree.
+	Matrix< double > XtVX = XtV.dotprod( Train );
+
+	// The design's conditioning, from that same matrix. UNPENALIZED on purpose:
+	//    this is the collinearity / identifiability diagnostic AGENTS.md tells
+	//    users to read, and weight decay must not be able to improve it. A
+	//    penalized curvature ( X'VX + lambda I ) is a different, better-behaved
+	//    matrix by construction -- reporting it here would let a user hide
+	//    collinearity by turning regularization up.
+	conditionOf( XtVX );
+
 	try // now do the statistical calculations 
 	{
 		// Var(B) = inv(X'VX): Hosmer & Lemeshow eqn 2.8, p. 41
-		Var = XtV.dotprod( Train ).inverse();
+		Var = XtVX.inverse();
 
 		// Pick up diagonal terms of covariance matrix to calculate std error, Z, p-values
 		for ( unsigned i = 0; i <= nInput; i++ )
@@ -350,68 +365,6 @@ void Logistic::reportAccuracy( ostream& outputStream )
 	// Report out the condition number
 	outputStream << endl;
 	reportCondNum( outputStream );
-}
-
-// Gather each training exemplar's gradient into the grads Matrix, for the
-//    condition number's B matrix. NOTHING here trains.
-//
-//    The gradient of the cross-entropy objective for exemplar k, with a
-//    sigmoidal output, is
-//
-//        g_k = ( o_k - y_k ) I_k
-//
-//    -- the o(1-o) of the sigmoid derivative cancels against the denominator of
-//    dE/do, which is why no d_sigmoidal appears (the same cancellation
-//    innerTrainSet relies on). With weight decay the objective carries the L2
-//    penalty, so its gradient carries the penalty's, Manifest section 2.2.1's
-//    right-hand term ( 1 / sigma_w^2 )[ W ]:
-//
-//        g_k = ( o_k - y_k ) I_k + lambda' W
-//
-//    W does not change here, so that term is a constant across the whole sweep
-//    and is computed once outside the loop rather than n times inside it
-//    (standing rule 7).
-//
-//    THIS REPRODUCES the previous canonical-backprop result exactly, verified
-//    against the pre-fix engine: during that sweep W was likewise constant (the
-//    per-exemplar decay multiply is guarded by !gradMaxFlag, and gradient
-//    stopping is on by default), and engine() is a no-op for training type 0.
-//    Under CGD or Shanno it does NOT reproduce it: engine() there replaces the
-//    gradient with a conjugate DIRECTION and the old code stored that, so the
-//    "condition number" was built from search directions rather than gradients.
-//    See the audit's D6.
-bool Logistic::collectGradients()
-{
-	if ( !theData.trainLoaded() || !weightsSetFlag )
-		return false; // nothing to differentiate
-
-	unsigned nTrain = theData.getNumTrain();
-
-	storeGrads( df(), nTrain ); // size the gradient Matrix: df rows, n columns
-
-	// The penalty's contribution, constant because W is not updated here
-	vector< double > penalty;
-	if ( weightDecayFlag )
-		penalty = W * decay;
-
-	vector< double > g( W.size() ); // reused, so the sweep allocates nothing
-
-	for ( unsigned example = 0; example < nTrain; example++ )
-	{
-		forward( Train, example ); // sets I to this row, and o from it
-
-		// g = ( o - y ) I, without disturbing I -- innerTrainSet computes the
-		//    same quantity as ( I *= o_err ), which CLOBBERS the input vector
-		g = I;
-		g *= ( o - y[ example ] );
-
-		if ( weightDecayFlag )
-			g += penalty;
-
-		grads.replacecol( example, g );
-	}
-
-	return true;
 }
 
 // Trains one iteration through the training set, model dependant

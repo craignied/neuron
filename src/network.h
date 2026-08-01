@@ -113,10 +113,6 @@ protected:
 		lastG, // $G_{t-1}$ for shanno/CGD
 		lastF; // $F_{t-1}$ for shanno/CGD
 
-	Matrix< double > grads; // to hold gradient matrix (each column is an exemplar
-							//    gradient) to be used to compute the B matrix for
-							//    calculating the condition number
-
 	double o,               // the output for a Network with only 1 output
 		x,                  // argument in sigmoidal transfer function for 1 output Network
 		randomLimit,        // the limit for the random weights
@@ -131,21 +127,22 @@ protected:
 		deltaError,         // deltaError constant for automatic stepsize selection
 		currGradMax,		// current absolute maximum gradient
 		gamma,              // gamma constant for automatic stepsize selection
-		condNum,            // condition number of the B matrix (-1 until computed)
-		condMaxEig,         // maximum eigenvalue of the B matrix (-1 until computed)
-		condMinEig;         // minimum eigenvalue of the B matrix (-1 until computed)
+		condNum,            // condition number of X'VX (-1 until computed)
+		condMaxEig,         // largest absolute eigenvalue of X'VX (-1 until computed)
+		condMinEig;         // smallest absolute eigenvalue of X'VX (-1 until computed)
 
 	bool weightsSetFlag,       // flag to indicate weights set
 		biasFlag,              // flag indicates if bias nodes in network
 		batchEpochFlag,        // flag indicates if batch/epoch training
 		weightDecayFlag,       // flag indicates if weight decay is used
 		automaticStepSizeFlag, // flag indicates if automatic step size algorithm is used
-		finalFlag;             // RETIRED 2026-08-01: nothing sets it. It marked
-		                       //    the gradient-harvesting call to
-		                       //    innerTrainSet() that computeCondNum() used
-		                       //    to make; collectGradients() replaced that.
-		                       //    Kept only because Network::copy carries it
-		                       //    and removing a member is a separate change.
+		finalFlag;             // RETIRED 2026-08-01: nothing sets or reads it.
+		                       //    It marked the gradient-harvesting call to
+		                       //    innerTrainSet() that the condition number
+		                       //    used to make; that whole mechanism is gone
+		                       //    (the diagnostic is now X'VX). Kept only
+		                       //    because Network::copy carries it; removing a
+		                       //    member is scheduled mechanical cleanup.
 
 	unsigned trainingType, // training method ( canonical backprop = 0,
 		                   // conjugate gradient descent = 1,
@@ -184,45 +181,18 @@ protected:
 	// Shanno algorithm, Golden pp. 217-218
 	void shanno( unsigned t );
 
-	// Initialize grads matrix, first argument is dimension (size of packed
-	//    gradient), second argument is the number of exemplars
-	void storeGrads( unsigned, unsigned );
-
-	// Accumulate grads matrix to compute condition number, passed argument
-	//    is the exemplar number
-	void storeGrads( unsigned );
-
-	// Fill the grads Matrix with one column per training exemplar, each column
-	//    that exemplar's gradient of the objective with respect to the model's
-	//    parameters -- the raw material for the B matrix below.
+	// Store the eigenvalue diagnostics of a SYMMETRIC matrix: its largest and
+	//    smallest absolute eigenvalues and their ratio, the condition number.
+	//    The caller supplies the matrix, because what "the condition number"
+	//    means is the caller's statistical decision, not this class's.
 	//
-	//    IT MUST NOT TRAIN. Until 2026-08-01 computeCondNum() obtained these by
-	//    setting finalFlag and calling innerTrainSet(), which forward
-	//    propagates and computes gradients -- and then also runs the optimizer
-	//    transformation and UPDATES THE WEIGHTS. Reporting a diagnostic
-	//    therefore moved the model: an audible Logistic run ended one gradient
-	//    step past the weights whose error it had just reported, while a quiet
-	//    run did not. It also disturbed G, stackG, lastG/lastF and the
-	//    step-size accumulators, so a continued run diverged from a control.
-	//
-	//    Returns false when this model does not supply gradients for a
-	//    condition number, which is the default: only Logistic reports one, and
-	//    a premature generic interface would oblige every network to implement
-	//    something nothing calls. computeCondNum() reports "not available"
-	//    rather than inventing a number.
-	virtual bool collectGradients() { return false; }
-
-	// Compute the condition number of the B matrix from collectGradients()'s
-	//    columns, storing condNum/condMaxEig/condMinEig; reportCondNum prints
-	//    those stored values.
-	//
-	//    It preserves the model's FITTED and OPTIMIZER state -- the weights, and
-	//    G / stackG / lastG / lastF / the step-size accumulators -- which is the
-	//    property that was broken. It does not leave the whole object untouched,
-	//    and is not meant to: it deliberately refreshes the diagnostic state
-	//    (grads, condNum, condMaxEig, condMinEig), and forward propagation
-	//    updates the per-exemplar scratch members (I, o, x) as it always does.
-	void computeCondNum();
+	//    Logistic passes the observed Fisher information X'VX -- the curvature
+	//    of the UNPENALIZED log likelihood, which is what a design-conditioning
+	//    / collinearity diagnostic must be measured on. Until 2026-08-01 this
+	//    class instead built an outer product of per-exemplar gradients, and
+	//    obtained them by running a training iteration; the gradient harvest is
+	//    gone with it. See docs/tex and refactor_audit.md.
+	void conditionOf( const Matrix< double >& symmetric );
 
 	// Utility to report out the condition number
 	void reportCondNum( ostream& );

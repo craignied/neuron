@@ -96,6 +96,7 @@ struct Hush {
 class Probe : public Logistic {
 public:
 	unsigned rows() { return Train.rows(); }
+	Matrix< double >& trainMatrix() { return Train; } // inputs incl. the bias column
 	double out( unsigned r ) { forward( Train, r ); return o; }
 	vector< double > predictions()
 	{
@@ -239,41 +240,130 @@ static void test_continuation_unaffected( unsigned algorithm, const string& name
 		name + ": continued predictions identical too" );
 }
 
-// (3): the value itself, under canonical backprop with GRADIENT STOPPING ON --
-// the engine's own default, and the only canonical configuration in which the
-// old path filled the grads Matrix at all. (With gradient stopping OFF the old
-// innerTrainSet took its no-separate-gradient branch, which never called
-// storeGrads, so the B matrix was built from an unwritten Matrix. The new
-// collection always fills it; that is a second improvement, not a regression.)
+// (3) THE VALUE, against an independently calculated fixture.
 //
-// Under canonical backprop the old path stored the gradient AFTER engine(), and
-// engine() is a no-op for training type 0 -- so the new collection is
-// mathematically the same and must reproduce the number exactly. The literal is
-// captured from the PRE-FIX engine.
-static void test_value_preserved()
+// The condition number is now the ratio of the extreme absolute eigenvalues of
+//
+//     X'VX,    V = diag( p_i ( 1 - p_i ) )
+//
+// the observed Fisher information of the UNPENALIZED log likelihood -- the same
+// matrix Logistic already forms for the Wald covariance (Hosmer & Lemeshow eqn
+// 2.8), now built once and used for both.
+//
+// With ONE input the design is n x 2 (input, bias), so X'VX is 2x2 and its
+// eigenvalues are analytic:
+//
+//     X'VX = [ a  b ]      lambda = (a+d)/2 +/- sqrt( ((a-d)/2)^2 + b^2 )
+//            [ b  d ]
+//
+// with a = sum v x^2, b = sum v x, d = sum v. This computes those sums with
+// plain loops -- not Matrix::dotprod, not GSL -- so the check is independent of
+// both the engine's matrix product and its eigenvalue routine.
+static void test_value_against_independent_fixture()
+{
+	util::set_seed( 4242 );
+
+	// ONE input, so X'VX is 2x2 and the eigenvalues are closed-form
+	Matrix< double > raw( 80, 2 );
+	for ( unsigned i = 0; i < 80; i++ )
+	{
+		double x = -1.0 + 2.0 * ( ( i * 37 ) % 100 ) / 99.0;
+		raw( i, 0 ) = x;
+		raw( i, 1 ) = ( x > 0.15 ) ? 1 : 0;
+	}
+	DataSet d;
+	d.setInput( 1 );
+	d.setOutput( 1 );
+	d.setDiscrete( true );
+	d.setHistory( false );
+	{ Hush h; d.setRawMatrix( raw ); d.raw2train(); }
+
+	Probe net;
+	net.setDataSet( d );
+	net.setHistory( false );
+	net.setLastop( false );
+	net.setLogPrint( false );
+	net.setQuiet( true );
+	net.setWeightDecay( false );
+	net.setDecay( 0 );
+	net.setAutoStepSize( false );
+	net.setEta( 0.05 );
+	net.setTrainingType( 0 );
+	net.setGradStop( false );
+	net.setMaxIterations( 40 );
+	util::set_seed( 7 );
+	net.randomize();
+	{ Hush h; net.train(); }
+	{ Hush h; net.reportAccuracy( h.sink ); }
+
+	// Independent X'VX: plain sums over the fitted probabilities
+	Matrix< double >& X = net.trainMatrix();
+	double a = 0, b = 0, dd = 0;
+	for ( unsigned i = 0; i < X.rows(); i++ )
+	{
+		double p = net.out( i );      // fitted probability for row i
+		double v = p * ( 1 - p );
+		double x = X( i, 0 );         // column 0 is the input; column 1 is the bias (1)
+		a  += v * x * x;
+		b  += v * x;
+		dd += v;
+	}
+
+	double half = ( a + dd ) / 2, gap = ( a - dd ) / 2;
+	double root = sqrt( gap * gap + b * b );
+	double l1 = half + root, l2 = half - root;      // both >= 0: X'VX is PSD
+	double hi = fabs( l1 ) > fabs( l2 ) ? fabs( l1 ) : fabs( l2 );
+	double lo = fabs( l1 ) < fabs( l2 ) ? fabs( l1 ) : fabs( l2 );
+	double expected = hi / lo;
+
+	double got = net.getCondNum();
+	if ( !( fabs( got - expected ) / expected < 1e-9 ) )
+		cout << "         got " << setprecision( 17 ) << got
+			<< ", independent calculation gives " << expected << endl;
+	expect( fabs( got - expected ) / expected < 1e-9,
+		"condition number equals the analytic eigenvalue ratio of X'VX" );
+
+	// And the two extreme eigenvalues themselves, not just their ratio
+	expect( fabs( net.getCondMaxEig() - hi ) / hi < 1e-9,
+		"largest absolute eigenvalue matches the analytic value" );
+	expect( fabs( net.getCondMinEig() - lo ) / lo < 1e-9,
+		"smallest absolute eigenvalue matches the analytic value" );
+}
+
+// (5) WEIGHT DECAY MUST NOT TOUCH IT. The design condition number answers
+// "is this design collinear / identifiable", and regularization would improve
+// it by construction -- X'VX + lambda I is better conditioned than X'VX for any
+// lambda > 0. If decay could move it, a user could hide collinearity by turning
+// regularization up. Weights and predictions are held FIXED here (no retraining
+// between the two reports), so the only thing that changes is the decay
+// configuration.
+static void test_decay_does_not_change_the_diagnostic()
 {
 	util::set_seed( 4242 );
 	DataSet d = makeData( 120, 36 );
 
 	Probe net;
-	prepare( net, d, 0, true, true ); // canonical, decay on, GRADIENT STOPPING ON
-	{
-		Hush h;
-		net.reportAccuracy( h.sink );
-	}
+	prepare( net, d, 0, false, true ); // trained ONCE, decay off
 
-	double got = net.getCondNum();
-	// MEASURED from the pre-fix engine (the mutating finalFlag/innerTrainSet
-	// path restored) under canonical backprop with gradient stopping on, where
-	// W is constant across the sweep and engine() is a no-op -- so the two
-	// collections are mathematically the same and must agree to the digit. They
-	// do. A move here means the gradient formula moved, not the plumbing.
-	double want = 3.7090611118615389;
-	if ( !( fabs( got - want ) / want < 1e-9 ) )
-		cout << "         got " << setprecision( 17 ) << got
-			<< ", expected " << want << endl;
-	expect( fabs( got - want ) / want < 1e-9,
-		"canonical-backprop condition number matches the pre-fix value" );
+	{ Hush h; net.reportAccuracy( h.sink ); }
+	double withoutDecay = net.getCondNum();
+	vector< double > pBefore = net.predictions();
+
+	// Turn weight decay on -- WITHOUT retraining, so the fit is untouched
+	net.setWeightDecay( true );
+	net.setDecay( 0.01 ); // 200x the shipped default
+	{ Hush h; net.reportAccuracy( h.sink ); }
+	double withDecay = net.getCondNum();
+
+	expect( sameBits( pBefore, net.predictions() ),
+		"the fit is unchanged between the two reports" );
+	expect( sameBits( withoutDecay, withDecay ),
+		"weight decay does not change the design condition number" );
+
+	// A penalized curvature would have moved it a long way at this lambda; that
+	//    it does not move AT ALL is the point.
+	expect( std::isfinite( withoutDecay ) && withoutDecay > 1,
+		"and the diagnostic is a real, finite ratio" );
 }
 
 int main()
@@ -291,7 +381,8 @@ int main()
 	// And with decay off, so the penalty term is not what carries the result
 	test_report_does_not_move_the_model( 0, "canonical, no decay", false );
 
-	test_value_preserved();
+	test_value_against_independent_fixture();
+	test_decay_does_not_change_the_diagnostic();
 
 	cout << endl << ( failures ? "FAILURES: " : "all passed (" ) << failures
 		<< ( failures ? "" : " failures)" ) << endl;

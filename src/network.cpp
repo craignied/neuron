@@ -6,7 +6,7 @@
 #include "stdafx.h" // For MSVC, must be first!
 
 #include <gsl/gsl_eigen.h>  // GSL eigenvalue routines
-#include <limits>           // quiet_NaN: a degenerate B matrix has no condition number
+#include <limits>           // quiet_NaN: a degenerate information matrix has none
 
 #include "network.h"
 
@@ -104,7 +104,6 @@ void Network::copy( const Network& rhs )
 	weightDecayFlag = rhs.weightDecayFlag;
 	trainingType = rhs.trainingType;
 	stackG = rhs.stackG;
-	grads = rhs.grads;
 	lastF = rhs.lastF;
 	lastG = rhs.lastG;
 	o_errAccumulate = rhs.o_errAccumulate;
@@ -687,60 +686,33 @@ void Network::shanno( unsigned t )
 	unpack();
 } */
 
-// Initialize grads matrix, first argument is dimension (size of packed gradient),
-//    second argument is the number of exemplars
-void Network::storeGrads( unsigned d, unsigned n )
+// Store the eigenvalue diagnostics of a symmetric matrix: largest and smallest
+//    absolute eigenvalue, and their ratio. reportCondNum prints these.
+//
+//    The matrix comes from the caller. Logistic passes X'VX, the observed Fisher
+//    information of the UNPENALIZED log likelihood -- the curvature of the
+//    design, which is what a collinearity diagnostic must measure. It used to be
+//    built here as G G^T / N from per-exemplar gradients harvested by running a
+//    training iteration, which (a) trained the model as a side effect of
+//    reporting, (b) stored conjugate DIRECTIONS rather than gradients under CGD
+//    and Shanno, (c) read an unwritten Matrix under canonical backprop with
+//    gradient stopping off, and (d) included the weight-decay penalty, so
+//    regularization improved the reported conditioning and could hide
+//    collinearity. All four are gone with the change of definition.
+void Network::conditionOf( const Matrix< double >& symmetric )
 {
-	grads.resize( d, n );
-}
+	unsigned dimension = symmetric.rows();
 
-// Accumulate grads matrix to compute condition number, passed argument is
-//    the exemplar number
-void Network::storeGrads( unsigned n )
-{
-	grads.replacecol( n, stackG );
-}
-
-// Compute the B-matrix eigenvalue diagnostics, storing them in condMaxEig /
-//    condMinEig / condNum. Split out of reportCondNum so the values can be read
-//    back (getCondNum et al.) after a run without recomputing; reportCondNum
-//    prints exactly these stored values.
-void Network::computeCondNum()
-{
-	// Gather the per-exemplar gradients WITHOUT training. This used to be
-	//    `finalFlag = true; innerTrainSet(); finalFlag = false;` -- a real
-	//    training iteration, run to harvest its gradients, which also stepped
-	//    the weights and disturbed the optimizer state. See collectGradients.
-	if ( !collectGradients() )
-	{
-		// This model supplies no gradients for a condition number
-		condMaxEig = condMinEig = condNum
-			= numeric_limits< double >::quiet_NaN();
-		return;
-	}
-
-	// Now that the gradients have been calculated during the final iteration,
-	//    calculate the B matrix = G . G^T
-	Matrix< double > gradsT = grads.t(); // construct the transpose of G
-	Matrix< double > B = grads.dotprod( gradsT );
-	B /= theData.getNumTrain(); // B must be the average gradient, so divide by N
-
-	// Now find the eigenvalues of the B matrix using the Gnu Scientific Library
-	//    routines (G Bansal Aug 2003)
-	unsigned dimension = B.rows(); // easier on the eyes
-
-	// A model with no estimated parameters has no B matrix and therefore no
-	//    condition number. This is not hypothetical: forward stepwise regression
-	//    begins by training a BASELINE network with every input removed, and on
-	//    a logistic model that baseline reaches here with dimension 0 --
-	//    gsl_vector_alloc( 0 ) yields nothing usable and the eigenvalue read
-	//    that followed dereferenced null, segfaulting the whole process (the
-	//    GUI server included). Forward regression crashed neuron this way from
-	//    the GUI; it survived unnoticed because every test and golden ran only
-	//    the REVERSE direction, which never builds an empty network.
+	// A model with no estimated parameters has no information matrix and
+	//    therefore no condition number. Not hypothetical: forward stepwise
+	//    regression begins by training a BASELINE network with every input
+	//    removed, and on a logistic model that baseline reaches here with
+	//    dimension 0 -- gsl_vector_alloc( 0 ) yields nothing usable and the
+	//    eigenvalue read that followed dereferenced null, segfaulting the whole
+	//    process, the GUI server included (legacy bug #11).
 	//    dimension 1 needs no special case: the loop below copies its single
 	//    eigenvalue and the ratio is 1, which is the right answer for a
-	//    one-parameter model (and NaN if that eigenvalue is 0, a singular B).
+	//    one-parameter model (and NaN if that eigenvalue is 0, a singular fit).
 	if ( dimension == 0 )
 	{
 		condMaxEig = condMinEig = condNum
@@ -748,17 +720,15 @@ void Network::computeCondNum()
 		return; // not a number, and reported as such (jnum -> JSON null)
 	}
 
-	// Create a gsl matrix from our matrix--begin function is cautioned to use but
-	//    here we need the value as double*
-	gsl_matrix_view m = gsl_matrix_view_array( B.begin(), dimension, dimension );
+	// GSL wants a contiguous double*; copy so the caller's matrix is untouched
+	//    (gsl_eigen_symm overwrites the matrix it is given)
+	Matrix< double > work( symmetric );
 
-	// Create a gsl vector to store all the eigen values
+	gsl_matrix_view m = gsl_matrix_view_array( work.begin(), dimension, dimension );
+
 	gsl_vector *eval = gsl_vector_alloc( dimension );
-
-	// Create gsl workspace for eigen value calculations
 	gsl_eigen_symm_workspace *w = gsl_eigen_symm_alloc( dimension );
 
-	// Calculate eigen values
 	gsl_eigen_symm( &m.matrix, eval, w );
 
 	// Copy out ALL `dimension` eigenvalues.
@@ -780,9 +750,6 @@ void Network::computeCondNum()
 	for ( unsigned i = 0; i < dimension; i++ )
 		eigenv.push_back( gsl_vector_get( eval, i ) );
 
-	// Free workspace AND the eigenvalue vector -- eval was allocated above and
-	//    never released, leaking one vector per condition number computed
-	//    (every logistic training report, every OBD trial that reports one)
 	gsl_eigen_symm_free( w );
 	gsl_vector_free( eval );
 
@@ -795,21 +762,24 @@ void Network::computeCondNum()
 //    string
 void Network::reportCondNum( ostream& outputStream )
 {
-	computeCondNum(); // fills condMaxEig / condMinEig / condNum
+	// Prints what conditionOf() stored; it does NOT compute. Deriving a
+	//    diagnostic inside a print routine is how reporting came to train the
+	//    model in the first place.
 
-	// A degenerate B matrix (a model with no estimated parameters, e.g. forward
+	// A degenerate information matrix (a model with no estimated parameters,
+	//    e.g. forward
 	//    stepwise's empty baseline network) has no eigenvalues to report. Say so
 	//    rather than printing "nan" three times.
 	if ( !std::isfinite( condNum ) )
 	{
 		outputStream << "Condition number = not available (the model has no "
-			<< "estimated parameters, or its B matrix is singular)" << endl;
+			<< "estimated parameters, or its information matrix is singular)" << endl;
 		return;
 	}
 
 	// Output results
 	// outputStream << "Eigenvalues are: " << eigenv << endl; // for debugging
-	outputStream << "B matrix maximum eigenvalue = " << condMaxEig << endl
-		         << "         minimum eigenvalue = " << condMinEig << endl
+	outputStream << "Information matrix maximum eigenvalue = " << condMaxEig << endl
+		         << "                    minimum eigenvalue = " << condMinEig << endl
 		<< "Condition number = " << condNum << endl;
 }
