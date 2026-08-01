@@ -1029,6 +1029,15 @@ needs. That takes 149 compilations to about 67 and speeds every platform.
     `finalFlag` / `storeGrads` comment blocks went with the move (§8.2 asymmetry
     D) — both identifiers were already deleted and the condition number is X'VX.
     All gates green including `tests/tools/run_tools.sh`; nothing re-blessed.
+10a. **D9 — the `Matrix` bounds policy. OPEN, and it comes BEFORE item 11.**
+    Discovered by Commit 2's verification and widened by Sol: `Matrix::operator()`
+    and `includerows` throw in Release, and roughly forty-five other public entry
+    points that can read or write outside the allocation are guarded by `assert`
+    alone — which never executes in the build this project ships. Same class as
+    D5, and it contradicts standing rule 4's sentence about *both* numerical
+    classes. Inventory, policy and order of work in §12. **DFA depends heavily on
+    `Matrix`, so this lands first.**
+
 11. DFA extraction, then the measured per-exemplar scoring optimization.
 12. Stepwise extraction — only after forward coverage exists.
 13. GUI async launcher, with its concurrency tests.
@@ -1867,6 +1876,156 @@ is a quality control.
 
 ---
 
+---
+
+## 12. D9 — the bounds policy of the numerical Matrix layer
+
+**This section is the inventory and the design. It is written before `matrix.h`
+or `matrix.cpp` is edited**, exactly as §11 was for `vector_ops`, because the
+question is again not "add a throw to `row()`" but *what does this class promise
+in the build we actually ship*.
+
+**Status: OPEN. Nothing below is implemented.** Sol's instruction (2026-08-01):
+record it as its own bounded phase and do it **before the DFA extraction**,
+because DFA leans heavily on `Matrix`. It is **not** folded into the
+`OneHiddenNet` commits.
+
+### 12.1 The finding
+
+It surfaced from the Commit-2 verification. `Matrix`'s ranged `dotprod` is
+`assert`-only, so the claim that BareProp satisfies its range contract could not
+be tested in the shipped configuration; an assert-enabled build was needed to
+check it, and that build *also* aborted on a defect in
+`tests/onehidden/check_onehidden.cpp` that Release had hidden (`174e76e`).
+Sol then widened it, correctly: this is not two methods.
+
+**`Matrix::operator()` throws `BoundsViolation` unconditionally, and almost
+nothing else in the class does.** Every other dimension and range contract —
+row and column access, row and column replacement, the arithmetic shape checks,
+the transpose, all nine `dotprod`/`dotprodt`/`dotprod_row` overloads, the outer
+product, the conversions, the column sums — is guarded by `assert` alone.
+`CMakeLists.txt` forces `CMAKE_BUILD_TYPE=Release` when none is given, and
+`CMAKE_CXX_FLAGS_RELEASE` carries `-DNDEBUG`, so **none of those assertions has
+ever executed in the gate chain**. Under `NDEBUG` an invalid argument is not an
+exception; it is an out-of-bounds read or write.
+
+**This contradicts standing rule 4 as written**, which says that *both* numerical
+classes reject bounds and dimension violations in Release:
+
+> **both** classes reject bounds and dimension violations in Release, where
+> asserts vanish: `Matrix::operator()` throws `BoundsViolation`, and every
+> `vector_ops` operation that walks two containers in lockstep or indexes one by
+> position throws `nvec::SizeMismatch` / `RangeViolation` / `EmptyVector`.
+
+That sentence is true of `vector_ops` since `5c94cd2`, and true of exactly one
+`Matrix` method. It was written from the element accessor and generalized to the
+class. Same defect class as D5 — a measured contract that the shipped binary does
+not enforce — and the same origin: a rule stated from the part that was checked.
+
+### 12.2 The inventory
+
+Every public operation of `src/matrix.{h,cpp}`, including the free functions in
+the header and the `double` specializations. **Class** is §11's: **A** = a
+violation can read or write outside the allocation; **B** = a violation gives a
+mathematically undefined *value* but touches no memory it does not own; **—** =
+no precondition to violate.
+
+| # | Operation | Precondition | Release today | Class |
+|---|---|---|---|---|
+| 1 | `Matrix()`, `~Matrix`, copy ctor, `operator=`, `clear`, `fill`, `setHeader`, `rows`, `cols` | none | ok | — |
+| 2 | `Matrix( r, c )`, `resize( r, c )` | allocation succeeds | `assert ( data_ != 0 )` only | A′ |
+| 3 | `Matrix( r, c, value )` | `nrows != 0` | **throws `BadSize`** | ✓ |
+| 4 | `Matrix( Q, Pt )` (outer product) | both vectors non-empty | `assert` | A |
+| 5 | `Matrix( filename, ncols )`, `loadfile( filename, ncols )` | file rows and `ncols` nonzero | `assert` | A |
+| 6 | `Matrix( report, filename )`, `loadfile( report, filename )` | file non-empty | `assert` | A |
+| 7 | `savefile` | none | ok | — |
+| 8 | `operator()( r, c )` ×2 | `r < nrows_`, `c < ncols_` | **throws `BoundsViolation`** | ✓ |
+| 9 | `submatrix( r1, rN, c1, cN, M )` | `r1 <= rN <= nrows_`, `c1 <= cN <= ncols_`, `M` sized to match | `assert` | A |
+| 10 | `submatrix( r1, rN, c1, cN )` | as #9 | via #9 | A |
+| 11 | `row( r, v )` | `v.size() == ncols_`, `r < nrows_` | copies `v.size()` from `data_ + r*ncols_` — **reads past the allocation**; this is the one the Debug build caught | A |
+| 12 | `row( r )` | `r < nrows_` (the vector is allocated correctly) | via #11 | A |
+| 13 | `col( c, v )`, `col( c )` | `v.size() == nrows_`, `c < ncols_` | strided read past the allocation | A |
+| 14 | `replacerow( r, v )` | `v.size() == ncols_`, `r < nrows_` | **WRITES past the allocation** | A |
+| 15 | `replacecol( c, v )` | `v.size() == nrows_`, `c < ncols_` | **WRITES past the allocation** | A |
+| 16 | `addrow( v, bigM )` / `addcol( v, bigM )` (+ the returning forms) | vector matches the fixed dimension; `bigM` is one row/column larger | `assert` | A |
+| 17 | `operator+= -= *= /=( const Matrix& )` (4) | identical dimensions | walks both in lockstep past the shorter | A |
+| 18 | `operator+ - * /( const Matrix& )` (4) | as #17 | via #17 | A |
+| 19 | scalar `+= -= *= /=` and binary scalar forms (8, both operand orders) | none | ok | B (`/=` by a zero scalar) |
+| 20 | `operator==`, `operator!=` | none — a size difference returns `false` | ok | — |
+| 21 | `t( M_in )` | `M_in.rows() == ncols_ && M_in.cols() == nrows_` | writes outside `M_in` | A |
+| 22 | `t()` | none — allocates correctly | ok | — |
+| 23 | `dotprod( iVec, oVec )` | `iVec.size() == ncols_`, `oVec.size() <= nrows_` (**prefix, deliberate** — same rule as §11.3) | reads `oVec.size() * iVec.size()` elements from `data_` | A |
+| 24 | `dotprod( iVec, oVec, a, b )` | `iVec.size() == ncols_`, `nrows_ == b - a + 1`, `a <= b`, `b < oVec.size()` | as #23, plus writes into `oVec[ a .. b ]` | A |
+| 25 | `dotprod( iVec )` | `iVec.size() == ncols_` | via #23 | A |
+| 26 | `dotprodt( iVec, oVec )`, ranged, and returning (3) | transposed forms of #23–#25 | as #23 | A |
+| 27 | `dotprod_row( D, r, oVec )`, ranged, and returning (3) | `ncols_ == D.ncols_`, `r < D.nrows_`, `oVec` sized | as #23, plus an unchecked row index into `D` | A |
+| 28 | `dotprod( B, C )` (matrix product) | `ncols_ == B.rows()`, `C.rows() == nrows_`, `C.cols() == B.cols()` | reads and writes outside both | A |
+| 29 | `dotprod( B )` | `ncols_ == B.rows()` | via #28 | A |
+| 30 | `outprod( Q, Pt )` | `nrows_ == Q.size()`, `ncols_ == Pt.size()` | **WRITES past the allocation** — and it is on the per-exemplar training path | A |
+| 31 | `squared()`, `maxabs()` | none — an empty matrix sums/maxes to `0` | ok | — |
+| 32 | `colsums( sums )` | `sums.size() == ncols_` | writes past `sums` | A |
+| 33 | `colsums()` | none — allocates correctly | ok | — |
+| 34 | `rowindex( v )` | `v.size() == nrows_` | writes past `v` | A |
+| 35 | `includecols( M, pos )` / `excludecols( M, pos )` (+ returning forms) | `max(pos) < ncols_`, `pos` unique, `M` sized | `assert` — **and the assert itself dereferences `max_element` on an empty `pos`**, so a Debug build has UB where Release has no check | A |
+| 36 | `includerows( M, pos )` (+ returning form) | `max(pos) < nrows_`, `M.nrows_ == pos.size()` | **throws `BoundsViolation`** (added 2026-07-16 with the bootstrap resample) | ✓ |
+| 37 | `toVector( v )` | `v.size() == nrows_ * ncols_` | writes past `v` | A |
+| 38 | `toVector()` | none — allocates correctly | ok | — |
+| 39 | `func( Mi, fx, Mo )` (free) | identical dimensions | writes past `Mo` | A |
+| 40 | `func( Mi, fx )` (free) | none — allocates correctly | ok | — |
+| 41 | `toMatrix( M_in, v_in )` / `toMatrix( v_in, r, c )` (free) | `v_in.size() == r * c` | reads past `v_in` | A |
+| 42 | `operator<<` (free) | none | ok | — |
+| 43 | `operator>>` (free) | `nrows_ != 0 && ncols_ != 0` | reads into a zero-sized matrix — no write, but silently consumes nothing | B |
+| 44 | `random( n )` | none | ok | — |
+| 45 | `covariance( V )` | `V` is `ncols_ × ncols_`; `nrows_ > 0`, `ncols_ > 1` | writes outside `V`; division by `nrows_ - 1` | A |
+| 46 | `covariance()` | as #45's second half | via #45 | A |
+| 47 | `inverse` (6 overloads), `inverseGaussJordan`, `inverseLU`, `ludcmp`, `lubksb`, `determinant` | square, and the destination the same shape | `assert` for shape; **`Singular` is already thrown** for the numerical failure | A (shape) / ✓ (singularity) |
+| 48 | `begin()`, `end()` ×2 | documented "DO NOT USE THESE" | raw pointers, by design | out of scope |
+
+Counting overloads, **roughly 60 public entry points, of which about 45 can read
+or write outside an allocation in the shipped build.** Three are already correct
+and are the precedent to follow: `operator()`, `includerows`, and the
+`BadSize` / `Singular` value-failure throws.
+
+### 12.3 What this phase must NOT do
+
+- **Do not change `BoundsViolation`'s inheritance.** It is a nested class with
+  `: public std::exception` deliberately commented out, as `BadSize` and
+  `Singular` are. Whether these should derive from `std::exception` is a real
+  question with catch-site consequences across the GUI, the CLI and the tests;
+  it is not part of a bounds-enforcement phase. Sol's instruction, adopted.
+- **Do not normalize the `<=` / `==` asymmetry.** `dotprod( iVec, oVec )` takes
+  `oVec.size() <= nrows_` on purpose — the same prefix rule §11.3 settled for
+  `vector_ops`, and the feed-forward bias arithmetic depends on it.
+- **Do not add checks to a hot loop's inner body.** These are entry-point
+  preconditions, checked once per call, exactly as `vector_ops` does it. The
+  per-exemplar callers (`outprod`, `row`, the ranged `dotprod`s) are called once
+  per exemplar, not once per element, so the cost is a comparison against a
+  member — but this must be *measured* on the scale probe before and after, not
+  assumed (rule 7).
+- **Do not fold it into another commit**, and do not start it before the DFA
+  work is explicitly sequenced after it.
+
+### 12.4 The shape of the work, in order
+
+1. **This inventory** (done, above) — reviewed before any code changes.
+2. **Characterize under Release.** A test that calls each contract with an
+   invalid argument and asserts the *exception*, built the way we ship. It must
+   be proven to fail first: against today's `matrix.h` every one of those
+   expectations fails, which is the D5 pattern and is the evidence that the
+   contract is absent rather than merely untested.
+3. **The smallest coherent exception policy.** `BoundsViolation` already exists
+   and already means "an index or range is outside this matrix". A dimension
+   mismatch between two objects is a different fact and probably wants its own
+   type beside `BadSize`; that decision belongs in the design step, with the
+   catch sites enumerated first.
+4. **Then implement**, one commit, with the goldens, the oracle, `smoke.sh`,
+   `run_tools.sh` and the scale probe as the evidence that nothing legal changed.
+5. **Then correct standing rule 4's sentence** to state what is true, as D5b did
+   for `CMakeLists.txt`'s comment.
+
+**Only then, DFA.**
+
 *Prepared by Claude (Opus 5). Reviewed by Sol (2026-07-31); revised §8 in response.
-§9–§11 are the implementation record: §§8.7–8.8 and 9–10 describe work now
-committed, and §11 is the D5 design, written before its code.*
+§9–§12 are the implementation record: §§8.7–8.8 and 9–10 describe work now
+committed, §11 is the D5 design, written before its code, and §12 is D9's,
+written the same way and not yet implemented.*

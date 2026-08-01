@@ -3304,3 +3304,38 @@ equations, shared with zero parameterization.**
     Manifest's method ownership was corrected and `docs/manifest.pdf` rebuilt; the added
     source-map row had pushed that table onto a near-empty page, which the visual inspection
     caught and the wording now avoids.
+
+**2026-08-01 (later still) — D9: `Matrix` promises in Release what only two of its methods
+deliver. OPEN; inventory written before any code.**
+
+  - **Found by Commit 2's own verification, then widened by Sol.** `Matrix`'s ranged
+    `dotprod` is `assert`-only, so the claim that BareProp satisfies its range contract
+    could not be tested in the configuration this project ships; an assert-enabled build was
+    needed, and that build also aborted on a `check_onehidden` defect Release had hidden.
+    Sol's correction: this is not two methods.
+  - **Measured.** `Matrix::operator()` and `includerows` throw in Release. **Roughly
+    forty-five other public entry points** — `row`, `col`, `replacerow`, `replacecol`, the
+    four compound arithmetic operators, `t`, all nine `dotprod` / `dotprodt` /
+    `dotprod_row` overloads, `dotprod( B, C )`, `outprod`, `colsums`, `rowindex`,
+    `toVector`, the free `func` and `toMatrix`, `includecols`, `excludecols`, `submatrix`,
+    `covariance`, and the `inverse` family's shape checks — carry `assert` alone. Under
+    `-DNDEBUG`, which is how every `ctest` target and the shipped binary are built, an
+    invalid argument is an out-of-bounds read or write, not an exception. Two of those
+    write (`replacerow`, `replacecol`, `outprod` — and `outprod` is on the per-exemplar
+    training path).
+  - **One assert is worse than absent.** `includecols` and `excludecols` bound-check with
+    `*max_element( pos.begin(), pos.end() )`, which **dereferences `end()` on an empty
+    `pos`**. A Debug build therefore has undefined behavior exactly where Release has no
+    check at all.
+  - **It falsifies a sentence of standing rule 4**, which claimed *both* numerical classes
+    reject violations in Release. True of `vector_ops` since `5c94cd2`; true of one `Matrix`
+    method. The sentence had been generalized from the accessor that was checked — the same
+    move rule 3 exists to catch, in the constitution itself. Rule 4 now states what is
+    enforced and what is not, and says that until D9 lands an assert-enabled build is the
+    only thing that tests a `Matrix` precondition.
+  - **Recorded as its own bounded phase (§12), sequenced BEFORE the DFA extraction** because
+    DFA leans heavily on `Matrix`. Deliberately **not** folded into either `OneHiddenNet`
+    commit. Three constraints carried in from Sol: do not touch `BoundsViolation`'s
+    inheritance (a separate question with catch-site consequences), do not normalize the
+    deliberate `<=` prefix rule of `dotprod( iVec, oVec )`, and check preconditions at the
+    entry point rather than inside any loop — measured on the scale probe, not assumed.
