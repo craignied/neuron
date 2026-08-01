@@ -517,19 +517,20 @@ double BackProp::innerTrainSet()
 			Weights[ i + 1 ].dotprodt( HErrors[ i + 1 ], HErrors[ i ] )
 				*= func( HOutputs[ i ], d_sigmoidal() );
 
-		// Weight decay
-		if ( weightDecayFlag && ( trainingType == 0 ) && !gradMaxFlag )
-		{
-			for ( unsigned m = 0; m < Weights.size(); m++ )
-				Weights[ m ] *= decayTerm;
-		}
-
 		if ( !batchEpochFlag ) // classic on-line backpropagation
 		{
 			// Tests of gradient calculation were found to slow training
 			//    by more than 50%, hence the if block
+			// Weight decay, ONCE PER WEIGHT UPDATE -- on-line makes one per
+			//    exemplar. It used to sit above the batch/on-line split and so ran
+			//    once per exemplar in BOTH modes, making the batch per-epoch factor
+			//    (1-eta*decay)^N (D4; refactor_audit.md section 9).
 			if ( ( trainingType == 0 ) && !gradMaxFlag ) // canonical backprop
 			{
+				if ( weightDecayFlag )
+					for ( unsigned m = 0; m < Weights.size(); m++ )
+						Weights[ m ] *= decayTerm;
+
 				// Update the output weights, note again the use of *= for efficiency
 				// (Freeman & Skapura p. 102, #8)
 				Weights[ nLayers ] -= ( WeightsUp[ nLayers ].outprod(
@@ -624,6 +625,11 @@ double BackProp::innerTrainSet()
 		// Canonical backprop without separate gradient calculation
 		if ( ( trainingType == 0 ) && !gradMaxFlag )
 		{
+			// Weight decay, once for THIS epoch's single update
+			if ( weightDecayFlag )
+				for ( unsigned m = 0; m < Weights.size(); m++ )
+					Weights[ m ] *= decayTerm;
+
 			// Batch/epoch updates weights at the end, *now* multiply by eta
 			for ( unsigned l = 0; l < WeightsAccumulate.size(); l++ )
 				Weights[ l ] -= ( ( WeightsAccumulate[ l ] *= eta ) /= ( double ) nTrain );

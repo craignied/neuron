@@ -592,21 +592,26 @@ double SimpleProp::innerTrainSet()
 		// its last element will be ignored in *=
 		( func( hO, d_sigmoidal(), h_err, 0, nH ) *= o_err ) *= oW;
 
-		// Weight decay for canonical backpropagation
-		// $\vec w_{t+1} = (1-2\eta\lambda)\vec w_t - \eta \left. \frac{\partial E}{\partial w} \right|_{w_t}$
-		// and where the gradient doesn't need to be separated
-		if ( weightDecayFlag && ( trainingType == 0 ) && !gradMaxFlag )
-		{
-			oW *= decayTerm;
-			hW *= decayTerm;
-		}
-
 		if ( !batchEpochFlag ) // classic on-line backpropagation
 		{
 			// Tests of gradient calculation were found to slow training
 			//    by more than 50%, hence the if block
+		// Weight decay for canonical backpropagation, applied ONCE PER WEIGHT
+		//    UPDATE -- which is what the formula says:
+		// $\vec w_{t+1} = (1-2\eta\lambda)\vec w_t - \eta \left. \frac{\partial E}{\partial w} \right|_{w_t}$
+		//    On-line makes one update per exemplar, so it belongs beside the
+		//    update below. It used to sit ABOVE the batch/on-line split and so
+		//    ran once per EXEMPLAR in both modes: batch makes ONE update per
+		//    epoch, so its effective per-epoch factor was (1-eta*decay)^N,
+		//    exponential in the dataset size (D4; refactor_audit.md section 9).
 			if ( ( trainingType == 0 ) && !gradMaxFlag ) // where gradient doesn't need to be separated
 			{
+				if ( weightDecayFlag ) // once, for THIS exemplar's update
+				{
+					oW *= decayTerm;
+					hW *= decayTerm;
+				}
+
 				// Update the output weights (Freeman & Skapura p. 102, #8)
 				// $w^o_{kj}(t+1)=w^o_{kj}(t)+\eta\delta^o_{pk}i_{pj}$
 				// Note that because the output error term is o-y as in Methodology,
@@ -708,6 +713,12 @@ double SimpleProp::innerTrainSet()
 			// Batch/epoch updates weights at the end, *now* multiply by eta
 			// Methodology equation 2.13: ${\bf y}_{t+1} = {\bf y}_t - \eta {\bf g}({\bf y}_t)$
 			// and $1/N$ in Methodology equation 2.14: ${\bf g} = (1/N) \sum_{k=1}^N {\bf g}_k$
+			if ( weightDecayFlag ) // once, for THIS epoch's single update
+			{
+				oW *= decayTerm;
+				hW *= decayTerm;
+			}
+
 			oW -= ( ( oWaccumulate *= eta ) / ( double ) nTrain ); // *=, /= for efficiency
 			hW -= ( ( hWaccumulate *= eta ) / ( double ) nTrain );
 			

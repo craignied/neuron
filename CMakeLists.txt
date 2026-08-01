@@ -221,3 +221,18 @@ add_executable(check_condnum
 target_include_directories(check_condnum PRIVATE src)
 target_link_libraries(check_condnum PRIVATE GSL::gsl GSL::gslcblas)
 add_test(NAME iterative_condition_number COMMAND check_condnum)
+
+# Regression test: weight decay is a property of lambda and eta, not of N (D4).
+# The canonical decay multiplier sat above the batch/on-line split, so it ran
+# once per EXEMPLAR in both modes -- giving a per-epoch factor of
+# (1-eta*decay)^N in batch mode, exponential in the dataset size. Asserts that
+# duplicating every observation (which leaves the mean gradient identical)
+# leaves the fit identical, for all four models.
+add_executable(check_decay
+    tests/iterative/check_decay.cpp
+    src/simpleprop.cpp src/bareprop.cpp src/backprop.cpp src/logistic.cpp
+    src/network.cpp src/iterative.cpp src/model.cpp src/dataset.cpp src/split.cpp
+    src/twoset.cpp src/stats.cpp src/matrix.cpp src/vector_ops.cpp src/utility.cpp)
+target_include_directories(check_decay PRIVATE src)
+target_link_libraries(check_decay PRIVATE GSL::gsl GSL::gslcblas)
+add_test(NAME iterative_weight_decay COMMAND check_decay)

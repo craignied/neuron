@@ -528,12 +528,6 @@ double Logistic::innerTrainSet()
 		if ( automaticStepSizeFlag )
 			o_errAccumulate += o_err;
 
-		// Weight decay for canonical gradient descent
-		// $\vec w_{t+1} = (1-2\eta\lambda)\vec w_t - \eta \left. \frac{\partial E}{\partial w} \right|_{w_t}$
-		// and where the gradient doesn't need to be separated
-		if ( weightDecayFlag && ( trainingType == 0 ) && !gradMaxFlag )
-			W *= decayTerm;
-
 		// Where gradient doesn't need to be separated
 		if ( ( trainingType == 0 ) && !gradMaxFlag )
 			// Accumulate beta weight update, see above note
@@ -559,12 +553,26 @@ double Logistic::innerTrainSet()
 	} // end of loop for exemplars in training set
 
 	// Canonical backprop without separate gradient calculation
+	//    ( braced: this branch carries two statements now, and a braceless if
+	//      would silently take only the first )
 	if ( ( trainingType == 0 ) && !gradMaxFlag )
+	{
+		// Weight decay for canonical gradient descent, applied ONCE PER WEIGHT
+		//    UPDATE -- for a logistic model, batch by definition, that is once
+		//    per epoch:
+		// $\vec w_{t+1} = (1-2\eta\lambda)\vec w_t - \eta \left. \frac{\partial E}{\partial w} \right|_{w_t}$
+		//    It used to run once per EXEMPLAR inside the loop above, making the
+		//    effective factor (1-eta*decay)^N -- exponential in the number of
+		//    training rows (D4; refactor_audit.md section 9).
+		if ( weightDecayFlag )
+			W *= decayTerm;
+
 		// Batch/epoch updates weights at the end, *now* multiply by eta
 		// Methodology equation 2.13: ${\bf y}_{t+1} = {\bf y}_t - \eta {\bf g}({\bf y}_t)$
 		// and $1/N$ in Methodology equation 2.14: ${\bf g} = (1/N) \sum_{k=1}^N {\bf g}_k$
 		W -= ( ( Waccumulate *= eta ) / ( double ) nTrain ); // *=, /= for efficiency
-	
+	}
+
 	else // routines where gradient is calculated separately
 	{
 		// Set the gradients to the accumulators so that pack() & unpack() work
