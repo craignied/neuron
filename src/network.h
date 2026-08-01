@@ -214,7 +214,14 @@ protected:
 
 	// Compute the condition number of the B matrix from collectGradients()'s
 	//    columns, storing condNum/condMaxEig/condMinEig; reportCondNum prints
-	//    those stored values. Leaves the model exactly as it found it.
+	//    those stored values.
+	//
+	//    It preserves the model's FITTED and OPTIMIZER state -- the weights, and
+	//    G / stackG / lastG / lastF / the step-size accumulators -- which is the
+	//    property that was broken. It does not leave the whole object untouched,
+	//    and is not meant to: it deliberately refreshes the diagnostic state
+	//    (grads, condNum, condMaxEig, condMinEig), and forward propagation
+	//    updates the per-exemplar scratch members (I, o, x) as it always does.
 	void computeCondNum();
 
 	// Utility to report out the condition number
