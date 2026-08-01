@@ -17,6 +17,15 @@ Ground rules:
   frozen but authoritative. A CLI option with no GUI equivalent is a bug. If you
   touch the menus or the GUI, update **`docs/gui_cli_parity.md`** (the menu ↔
   control ↔ API matrix) in the same commit.
+- **If you are about to write engine code, read standing rules 4, 6 and 7 in
+  `CLAUDE.md` first.** In short: the class layer (`Matrix`, `vector_ops`,
+  `Population`) is the numerical vocabulary and code must read against the
+  equations it came from (rule 4); each mechanism has one authoritative
+  implementation in the class that owns it (rule 6); and **speed is an
+  architectural requirement** (rule 7) — prefer the destination-taking overload
+  and the compound operators in loops, pass read-only containers by `const&`,
+  keep `std::function`/virtual dispatch/allocation out of hot loops, measure
+  before optimizing, and never hide a published formula to save lines.
 - The engine is `build/neuron`, an interactive menu program. **Never drive
   it by typing interactively** — write the menu answers to a file, one per
   line, and run `./build/neuron --seed 42 < session.in > session.out`.

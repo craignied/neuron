@@ -183,6 +183,45 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
    training; OBD owns selection not evaluation; models own fitting not fold management;
    DataSet owns fold materialization not modeling policy* — is the governing interpretation.
 
+7. **Speed is an architectural requirement, and the mathematics must stay visible. Neither
+   may be traded for the other, and neither may be traded for fewer lines.** The engine is
+   compiled C++ because neural computation is compute-bound; the class layer exists so that
+   code can be read against the equations it came from. Rule 4 states the readability half.
+   This is the other half, and the idioms that implement it — which lived only in scattered
+   implementation comments until 2026-07-31:
+
+   - **`Matrix`, `vector_ops` and `Population` are the numerical vocabulary.** Extend them;
+     do not work around them (rule 4).
+   - **Prefer the destination-taking overload when a buffer can be reused.** Every
+     `Matrix`/`vector_ops` operation comes in two forms — one that fills an object you pass,
+     one that returns a new one. The pair is deliberate and is NOT duplication: the returning
+     form is convenience, the destination form is what belongs in a loop.
+   - **Prefer the compound operators (`*=`, `+=`, `-=`) where they avoid a temporary
+     container** and do not obscure the equation.
+   - **Use the range overloads** (`func( v, f, out, a, b )`, `dotprod( v, out, a, b )`) where
+     they express the mathematical domain directly — e.g. "all hidden units except the bias
+     slot" — rather than computing the whole vector and fixing it afterward.
+   - **Do not introduce `std::function`, virtual dispatch, allocation or copying into a hot
+     loop to remove source duplication.** A hot loop is anything inside `trainSet` /
+     `innerTrainSet` / `forward` / a per-exemplar scoring pass. In cold paths (reporting,
+     file writing, one-shot setup) those tools are fine.
+   - **Pass read-only containers by `const&`.** By-value parameters on a per-exemplar path
+     are heap traffic per exemplar per iteration.
+   - **Measure before you change an algorithm for speed.** Rule 3 applies to performance
+     claims, including ones written here. `./build/scale_probe` and a timed run are the
+     evidence; a reading of the source is a hypothesis.
+   - **An abstraction that hides the equation has failed even if it removes lines.** The
+     biased and unbiased forms of a gradient are two published formulae; keeping them
+     separately legible is worth the duplication that a bias flag would remove. DRY means one
+     authoritative mechanism at the correct layer (rule 6), never minimum line count.
+
+   *Why this is a rule and not advice:* on 2026-07-31 a full-repo DRY audit found genuine
+   duplication (SimpleProp/BareProp, four copies of the auto-stepsize loop) alongside
+   proposals that would have collapsed the deliberate destination/value overload pairs and
+   replaced visible per-class formulae with boolean switches — because the efficiency and
+   legibility constraints existed in Craig's head and in code comments, not in this file.
+   → `refactor_audit.md`, and Sol's review of it.
+
 ## Housekeeping
 
 - **GitHub:** https://github.com/craignied/neuron (HTTPS remote per the locker's

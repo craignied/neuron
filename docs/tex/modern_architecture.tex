@@ -59,6 +59,49 @@ own final evaluation.  Cross-validation owns repetition, not training.
 This separation keeps the matrix notation, the implementation, and the
 statistical report traceable to one another.
 
+\section{Legibility and speed as joint requirements}
+\index{Legibility!architectural requirement}
+\index{Speed!architectural requirement}
+\index{Numerical vocabulary}
+
+Two constraints govern every line of engine code, and neither may be
+traded for the other or for a smaller source file.
+
+The first is legibility.  The computational core was built on Matrix,
+the vector operations and Population so that a reader can move between
+a published equation and its implementation in either direction.  A
+gradient in this Manifest and the statement that computes it should be
+recognizably the same object.  An abstraction that hides a published
+formula has failed even when it removes duplication: the biased and
+unbiased forms of a gradient are two equations, and keeping both
+visible is worth the repetition that a flag would remove.
+
+The second is speed.  Neural computation is compute-bound, and the
+engine is compiled C++ for that reason.  The numerical classes
+therefore offer each operation twice: a form that fills a destination
+the caller supplies, and a form that returns a new object.  That pair
+is deliberate and is not duplication.  The returning form is for
+formulae written once; the destination form is what belongs inside a
+training loop, where a fresh allocation per exemplar per iteration is
+the difference between a run and a wait.  The compound operators and
+the range overloads exist for the same reason, the latter also because
+a range expresses a mathematical domain -- every hidden unit except the
+bias slot -- more directly than computing the whole vector and
+repairing it afterwards.
+
+It follows that removing duplicated source is not, by itself, an
+improvement.  Indirection through a function object, a virtual call, or
+a copy introduced into a per-exemplar path to unify two loops trades a
+measurable cost for a cosmetic gain.  In cold paths -- reporting, file
+writing, one-time setup -- those tools are unobjectionable.  A
+suspected performance problem is measured before an algorithm changes
+in response to it.
+
+The operating form of this section, with the specific idioms and the
+episode that prompted writing it down, is standing rule~7 in
+\texttt{CLAUDE.md}; rule~4 states the legibility half and rule~6 the
+ownership half.
+
 \section{Interfaces}
 
 \subsection{Command line}

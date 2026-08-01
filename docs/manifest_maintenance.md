@@ -289,6 +289,7 @@ it. Check the authoritative source before changing prose.
 | REST route registration and exact validation | `src/gui.cpp` |
 | Browser controls and fields sent to the API | `src/gui_page.html` |
 | Engine layer ownership | `docs/cv_refactoring_architecture.md`, current C++ classes |
+| Numerical style: legibility vs. speed, and the class-layer idioms | `CLAUDE.md` standing rules 4, 6 and 7 |
 | Statistical interpretation | `docs/roc_theory.md`, engine reports, statistical tests |
 | Cross-validation report layout and artifacts | `docs/evaluation_report_spec.md`, `src/cvreport.{h,cpp}` |
 | Evaluation design and clustered covariance | `src/evaldesign.{h,cpp}`, `src/auccov.{h,cpp}`, `src/delong.{h,cpp}`, `src/clustered_auc.{h,cpp}` |
