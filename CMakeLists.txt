@@ -308,6 +308,20 @@ add_test(NAME twoset_rates COMMAND check_rates)
 # tests/vectorops/run_bounds_demo.sh runs each case in its own process. That is
 # a demonstration driver for use against sabotaged or historical builds, where
 # a case that takes a SIGBUS would otherwise hide every case after it.
+# Characterization test: SimpleProp and BareProp, before they share a base.
+#
+# The two one-hidden-layer models carry byte-identical state and six methods
+# differing only by the class name (refactor_audit.md 8.2 category A). Holds
+# still what must NOT move when those go to an intermediate base: two distinct
+# runtime types and objType, saved-file bytes and their first line, the factory
+# dispatch, df() and outputHeader(), and -- the subtle one -- that the bias
+# ARCHITECTURE is fixed at construction and is not Network::biasFlag, which is
+# publicly settable. Cross-type assignment is refused at COMPILE time, since a
+# runtime test cannot catch a program that compiles.
+add_executable(check_onehidden tests/onehidden/check_onehidden.cpp)
+target_link_libraries(check_onehidden PRIVATE neuron_engine)
+add_test(NAME onehidden_models COMMAND check_onehidden)
+
 # Characterization test: the automatic step-size search, in all four models.
 #
 # SimpleProp, BareProp, BackProp and Logistic each carry their own copy of the

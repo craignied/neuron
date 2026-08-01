@@ -1738,6 +1738,44 @@ The three questions raised before writing it, resolved:
 3. It landed as its **own** commit, before the three DRY extractions and before
    the auto-step-size template method (§1.2).
 
+### 11.15 OPEN, escalated: `Iterative::iteration` is not initialised
+
+Found 2026-08-01 while writing `tests/onehidden/check_onehidden.cpp`, by D5's
+own bounds check firing: five CGD iterations threw `nvec::SizeMismatch`.
+
+`Iterative::Iterative()`'s initialiser list (`iterative.cpp:13-19`) sets
+nineteen members and **does not set `iteration`**. It is an `unsigned`, so it
+holds indeterminate memory until `train()` assigns it.
+
+**The production training path is safe**, and that is established rather than
+assumed: the only caller of `trainSet()` in `src/` is `iterative.cpp:312`, which
+sits inside `for ( iteration = 0; iteration <= maxIterations; iteration++ )`. So
+`iteration` is always assigned before any training pass reads it.
+
+**Two places where it is nevertheless observable:**
+
+1. `Iterative::copy()` copies it (`iterative.cpp:106`). A clone of a model that
+   has never trained therefore copies indeterminate memory — the exact pattern
+   of the settled decision *"'Not copied' must be WRITTEN in `copy()`, never left
+   out"*, and of the `Matrix` value-initialisation misdiagnosis, whose real cause
+   was an uninitialised `Model::errorType` scalar.
+2. `getIterations()` is public and is read by `RegressNet` for its audit trail
+   (`regressnet.cpp:77`, `:794`). Whether that can be reached before any training
+   has run is **not established** — it needs checking, and I am not claiming
+   either way.
+
+**What it costs when it is read.** `Network::engine( type, iteration )` branches
+on `t == 0 || t == df()`. An indeterminate `t` takes the conjugate-direction
+branch on the very first call, where `lastF` and `lastG` are still empty, and
+`dotprod( u, lastF )` then reads `df()` doubles out of an empty vector. Before
+D5 that was a silent out-of-bounds read; it is now a thrown `SizeMismatch`,
+which is the only reason this was noticed at all.
+
+**Not fixed here.** A one-line initialiser is a correctness change and belongs in
+its own commit with its own test, not folded into a DRY extraction — the same
+rule that kept legacy bug #12 separate. The test that found it sets the counter
+explicitly, as `train()` would.
+
 ### 11.14 The measured values — evidence, not a contract
 
 The first `check_bpoptimizer` pinned these as exact hexadecimal literals. They
