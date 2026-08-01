@@ -23,11 +23,19 @@
 // resolve the path once in the wrong place.
 
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <vector>
+
+#ifdef _WIN32
+#include <process.h>
+#define getpid _getpid
+#else
+#include <unistd.h>
+#endif
 
 #include "iterative.h"
 #include "ldfa.h"
@@ -109,9 +117,46 @@ static DataSet makeData( unsigned n )
 	return d;
 }
 
+// A private directory for this run, under the platform's own temporary root.
+//    /tmp is not a temporary directory on Windows, where the hardcoded path
+//    made every write silently fail; and a fixed shared filename can collide
+//    between concurrent test runs, so the directory name carries the process id.
+//    Removed on the way out -- and only ever paths this test created.
+class TempDir {
+public:
+	TempDir()
+	{
+		namespace fs = std::filesystem;
+		root = fs::temp_directory_path()
+			/ ( "neuron_lastop_" + to_string( ( long ) getpid() ) );
+		fs::create_directories( root );
+	}
+	~TempDir()
+	{
+		std::error_code ec; // never throw from a destructor
+		std::filesystem::remove_all( root, ec );
+	}
+	// A file inside it
+	string file( const char* name ) const
+	{
+		return ( root / ( string( name ) + ".txt" ) ).string();
+	}
+	// A path that CANNOT be opened: a file inside a directory that is not
+	//    there. Built under our own root so it is portable and so the failure
+	//    is the one we intend, not a permissions accident.
+	string unopenable() const
+	{
+		return ( root / "no_such_subdirectory" / "lastop.txt" ).string();
+	}
+private:
+	std::filesystem::path root;
+};
+
+static TempDir tempDir;
+
 static string tmpPath( const char* name )
 {
-	return string( "/tmp/neuron_lastop_" ) + name + ".txt";
+	return tempDir.file( name );
 }
 
 // Each writer is driven through the same four checks. `go` runs one training
@@ -162,7 +207,13 @@ static void checkWriter( const char* who, GO go )
 		marker << "UNTOUCHED" << endl;
 		marker.close();
 		{ util::ScreenCapture hush; go( path, false ); }
-		expect( slurp( path ) == "UNTOUCHED\n", string( who )
+		// Compared by its leading text, not by an exact byte string: the
+		//    marker is written in TEXT mode, so the line ending is "\n" on
+		//    POSIX and "\r\n" on Windows. What matters is that the file was
+		//    not touched, which the prefix and the length together establish.
+		string kept = slurp( path );
+		expect( kept.compare( 0, 9, "UNTOUCHED" ) == 0 && kept.size() < 12,
+			string( who )
 			+ ": with lastop off, an existing file is left alone" );
 	}
 
@@ -172,7 +223,7 @@ static void checkWriter( const char* who, GO go )
 	//    and the assertion would fail for a reason that has nothing to do with
 	//    the code under test.
 	{
-		string bad = "/no/such/directory/neuron_lastop.txt";
+		string bad = tempDir.unopenable();
 		string said;
 		bool returned = false;
 		{

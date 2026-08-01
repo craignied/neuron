@@ -27,27 +27,65 @@
 // The optimizer tests executed the dispatch, passed, and guarded nothing for the
 // one model where it did not work. This file is that guard.
 //
-// WHAT IS ASSERTED
-//   1. INVARIANTS -- captured BEFORE the correction, and they must not move:
-//      canonical batch, and all three on-line paths.
-//   2. The correction -- batch CGD and Shanno now differ from canonical and
-//      from each other, with automatic step size both off and on.
-//   3. Exact post-correction values for batch CGD and Shanno.
-//   4. The run header names the algorithm that actually ran.
+// WHAT IS ASSERTED -- and deliberately NOT asserted
+//
+// NO BIT-EXACT LITERALS. This test originally pinned macOS-captured hexadecimal
+// doubles. They failed on Ubuntu and GCC and on Windows and MSVC while EVERY
+// structural assertion passed on all three -- which is the correct result: the
+// correction is real everywhere, and twenty iterations of a conjugate method
+// are allowed to differ in their low bits between compilers. Pinning one
+// machine's bytes as a universal contract was an overclaim, and a per-platform
+// table of expected values would be the same overclaim written three times.
+// The measured macOS before/after values live in refactor_audit.md as the
+// sabotage evidence they are.
+//
+// What is asserted instead is portable and is about the CODE, not the machine:
+//
+//   1. THE INVARIANT. Canonical batch training reaches the same weights whether
+//      or not gradient stopping is armed -- even though the two run through
+//      DIFFERENT branches. With it off, the canonical branch updates from
+//      WeightsAccumulate directly; with it on, the separate-gradient branch
+//      runs, engine() dispatches to a switch with no case 0 and changes
+//      nothing, and the update comes from Gradient. The corrected branch must
+//      therefore agree with the canonical one, to within floating-point
+//      reassociation: the two orders are ( a * eta ) / n and ( a / n ) * eta.
+//      This is a stronger statement than "bit-identical to a capture" because
+//      it is a property of the code rather than of one machine, and it fails
+//      if the branch drops the average, double-applies eta, or updates the
+//      wrong structure.
+//
+//   2. THE CORRECTION. Batch CGD and Shanno are SEPARATED from canonical and
+//      from each other, by a margin far larger than rounding noise, with
+//      automatic step size off and on. Under the defect all three were equal.
+//
+//   3. Every arm is finite, and the on-line arms remain discriminating.
+//
+//   4. The announced algorithm agrees with the computation -- asserted
+//      together, never the name alone, which is the mistake that let the
+//      defect ship.
+//
+// THE SEPARATION THRESHOLD is 0.01, chosen from measurement and not to make CI
+// green: the smallest real gap observed is 0.3706 (canonical vs Shanno, batch),
+// so the threshold sits ~37x below the true signal, while double rounding noise
+// on a sum of magnitude ~23 is around 1e-14. Actual values print in hexadecimal
+// on failure, so cross-platform drift stays diagnosable.
 //
 // NOT first-iteration divergence: an optimizer's first direction is legitimately
 // the raw gradient (Golden's step 1 sets f(0) = -g(0)), so equality there proves
-// nothing. Every comparison is taken at iteration 20, where the histories must
-// have diverged.
+// nothing. Every comparison is taken at iteration 20.
+//
+// ON-LINE CGD AND SHANNO ARE DEGENERATE, and that is a fact about the
+// algorithms rather than a flaw in this fixture: conjugate methods assume a
+// TRUE BATCH GRADIENT, which is why autoalgo::pick forces batch/epoch for both.
+// Driven on-line at any step size tried they either collapse to zero or
+// saturate every output. They are smoke here -- they must run and stay finite --
+// and only the on-line canonical arm is a quality control.
 //
 // SABOTAGE: restore `Weights[ m ] -= ( WeightsAccumulate[ m ] *= eta );` in the
-// batch separate-gradient branch. Group 2 and 3 fail; group 1 still passes,
-// which is what makes group 1 an invariant rather than a restatement.
-//
-// Run with --capture to print the literals in full precision. Re-capturing is
-// not a fix for a failure: group 1 moving means canonical or on-line training
-// changed, and group 3 moving means the optimizer changed.
+// batch separate-gradient branch. The separation assertions fail; the invariant
+// and the on-line assertions still pass, which is what makes them invariants.
 
+#include <cmath>
 #include <cstdio>
 #include <iomanip>
 #include <iostream>
@@ -117,8 +155,12 @@ static DataSet makeData( unsigned n, unsigned nTest )
 // One run. Every arm starts from the SAME weights -- randomize() under a fixed
 // seed after an identically constructed network -- so a difference in the result
 // can only come from the training, not from the initialization.
+static const double ONLINE_ETA = 0.05;
+
+static unsigned trainingRows() { return 120 - 36; }
+
 static double run( bool batch, unsigned type, bool autoStep,
-	string* headerOut = 0 )
+	string* headerOut = 0, bool gradStop = false )
 {
 	util::set_seed( 4242 );
 	DataSet d = makeData( 120, 36 );
@@ -143,8 +185,13 @@ static double run( bool batch, unsigned type, bool autoStep,
 	//    stable, but a number that many kinds of breakage would also produce.
 	//    A smaller on-line step keeps the three arms distinct and the
 	//    invariants meaningful.
-	b.setEta( batch ? 0.5 : 0.05 );
-	b.setGradStop( false );         // no early exit: every arm runs the full 20
+	b.setEta( batch ? 0.5 : ONLINE_ETA );
+	// Gradient stopping is off for every arm except the invariant's second
+	//    run, whose whole point is to reach the separate-gradient branch. The
+	//    limit is 0 so the rule can never actually fire and cut a run short --
+	//    only the BRANCH changes, never the iteration count.
+	b.setGradStop( gradStop );
+	b.setGradMaxLimit( 0.0 );
 	b.setTrainingType( type );
 	b.setMaxIterations( 20 );
 
@@ -162,33 +209,67 @@ static double run( bool batch, unsigned type, bool autoStep,
 	return b.signature();
 }
 
-// --- 1. INVARIANTS: captured before the correction, must not move ----------
+// --- the numerical vocabulary of this test --------------------------------
 
-// Canonical batch does not go through the separate-gradient branch at all
-// (trainingType 0 with gradient stopping off), so the correction cannot touch
-// it. On-line BackProp already updated from Gradient, so the correction cannot
-// touch that either. If any of these move, the fix reached further than it
-// should have.
-static const double CANON_BATCH   = 0x1.760ffbe7973c2p+4;
-static const double ONLINE_CANON  = 0x1.225f05c606211p+5;
-static const double ONLINE_CGD    = 0x1.617604c2720ddp+2;
-static const double ONLINE_SHANNO = 0x1.5p+6;
+// Comfortably above double rounding noise (~1e-14 at magnitude 23) and far
+// below the smallest real separation observed (0.3706). See the header.
+static const double SEPARATION = 0.01;
 
-static void test_invariants()
+// Reassociation tolerance for the invariant: ( a * eta ) / n versus
+// ( a / n ) * eta over 20 iterations. Tight enough that a dropped average or a
+// doubled eta could never slip through -- those move the result by whole units.
+static const double REASSOC = 1e-9;
+
+static void expectFinite( double v, const string& who )
 {
-	cout << "-- unchanged by the correction --" << endl;
-
-	expect( run( true, 0, false ) == CANON_BATCH,
-		"canonical BATCH is bit-identical to before the fix" );
-	expect( run( false, 0, false ) == ONLINE_CANON,
-		"on-line canonical is bit-identical to before the fix" );
-	expect( run( false, 1, false ) == ONLINE_CGD,
-		"on-line CGD is bit-identical to before the fix" );
-	expect( run( false, 2, false ) == ONLINE_SHANNO,
-		"on-line Shanno is bit-identical to before the fix" );
+	bool ok = std::isfinite( v );
+	if ( !ok )
+		cout << "         " << who << " = " << v << endl;
+	expect( ok, who + " is finite" );
 }
 
-// --- 2. The correction: batch optimizers now reach the weights ------------
+static void expectSeparated( double a, double b, const string& who )
+{
+	double gap = fabs( a - b );
+	bool ok = gap > SEPARATION;
+	if ( !ok )
+		printf( "         %a vs %a  (gap %a = %.17g, need > %g)\n",
+			a, b, gap, gap, SEPARATION );
+	expect( ok, who );
+}
+
+static void expectAgrees( double a, double b, const string& who )
+{
+	double scale = fabs( a ) > 1 ? fabs( a ) : 1.0;
+	bool ok = fabs( a - b ) / scale < REASSOC;
+	if ( !ok )
+		printf( "         %a vs %a  (relative %.3g, need < %g)\n",
+			a, b, fabs( a - b ) / scale, REASSOC );
+	expect( ok, who );
+}
+
+// --- 1. THE INVARIANT: the corrected branch agrees with the canonical one ---
+//
+// Canonical training with gradient stopping ARMED takes the separate-gradient
+// branch -- the one that was wrong -- but engine( 0, ... ) dispatches to a
+// switch with no case 0, so no optimizer transforms the gradient and the update
+// must land in the same place as the canonical branch's own. That is the
+// portable form of "the correction did not change what it was not supposed to".
+
+static void test_invariant()
+{
+	cout << "-- the corrected branch agrees with canonical when no optimizer runs --" << endl;
+
+	double plain = run( true, 0, false );              // canonical branch
+	double viaGradientBranch = run( true, 0, false, 0, true ); // separate-gradient branch
+
+	expectFinite( plain, "canonical batch" );
+	expectFinite( viaGradientBranch, "canonical batch, gradient stopping armed" );
+	expectAgrees( plain, viaGradientBranch,
+		"the separate-gradient branch computes the canonical update" );
+}
+
+// --- 2. THE CORRECTION: batch optimizers reach the weights -----------------
 
 static void test_batch_optimizers_discriminate()
 {
@@ -204,37 +285,45 @@ static void test_batch_optimizers_discriminate()
 		double cgd    = run( true, 1, a );
 		double shanno = run( true, 2, a );
 
-		expect( cgd != canon, "batch CGD differs from canonical" + tag );
-		expect( shanno != canon, "batch Shanno differs from canonical" + tag );
-		expect( cgd != shanno, "batch CGD differs from Shanno" + tag );
+		expectFinite( canon,  "batch canonical" + tag );
+		expectFinite( cgd,    "batch CGD" + tag );
+		expectFinite( shanno, "batch Shanno" + tag );
+
+		expectSeparated( cgd, canon, "batch CGD differs from canonical" + tag );
+		expectSeparated( shanno, canon, "batch Shanno differs from canonical" + tag );
+		expectSeparated( cgd, shanno, "batch CGD differs from Shanno" + tag );
 	}
 }
 
-// --- 3. Exact post-correction values --------------------------------------
+// --- 3. the on-line arms -----------------------------------------------------
 //
-// HOW THESE WERE OBTAINED. Captured with --capture from the CORRECTED engine on
-// 2026-08-01, printed as C99 hexadecimal float so the literal is the double, not
-// a decimal rendering of it. They are new expected values for a deliberate
-// correctness change -- the arms they describe previously produced the canonical
-// numbers, which was the bug. They are NOT re-blessed goldens: no golden
-// transcript uses BackProp, and group 1 above pins everything the correction was
-// not allowed to move.
+// The correction touched only the batch separate-gradient branch, so on-line is
+// untouched by construction. These are smoke: they must run and stay finite.
+// Only the CANONICAL arm is a quality control -- on-line CGD and Shanno are
+// ill-posed (see the header) and legitimately collapse or saturate.
 
-static const double BATCH_CGD         = 0x1.50564fab14283p+4;
-static const double BATCH_SHANNO      = 0x1.70220b4a8a31ap+4;
-static const double BATCH_CGD_AUTO    = 0x1.a5cfd3a6729ffp+4;
-static const double BATCH_SHANNO_AUTO = 0x1.6eebfea1aa607p+4;
-
-static void test_exact_values()
+static void test_online_still_runs()
 {
-	cout << "-- exact post-correction values --" << endl;
+	cout << "-- on-line arms --" << endl;
 
-	expect( run( true, 1, false ) == BATCH_CGD, "batch CGD exact" );
-	expect( run( true, 2, false ) == BATCH_SHANNO, "batch Shanno exact" );
-	expect( run( true, 1, true ) == BATCH_CGD_AUTO,
-		"batch CGD exact, automatic step size" );
-	expect( run( true, 2, true ) == BATCH_SHANNO_AUTO,
-		"batch Shanno exact, automatic step size" );
+	double canon  = run( false, 0, false );
+	double cgd    = run( false, 1, false );
+	double shanno = run( false, 2, false );
+
+	expectFinite( canon,  "on-line canonical" );
+	expectFinite( cgd,    "on-line CGD" );
+	expectFinite( shanno, "on-line Shanno" );
+
+	// The canonical arm is a real training run: it must have moved off the
+	// initial state without collapsing to nothing or saturating everything.
+	double rows = ( double ) trainingRows();
+	expect( canon > SEPARATION && canon < rows - SEPARATION,
+		"on-line canonical is a healthy run, neither collapsed nor saturated" );
+
+	// The three remain mutually distinguishable, which is what makes them
+	// usable as a control at all.
+	expectSeparated( canon, cgd, "on-line canonical and CGD are distinguishable" );
+	expectSeparated( canon, shanno, "on-line canonical and Shanno are distinguishable" );
 }
 
 // --- 4. The name and the computation agree --------------------------------
@@ -274,19 +363,20 @@ static void test_name_matches_computation()
 
 // --- capture mode ----------------------------------------------------------
 
+// Print every arm in full precision. NOT a source of expected literals any
+// more -- these are machine-specific (see the header) and exist so that
+// cross-platform drift can be inspected when a separation assertion fails.
 static void capture()
 {
-	cout << setprecision( 17 );
-	printf( "// invariants (canonical batch, and all three on-line)\n" );
-	printf( "static const double CANON_BATCH   = %a;\n", run( true, 0, false ) );
-	printf( "static const double ONLINE_CANON  = %a;\n", run( false, 0, false ) );
-	printf( "static const double ONLINE_CGD    = %a;\n", run( false, 1, false ) );
-	printf( "static const double ONLINE_SHANNO = %a;\n", run( false, 2, false ) );
-	printf( "// post-correction batch optimizer values\n" );
-	printf( "static const double BATCH_CGD         = %a;\n", run( true, 1, false ) );
-	printf( "static const double BATCH_SHANNO      = %a;\n", run( true, 2, false ) );
-	printf( "static const double BATCH_CGD_AUTO    = %a;\n", run( true, 1, true ) );
-	printf( "static const double BATCH_SHANNO_AUTO = %a;\n", run( true, 2, true ) );
+	printf( "batch    canonical         %a  %.17g\n", run( true, 0, false ), run( true, 0, false ) );
+	printf( "batch    canonical+gradstop%a  %.17g\n", run( true, 0, false, 0, true ), run( true, 0, false, 0, true ) );
+	printf( "batch    CGD               %a  %.17g\n", run( true, 1, false ), run( true, 1, false ) );
+	printf( "batch    Shanno            %a  %.17g\n", run( true, 2, false ), run( true, 2, false ) );
+	printf( "batch    CGD    auto       %a  %.17g\n", run( true, 1, true ), run( true, 1, true ) );
+	printf( "batch    Shanno auto       %a  %.17g\n", run( true, 2, true ), run( true, 2, true ) );
+	printf( "on-line  canonical         %a  %.17g\n", run( false, 0, false ), run( false, 0, false ) );
+	printf( "on-line  CGD               %a  %.17g\n", run( false, 1, false ), run( false, 1, false ) );
+	printf( "on-line  Shanno            %a  %.17g\n", run( false, 2, false ), run( false, 2, false ) );
 }
 
 int main( int argc, char* argv[] )
@@ -297,9 +387,9 @@ int main( int argc, char* argv[] )
 		return 0;
 	}
 
-	test_invariants();
+	test_invariant();
 	test_batch_optimizers_discriminate();
-	test_exact_values();
+	test_online_still_runs();
 	test_name_matches_computation();
 
 	cout << endl << ( failures ? "FAILURES: " : "all passed (" ) << failures

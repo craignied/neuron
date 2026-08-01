@@ -1733,6 +1733,55 @@ The three questions raised before writing it, resolved:
 3. It landed as its **own** commit, before the three DRY extractions and before
    the auto-step-size template method (§1.2).
 
+### 11.14 The measured values — evidence, not a contract
+
+The first `check_bpoptimizer` pinned these as exact hexadecimal literals. They
+passed on macOS and **failed on Ubuntu/GCC and Windows/MSVC while every
+structural assertion passed on all three** — which is the correct outcome, and
+the right reading of it is that the correction is real everywhere and twenty
+iterations of a conjugate method are allowed to differ in their low bits between
+compilers. Pinning one machine's bytes as a universal contract was an overclaim;
+a per-platform table would be the same overclaim three times. The numbers are
+kept here as the sabotage evidence they are.
+
+| arm | before the fix (macOS) | after |
+|---|---|---|
+| canonical batch | `0x1.760ffbe7973c2p+4` | `0x1.760ffbe7973c2p+4` |
+| batch CGD | `0x1.760ffbe7973c2p+4` | `0x1.50564fab14283p+4` |
+| batch Shanno | `0x1.760ffbe7973c2p+4` | `0x1.70220b4a8a31ap+4` |
+| batch CGD, auto step | `0x1.750c75ff17d87p+4` | `0x1.a5cfd3a6729ffp+4` |
+| batch Shanno, auto step | `0x1.750c75ff17d87p+4` | `0x1.6eebfea1aa607p+4` |
+| on-line canonical | `0x1.225f05c606211p+5` | `0x1.225f05c606211p+5` |
+| on-line CGD | `0x1.617604c2720ddp+2` | `0x1.617604c2720ddp+2` |
+| on-line Shanno | `0x1.5p+6` | `0x1.5p+6` |
+
+Before the fix the three batch arms are **one number**. After it they are three,
+and every arm the correction was not allowed to touch is unchanged.
+
+**The portable invariant that replaced them is stronger than a capture**,
+because it is a statement about the code rather than about one machine:
+canonical training with gradient stopping **armed** takes the separate-gradient
+branch — the one that was wrong — but `engine( 0, ... )` dispatches to a `switch`
+with no `case 0`, so nothing transforms the gradient and the update must agree
+with the canonical branch's own, to within floating-point reassociation
+(`( a * eta ) / n` against `( a / n ) * eta`). Proven to guard: dropping the
+batch average from that branch fails it while the separation assertions still
+pass, and restoring the old `WeightsAccumulate` update fails the separations
+while the invariant still passes. The two are independent.
+
+The separation threshold is **0.01**, chosen from measurement rather than to
+make CI green: the smallest real gap is 0.3706 (canonical against Shanno,
+batch), so the threshold sits ~37x below the true signal while double rounding
+noise on a sum of magnitude ~23 is around 1e-14. Failures print hexadecimal, so
+future cross-platform drift stays diagnosable.
+
+**On-line CGD and Shanno are degenerate at every step size tried** — they
+collapse to zero or saturate every output. That is a property of the algorithms,
+not of the fixture: conjugate methods assume a true batch gradient, which is
+exactly why `autoalgo::pick` forces batch/epoch for both. They are smoke in the
+permanent test (they must run and stay finite); only the on-line canonical arm
+is a quality control.
+
 
 ---
 
