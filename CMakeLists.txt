@@ -262,3 +262,13 @@ add_executable(check_decay
     tests/iterative/check_decay.cpp)
 target_link_libraries(check_decay PRIVATE neuron_engine)
 add_test(NAME iterative_weight_decay COMMAND check_decay)
+
+# Unit test: the output error function, single and multiple output. Pins the
+# LMS and cross-entropy values, the cross-entropy boundary approximations, and
+# the identity that nothing previously checked -- that the multi-output
+# constructor is the single-output one summed over components. Also covers the
+# sumSquaredDifference primitive the LMS branch uses. Header-only; links the
+# numerical core.
+add_executable(check_errorfunc tests/errorfunc/check_errorfunc.cpp)
+target_link_libraries(check_errorfunc PRIVATE neuron_core)
+add_test(NAME error_function COMMAND check_errorfunc)

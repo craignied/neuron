@@ -419,6 +419,37 @@ T squared( const vector< T >& v )
 	return sum; // and return the sum of squares
 }
 
+// Sum of squared differences between two vectors: || a - b ||^2, computed
+//    without materializing a - b.
+// Example: s = sumSquaredDifference( y, o );
+//
+//    It exists so that a caller can write the least-squares error as the
+//    equation it is,
+//
+//        E = 0.5 * sumSquaredDifference( y, o );
+//
+//    without the temporary vector that `squared( y - o )` allocates. That
+//    matters because the caller is errorFunction, evaluated once per exemplar
+//    per iteration on every training path in the engine (standing rule 7: the
+//    elementwise loop belongs once, in the numerical layer, not open-coded at
+//    the call site).
+template < class T >
+T sumSquaredDifference( const vector< T >& a, const vector< T >& b )
+{
+	assert ( a.size() == b.size() ); // catch different size vectors
+
+	T sum = 0;
+
+	typename vector< T >::const_iterator pa, pb;
+	for ( pa = a.begin(), pb = b.begin(); pa != a.end(); ++pa, ++pb )
+	{
+		T d = *pa - *pb;
+		sum += d * d;
+	}
+
+	return sum;
+}
+
 // Method which computes the maximum absolute value of a vector
 // Example: a = maxabs( v );
 template < class T >

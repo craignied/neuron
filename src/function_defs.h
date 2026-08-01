@@ -118,8 +118,8 @@ public:
 	// Ctor for multiple sigmoidal output nodes, takes as arguments known values
 	//    vector y, guess vector o, argument vector x in sigmoidal transfer function
 	//    1/(1+e^{-x}) and bool flag errorType (0 = LMS, 1 = X-entropy)
-	errorFunction( vector< double > y, vector< double > o, vector< double > x,
-		bool errorType )
+	errorFunction( const vector< double >& y, const vector< double >& o,
+		const vector< double >& x, bool errorType )
 	{
 		if ( errorType ) // 1 = X-entropy
 		{
@@ -129,7 +129,7 @@ public:
 			E = 0; // initialize accumulated error
 
 			// Let's do this through iterators
-			vector< double >::iterator py, po, px;
+			vector< double >::const_iterator py, po, px;
 	
 			for ( py = y.begin(), po = o.begin(), px = x.begin(); py != y.end(); py++, po++, px++ )
 			{
@@ -153,8 +153,9 @@ public:
 		else // 0 = LMS
 		{
 			boundsErrorFlag = false;
-			vector< double > errors = y - o;
-			E = 0.5 * dotprod( errors , errors );
+			// The equation, without the temporary ( y - o ) vector this used
+			//    to allocate per exemplar per iteration (see vector_ops.h)
+			E = 0.5 * sumSquaredDifference( y, o );
 		}
 
 		defined = true; // an error has now been calculated
@@ -177,14 +178,15 @@ public:
 private:
 	double E; // numerical error result
 	bool defined, // flag indicates if an error has been calculated
-		multOutput, // false if single output, true if multiple outputs
 		boundsErrorFlag; // flag to indicate if log(o) is out of bounds
+	// ( multOutput was removed 2026-08-01: neither constructor ever set it and
+	//   nothing read it, so copy() propagated indeterminate storage. Dead state
+	//   is not made safe by initializing it. )
 
 	void copy( const errorFunction& rhs ) // copy utility
 	{
 		E = rhs.E;
 		defined = rhs.defined;
-		multOutput = rhs.multOutput;
 		boundsErrorFlag = rhs.boundsErrorFlag;
 	}
 };
