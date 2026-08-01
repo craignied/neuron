@@ -81,10 +81,12 @@ public:
 	virtual void removeInputs( const vector< unsigned >& );
 
 private:
-	unsigned nHidden, // number of hidden nodes
-		nH; // will be defined as nHidden - 1 for ease of indexing with biases,
-		    // because the last element of some vectors is a bias, will apply
-		    // certain operations only to elements 0 to nHidden - 1
+	unsigned nHidden; // number of hidden nodes
+	// ( nH, a stored copy of nHidden - 1, was removed 2026-08-01. It was a
+	//   derived value that had to be kept in sync by setHidden and
+	//   removeHidden, and copied by copy(), to say what "nHidden - 1" already
+	//   says. The two ranged calls that used it now write the domain out:
+	//   elements 0 .. nHidden - 1, i.e. every hidden unit except the bias slot. )
 
 	Matrix< double > hW, // hidden weight Matrix
 		hWup,            // hidden weight update Matrix

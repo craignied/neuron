@@ -32,7 +32,6 @@ void SimpleProp::copy( const SimpleProp& rhs )
 {
 	Network::copy( rhs ); // call immediate base object copy
 	nHidden = rhs.nHidden;
-	nH = rhs.nH;
 	hW = rhs.hW;
 	hWup = rhs.hWup;
 	y = rhs.y;
@@ -111,9 +110,6 @@ void SimpleProp::setHidden( const unsigned n )
 	assert ( n != 0 && theData.trainLoaded() );
 
 	nHidden = n;
-	nH = n - 1; // for ease of indexing with biases, because the last
-	            // element of some vectors is a bias, will apply
-	            // certain operations only to elements 0 to nHidden - 1
 
 	// Size the hidden weight, hidden weight update and gradient Matrices
 	hW.resize( nHidden, ( nInput + 1 ) );
@@ -212,7 +208,6 @@ void SimpleProp::removeHidden( const vector< unsigned >& v )
 
 	// Resize the remaining per-unit vectors to the new width
 	nHidden = newH;
-	nH = newH - 1;
 	hO.resize( nHidden + 1 );
 	hO[ nHidden ] = 1; // last hidden output is always the bias
 	oG.resize( nHidden + 1 );
@@ -589,7 +584,7 @@ double SimpleProp::innerTrainSet()
 		// last argument, and *= instead of *, is the most efficient way
 		// Note also that although oW has 1 more element than h_err,
 		// its last element will be ignored in *=
-		( func( hO, d_sigmoidal(), h_err, 0, nH ) *= o_err ) *= oW;
+		( func( hO, d_sigmoidal(), h_err, 0, nHidden - 1 ) *= o_err ) *= oW;
 
 		if ( !batchEpochFlag ) // classic on-line backpropagation
 		{
@@ -757,11 +752,11 @@ void SimpleProp::forward( Matrix< double >& data, unsigned example )
 	// transpose of a row of the input Matrix I, and apply the
 	// sigmoidal function to the resulting vector
 	// Because the last element of hO is the bias, only apply the
-	// operations to elements 0 to nHidden - 1 (nH)
+	// operations to elements 0 to nHidden - 1
 	// (Freeman & Skapura p. 102, #2 & #3)
 	// 2: $net^h_{pj}=\sum_{i=1}^Nw^h_{ji}x_{pi}+\theta^h_j$
 	// 3: $i_{pj}=f_j^h(net^h_{pj})$
-	func( hW.dotprod( I, hO, 0, nH ), sigmoidal(), hO, 0, nH );
+	func( hW.dotprod( I, hO, 0, nHidden - 1 ), sigmoidal(), hO, 0, nHidden - 1 );
 
 	// Take the dotproduct of the hidden output vector and the output
 	// weights vector, and apply the sigmoidal function to the result
