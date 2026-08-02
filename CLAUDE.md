@@ -116,6 +116,22 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
    foot) so that this particular hole cannot silently reopen; nothing equivalent guards
    the other suites, so the practice is the guard.
 
+   **Sabotage evidence is only valid if the sabotaged code was actually compiled —
+   and only if the restored code was too.** Every affected translation unit must be
+   *demonstrably* recompiled after the sabotage is introduced **and again after it
+   is restored**. Force it: a clean rebuild, or delete the precise object files, and
+   then **require the build log to show them being compiled**. Neither a clean
+   `git diff src/` nor a "Built target" line is evidence — a restored source file
+   can be older than a cached object, and the build will believe the object.
+   *Why this is a rule:* on 2026-08-01/02 the incremental build did exactly that
+   three times in two days. Twice it made correct source look broken, which merely
+   wastes an hour chasing a phantom engine defect. **Once it made a sabotaged
+   source look fine** — and that direction is the one this rule exists for: a
+   sabotage that "fails to fail" certifies a guard that is not there, which is the
+   whole hole rule 2 was written to close, arriving through the build system
+   instead of through the test. The signature is a clean source diff while the
+   tests disagree with the source you are reading.
+
    **Artifact comparisons require existence evidence.** Before comparing two generated
    files, reports, arrays, or parsed results, assert *independently* that each production
    operation succeeded and that each artifact exists and is non-empty where non-empty

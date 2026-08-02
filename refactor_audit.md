@@ -3231,6 +3231,12 @@ signature.** Every sabotage above was run through a harness that deletes the
 exact object files and then REFUSES the result unless the build log shows them
 being compiled. The object counts were checked on each run.
 
+**This is now standing rule 2's third paragraph** (2026-08-02), because a
+scratchpad harness protects one session and a rule protects the next one: a
+sabotage that "fails to fail" certifies a guard that is not there, which is
+precisely the hole rule 2 exists to close, arriving through the build system
+rather than through the test.
+
 *Prepared by Claude (Opus 5). Reviewed by Sol (2026-07-31); revised §8 in response.
 §9–§12 are the implementation record: §§8.7–8.8 and 9–10 describe work now
 committed, §11 is the D5 design, written before its code, and §12 is D9's,
