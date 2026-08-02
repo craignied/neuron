@@ -339,7 +339,7 @@ golden fixture uses `BackProp` at all.
 **The refactor (`refactor_audit.md`) is at item 12 of 14, and items 1-12 are done.**
 The audit is the working document and it is sectioned: §11 is D5's `vector_ops` bounds
 policy, §12 is D9's `Matrix` policy, §13 the DFA scaffold, §14 the DFA scoring measurement,
-§§15-18 stepwise. Read the section, not the file. What landed 2026-08-01/02:
+§§15-18 stepwise, §19 a factual correction to §§16-18. Read the section, not the file. What landed 2026-08-01/02:
 `OneHiddenNet` (above); **D9** — `Matrix::DimensionMismatch` added, all four contract
 classes derived from `std::exception`, 55 contracts enforced at the entry points, plus
 `runOnWorker` in the GUI and a `main` boundary in the CLI so a contract failure reports
@@ -350,7 +350,8 @@ owning the once-per-run bookkeeping while each model keeps its whole fit in
 (legacy bugs #13 and #14, above) before its extraction was allowed to start.
 `RegressNet` now shares `beginAnalysis` / `fitCandidate` / `reportComparison` /
 `endAnalysis` — four mechanisms, **none of which knows which direction is running** — while
-both selection loops stay whole. Remaining: 13 the GUI async launcher, 14 the measured
+both selection loops stay whole. **Next: 13, the GUI async launcher**, which is where the
+untested `runOnWorker` / CLI-boundary debt D9 left behind gets paid; then 14, the measured
 `gramRows()` / CGD-Shanno allocation work.
 
 **Interfaces.** The CLI menus are **frozen** but fully working — they remain the
@@ -466,7 +467,8 @@ so neither a unit test nor `smoke.sh` can reach them; the evidence is a recorded
 fault injection (`refactor_audit.md` §12.10). **Sol's disposition (2026-08-01): this does
 not block DFA — close it during the planned GUI async-launcher consolidation, where
 `runOnWorker` moves into a linkable unit and gets concurrency tests with it. It must be
-resolved before the refactor is declared complete.** **No GUI click-through is outstanding: Craig ran the live
+resolved before the refactor is declared complete.** **That consolidation is refactor
+item 13, and it is the next piece of work.** **No GUI click-through is outstanding: Craig ran the live
 GUI on the group-aware CV batch and approved it (2026-07-31).** The CV panel's three new
 controls — fold stratification columns/bins, group columns, and the clustered sampling
 unit — are visible, selectable and submitted by the page, after the 2026-07-30 help-text
@@ -639,6 +641,16 @@ Re-proposing one is rework, not initiative. Full reasoning at the cited HISTORY 
   silently changes published threshold behavior. "No comparable candidate" means every
   p-value *calculation* was refused, which is a different state and is refused explicitly.
   → HISTORY 2026-08-02.
+- **`stats::pX2` CAN refuse on perfectly valid arguments, so its NaN paths are live.**
+  `gammq` rejects a non-positive shape parameter or a negative argument — but it also
+  throws out of `gcf`/`gser` when they exhaust **ITMAX**, i.e. numerical non-convergence
+  on a legitimate chi-square. `tests/oracle/xor_reference_output.txt` records exactly that
+  defeating a Hosmer-Lemeshow p-value. So stepwise's `!isnan( p )` winner guards and
+  `RegressNet::requireComparablePass` are **numerical defenses, not unreachable
+  invariants** — I claimed the latter for four commits and was wrong (§19). What is
+  missing is a *portable* end-to-end fixture; **do not add a virtual hook, a production
+  callback, public mutable state, or a fixture tuned to sit on a convergence boundary** to
+  force the path. → HISTORY 2026-08-02; `refactor_audit.md` §19.
 - **A stepwise input structure must be an EXACT PARTITION of the input nodes** —
   `setNetwork` first, nothing empty, every index in range, every node exactly once.
   Overlaps, duplicates and omissions (including ones whose maximum still looks right) are
