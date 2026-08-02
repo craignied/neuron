@@ -3886,3 +3886,114 @@ be building on behavior nobody has characterized, which is the objection that
 retired two earlier sabotage proposals. Recorded here as its own candidate
 correctness item, ahead of the extraction or after it, but not smuggled into
 either.
+
+---
+
+## 17. Item 12 — input-structure validation, AS LANDED (2026-08-02)
+
+§16.4's finding, made its own fail-first correctness commit. **The extraction is
+still not started.**
+
+Sol's reason for ordering it here rather than after: the finding overlaps the
+proposed `beginAnalysis`, and it undermines §16.3's claim that the
+no-comparable call site is unreachable — because malformed structures were being
+*accepted* by the class.
+
+### 17.1 What each malformed structure actually did — measured BEFORE fixing
+
+One case per process, on a four-input dataset, against the previous
+maximum-only check.
+
+| Structure | Accepted? | What happened |
+|---|---|---|
+| `{{0},{0},{1},{2},{3}}` (overlap) | **accepted** | completed; 12 candidates; a whole, reasonable-looking analysis of *five* variables over four nodes, in which two of them are the same node compared twice |
+| `{{3}}` (omission, max correct) | **accepted** | completed; 1 candidate; analyzed a model the user never described — nodes 0-2 stay in every subnetwork and are never candidates |
+| `{{0},{3}}` (omission) | **accepted** | completed; 3 candidates; same |
+| `{{0},{1},{2},{3},{}}` (empty group) | **accepted** | completed; **one zero-df comparison**, and the empty group **won pass 0 and was removed first**, having removed nothing |
+| `{}` (empty structure) | — | **SIGSEGV, exit 139** |
+| `setInputStructure` before `setNetwork` | — | **SIGSEGV, exit 139** |
+| `{{0},{1},{2},{9}}` (out of range) | refused | the only malformed case the old check caught, and only because an out-of-range node necessarily raises the maximum |
+
+**The empty-group case is the interesting one, and it answers Sol's question.**
+Removing no nodes leaves the error unchanged, so its chi-square is
+`-2.29e-09` — i.e. `G2 <= 0`. The call site takes the `p = 1` branch **without
+calling `pX2` at all**, so no `statsErr` is thrown and `haveWinner` is set. And
+a p-value of 1 is maximal, so the empty variable wins every reverse pass it is
+in: measured selection path `4 2 3`, the empty group removed first.
+
+So: **`df == 0` was reachable through a malformed structure, and `!haveWinner`
+still was not.** §16.3's conclusion survives, but its stated reason was
+incomplete — the guard that actually prevents it is `G2 <= 0`, upstream of
+`pX2`, not the impossibility of a zero df. That is now the reason recorded in
+the header.
+
+The damage the old check permitted was therefore not a crash in the analysis but
+**three silently wrong analyses and two segmentation faults**.
+
+### 17.2 The contract
+
+`setInputStructure` now requires the groups to be an **exact partition** of the
+Network's input nodes:
+
+1. `setNetwork()` first — refuse rather than dereference null;
+2. the outer structure is not empty;
+3. no group is empty;
+4. every node index is `< nInput`;
+5. every input node appears **exactly once** across all groups.
+
+Duplicates, overlaps, omissions — including omissions whose maximum still looks
+correct — and out-of-range nodes are all refused, each with its own message.
+**The caller's order is preserved**, between groups and within one: variable
+numbering in every report, progress announcement and audit row is the caller's
+own, so normalizing here would renumber the answer. This validates; it does not
+tidy.
+
+`regress_seed42` is byte-identical and `smoke.sh` passes unchanged — every
+structure either uses is already an exact partition. The GUI needs no change
+because it validates *through* this method (`gui.cpp:3105`) and returns its
+message.
+
+### 17.3 `requireComparablePass` is an invariant defense
+
+Now that a structure must be a partition, no caller-supplied input can drive a
+whole pass into it: `gammq` refuses only on a non-positive shape parameter or a
+negative argument, a partition gives every variable at least one node, and the
+call site already handles `G2 <= 0` without calling `pX2`. What remains is an
+internal or statistical failure.
+
+So its call sites are **unreachable by construction**, no behavioral test can
+turn a sabotage of them red, and its body is characterized directly (case 59).
+This is written in the header. **No production hook exists whose purpose is to
+make the call site reachable, and none should be added.**
+
+### 17.4 Sabotages — one per rule, all seven guarded
+
+Object file deleted and the build log required to show `regressnet.cpp`
+recompiling, on introduction and again on restoration.
+
+| # | Sabotage | Cases red |
+|---|---|---|
+| V1 | the `setNetwork`-first guard removed | **process died, exit 139** — the guard is what stops a crash, so its sabotage crashes rather than merely failing |
+| V2 | the empty-structure guard removed | 37k2 |
+| V3 | the empty-group guard removed | 37j |
+| V4 | the node-range check removed | 37d |
+| V5 | the duplicate-node check removed | 37h, 37i |
+| V6 | the every-node-covered check removed | 37e, 37f, 37g |
+| V7 | validation sorts instead of preserving | 37o |
+
+**V2 needed a stronger assertion than "refused", and this is worth recording.**
+An empty structure is caught twice — by its own guard and, since it claims
+nothing, by the every-node-covered rule — so removing the specific guard left
+the case still refused and nothing red. The refusal was then *misleading*: a
+user who supplied no variables at all was told "input node 0 belongs to no
+variable". Case 37k2 asserts the message names the real problem, and the
+sabotage turns it red. A refusal that fires for the wrong stated reason is the
+same class of defect as one that does not fire.
+
+### 17.5 Fail-first evidence
+
+The new cases were run against the previous validation with `regressnet.cpp`
+demonstrably recompiled: **exit 139 (SIGSEGV)**, with 37e, 37f, 37h, 37i and 37j
+already red before the process died, and the three valid-partition controls
+green. The crash truncated the run before 37k-37o, which is itself the evidence
+those cases exist for.

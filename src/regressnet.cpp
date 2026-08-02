@@ -139,23 +139,111 @@ void RegressNet::setThreshold( double t )
 // Accessor for data structure representing input variables,
 //    takes vector of vector of unsigned as argument
 //    Note: setNetwork must be called first
+// THE VARIABLE GROUPS MUST BE AN EXACT PARTITION OF THE NETWORK'S INPUT NODES:
+//    every node in exactly one group, no group empty, no node outside the
+//    network, and nothing left over.
+//
+//    This used to check one thing -- that the LARGEST node mentioned equalled
+//    getInput() - 1 -- which admits three malformed structures and dereferences
+//    a null network. Measured against the previous code on a four-input
+//    dataset (audit section 17.1):
+//
+//    * `{{0},{0},{1},{2},{3}}` was ACCEPTED and produced a complete, entirely
+//      reasonable-looking analysis of five variables over four nodes, in which
+//      two "different" variables are the same node compared twice.
+//    * `{{3}}` and `{{0},{3}}` were ACCEPTED and silently analyzed a model the
+//      user never described -- the unmentioned nodes stay in every subnetwork
+//      and are never candidates.
+//    * `{{0},{1},{2},{3},{}}` was ACCEPTED, and the empty group HIJACKED THE
+//      SELECTION: removing no nodes leaves the error unchanged, so its
+//      chi-square is 0, its p-value is 1, and a p-value of 1 wins every reverse
+//      pass. It was removed first, on every run, having removed nothing.
+//    * `{}` dereferenced max_element's end iterator -- SIGSEGV.
+//    * calling this before setNetwork() dereferenced a null netPtr -- SIGSEGV.
+//
+//    Only the out-of-range case was refused, and only because an out-of-range
+//    node necessarily raises the maximum.
+//
+//    The caller's order is PRESERVED, both between groups and within one:
+//    variable numbering in every report, progress announcement and audit-trail
+//    row is the caller's own, and normalizing it here would renumber the
+//    answer. This validates; it does not tidy.
 void RegressNet::setInputStructure( const vector< vector< unsigned > >& v_in )
-{ 
-	// Find maximum element of vector structure
-	vector< unsigned > v_max = *max_element( v_in.begin(),
-		v_in.end() );
-	unsigned max = *max_element( v_max.begin(), v_max.end() ),
-		// What the max should be
-		correct = netPtr->getDataSet().getInput() - 1;
-				
-	// Check to make sure maximum element is correct
-	if ( max != correct )
+{
+	// Refuse rather than dereference: setNetwork() supplies the node count that
+	//    every rule below is stated against
+	if ( !netPtr )
 	{
-		errorOut << errorString << "maximum node value not " << correct;
+		errorOut.str( "" );
+		errorOut << errorString
+			<< "the Network must be set before its input structure";
 		throw RegressNetErr( errorOut.str().c_str() );
 	}
-	else
-		variable_defs = v_in;
+
+	const unsigned nInput = netPtr->getDataSet().getInput();
+
+	if ( v_in.empty() )
+	{
+		errorOut.str( "" );
+		errorOut << errorString << "the input structure names no variables";
+		throw RegressNetErr( errorOut.str().c_str() );
+	}
+
+	// Which variable claims each input node, or "none yet". Plain bookkeeping
+	//    over node indices -- there is no arithmetic here for the class layer
+	//    to own (rule 4); the numerical work is elsewhere.
+	vector< bool > claimed( nInput, false );
+
+	for ( unsigned i = 0; i < v_in.size(); i++ )
+	{
+		if ( v_in[ i ].empty() )
+		{
+			errorOut.str( "" );
+			errorOut << errorString << "variable " << i << " has no input nodes";
+			throw RegressNetErr( errorOut.str().c_str() );
+		}
+
+		for ( unsigned k = 0; k < v_in[ i ].size(); k++ )
+		{
+			const unsigned node = v_in[ i ][ k ];
+
+			if ( node >= nInput )
+			{
+				errorOut.str( "" );
+				errorOut << errorString << "variable " << i << " names node "
+					<< node << ", which is not an input node of this Network (0"
+					<< ( nInput ? " to " : "" );
+				if ( nInput )
+					errorOut << nInput - 1;
+				errorOut << ")";
+				throw RegressNetErr( errorOut.str().c_str() );
+			}
+
+			if ( claimed[ node ] )
+			{
+				errorOut.str( "" );
+				errorOut << errorString << "input node " << node
+					<< " belongs to more than one variable";
+				throw RegressNetErr( errorOut.str().c_str() );
+			}
+
+			claimed[ node ] = true;
+		}
+	}
+
+	// ... and nothing left over. An omission is not detectable from the maximum
+	//    node alone: {{3}} on a four-input Network has the correct maximum.
+	for ( unsigned node = 0; node < nInput; node++ )
+		if ( !claimed[ node ] )
+		{
+			errorOut.str( "" );
+			errorOut << errorString << "input node " << node
+				<< " belongs to no variable; every input node must appear "
+				<< "exactly once";
+			throw RegressNetErr( errorOut.str().c_str() );
+		}
+
+	variable_defs = v_in; // the caller's order, unchanged
 }
 
 // Accessor for Network, takes Network & last error as arguments

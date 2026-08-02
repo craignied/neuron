@@ -158,6 +158,21 @@ protected:
 	//    maximally significant, the candidate WAS compared, and it wins its pass
 	//    if it is the first one. This is the case where stats::pX2 itself
 	//    refused every time.
+	//
+	//    AN INVARIANT DEFENSE, NOT A PUBLIC-INPUT BRANCH. Since the input
+	//    structure must be an exact partition (see setInputStructure), no
+	//    caller-supplied structure can drive a whole pass into it: pX2 is
+	//    gammq, which refuses only on a non-positive shape parameter or a
+	//    negative argument -- df == 0 or G2 < 0 -- and a partition gives every
+	//    variable at least one node, while the call site already handles
+	//    G2 <= 0 without calling pX2 at all. What remains is an internal or
+	//    statistical failure, and this refuses it rather than naming a winner
+	//    that does not exist.
+	//
+	//    So its call sites are unreachable by construction and no behavioral
+	//    test can turn a sabotage of them red; the BODY is characterized
+	//    directly instead (check_regressnet case 59). Do not add a production
+	//    hook whose only purpose is to make the call site reachable.
 	void requireComparablePass( unsigned step );
 
 private:

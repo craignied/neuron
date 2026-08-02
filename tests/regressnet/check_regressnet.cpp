@@ -873,25 +873,114 @@ static void test_invalid_structure()
 	Logistic net;
 	fitSource( net, d );
 
-	// setInputStructure requires the maximum node mentioned to be exactly
-	//    getInput() - 1: every input node must be accounted for, exactly once
-	unsigned refusedHigh = 0, refusedLow = 0;
+	// THE CONTRACT: the groups must be an EXACT PARTITION of the input nodes.
+	//    Every node in exactly one group, no group empty, no node outside the
+	//    Network, nothing left over. Each of these must produce a RegressNetErr
+	//    -- not a crash, and not some unrelated exception, which is why the
+	//    helper distinguishes the three outcomes rather than catching (...).
+	enum Outcome { REFUSED, ACCEPTED, WRONG_EXCEPTION };
+	struct Check {
+		static Outcome of( Network& n, const vector< vector< unsigned > >& defs )
+		{
+			RegressNet r;
+			r.setNetwork( &n, 1.0 );
+			try { r.setInputStructure( defs ); }
+			catch ( RegressNet::RegressNetErr& ) { return REFUSED; }
+			catch ( ... ) { return WRONG_EXCEPTION; }
+			return ACCEPTED;
+		}
+	};
+
+	// The control FIRST: a valid partition must be accepted, or every "refused"
+	//    below is satisfied by a function that refuses everything.
+	expect( Check::of( net, singles( 4 ) ) == ACCEPTED,
+		"37a: a valid singleton partition is accepted (control)" );
+	vector< vector< unsigned > > grouped;
+	grouped.push_back( { 0, 1 } );
+	grouped.push_back( { 2 } );
+	grouped.push_back( { 3 } );
+	expect( Check::of( net, grouped ) == ACCEPTED,
+		"37b: a valid grouped partition is accepted (control)" );
+	expect( Check::of( net, util::variable_parse( "0-1;2;3" ) ) == ACCEPTED,
+		"37c: the same partition written as a range is accepted (control)" );
+
+	// Out of range. This was the ONE malformed case the old maximum-only check
+	//    caught, and only because an out-of-range node raises the maximum.
+	vector< vector< unsigned > > tooHigh = singles( 4 );
+	tooHigh.push_back( { 9 } );
+	expect( Check::of( net, tooHigh ) == REFUSED,
+		"37d: a structure naming a node the Network does not have is refused" );
+
+	// OMISSION WITH A CORRECT MAXIMUM. `{{3}}` on a four-input Network has
+	//    maximum 3, which is exactly what the old check demanded -- and it was
+	//    accepted, silently analyzing a model the user never described.
+	vector< vector< unsigned > > onlyLast;
+	onlyLast.push_back( { 3 } );
+	expect( Check::of( net, onlyLast ) == REFUSED,
+		"37e: an omission whose maximum still looks valid is refused" );
+	vector< vector< unsigned > > twoOfFour;
+	twoOfFour.push_back( { 0 } );
+	twoOfFour.push_back( { 3 } );
+	expect( Check::of( net, twoOfFour ) == REFUSED,
+		"37f: a structure covering only some input nodes is refused" );
+	expect( Check::of( net, singles( 3 ) ) == REFUSED,
+		"37g: a structure whose maximum is too low is refused" );
+
+	// OVERLAP. Node 0 in two variables was accepted and produced a complete
+	//    analysis of five variables over four nodes.
+	vector< vector< unsigned > > overlapping;
+	overlapping.push_back( { 0 } );
+	overlapping.push_back( { 0 } );
+	overlapping.push_back( { 1 } );
+	overlapping.push_back( { 2 } );
+	overlapping.push_back( { 3 } );
+	expect( Check::of( net, overlapping ) == REFUSED,
+		"37h: a node belonging to two variables is refused" );
+	vector< vector< unsigned > > repeatedWithin;
+	repeatedWithin.push_back( { 0, 0 } );
+	repeatedWithin.push_back( { 1 } );
+	repeatedWithin.push_back( { 2 } );
+	repeatedWithin.push_back( { 3 } );
+	expect( Check::of( net, repeatedWithin ) == REFUSED,
+		"37i: a node repeated inside one variable is refused" );
+
+	// AN EMPTY GROUP. It removed no nodes, so its chi-square was 0, its p-value
+	//    was 1, and a p-value of 1 wins every reverse pass -- it was selected
+	//    first on every run, having removed nothing.
+	vector< vector< unsigned > > emptyGroup = singles( 4 );
+	emptyGroup.push_back( vector< unsigned >() );
+	expect( Check::of( net, emptyGroup ) == REFUSED,
+		"37j: a variable with no input nodes is refused" );
+
+	// AN EMPTY STRUCTURE. max_element over an empty range dereferenced its end
+	//    iterator: SIGSEGV.
+	expect( Check::of( net, vector< vector< unsigned > >() ) == REFUSED,
+		"37k: an empty input structure is refused" );
+	// ... and it must say THAT, rather than reporting the first uncovered node.
+	//     An empty structure is caught twice over -- by its own guard and, since
+	//     it claims nothing, by the every-node-covered rule -- so without this
+	//     the specific guard is unguarded, and a user who supplied no variables
+	//     at all would be told "input node 0 belongs to no variable".
 	{
 		RegressNet r;
 		r.setNetwork( &net, 1.0 );
-		vector< vector< unsigned > > tooHigh = singles( 4 );
-		tooHigh.push_back( { 9 } );                       // node 9 does not exist
-		try { r.setInputStructure( tooHigh ); }
-		catch ( RegressNet::RegressNetErr& ) { refusedHigh = 1; }
+		string message;
+		try { r.setInputStructure( vector< vector< unsigned > >() ); }
+		catch ( RegressNet::RegressNetErr& e ) { message = e.what(); }
+		expect( has( message, "names no variables" ),
+			"37k2: ... and the refusal names the real problem" );
 	}
+
+	// NO NETWORK AT ALL. netPtr was dereferenced without a null check: SIGSEGV.
+	unsigned refusedNoNetwork = 0, wrongException = 0;
 	{
-		RegressNet r;
-		r.setNetwork( &net, 1.0 );
-		try { r.setInputStructure( singles( 3 ) ); }       // node 3 unaccounted for
-		catch ( RegressNet::RegressNetErr& ) { refusedLow = 1; }
+		RegressNet r; // setNetwork deliberately NOT called
+		try { r.setInputStructure( singles( 4 ) ); }
+		catch ( RegressNet::RegressNetErr& ) { refusedNoNetwork = 1; }
+		catch ( ... ) { wrongException = 1; }
 	}
-	expect( refusedHigh == 1, "37a: a structure naming a node that does not exist is refused" );
-	expect( refusedLow == 1, "37b: a structure that omits an input node is refused" );
+	expect( refusedNoNetwork == 1 && wrongException == 0,
+		"37l: setting a structure before the Network is refused, not a crash" );
 
 	// An analysis with no structure at all is refused too
 	unsigned refusedEmpty = 0;
@@ -902,7 +991,32 @@ static void test_invalid_structure()
 		try { r.reverse_regress(); }
 		catch ( RegressNet::RegressNetErr& ) { refusedEmpty = 1; }
 	}
-	expect( refusedEmpty == 1, "37c: an analysis with no input structure is refused" );
+	expect( refusedEmpty == 1, "37m: an analysis with no input structure is refused" );
+
+	// ORDER IS PRESERVED, NOT NORMALIZED. Validation must not sort or renumber:
+	//    variable numbering in every report and audit row is the caller's own.
+	vector< vector< unsigned > > reversedOrder;
+	reversedOrder.push_back( { 3, 2 } ); // descending within the group, too
+	reversedOrder.push_back( { 1 } );
+	reversedOrder.push_back( { 0 } );
+	{
+		RegressNet r;
+		r.setNetwork( &net, 1.0 );
+		unsigned accepted = 0;
+		try { r.setInputStructure( reversedOrder ); accepted = 1; }
+		catch ( RegressNet::RegressNetErr& ) {}
+		expect( accepted == 1,
+			"37n: a partition given in any order is accepted (control)" );
+	}
+	{
+		DataSet d2 = mixedData();
+		Logistic net2;
+		double e2 = fitSource( net2, d2 );
+		Run r = regress( net2, e2, reversedOrder, false, 0.05 );
+		expect( !r.candidates.empty()
+			&& r.candidates[ 0 ].inputs == vector< unsigned >( { 3, 2 } ),
+			"37o: the caller's group order and within-group order are preserved" );
+	}
 }
 
 // ---------------------------------------------------------------------------
