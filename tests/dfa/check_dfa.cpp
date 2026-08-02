@@ -165,16 +165,42 @@ static DataSet multiData( unsigned n = 150 )
 	return d;
 }
 
-// A dataset whose second input is an exact multiple of the first: the covariance
-//    matrix is singular, and the inverse must refuse.
-static DataSet collinearData( unsigned n = 60 )
+// A dataset with a ZERO-VARIANCE input column: the covariance matrix has an
+//    exactly-zero row, on every platform, so the inverse must refuse.
+//
+// THIS REPLACES A FIXTURE THAT WAS NOT PORTABLY SINGULAR, and the difference is
+// the whole point. The first version made column 1 exactly 2x column 0 --
+// singular in exact arithmetic, but with no zero row, so detection depended on
+// the elimination arriving at exactly 0. `ludcmp` has two singularity tests
+// (matrix.cpp): a structural one, `big == 0`, when a whole row is zero; and an
+// arithmetic one, `L( j, j ) == 0`, after eliminating. The collinear fixture
+// could only reach the SECOND, and whether the residual cancels to exactly zero
+// depends on how the covariance sums were accumulated -- FP contraction into
+// FMA, vectorization and reassociation all differ between clang on arm64,
+// gcc on x86-64 and MSVC. On macOS it cancelled and LDFA refused; on Ubuntu it
+// did not, LDFA inverted a nearly-singular matrix, and the assertion failed. CI
+// caught what one machine could not.
+//
+// A constant column reaches the FIRST test instead. Every deviation from the
+// column mean is exactly 0.0, so every covariance product with that column is
+// exactly 0.0 and every sum of them is exactly 0.0 -- true under any IEEE
+// rounding mode, with or without FMA, in any summation order, because 0*x = 0
+// and 0+0 = 0 are exact. The value 0.0 is used rather than any other constant so
+// that the column's sum is exactly 0 for ANY row count, making the mean exactly
+// 0 without needing an argument about representability. (Measured on this
+// fixture: V(0,0) = 0.225009..., V(0,1) = V(1,1) = 0 exactly.)
+//
+// It is also a real degeneracy rather than a contrivance: a predictor that is
+// identically zero in the training data -- a rare indicator with no positive
+// rows -- is the same case DataSet::normalize documents as bug B4.
+static DataSet singularData( unsigned n = 60 )
 {
 	Matrix< double > raw( n, 3 );
 	for ( unsigned i = 0; i < n; i++ )
 	{
 		double t = ( ( i * 31 ) % 71 ) / 70.0;
-		raw( i, 0 ) = t + ( i % 2 ? 0.8 : 0.0 );
-		raw( i, 1 ) = 2.0 * raw( i, 0 ); // exactly collinear
+		raw( i, 0 ) = t + ( i % 2 ? 0.8 : 0.0 ); // separates the classes
+		raw( i, 1 ) = 0.0;                       // ZERO VARIANCE, exactly
 		raw( i, 2 ) = i % 2;
 	}
 	DataSet d;
@@ -460,12 +486,42 @@ static void test_history_and_lastop( const char* who, const char* stem )
 
 // --- 8. the refusal paths ---------------------------------------------------
 
+// THE FIXTURE PROVES ITSELF, on whatever platform is running. If this ever
+// fails, the two refusal cases below are testing nothing and say so here first,
+// rather than passing for the wrong reason or failing mysteriously as the
+// collinear fixture did on Ubuntu.
+static void test_fixture_is_singular()
+{
+	cout << "-- the singular fixture is exactly singular --" << endl;
+
+	DataSet d = singularData();
+	Matrix< double >& T = d.getTrainMatrix();
+	Matrix< double > inputs = T.submatrix( 0, T.rows() - 1, 0, 1 );
+	Matrix< double > V = inputs.covariance();
+
+	// EXACTLY zero, not nearly: the constant column contributes 0*x to every
+	//    product and 0 to every sum, which no rounding mode can disturb.
+	expect( V( 1, 0 ) == 0.0 && V( 1, 1 ) == 0.0,
+		"the covariance row of the zero-variance column is exactly zero" );
+	expect( V( 0, 0 ) > 0.0,
+		"...while the other column still carries variance" );
+
+	bool threwSingular = false, threwOther = false;
+	try { Matrix< double > I = V.inverse(); ( void ) I; }
+	catch ( Matrix< double >::Singular& ) { threwSingular = true; }
+	catch ( ... ) { threwOther = true; }
+
+	expect( threwSingular, "inverting it throws Matrix::Singular" );
+	expect( !threwOther, "...and not some other exception, which would mean the "
+		"refusal below is testing the wrong mechanism" );
+}
+
 template < class DFAMODEL >
 static void test_singular( const char* who, const char* message )
 {
 	cout << "-- " << who << ": a singular covariance --" << endl;
 
-	DataSet d = collinearData();
+	DataSet d = singularData();
 	DFAMODEL m;
 	string said = runDFA( m, d );
 
@@ -636,6 +692,7 @@ int main()
 	test_history_and_lastop< LDFA >( "LDFA", "ldfa" );
 	test_history_and_lastop< QDFA >( "QDFA", "qdfa" );
 
+	test_fixture_is_singular();
 	test_singular< LDFA >( "LDFA", "Can't do LDFA" );
 	test_singular< QDFA >( "QDFA", "Can't do QDFA" );
 

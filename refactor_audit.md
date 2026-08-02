@@ -2667,6 +2667,47 @@ sabotages above show the guard bites in both directions.
    which is the form a caller can actually reach (the GUI takes both from the same
    place), and the pointer sabotage then fails exactly the intended assertion.
 
+**The singular fixture was WRONG, and CI on two platforms is what found it.**
+`db435f7` passed everything locally on macOS and failed `dfa_characterization`
+on **Ubuntu and Windows**: LDFA did not refuse the fixture there, so both the
+`"Can't do LDFA"` assertion and the "no accuracy reported" assertion failed.
+(QDFA refused on Ubuntu — equally by luck.)
+
+*Why the original fixture was not deterministically singular.* It made column 1
+exactly `2 x` column 0: singular in exact arithmetic, but with **no zero row**.
+`ludcmp` has two singularity tests — a **structural** one, `big == 0`, when a
+whole row is zero, and an **arithmetic** one, `L( j, j ) == 0`, after
+eliminating. A collinear pair can only reach the second, and whether the
+residual cancels to exactly zero depends on how the covariance sums were
+accumulated: FP contraction into FMA, vectorization and reassociation all differ
+between clang on arm64, gcc on x86-64 and MSVC. The fixture was therefore a bet
+on one toolchain's rounding, dressed as mathematics.
+
+*Why the replacement is.* A **zero-variance column** reaches the structural test
+instead. Every deviation from that column's mean is exactly `0.0`, so every
+covariance product involving it is exactly `0.0` and every sum of them is exactly
+`0.0` — true under any IEEE rounding mode, with or without FMA, in any summation
+order, because `0*x = 0` and `0+0 = 0` are exact. The constant is `0.0` rather
+than any other value so the column's sum is exactly zero for **any** row count,
+making the mean exactly zero without an argument about representability.
+Measured: `V(0,0) = 0.225009...`, `V(0,1) = V(1,1) = 0` exactly. It is a real
+degeneracy too — a predictor identically zero in the training data is the case
+`DataSet::normalize` already documents as bug B4.
+
+*And the fixture now proves itself.* Four assertions check, on whatever platform
+is running, that the covariance row is exactly zero, that the other column still
+carries variance, that inverting throws `Matrix::Singular`, and that it is **not**
+some other exception — so the two refusal cases can never again pass for the
+wrong reason or fail mysteriously. The suppression sabotage was re-run against
+the new fixture: silencing LDFA's refusal fails exactly its assertion, and
+silencing QDFA's fails exactly its own.
+
+*Two process notes, both mine.* I pushed `db435f7` without waiting for CI, having
+just been told to wait for it on the previous commit; the failure was public for
+that reason. And `setRawMatrix` / `setTrainMatrix` turn out **not** to normalize
+at all — I had reasoned about `inLowerLimit` affecting the constant column before
+measuring, and the measurement showed the raw value passes straight through.
+
 **One sabotage that changed nothing, and why that is informative.** Adding a
 `metricsReport` call to the multi-output path did not move a single assertion —
 because `DataSet::metricsReport` refuses more than one output at its own entry

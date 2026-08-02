@@ -3469,3 +3469,33 @@ we ship.**
     multi-output path moved no assertion, because `DataSet::metricsReport` refuses more than
     one output at its own entry. So "no ROC for multi-output" is enforced by `DataSet`, not
     by the DFA classes, and the extraction cannot lose it by accident.
+
+**2026-08-01 (later still) — the DFA characterization's singular fixture was a bet on one
+toolchain's rounding. CI on two platforms found it.**
+
+  - `db435f7` was green on macOS and **failed on Ubuntu and Windows**: LDFA did not refuse
+    the "singular" fixture there, so both its refusal assertions failed. I had pushed it
+    without waiting for CI, one commit after being told to wait for CI.
+  - **Why it was not deterministically singular.** The fixture made column 1 exactly `2 x`
+    column 0 — singular in exact arithmetic, but with **no zero row**. `ludcmp` has two
+    singularity tests: a structural `big == 0` when a whole row is zero, and an arithmetic
+    `L( j, j ) == 0` after eliminating. Collinearity can only reach the second, and whether
+    that residual cancels to exactly zero depends on how the covariance sums were
+    accumulated — FP contraction into FMA, vectorization and reassociation all differ
+    between clang on arm64, gcc on x86-64 and MSVC.
+  - **Why the replacement is.** A **zero-variance column** reaches the structural test.
+    Every deviation from that column's mean is exactly `0.0`, so every covariance product
+    involving it is exactly `0.0` and every sum of them is exactly `0.0` — under any IEEE
+    rounding mode, with or without FMA, in any order, because `0*x = 0` and `0+0 = 0` are
+    exact. The constant is `0.0` so the sum is exactly zero for any row count. Measured:
+    `V(0,0) = 0.225009...`, `V(0,1) = V(1,1) = 0` exactly. It is also a real degeneracy: a
+    predictor identically zero in training is bug B4's case, which `DataSet::normalize`
+    already documents.
+  - **The fixture now proves itself** — four assertions that the covariance row is exactly
+    zero, that the other column still varies, that inverting throws `Matrix::Singular`, and
+    that it is not some other exception. The refusal cases can no longer pass for the wrong
+    reason. Both suppression sabotages were re-run and each fails exactly its own assertion.
+  - **A measurement corrected a second assumption**: `setRawMatrix` / `setTrainMatrix` do
+    **not** normalize, so the `inLowerLimit` reasoning I was about to rely on was moot — the
+    raw constant passes straight through. Reasoned first, measured second, and the
+    measurement was what settled it. Rule 3, again.
