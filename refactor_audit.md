@@ -2715,6 +2715,286 @@ and writes nothing. So the "no ROC for multi-output" property is enforced by
 `DataSet`, not by the DFA classes, and an extraction cannot lose it by accident.
 Worth knowing before designing the shared orchestration.
 
+---
+
+## 13. The DFA extraction — PROPOSAL ONLY, nothing implemented
+
+Written after the characterization (`ad7ab14`, green on all three platforms) and
+before any implementation change, to Sol's eight-point specification. **No source
+file is modified by this section.**
+
+### 13.1 What was measured, not assumed
+
+Both method pairs were diffed with comments and whitespace discounted:
+
+| pair | LDFA | QDFA | code lines that differ |
+|---|---|---|---|
+| `train()` | 54 lines (36 code) | 61 lines | **18** — and every one of them is the FIT |
+| `reportAccuracy()` | 112 lines (70 code) | 111 lines | **22** — and every one of them is a DISCRIMINANT or `max_element`/`min_element` |
+
+That split is the whole proposal: `train()`'s difference is a block that runs
+**once per run**, and `reportAccuracy()`'s difference is inside loops that run
+**once per exemplar**. They are therefore treated separately, per Sol's item 6.
+
+### 13.2 Ownership table (item 1)
+
+**Moves into `DFA` — the once-per-run scaffold, and nothing else.**
+
+| Element | Why it may move |
+|---|---|
+| the two `ostringstream`s and their flush | Pure reporting mechanics; byte-identical in both. |
+| `"I'm running " << objType << ":"` | The object's own name, which it already owns. Not a parameterization of mathematics — the same device `OneHiddenNet::randomize()` already uses. Produces `"I'm running LDFA:"` and `"I'm running QDFA:"` exactly, and the characterization asserts both strings. |
+| `outputHeader( screenStream )` | Already `DFA`'s own method, called identically. |
+| the `try` / `catch ( Matrix< double >::Singular& )` and `"Can't do " << objType << ": " << e.what()` | Identical control flow; identical message modulo `objType`. The characterization asserts both texts and that no accuracy follows a refusal. |
+| the single `reportAccuracy( screenStream )` call | Today it is written twice, once inside each arity branch of each model — four copies. The fit no longer branches at the scaffold level, so one call after the fit is the same order of operations. |
+| `screenStream << endl`, the file-stream copy, `util::screen()` write | Identical. |
+| `addHistory( fileStream )`, `writeLastop( fileStream.str() )`, `return -1` | Identical; `Model` already owns both writers. |
+
+**Stays in `LDFA` — the linear fit, entire.**
+
+`C = Train.covariance()`, `S = C.inverse()`, and both constant forms, written
+out: `K0 = 0.5 * dotprod( U0, S.dotprod( U0 ) ) - log( P0 )` and its `U1`
+sibling, and the n-output `K[ o ] = 0.5 * dotprod( U[ o ], S.dotprod( U[ o ] ) )
+- log( P[ o ] )`. **One pooled covariance** is a property of the linear model and
+appears nowhere else.
+
+**Stays in `QDFA` — the quadratic fit, entire.**
+
+`C0 = D0.covariance()`, `C1 = D1.covariance()`, `S0 = C0.inverse( Det0 )`, its
+`S1` sibling, `K0 = log( Det0 ) - log( P0 )`, `K1`, and the n-output loop over
+`C.push_back( D[ o ].covariance() )` etc. **Per-class covariances and their
+determinants** are the quadratic model's, and the determinant term is why its
+constants have a different form.
+
+**Stays in both, untouched by this commit — `reportAccuracy()` in full**, both
+copies, including every discriminant expression and both `max_element` /
+`min_element` selections. See §13.5.
+
+### 13.3 Signatures and call flow (item 2)
+
+Two declarations change. One is added.
+
+```cpp
+// dfa.h
+class DFA : public Model {
+public:
+    // Was pure virtual. Becomes the shared scaffold -- NON-virtual, because
+    //    there is nothing left for a subclass to override in it.
+    double train();                                   // was: = 0
+
+    virtual void reportAccuracy( ostream& ) = 0;      // UNCHANGED
+
+protected:
+    // The fit, and only the fit: covariances, inverses, constants. Runs ONCE
+    //    per train(). Each model writes its own published formulae here.
+    virtual void fitDiscriminant() = 0;               // NEW
+};
+```
+
+```cpp
+// ldfa.h / qdfa.h -- train() disappears from both; fitDiscriminant appears
+    virtual void reportAccuracy( ostream& );          // unchanged
+protected:
+    virtual void fitDiscriminant();                   // replaces train()
+```
+
+Call flow, once per run, top to bottom:
+
+```
+caller -> DFA::train()                       non-virtual
+            ostringstream setup
+            "I'm running " << objType << ":"
+            outputHeader( screenStream )     virtual, 1x   (already virtual today)
+            try {
+              fitDiscriminant()              virtual, 1x   (NEW)
+              reportAccuracy( screenStream ) virtual, 1x   (already virtual today)
+            }
+            catch ( Matrix<double>::Singular& )
+              "Can't do " << objType << ": " << what()
+            endl; file copy; screen write
+            addHistory( fileStream )
+            writeLastop( fileStream.str() )
+            return -1
+```
+
+One behavioral ordering note, stated because it is the only thing that moves:
+today `reportAccuracy` is called *inside* each arity branch, immediately after
+that branch's constants are computed; afterwards it is called once, immediately
+after `fitDiscriminant()` returns. The sequence fit-then-report is unchanged, and
+so is what the `try` block covers.
+
+### 13.4 Virtual calls, and their frequency (item 3)
+
+| call | virtual? | executions per `train()` |
+|---|---|---|
+| `outputHeader` | yes, already | 1 |
+| `fitDiscriminant` | yes, **new** | 1 |
+| `reportAccuracy` | yes, already | 1 |
+
+**One new virtual call per run.** Nothing is introduced inside any loop:
+per-exemplar dispatch is prohibited and this proposal adds none, because the
+per-exemplar code is not being shared at all (§13.5). `DFA::train()` itself
+becomes non-virtual — a subclass has no reason to override the scaffold, and
+leaving it virtual would invite exactly that.
+
+### 13.5 The per-exemplar loops are NOT shared here (item 6)
+
+`reportAccuracy()`'s 22 differing lines are the discriminants themselves and the
+`max_element` / `min_element` selection, all inside loops over exemplars. Every
+mechanism that could share those loops is disqualified:
+
+- **A virtual `score( X )` per exemplar** — per-exemplar virtual dispatch.
+  Prohibited outright, and it is also rule 7's named failure mode.
+- **A template or CRTP on a scoring functor** — zero-overhead, but it moves the
+  discriminant out of `LDFA::reportAccuracy` into a functor and makes
+  larger-versus-smaller a template parameter. That is the comparator flag in
+  another costume; the formulae stop being readable where the model is.
+- **A shared loop with a passed comparator or sign** — explicitly forbidden.
+
+So the recommendation is to **leave both `reportAccuracy` bodies exactly as they
+are**, and revisit them in the later measured scoring phase, where the question
+is posed as performance with a measurement attached rather than as line count.
+The honest consequence: this extraction removes far less duplication than
+§2.4/§2.5 imagined, because most of the duplication is in the half that may not
+be shared. That is the correct outcome, not a shortfall.
+
+*One sub-option, offered rather than assumed.* Inside the multi-output branch of
+each `reportAccuracy` there is an identical **once-per-run** block: size
+`testClasses`, take the output submatrix, call `rowindex`, and print
+`"Sorry, that test set had bad output columns."` on failure. It is ~8 identical
+lines and touches no discriminant. It could become
+`bool DFA::classesFromTestOutputs()`. It is *not* included in the recommendation
+above because it edits the same function this section otherwise defers, and
+Sol may prefer one function per commit. Sol's call.
+
+### 13.6 The mathematics stays visible (items 4 and 5)
+
+After the extraction, reading `ldfa.cpp` shows, with nothing between them and the
+reader:
+
+- the pooled covariance and its inverse;
+- `K0 = 0.5 * dotprod( U0, S.dotprod( U0 ) ) - log( P0 )`;
+- in `reportAccuracy`, unchanged: `d0 = dotprod( U0, S.dotprod( X ) ) - K0`,
+  `d1 = ...`, `sigmoidal()( d1 - d0 )`, and `max_element` — **the larger
+  discriminant wins**.
+
+and `qdfa.cpp` shows:
+
+- the per-class covariances, their inverses and determinants;
+- `K0 = log( Det0 ) - log( P0 )`;
+- in `reportAccuracy`, unchanged: `d0 = dotprod( X - U0, S0.dotprod( X - U0 ) ) +
+  K0`, `d1 = ...`, `sigmoidal()( d0 - d1 )`, and `min_element` — **the smaller
+  discriminant wins**.
+
+**No `largerWins()`, no sign flag, no comparator, no formula descriptor, no
+generic indexing convention, no type switch** appears anywhere in `DFA`. The only
+thing the shared scaffold reads from the concrete class is `objType`, which is
+its name, and the only thing it calls is `fitDiscriminant()`, which is the
+model's own code. `DFA` after the change contains no discriminant arithmetic at
+all — it contains streams, a `try`, and three virtual calls.
+
+### 13.7 Sabotage plan (item 7)
+
+Each newly shared mechanism, with the characterization assertions expected to go
+red. To be run and recorded before the commit is offered.
+
+| # | sabotage of the shared scaffold | expected failures |
+|---|---|---|
+| 1 | hard-code the banner to `"I'm running LDFA:"` for both | 1 — *QDFA: the report names itself* |
+| 2 | hard-code the refusal to `"Can't do LDFA: "` | 1 — *QDFA: a singular covariance is refused* |
+| 3 | remove the `catch ( Singular& )` entirely | both refusal cases, and the run terminates rather than reporting — 4 assertions plus a non-zero exit |
+| 4 | call `reportAccuracy()` **before** `fitDiscriminant()` | the direction and separation assertions for both models (4), since the constants are not yet computed |
+| 5 | drop `writeLastop( fileStream.str() )` | 2 — the last-operation content assertions, for both models |
+| 6 | drop `addHistory( fileStream )` | 2 — the history-file content assertions |
+| 7 | give `DFA` a non-virtual `fitDiscriminant` so `QDFA`'s is never reached | QDFA's direction, separation and multi-output accuracy assertions |
+
+Sabotage 4 is the important one: it is the only way the scaffold could silently
+break the *order* the models depend on, and nothing but the direction assertions
+would notice.
+
+### 13.8 Expected reduction and documentation (item 8)
+
+**Source.** `LDFA::train` (54 lines) and `QDFA::train` (61) are replaced by
+`DFA::train` (~40 with its comments) plus `LDFA::fitDiscriminant` (~22) and
+`QDFA::fitDiscriminant` (~32). **Net ≈ −21 lines**, and one authoritative copy of
+the scaffold instead of two. Deliberately modest: the large duplication is in
+`reportAccuracy`, which §13.5 declines to touch. If the §13.5 sub-option is
+included, a further ~8 lines.
+
+**Documentation, in the same commit**: `refactor_audit.md` item 11 marked with
+what shipped and what was deferred and why; the Manifest — `DFA` currently has no
+Chapter 12 object entry at all, only a line in the architecture chapter's model
+list, so this adds one covering `train()` as the shared scaffold,
+`fitDiscriminant()` and `reportAccuracy()` as the per-class contracts, and the
+statement that the discriminant mathematics is per-class by policy — plus a
+`docs/manifest.pdf` rebuild with the affected pages inspected; `docs/HISTORY.md`;
+and `CLAUDE.md` only if the roadmap line changes.
+
+### 13.9 A separate possible defect, recorded and NOT touched here
+
+Sol asked for this to be recorded rather than quietly fixed. It is worse than
+suspected, so the measurement is given in full.
+
+**Measured, by a read-only probe (no engine source touched), on a 3-class
+fixture where `nOutput = 3` and every vector should stay at 3:**
+
+```
+QDFA after setDataSet:      D=3 U=3
+QDFA after train 1:         C=3 S=3 K=3 Det=3
+QDFA after train 2:         C=6 S=6 K=6 Det=3
+QDFA after train 3:         C=9 S=9 K=9 Det=3
+QDFA after 2nd setDataSet:  D=6 U=6
+LDFA after train 1..3:      K=3 K=3 K=3          <- bounded
+LDFA after 2nd setDataSet:  D=6 U=6
+```
+
+Two distinct accumulations:
+
+1. **`QDFA::train()` multi-output** appends to `C`, `S` and `K` with
+   `push_back` on every run. `Det` does not grow because it uses
+   `Det.resize( nOutput )`. `LDFA::train()` does not grow because it uses
+   `K.resize( nOutput )` and indexed assignment — so this is QDFA's alone.
+2. **`DFA::setDataSet()` multi-output** appends to `D` and `U` with `push_back`
+   on every call. This one is in the **shared base**, so it affects LDFA and QDFA
+   equally.
+
+**The consequence is not merely unbounded memory — it is a stale model.** Every
+reader indexes `[ 0 .. nOutput - 1 ]`, so after a second load the leading entries
+are still the *first* dataset's class matrices and means. Measured, same object,
+loading a genuinely different 3-class dataset B after dataset A:
+
+| | reused object on B | fresh object on B | (A alone) |
+|---|---|---|---|
+| LDFA training accuracy | **37.3%** | 100% | 100% |
+| QDFA training accuracy | **30.0%** | 100% | 100% |
+
+Chance is 33%. The reused object is fitting dataset A and scoring dataset B.
+
+**Reachability, stated precisely.** No shipped path currently reloads different
+data into an existing DFA object: `/api/dfa` constructs a fresh model per request
+(`gui.cpp`), `cvadapters::dfaProcedure` constructs a fresh model per fold, and the
+CLI's `dfa()` constructs `ldfaObj` / `qdfaObj` on entry to the submenu, which is
+the only scope in which `*dataPtr` cannot change. What **is** reachable today is
+the growth itself: repeating LDFA or QDFA from that CLI submenu grows `D` and `U`
+(and, for QDFA, `C`, `S`, `K`) on every run, and every run after the first
+silently reports the *first* run's fit — identical numbers, because the data
+cannot change within that scope. Same shape as D1: real, reachable, not currently
+producing a wrong answer on any shipped path, and one refactor away from doing so.
+
+**And it exposes a weakness in my own characterization.** `test_train_twice_multi`
+asserts that a second run reports the same thing — and it passes **because of**
+this defect rather than despite it. The assertion is satisfied by staleness. Sol
+identified exactly that: repeated reports being identical does not prove internal
+state is bounded. A correctness commit must add an assertion on the *state*, not
+only on the output.
+
+**Disposition, per Sol: do not clear or otherwise fix this during the
+behavior-preserving extraction.** It is a separate correctness commit, and it
+should come with its own characterization — a bounded-state assertion, and a
+reload-different-data assertion that fails against today's engine. Whether it
+lands before or after the scaffold extraction is Sol's call; the extraction does
+not touch `setDataSet` or either fit, so the two do not collide.
+
 *Prepared by Claude (Opus 5). Reviewed by Sol (2026-07-31); revised §8 in response.
 §9–§12 are the implementation record: §§8.7–8.8 and 9–10 describe work now
 committed, §11 is the D5 design, written before its code, and §12 is D9's,
