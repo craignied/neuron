@@ -1045,6 +1045,13 @@ needs. That takes 149 compilations to about 67 and speeds every platform.
     `Matrix`, so this lands first.**
 
 11. DFA extraction, then the measured per-exemplar scoring optimization.
+    **Characterization DONE** (`tests/dfa/check_dfa.cpp`, 44 assertions): both
+    models, binary and three-class, the reports, the graded guesses, ROC
+    availability per output arity, save behavior, history and last-operation
+    behavior, the singular and non-discrete refusals, running twice, and a
+    standalone analysis leaving a trained network's guesses alone. **Six
+    sabotages**, each failing a distinct set — see §12.12. No implementation
+    code was touched.
 12. Stepwise extraction — only after forward coverage exists.
 13. GUI async launcher, with its concurrency tests.
 14. Measured `gramRows()` / CGD-Shanno allocation work, only if justified.
@@ -2611,6 +2618,62 @@ comparison of two `unsigned` members already in cache, at the entry point of an
 operation that then walks hundreds of doubles. The checks were deliberately not
 placed inside any element loop (§12.3), which is the decision this measurement
 confirms was the right one.
+---
+
+## 12.12 The DFA characterization, before any extraction (2026-08-01)
+
+Written first, per Sol, and pushed on its own with no implementation change.
+`tests/dfa/check_dfa.cpp`, 44 assertions across LDFA and QDFA, binary and
+three-class. Portable by construction: structure (which lines a report has),
+integers (row counts, distinct-score counts), same-process relations, and
+inequalities a sign error would break. No multi-iteration float literals.
+
+**What the six sabotages proved, each failing a distinct set:**
+
+| sabotage | fails |
+|---|---|
+| flip the LINEAR discriminant's sense (`d1-d0` → `d0-d1`) | 2, both LDFA direction assertions, area 0.000 |
+| flip the QUADRATIC's sense | 2, both QDFA direction assertions |
+| revert the graded score to a hard 0/1 decision | 1 — "2 distinct scores, not a 0/1 decision" |
+| let DFA keep a pointer to the caller's `DataSet` and write through it | 1 — the network's guesses move |
+| remove `metricsReport` from the 1-output path | 4, including the last-operation file's content |
+| silence the singular refusal | 1 |
+
+**The direction pin is the one that matters for the extraction.** LDFA takes the
+larger discriminant, QDFA the smaller, because one is a similarity and the other
+a distance. A flipped sense does not crash, does not change the number of scores,
+and leaves an entirely normal-looking report — with the area on the wrong side of
+0.5. That is precisely what a shared `largerWins()` flag would risk, and the two
+sabotages above show the guard bites in both directions.
+
+**Two things the characterization changed about my own expectations.**
+
+1. **QDFA's guesses are not strictly inside (0,1), and that is correct.** My first
+   assertion said they were; it failed. Measured on this fixture: LDFA spans
+   0.0502–0.9666 with 120 distinct scores and none saturated; **QDFA saturates 20
+   of 120 to exactly 1.0**, with 101 distinct. The quadratic margin is a
+   difference of Mahalanobis distances plus log-determinant constants, reaching
+   the tens, and `sigmoidal()` of that is exactly 1.0 in double precision. The
+   assertion was wrong, not the code. The contract pinned is the **closed** range
+   plus graded-ness; the saturated count is deliberately *not* asserted, because
+   it comes through a matrix inverse and a borderline row could move in the last
+   bits on another toolchain. It is recorded because it costs ROC resolution at
+   the top, and because anyone "simplifying" the graded score should see it.
+2. **My first standalone test was weak, and a failed sabotage is what showed it.**
+   It ran the analysis on a `DataSet` the network did not own, so value semantics
+   made the assertion true structurally and no realistic sabotage could reach it —
+   my first attempt crashed on an unrelated bounds violation instead of failing
+   the assertion. The test now hands the DFA **the network's own `DataSet`**,
+   which is the form a caller can actually reach (the GUI takes both from the same
+   place), and the pointer sabotage then fails exactly the intended assertion.
+
+**One sabotage that changed nothing, and why that is informative.** Adding a
+`metricsReport` call to the multi-output path did not move a single assertion —
+because `DataSet::metricsReport` refuses more than one output at its own entry
+and writes nothing. So the "no ROC for multi-output" property is enforced by
+`DataSet`, not by the DFA classes, and an extraction cannot lose it by accident.
+Worth knowing before designing the shared orchestration.
+
 *Prepared by Claude (Opus 5). Reviewed by Sol (2026-07-31); revised §8 in response.
 §9–§12 are the implementation record: §§8.7–8.8 and 9–10 describe work now
 committed, §11 is the D5 design, written before its code, and §12 is D9's,

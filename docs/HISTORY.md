@@ -3432,3 +3432,40 @@ we ship.**
     `smoke.sh` reaches them. The evidence is a manual fault injection with its exact output
     in `refactor_audit.md` §12.10. It is the one mechanism added here that rule 2 does not
     yet guard.
+
+**2026-08-01 (later still) — the DFA characterization, written before the extraction.**
+
+  - `tests/dfa/check_dfa.cpp`, **44 assertions**, LDFA and QDFA, binary and three-class:
+    the reports and their headers, the graded guesses, what ROC and statistics are
+    available for each output arity, saving the guesses, history and last-operation
+    behavior, the singular and non-discrete refusals, running an analysis twice, and a
+    standalone analysis leaving a trained network's guesses alone. **No implementation code
+    was touched**, per Sol.
+  - **Six sabotages, each failing a distinct set.** Flipping the LINEAR discriminant's
+    sense fails 2 (area 0.000); flipping the QUADRATIC's fails 2; reverting the graded score
+    to a hard 0/1 decision fails 1 ("2 distinct scores"); giving DFA a pointer to the
+    caller's `DataSet` fails 1; removing `metricsReport` from the 1-output path fails 4;
+    silencing the singular refusal fails 1.
+  - **The direction pin is the one the extraction needs.** LDFA takes the larger
+    discriminant and QDFA the smaller, because one is a similarity and the other a distance.
+    A flipped sense does not crash, does not change the number of scores, and leaves an
+    entirely normal report — with the area on the wrong side of 0.5. That is what a shared
+    `largerWins()` flag would risk, and both sabotages show the guard bites.
+  - **QDFA's guesses are not strictly inside (0,1), and the code is right.** My first
+    assertion said they were and failed. Measured: LDFA spans 0.0502–0.9666, 120 distinct,
+    none saturated; **QDFA saturates 20 of 120 to exactly 1.0**, 101 distinct. The quadratic
+    margin reaches the tens and `sigmoidal()` of that is 1.0 in double precision. Pinned as
+    the **closed** range plus graded-ness; the saturated count is not asserted, because it
+    comes through a matrix inverse and could move in the last bits elsewhere. Recorded
+    because it costs ROC resolution at the top.
+  - **A failed sabotage exposed a weak test, which is the second time this week that has
+    been the useful outcome.** The standalone case originally ran the analysis on a
+    `DataSet` the network did not own, so value semantics made it true structurally and no
+    realistic sabotage could reach it — the first attempt crashed on an unrelated bounds
+    violation rather than failing the assertion. It now hands the DFA **the network's own
+    `DataSet`**, the form a caller can actually reach, and the pointer sabotage then fails
+    exactly the intended assertion.
+  - **One sabotage changed nothing, informatively.** Adding a `metricsReport` call to the
+    multi-output path moved no assertion, because `DataSet::metricsReport` refuses more than
+    one output at its own entry. So "no ROC for multi-output" is enforced by `DataSet`, not
+    by the DFA classes, and the extraction cannot lose it by accident.

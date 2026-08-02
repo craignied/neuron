@@ -424,6 +424,18 @@ add_test(NAME vector_ops_bounds COMMAND check_vector_bounds)
 # is what changed when the policy landed. tests/matrix/run_matrix_bounds_demo.sh
 # still runs each case in its own process, which is how a case that CRASHES
 # rather than returning is attributed to itself.
+# CHARACTERIZATION test: what LDFA and QDFA observably do, pinned BEFORE the
+# reporting-scaffold extraction (refactor_audit.md 2.4/2.5). Reports, graded
+# guesses, ROC availability per output arity, the DIRECTION of each
+# discriminant (larger wins for the linear, smaller for the quadratic -- the
+# thing a shared "which one wins" flag would risk), save behavior, history and
+# last-operation behavior, the singular and non-discrete refusals, and that a
+# standalone analysis leaves a trained network's guesses alone. Trains a real
+# SimpleProp for that last one, so it links the engine.
+add_executable(check_dfa tests/dfa/check_dfa.cpp)
+target_link_libraries(check_dfa PRIVATE neuron_engine)
+add_test(NAME dfa_characterization COMMAND check_dfa)
+
 add_executable(check_matrix_bounds tests/matrix/check_matrix_bounds.cpp)
 target_link_libraries(check_matrix_bounds PRIVATE neuron_core)
 target_compile_definitions(check_matrix_bounds PRIVATE NDEBUG)
