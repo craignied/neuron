@@ -303,7 +303,7 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
   Mac Studio SSH-push note). Created 2026-07-11; push freely on session handoff.
 - **Memory:** enrolled in `~/code/claude-memory/` as `neuron-3.0` (2026-07-11).
 
-## Where things stand (2026-07-29)
+## Where things stand (2026-08-02)
 
 Present tense, rewritten each session — **not** a log. The dated record is
 `docs/HISTORY.md`.
@@ -330,6 +330,19 @@ from the raw accumulator instead, so **selecting an optimizer was nominal rather
 computational** for twenty years — while the optimizer tests executed the dispatch and
 passed, because they carry expected values for SimpleProp and BareProp only and no
 golden fixture uses `BackProp` at all.
+
+**The refactor (`refactor_audit.md`) is at item 11 of 14, and items 1-11 are done.**
+The audit is the working document: §11 is D5's `vector_ops` bounds policy, §12 is D9's
+`Matrix` policy, §13 the DFA scaffold extraction, §14 the DFA scoring measurement. What
+landed 2026-08-01/02: `OneHiddenNet` (above); **D9** — `Matrix::DimensionMismatch` added,
+all four contract classes derived from `std::exception`, 55 contracts enforced at the entry
+points, plus `runOnWorker` in the GUI and a `main` boundary in the CLI so a contract failure
+reports instead of killing the process; a **stale-state fix** — a reused multi-output DFA
+object reported the *previous* dataset's model, because `DFA::setDataSet` appended to `D`/`U`
+and `QDFA::train` to `C`/`S`/`K`; and the **DFA scaffold**, `DFA::train() override final`
+owning the once-per-run bookkeeping while each model keeps its whole fit in
+`fitDiscriminant()`. Remaining: 12 stepwise (needs real forward coverage first), 13 the GUI
+async launcher, 14 the measured `gramRows()` / CGD-Shanno allocation work.
 
 **Interfaces.** The CLI menus are **frozen** but fully working — they remain the
 authoritative feature list rule 5 measures the GUI against. `neuron --gui` (embedded
@@ -402,10 +415,12 @@ how many independent clusters an interval and a *p* rest on.
 
 **The gates, run at the end of every piece of work**: zero-warning
 Release build → `tests/golden/run_golden.sh` byte-identical (3 transcripts: `xor_seed42`,
-`regress_seed42`, `binormal_seed42`) → `ctest` (13 tests) → `tests/gui/smoke.sh` →
-`tests/oracle/verify_oracle.sh` numerically identical → live `neuron --gui` click-through
-for anything that adds a control. CI runs the
-build, goldens, ctest, smoke, and the Python tools on macOS/Linux/Windows.
+`regress_seed42`, `binormal_seed42`) → `ctest` (**29 tests** as of 2026-08-02 — run
+`ctest -N`, never a remembered number) → `tests/gui/smoke.sh` →
+`tests/oracle/verify_oracle.sh` numerically identical → **`tests/tools/run_tools.sh`** →
+`git diff --check` → live `neuron --gui` click-through for anything that adds a control.
+CI runs the build, goldens, ctest, smoke, and the Python tools on macOS/Linux/Windows, and
+**a commit is not finished until CI is green on its exact SHA** on all three.
 The automated gates are currently green, and **no GUI click-through is outstanding** —
 the last one, the group-aware CV controls, was run and approved by Craig on 2026-07-31. The
 live walkthrough that was running through late July is **complete and published** —
@@ -596,6 +611,23 @@ Re-proposing one is rework, not initiative. Full reasoning at the cited HISTORY 
   because neither becomes `modelPtr`. Never label a standalone analysis "current model",
   and never let CV's report sit above an unlabelled panel from a different fit. → HISTORY
   2026-07-29.
+- **The DFA scaffold is shared; both `reportAccuracy()` bodies are NOT.** `DFA::train()`
+  owns the once-per-run bookkeeping (streams, banner, header, the `Singular` refusal, the
+  single report call, history, last-operation, `return -1`) and each model keeps its entire
+  fit in `fitDiscriminant()`. The per-exemplar scoring loops stay written out twice **on
+  purpose**: sharing them needs either a virtual call per exemplar or a comparator, and
+  larger-wins (linear, a similarity) versus smaller-wins (quadratic, a distance) **is** the
+  published mathematics. No `largerWins()`, sign flag, formula descriptor, CRTP wrapper or
+  type switch, now or later. `train()` is `override final` — it cannot be non-virtual,
+  `Model::train()` is pure virtual and CV dispatches through `unique_ptr< Model >`.
+  → HISTORY 2026-08-02; `refactor_audit.md` §13.
+- **DFA scoring was measured and needs no optimization.** Binary: the discriminant loop is
+  **0.67-0.77%** of the analysis; the other 99% is the ROC bootstrap. Multi-output: 57-71%,
+  but of an analysis that runs once when a user asks, and CV cannot reach it (`crossval`
+  metrics are `TwoSet`-based, one output). The available change was prototyped —
+  destination-taking `row`/`dotprod` plus hoisting the class-independent `S·x` — and is
+  **5.1x / 3.4x with bit-identical predictions**. Recorded, not applied. Revisit only if
+  multi-output DFA lands on a repeated path. → `refactor_audit.md` §14.
 - **Palm/iPhone exporters stay dead**; the HTML calculator lives on as
   `tools/neuron2web.py`. Python tooling is **stdlib-only** — no pip, no venv, enforced by
   CI on all three OSes.
@@ -692,6 +724,9 @@ establish the endpoint and the workflow, not performance or memory at scale.
 - **Tier-2 calibration numbers, per-fold timing, and Tier-3 download buttons** in the CV
   report (files are written to disk and their paths reported; only the buttons are
   missing). → `docs/evaluation_report_spec.md`.
+- **The ROC bootstrap is where DFA runtime actually is** — 99% of a binary discriminant
+  analysis at 20,000 rows, measured 2026-08-02 (`refactor_audit.md` §14). Nobody has asked
+  for it to be faster; if anyone does, that is the place, not the scoring loops.
 - `getGoodData()` port from the legacy roc app, if something ever needs it.
 - More grooming tools (dataset describe/summary; train/test split outside the engine).
 
