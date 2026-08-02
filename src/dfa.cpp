@@ -161,6 +161,46 @@ void DFA::setDataSet( DataSet& dataObj )
 	}
 }
 
+// Runs the analysis: fit, report, and the surrounding bookkeeping. See the
+//    declaration in dfa.h for what "shared scaffold" means and why this is
+//    still an override.
+double DFA::train()
+{
+	// For reporting to screen and file
+	ostringstream screenStream, fileStream;
+	screenStream.str( "" ); // just in case, flush the streams
+	fileStream.str( "" );
+
+	screenStream << "I'm running " << objType << ":" << endl;
+	outputHeader( screenStream ); // output the header identifying the model object
+
+	try
+	{
+		// The model's own mathematics, in the model's own file. Note that LDFA
+		//    used to compute its pooled covariance just ABOVE its try block;
+		//    inside it now. Only Singular is caught here, and covariance()
+		//    throws BadSize or DimensionMismatch, never Singular, so what
+		//    escapes this function is unchanged.
+		fitDiscriminant();
+
+		reportAccuracy( screenStream ); // report the accuracy
+	}
+	catch ( Matrix< double >::Singular& e )
+	{
+		util::screen() << "Can't do " << objType << ": " << e.what() << endl;
+	}
+
+	screenStream << endl; // finish off stream
+	fileStream << screenStream.str(); // stream line into file stream
+	util::screen() << screenStream.str(); // then print to screen
+
+	addHistory( fileStream ); // append to history file if specified by flag
+
+	writeLastop( fileStream.str() );
+
+	return -1; // DFA does not return a set error
+}
+
 // Outputs a header to ostream describing this DFA model architecture
 //    and run, which is just the number of input and output nodes, and
 //    number of exemplars

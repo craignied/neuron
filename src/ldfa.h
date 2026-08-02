@@ -16,11 +16,13 @@ public:
 	// Overloaded = operator
 	LDFA& operator= ( const LDFA& rhs );
 
-	// Trains the LDFA Model
-	virtual double train();
-
 	// Outputs to ostream reporting the accuracy of the LDFA Model
 	virtual void reportAccuracy( ostream& );
+
+protected:
+	// The LINEAR fit: one POOLED covariance across all classes, its inverse,
+	//    and the constants. DFA::train calls this once per run.
+	virtual void fitDiscriminant();
 
 private:
 	Matrix< double > C, // common covariance Matrix

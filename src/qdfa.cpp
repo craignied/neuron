@@ -35,78 +35,51 @@ void QDFA::copy( const QDFA& rhs )
 	Det = rhs.Det;
 }
 
-// Trains the model, returns the final error
-double QDFA::train()
+// The quadratic discriminant fit. The scaffold around it lives once in
+//    DFA::train (refactor_audit.md section 13).
+void QDFA::fitDiscriminant()
 {
 	// Easier on the eyes
 	unsigned nOutput = theData.getOutput(); // number of output nodes
 
-	// For reporting to screen and file
-	ostringstream screenStream, fileStream;
-	screenStream.str( "" ); // just in case, flush the streams
-	fileStream.str( "" );
-
-	screenStream << "I'm running QDFA:" << endl;
-	outputHeader( screenStream ); // output the header identifying the model object
-
-	try
+	if ( nOutput == 1 )
 	{
-		if ( nOutput == 1 )
+		// Covariance Matrices -- one PER CLASS, which is what makes this
+		//    discriminant quadratic
+		C0 = D0.covariance();
+		C1 = D1.covariance();
+
+		// Inverse of covariance Matrices, get determinants
+		S0 = C0.inverse( Det0 );
+		S1 = C1.inverse( Det1 );
+
+		// Constants
+		K0 = log( Det0 ) - log( P0 );
+		K1 = log( Det1 ) - log( P1 );
+	}
+	else // multiple output dataset
+	{
+		Det.resize( nOutput ); // size the determinant vector
+
+		// DISCARD THE PREVIOUS RUN'S FIT. The loop below appends with
+		//    push_back, so without this a second train() left the first
+		//    run's covariances, inverses and constants at 0 .. nOutput-1
+		//    and appended the new ones past the end where nothing reads
+		//    them: three runs held nine of each, and every run after the
+		//    first silently reported the first run's fit. Det escaped it
+		//    only because it is resized rather than appended.
+		C.clear();
+		S.clear();
+		K.clear();
+
+		// Build covariance & inverse Matrices, determinant & constant vectors
+		for ( unsigned o = 0; o < nOutput; o++ )
 		{
-			// Covariance Matrices
-			C0 = D0.covariance();
-			C1 = D1.covariance();
-
-			// Inverse of covariance Matrices, get determinants
-			S0 = C0.inverse( Det0 );
-			S1 = C1.inverse( Det1 );
-
-			// Constants
-			K0 = log( Det0 ) - log( P0 );
-			K1 = log( Det1 ) - log( P1 );
-			
-			reportAccuracy( screenStream ); // report the accuracy
-		}
-		else // multiple output dataset
-		{
-			Det.resize( nOutput ); // size the determinant vector
-
-			// DISCARD THE PREVIOUS RUN'S FIT. The loop below appends with
-			//    push_back, so without this a second train() left the first
-			//    run's covariances, inverses and constants at 0 .. nOutput-1
-			//    and appended the new ones past the end where nothing reads
-			//    them: three runs held nine of each, and every run after the
-			//    first silently reported the first run's fit. Det escaped it
-			//    only because it is resized rather than appended.
-			C.clear();
-			S.clear();
-			K.clear();
-
-			// Build covariance & inverse Matrices, determinant & constant vectors
-			for ( unsigned o = 0; o < nOutput; o++ )
-			{
-				C.push_back( D[ o ].covariance() ); // covariance Matrix
-				S.push_back( C[ o ].inverse( Det[ o ] ) ); // inverse & determinants
-				K.push_back( log( Det[ o ] ) - log( P[ o ] ) ); // constant
-			}
-
-			reportAccuracy( screenStream ); // report the accuracy
+			C.push_back( D[ o ].covariance() ); // covariance Matrix
+			S.push_back( C[ o ].inverse( Det[ o ] ) ); // inverse & determinants
+			K.push_back( log( Det[ o ] ) - log( P[ o ] ) ); // constant
 		}
 	}
-	catch ( Matrix< double >::Singular& e )
-	{
-		util::screen() << "Can't do QDFA: " << e.what() << endl;
-	}
-	
-	screenStream << endl; // finish off stream
-	fileStream << screenStream.str(); // stream line into file stream
-	util::screen() << screenStream.str(); // then print to screen
-
-	addHistory( fileStream ); // append to history file if specified by flag
-
-	writeLastop( fileStream.str() );
-
-	return -1; // DFA does not return a set error
 }
 
 // Outputs to ostream reporting the accuracy of this QDFA Model

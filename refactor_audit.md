@@ -1044,7 +1044,12 @@ needs. That takes 149 compilations to about 67 and speeds every platform.
     classes. Inventory, policy and order of work in §12. **DFA depends heavily on
     `Matrix`, so this lands first.**
 
-11. DFA extraction, then the measured per-exemplar scoring optimization.
+11. ~~DFA extraction~~ — **the scaffold is DONE**; the per-exemplar scoring
+    optimization is not started and is deliberately deferred (§13.5).
+    `DFA::train()` is now the shared `double train() override final`, each model
+    keeps its whole fit in `fitDiscriminant()`, both `reportAccuracy()` bodies
+    are untouched, and the base contains no discriminant arithmetic at all.
+    Seven sabotages recorded in §13.12.
     **Characterization DONE** (`tests/dfa/check_dfa.cpp`, 44 assertions): both
     models, binary and three-class, the reports, the graded guesses, ROC
     availability per output arity, save behavior, history and last-operation
@@ -3166,6 +3171,65 @@ sabotaged object file linked into the test — twice the suite "failed" against
 correct source, and once it "passed" against sabotaged source. `git diff src/`
 being empty while the tests disagree is the signature. Deleting the specific
 object files is the reliable fix; trusting "Built target" is not.
+
+
+### 13.12 The extraction as landed (2026-08-02)
+
+Exactly the settled scope. `DFA::train()` is the shared `double train() override
+final`; `fitDiscriminant()` is a new protected pure virtual; each model's fit
+moved into its own override; **both `reportAccuracy()` bodies are byte-for-byte
+untouched**; `classesFromTestOutputs()` was not extracted; the `8004058` resets
+are preserved verbatim inside `QDFA::fitDiscriminant()`. No sign, comparator,
+winner flag, type switch, formula descriptor or per-exemplar dispatch exists
+anywhere in `DFA`.
+
+**One thing the scope did not anticipate.** Marking `train()` `override` made
+clang emit `-Winconsistent-missing-override` for `DFA`'s three other virtuals,
+and a zero-warning build is a gate. `setDataSet`, `outputHeader` and
+`reportAccuracy` therefore gained `override` in the same header. It is a keyword
+on declarations that already overrode those methods — no behavior — but it is a
+change beyond the literal scope and is recorded rather than slipped in.
+
+**One ordering fact, stated because it is the only thing that moved.** `LDFA`
+computed its pooled covariance just ABOVE its `try`; it is inside now, since the
+whole fit moved. `covariance()` throws `BadSize` or `DimensionMismatch`, never
+`Singular`, and only `Singular` is caught — so what escapes `train()` is
+unchanged.
+
+**Source:** 139 insertions, 122 deletions across six files. Modest, as §13.8
+predicted, because the large duplication is in the half that may not be shared.
+
+**The seven sabotages, each with a provably fresh compilation** (objects deleted,
+the build log required to show them recompiled — a clean `git diff` is not
+evidence, see below):
+
+| # | sabotage | result |
+|---|---|---|
+| 1 | banner hard-coded to `LDFA` | 3 — QDFA's self-naming, and both polymorphic cases |
+| 2 | refusal hard-coded to `LDFA` | 1 — QDFA's singular refusal |
+| 3 | `catch ( Singular& )` rethrows | the run **terminates**, exit 134, uncaught `Matrix<double>::Singular` |
+| 4 | the two calls reversed | **the probe, deterministically**: `got "report,fit"`, twice — *before* the numeric cases die |
+| 5 | `writeLastop` dropped | 4 — both models' last-operation content |
+| 6 | `addHistory` dropped | 2 — both models' history content |
+| 7 | virtual dispatch bypassed | **the probe**: `got "report"`, and `fitDiscriminant runs exactly once` fails |
+
+Sabotages 4 and 7 are judged by the **scaffold-order probe**, which reads no
+numerical state: a `DFA` subclass whose two overrides append a token, driven
+through the shared `train()`, must log exactly `fit,report`. It runs **first** in
+`main()` — deliberately, because both of those sabotages make the concrete models
+touch an unfitted model and abort the process a few cases later. Judged first,
+the structural break is attributed to the structure rather than to whatever
+happens to crash. That ordering is the difference between a deterministic test
+and the undefined-behavior sabotage this proposal originally contained.
+
+**The build-cache trap, and what was done about it.** Three times on
+2026-08-01/02 `cmake --build` reported "Built target" without recompiling after a
+source restore, leaving a sabotaged object linked into the test: twice a correct
+source looked broken, and once — the dangerous direction — a sabotaged source
+looked fine. **A clean `git diff src/` while the tests disagree is the
+signature.** Every sabotage above was run through a harness that deletes the
+exact object files and then REFUSES the result unless the build log shows them
+being compiled. The object counts were checked on each run.
 
 *Prepared by Claude (Opus 5). Reviewed by Sol (2026-07-31); revised §8 in response.
 §9–§12 are the implementation record: §§8.7–8.8 and 9–10 describe work now

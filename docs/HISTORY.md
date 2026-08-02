@@ -3574,3 +3574,49 @@ containers.**
     linked into the test: twice the suite "failed" against correct source and once "passed"
     against sabotaged source. `git diff src/` empty while the tests disagree is the
     signature; deleting the specific object files is the fix.
+
+**2026-08-02 (later) — the DFA scaffold extracted; the scoring loops deliberately not.**
+
+  - **What moved.** `DFA::train()` is now the shared `double train() override final`: the
+    streams, the banner, the header, the `Singular` refusal, the single `reportAccuracy`
+    call, the history and last-operation writes, and the `-1`. A new protected pure virtual
+    `fitDiscriminant()` holds each model's whole fit. **139 insertions, 122 deletions** —
+    modest, and expected to be: measured beforehand, `train()` differed between the two
+    models in 18 code lines and every one was the fit, while `reportAccuracy()` differed in
+    22 and every one was a discriminant or a `max_element`/`min_element`.
+  - **What did not move, and why.** Both `reportAccuracy()` bodies are untouched. Sharing
+    their per-exemplar loops needs either a virtual call per exemplar or a comparator
+    parameter, and both are forbidden — the first by the no-per-exemplar-dispatch rule, the
+    second because larger-wins-versus-smaller-wins IS the published mathematics. `DFA` ends
+    up containing no discriminant arithmetic at all: streams, a `try`, three virtual calls.
+  - **`train()` is still virtual, and that matters.** `Model::train()` is pure virtual, so
+    this is an override; `final` says no subclass may replace the scaffold. The polymorphism
+    is live — `cvadapters::dfaProcedure` holds a `unique_ptr< Model >` and every CV fold
+    reaches the override through it. New characterization drives both models through a
+    `Model&` and a `unique_ptr< Model >`, and it was written to pass BEFORE the extraction,
+    so it characterizes the contract rather than the change.
+  - **The order and dispatch are guarded by a probe that reads no numbers.** A `DFA`
+    subclass whose two overrides append a token must log exactly `fit,report`. It runs
+    **first** in `main()`, because reversing the calls or bypassing dispatch makes the
+    concrete models touch an unfitted model and abort a few cases later; judged first, the
+    structural break is attributed to the structure. That replaced an earlier proposed
+    sabotage that would have asserted on unfitted numerical state — undefined behavior, and
+    the same mistake as the singular fixture two days before.
+  - **Seven sabotages, all landing**: banner (3 failures), refusal (1), removed `catch`
+    (process terminates, exit 134), reversed calls (**the probe**, `got "report,fit"`),
+    dropped `writeLastop` (4), dropped `addHistory` (2), bypassed dispatch (**the probe**,
+    `got "report"`).
+  - **Beyond the literal scope, recorded not slipped in**: `override` on `train()` made
+    clang require it on `DFA`'s three other virtuals (`-Winconsistent-missing-override`), and
+    zero warnings is a gate. And `LDFA` computed its pooled covariance just above its `try`;
+    it is inside now — `covariance()` throws `BadSize` or `DimensionMismatch`, never
+    `Singular`, so what escapes `train()` is unchanged.
+  - **The build-cache trap is now a harness, not a hope.** Three times across two days
+    `cmake --build` reported "Built target" without recompiling after a source restore —
+    twice making correct source look broken, and once, the dangerous direction, making
+    sabotaged source look fine. A clean `git diff src/` while tests disagree is the
+    signature. Every sabotage here ran through a harness that deletes the exact object files
+    and refuses the result unless the build log shows them recompiled.
+  - The Manifest gained its first `DFA` object entry — the scaffold, `fitDiscriminant`, and
+    both discriminant formulae with their opposite senses written out — and `docs/manifest.pdf`
+    was rebuilt and the page inspected.

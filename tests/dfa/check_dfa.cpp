@@ -34,6 +34,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <string>
@@ -46,6 +47,7 @@
 #include <unistd.h>
 #endif
 
+#include "dfa.h"
 #include "ldfa.h"
 #include "qdfa.h"
 #include "simpleprop.h"
@@ -941,8 +943,154 @@ static void test_qdfa_covariance_not_stale()
 		"QDFA covariance: a reused object reports what a fresh object reports" );
 }
 
+
+// --- 13. THE POLYMORPHIC PATH, which is how cross-validation reaches these ---
+//
+// Model::train() is pure virtual (model.h), so DFA::train() -- shared or not --
+// is an OVERRIDE and stays virtual. That polymorphism is not decorative:
+// cvadapters::dfaProcedure holds a unique_ptr< Model > and fitQuietly( Model& )
+// calls m.train() through that reference, so every cross-validation fold
+// reaches the override virtually. A suite that only ever called train() on a
+// concrete type could not tell a working override from a broken one.
+//
+// Written BEFORE the scaffold extraction and passing against the code that
+// preceded it, so it characterizes the contract rather than the change.
+
+template < class DFAMODEL >
+static void test_through_base_reference( const char* who )
+{
+	cout << "-- " << who << ": driven through Model --" << endl;
+
+	// A Model& , which is fitQuietly's parameter shape
+	{
+		DataSet d = binaryData();
+		DFAMODEL concrete;
+		Model& m = concrete;
+		string said;
+		{
+			util::ScreenCapture cap;
+			m.setDataSet( d );
+			m.setHistory( false );
+			m.setLastop( false );
+			m.train();
+			said = cap.text();
+		}
+		expect( has( said, string( "I'm running " ) + who ),
+			string( who ) + ": a Model& reaches the right override" );
+		expect( has( said, "Classification accuracy" ),
+			string( who ) + ": ...and it runs to a full report" );
+	}
+
+	// A unique_ptr< Model >, which is cvadapters' shape, released through the
+	//    base pointer -- so the virtual destructor is exercised too
+	{
+		DataSet d = binaryData();
+		unique_ptr< Model > m( new DFAMODEL );
+		string said;
+		{
+			util::ScreenCapture cap;
+			m->setDataSet( d );
+			m->setHistory( false );
+			m->setLastop( false );
+			m->train();
+			said = cap.text();
+		}
+		expect( has( said, string( "I'm running " ) + who ),
+			string( who ) + ": a unique_ptr< Model > reaches the right override" );
+		expect( m->getType() == who,
+			string( who ) + ": ...and reports its own type through the base" );
+	}
+}
+
+
+// --- 14. THE SCAFFOLD PROBE: order, omission, and dispatch, with no numbers --
+//
+// DFA::train() is now shared, and what it must do is call the CONCRETE class's
+// fitDiscriminant() exactly once and then the CONCRETE class's reportAccuracy()
+// exactly once. Three ways that can break -- reversed, one omitted, or the
+// override bypassed -- and none of them would be caught by looking at a report.
+//
+// It is tempting to test the ORDER by fitting nothing and asserting that the
+// numbers come out wrong. That is not a test: reading a model that was never
+// fitted reads unsized or uninitialised state, so the outcome is a wrong number
+// on one platform, an exception on another, and undefined behavior in
+// principle. This file already made that mistake once, in the singular fixture
+// that passed on macOS and failed on Ubuntu.
+//
+// So the probe records CALLS, not values. A DFA subclass whose two overrides do
+// nothing but append a token, driven through the shared scaffold, must produce
+// exactly "fit,report". No floating-point arithmetic is involved anywhere, so
+// the assertion is identical on every platform -- and because the tokens are
+// appended by the OVERRIDES, a scaffold that bypassed virtual dispatch would
+// produce an empty log rather than a wrong number.
+
+class ScaffoldProbe : public DFA {
+public:
+	string log;
+	unsigned fits = 0, reports = 0;
+
+protected:
+	void fitDiscriminant() override
+	{
+		fits++;
+		log += log.empty() ? "fit" : ",fit";
+	}
+
+public:
+	void reportAccuracy( ostream& ) override
+	{
+		reports++;
+		log += log.empty() ? "report" : ",report";
+	}
+};
+
+static void test_scaffold_calls_in_order()
+{
+	cout << "-- the scaffold fits once, then reports once --" << endl;
+
+	DataSet d = binaryData();
+	ScaffoldProbe p;
+	double returned;
+	{
+		util::ScreenCapture hush;
+		p.setDataSet( d );
+		p.setHistory( false );
+		p.setLastop( false );
+		returned = p.train();
+	}
+
+	expect( p.log == "fit,report", "the scaffold calls fitDiscriminant then "
+		"reportAccuracy -- got \"" + p.log + "\"" );
+	expect( p.fits == 1, "fitDiscriminant runs exactly once" );
+	expect( p.reports == 1, "reportAccuracy runs exactly once" );
+	expect( returned == -1, "the scaffold returns -1, as a discriminant analysis "
+		"has no set error" );
+
+	// And through a Model& -- the shape cross-validation uses -- so a scaffold
+	//    that somehow lost its virtual reach is caught here too.
+	DataSet d2 = binaryData();
+	ScaffoldProbe q;
+	{
+		util::ScreenCapture hush;
+		Model& m = q;
+		m.setDataSet( d2 );
+		m.setHistory( false );
+		m.setLastop( false );
+		m.train();
+	}
+	expect( q.log == "fit,report",
+		"...and the same through a Model& -- got \"" + q.log + "\"" );
+}
+
 int main()
 {
+	// FIRST, deliberately. It reads no numerical state, so it survives a
+	//    scaffold that would make every later case abort -- reversing the two
+	//    calls makes the concrete models report a model they have not fitted,
+	//    and the run dies. Judged first, the structural break is attributed to
+	//    the structure rather than to whatever happens to crash.
+	test_scaffold_calls_in_order();
+
 	test_report< LDFA >( "LDFA", "I'm running LDFA:" );
 	test_report< QDFA >( "QDFA", "I'm running QDFA:" );
 
@@ -982,6 +1130,9 @@ int main()
 	test_reload_is_not_stale< QDFA >( "QDFA" );
 
 	test_qdfa_covariance_not_stale();
+
+	test_through_base_reference< LDFA >( "LDFA" );
+	test_through_base_reference< QDFA >( "QDFA" );
 
 	cout << endl << ( failures ? "FAILURES: " : "all passed (" ) << failures
 		<< ( failures ? "" : " failures)" ) << endl;

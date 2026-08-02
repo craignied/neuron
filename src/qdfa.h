@@ -16,11 +16,13 @@ public:
 	// Overloaded = operator
 	QDFA& operator= ( const QDFA& rhs );
 
-	// Trains the QDFA Model
-	virtual double train();
-
 	// Outputs to ostream reporting the accuracy of the QDFA Model
 	virtual void reportAccuracy( ostream& );
+
+protected:
+	// The QUADRATIC fit: a SEPARATE covariance per class, each inverted, with
+	//    its determinant in the constant. DFA::train calls this once per run.
+	virtual void fitDiscriminant();
 
 private:
 	Matrix< double > C0, C1, // covariance Matrices for 1-output datasets

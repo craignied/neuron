@@ -325,6 +325,52 @@ The bias architecture is a property of the concrete type.
       Wald-test p-values.
 \end{itemize}
 
+\subsection{DFA, LDFA and QDFA}
+\index{DFA}
+\index{DFA!train}
+\index{DFA!fitDiscriminant}
+\index{LDFA!linear discriminant}
+\index{QDFA!quadratic discriminant}
+\index{Discriminant function analysis!shared scaffold}
+\texttt{DFA} is the discriminant-analysis base.  It owns the class matrices,
+mean vectors, a priori probabilities and constants that both concrete analyses
+build, and since 2026 it also owns the run itself:
+
+\begin{itemize}
+\item \texttt{double train() override final}: performs one analysis.  It writes
+      the banner and header, calls the fit and then the report, catches a
+      singular covariance and reports the refusal, writes the history and
+      last-operation files, and returns $-1$ because a discriminant analysis has
+      no set error.  It is \texttt{final} because no subclass may replace the
+      scaffold, and it remains a virtual override of \texttt{Model::train()} ---
+      cross-validation reaches it through a \texttt{unique\_ptr<Model>}.
+\item \texttt{virtual void fitDiscriminant()}: pure virtual, protected.  The
+      fit, and only the fit.  Runs once per analysis, inside the scaffold's
+      \texttt{try}.
+\item \texttt{void reportAccuracy(ostream\&) override = 0}: pure virtual.  Each
+      model writes this out in full.
+\end{itemize}
+
+\texttt{LDFA} fits one \emph{pooled} covariance across all classes, inverts it,
+and forms constants $K_c = \frac{1}{2}\mathbf{u}_c^{\mathsf{T}} S
+\mathbf{u}_c - \log P_c$.  Its discriminant is $d_c = \mathbf{u}_c^{\mathsf{T}}
+S \mathbf{x} - K_c$ and the \emph{larger} discriminant wins; the binary graded
+score is $\sigma(d_1 - d_0)$.
+
+\texttt{QDFA} fits a \emph{separate} covariance per class, inverts each, and
+forms constants $K_c = \log|C_c| - \log P_c$.  Its discriminant is $d_c =
+(\mathbf{x}-\mathbf{u}_c)^{\mathsf{T}} S_c (\mathbf{x}-\mathbf{u}_c) + K_c$ and
+the \emph{smaller} discriminant wins, because it is a distance where the linear
+one is a similarity; the binary graded score is $\sigma(d_0 - d_1)$.
+
+Those opposite senses are why only the scaffold is shared.  Sharing the
+per-exemplar scoring loops would require either a virtual call per exemplar or a
+comparator parameter, and the base class deliberately contains no sign, winner
+flag, formula descriptor or type switch: the published mathematics stays in the
+class that owns it.  Both models write a \emph{graded} score through the
+logistic function rather than a hard decision, so the ROC sweep sees a curve;
+the classification boundary is unchanged.
+
 \subsection{RegressNet}
 The following methods support non-interactive, cancellable stepwise analysis:
 

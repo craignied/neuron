@@ -28,60 +28,34 @@ void LDFA::copy( const LDFA& rhs )
 	S = rhs.S;
 }
 
-// Trains the model, returns the final error
-double LDFA::train()
+// The linear discriminant fit. The scaffold around it -- streams, banner,
+//    header, the Singular refusal, the report, history and last-operation --
+//    lives once in DFA::train (refactor_audit.md section 13).
+void LDFA::fitDiscriminant()
 {
 	// Easier on the eyes
 	unsigned nOutput = theData.getOutput(); // number of output nodes
-	
-	// For reporting to screen and file
-	ostringstream screenStream, fileStream;
-	screenStream.str( "" ); // just in case, flush the streams
-	fileStream.str( "" );
 
-	screenStream << "I'm running LDFA:" << endl;
-	outputHeader( screenStream ); // output the header identifying the model object
-	
-	// Common covariance Matrix
+	// Common covariance Matrix -- ONE pooled covariance for every class, which
+	//    is what makes this discriminant linear
 	C = Train.covariance();
 
-	try
+	// Inverse of common covariance Matrix
+	S = C.inverse();
+
+	if ( nOutput == 1 )
 	{
-		// Inverse of common covariance Matrix
-		S = C.inverse();
-
-		if ( nOutput == 1 )
-		{
-			// Constants for 1 output ( 2 classes )
-			K0 = 0.5 * dotprod( U0, S.dotprod( U0 ) ) - log( P0 );
-			K1 = 0.5 * dotprod( U1, S.dotprod( U1 ) ) - log( P1 );
-			
-			reportAccuracy( screenStream ); // report the accuracy
-		}
-		else
-		{
-			// Constants for n-outputs
-			K.resize( nOutput ); // size constants vector
-			for ( unsigned o = 0; o < nOutput; o++ )
-				K[ o ] = 0.5 * dotprod( U[ o ], S.dotprod( U[ o ] ) ) - log( P[ o ] );
-
-			reportAccuracy( screenStream ); // report the accuracy
-		}
+		// Constants for 1 output ( 2 classes )
+		K0 = 0.5 * dotprod( U0, S.dotprod( U0 ) ) - log( P0 );
+		K1 = 0.5 * dotprod( U1, S.dotprod( U1 ) ) - log( P1 );
 	}
-	catch ( Matrix< double >::Singular& e )
+	else
 	{
-		util::screen() << "Can't do LDFA: " << e.what() << endl;
+		// Constants for n-outputs
+		K.resize( nOutput ); // size constants vector
+		for ( unsigned o = 0; o < nOutput; o++ )
+			K[ o ] = 0.5 * dotprod( U[ o ], S.dotprod( U[ o ] ) ) - log( P[ o ] );
 	}
-
-	screenStream << endl; // finish off stream
-	fileStream << screenStream.str(); // stream line into file stream
-	util::screen() << screenStream.str(); // then print to screen
-
-	addHistory( fileStream ); // append to history file if specified by flag
-
-	writeLastop( fileStream.str() );
-
-	return -1; // DFA does not return a set error
 }
 
 // Outputs to ostream reporting the accuracy of this LDFA Model
