@@ -1044,8 +1044,12 @@ needs. That takes 149 compilations to about 67 and speeds every platform.
     classes. Inventory, policy and order of work in §12. **DFA depends heavily on
     `Matrix`, so this lands first.**
 
-11. ~~DFA extraction~~ — **the scaffold is DONE**; the per-exemplar scoring
-    optimization is not started and is deliberately deferred (§13.5).
+11. ~~DFA extraction~~ — **DONE, both halves**. The scaffold shipped
+    (§13.12); the per-exemplar scoring phase was performed as **measurement**
+    and concluded **no change** (§14) — the binary loop is 0.67% of its
+    analysis, the multi-output loop is 57-71% of an analysis nobody waits for,
+    and the available 3-5x is recorded, bit-identical, for the day one of those
+    stops being true.
     `DFA::train()` is now the shared `double train() override final`, each model
     keeps its whole fit in `fitDiscriminant()`, both `reportAccuracy()` bodies
     are untouched, and the base contains no discriminant arithmetic at all.
@@ -3236,6 +3240,133 @@ scratchpad harness protects one session and a rule protects the next one: a
 sabotage that "fails to fail" certifies a guard that is not there, which is
 precisely the hole rule 2 exists to close, arriving through the build system
 rather than through the test.
+
+---
+
+## 14. The DFA scoring phase — MEASUREMENT AND PROPOSAL ONLY (2026-08-02)
+
+Item 11's deferred half, performed as measurement. **No engine source is modified
+by this section.** The harnesses live in a scratchpad and are not committed;
+their numbers are here.
+
+The scaffold extraction is what made this measurable: `fitDiscriminant()` and
+`reportAccuracy()` are separate virtuals now, so fit time and scoring time can be
+measured **apart** instead of inferred from one total.
+
+### 14.1 The allocation inventory (item 1)
+
+Counted analytically from the source and then confirmed exactly by a global
+`operator new` counter. Per exemplar:
+
+| loop | allocations per exemplar | what they are |
+|---|---|---|
+| LDFA binary | **3** | `X = Train.row( r )`, and `S.dotprod( X )` **twice** |
+| LDFA n-output | **1 + nOutput** | `X`, and `S.dotprod( X )` once **per class** |
+| QDFA binary | **7** | `X`, and per class: `X - U` twice plus one `S.dotprod` |
+| QDFA n-output | **1 + 3·nOutput** | same, per class |
+
+Measured totals at 20,000 rows (train + test = 40,000 exemplars), 5 classes:
+LDFA **240,006** = 40,000 × 6 ✓; QDFA **1,040,006** = 40,000 × 26 ✓. The
+analytical count is exact.
+
+**One of these is not merely an allocation — it is a redundant computation.**
+`S.dotprod( X )` does not depend on the class, and LDFA evaluates it `nOutput`
+times per exemplar (twice in the binary loop, once per class in the n-output
+loop). That is an O(nInput²) matrix-vector product repeated for an answer that
+cannot change. `X - U[ o ]` in QDFA is likewise computed **twice** in one
+expression.
+
+### 14.2 What the existing vocabulary already offers (item 2)
+
+Nothing new is needed. `Matrix::row( r, v )`, `Matrix::dotprod( v, out )` and the
+compound `-=` are the destination-taking forms rule 7 already names, and the
+hoist is ordinary common-subexpression removal done in the source rather than
+hoped for from the optimizer. Written out, the LDFA loop becomes
+
+```cpp
+Train.row( r, X );
+S.dotprod( X, SX );                       // ONE matvec: S*x has no class index
+for ( unsigned o = 0; o < nOutput; o++ )
+    d[ o ] = dotprod( U[ o ], SX ) - K[ o ];
+```
+
+which is arguably **more** faithful to the published formula than the present
+version, because $d_c = \mathbf{u}_c^{\mathsf T} S\mathbf{x} - K_c$ visibly
+shares $S\mathbf{x}$ across classes and the code now says so.
+
+### 14.3 The measurement (items 3, 4, 6)
+
+Deterministic datasets, no RNG in their construction; 20 inputs; train and test
+both scored. Medians of 7 trials, Release, one model at a time — LDFA and QDFA
+measured independently, neither inferred from the other.
+
+**20,000 rows:**
+
+| | fit | score | of which `metricsReport` | **discriminant loop** | loop share |
+|---|---|---|---|---|---|
+| LDFA binary | 18.6 ms | 3793 ms | 3768 ms | **25.6 ms** | **0.67%** |
+| QDFA binary | 17.1 ms | 3718 ms | 3689 ms | **28.6 ms** | **0.77%** |
+| LDFA 5-class | 17.4 ms | 23.8 ms | — (none) | **23.8 ms** | **57.8%** |
+| QDFA 5-class | 17.1 ms | 42.4 ms | — (none) | **42.4 ms** | **71.3%** |
+
+**100,000 rows**, 5 classes: LDFA loop 125 ms (56.7% of fit+score), QDFA loop
+217 ms (70.9%). Trial spread was under 1% in every row above except one 5-class
+fit outlier.
+
+**A measurement error worth recording, because it inverted the answer.** My first
+separation timed `metricsReport` *after* `reportAccuracy` had already run it —
+a cache hit, 6 ms — and so attributed 3768 ms to the discriminant loop and
+concluded the loop was **99.4%** of the binary analysis. Invalidating the cached
+statistics before the second timing gives the true split: the loop is **0.67%**,
+and the other 99% is the ROC bootstrap. Two orders of magnitude, in the direction
+that would have justified an unnecessary optimization.
+
+### 14.4 What the change is worth, and that it changes no number (item 5)
+
+Both loops were reimplemented in the destination-taking style **beside** the
+production expressions, run on the same fitted model, at 100,000 rows:
+
+| | production | proposed | speedup | predictions |
+|---|---|---|---|---|
+| LDFA 5-class | 62.6 ms | 12.2 ms | **5.12×** | **bit-identical** |
+| QDFA 5-class | 185.4 ms | 53.8 ms | **3.44×** | **bit-identical** |
+
+Equivalence is asserted on the predicted class of every row, not on a summary:
+`a == b` over 100,000 predictions. A faster loop that moved a single prediction
+would fail that comparison.
+
+### 14.5 Recommendation: **no change now**
+
+Sol's bar is that the scoring cost be material beyond measurement noise *and*
+that a concrete-class-local, zero-dispatch change preserve the visible
+mathematics. The second half is satisfied — the change is local to each concrete
+class, introduces no dispatch, no comparator, no CRTP, no shared loop, and
+arguably reads closer to the published formula. **The first half is not, for the
+path that matters.**
+
+- **Binary is the path with statistics, and its loop is 0.67–0.77% of the
+  analysis.** A 5× loop speedup moves the total by about half a percent. The
+  binary analysis is dominated by the ROC bootstrap, and any real interest in DFA
+  runtime belongs there, not here.
+- **Multi-output has no statistics report at all**, so its loop is 57–71% of the
+  analysis — but the absolute cost is 24 ms at 20,000 rows and 217 ms at 100,000,
+  for a standalone, once-per-user-action analysis. Cross-validation cannot reach
+  it: `crossval`'s metrics are `TwoSet`-based and require one output.
+- So the honest summary is a 3–5× improvement to something nobody waits for.
+
+**Recommend revisiting if** multi-output DFA ever moves onto a repeated path —
+if cross-validation gains multi-output support, or a multiclass DFA is put inside
+any loop. The evidence above is then immediately actionable, and the change is
+known to be bit-identical.
+
+**One thing a future toucher should not have to rediscover.** The LDFA
+redundancy is not an allocation, it is the same matrix-vector product evaluated
+`nOutput` times for an answer that cannot change. Whoever next edits that loop for
+any reason should hoist it, because it costs nothing to do while already there.
+
+**Deliberately not proposed**, per the standing constraints: no shared
+per-exemplar dispatch, no comparator or sign parameterization, no CRTP formula
+wrapper, and no equation moved out of `LDFA` or `QDFA`.
 
 *Prepared by Claude (Opus 5). Reviewed by Sol (2026-07-31); revised §8 in response.
 §9–§12 are the implementation record: §§8.7–8.8 and 9–10 describe work now

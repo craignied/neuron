@@ -3620,3 +3620,35 @@ containers.**
   - The Manifest gained its first `DFA` object entry — the scaffold, `fitDiscriminant`, and
     both discriminant formulae with their opposite senses written out — and `docs/manifest.pdf`
     was rebuilt and the page inspected.
+
+**2026-08-02 (later still) — the DFA scoring phase: measured, and concluded no change.**
+
+  - **The extraction is what made it measurable.** `fitDiscriminant()` and
+    `reportAccuracy()` are separate virtuals now, so fit and scoring were timed apart
+    instead of inferred from one total.
+  - **The allocation inventory is exact.** Per exemplar: LDFA binary 3, LDFA n-output
+    1 + nOutput, QDFA binary 7, QDFA n-output 1 + 3·nOutput — counted from the source and
+    confirmed to the unit by a global `operator new` counter (240,006 and 1,040,006 at
+    20,000 rows, 5 classes). **One of them is not an allocation but a redundant
+    computation**: `S.dotprod( X )` has no class index and LDFA evaluates it once per
+    class; `X - U[o]` is computed twice inside one QDFA expression.
+  - **A measurement error inverted the answer, and is recorded because of it.** Timing
+    `metricsReport` *after* `reportAccuracy` had already run it measured a cache hit (6 ms)
+    and attributed 3768 ms to the discriminant loop — making the binary loop look like
+    **99.4%** of the analysis. Invalidating the cached statistics first gives the truth:
+    **0.67%**, with the other 99% being the ROC bootstrap. Two orders of magnitude, in the
+    direction that would have justified an optimization nobody needs.
+  - **Measured** (20,000 rows, 20 inputs, train + test, medians of 7, spread under 1%):
+    binary loop 25.6 ms LDFA / 28.6 ms QDFA — **0.67% and 0.77%** of fit+score; 5-class loop
+    23.8 ms / 42.4 ms — **57.8% and 71.3%**, because the multi-output path has no statistics
+    report at all. At 100,000 rows the 5-class loops are 125 ms and 217 ms.
+  - **The available change was prototyped and is worth 5.12× (LDFA) and 3.44× (QDFA) on the
+    loop, with bit-identical predictions** over 100,000 rows — destination-taking
+    `row`/`dotprod` plus hoisting the class-independent `S·x`, which is arguably closer to
+    the published formula than the present code.
+  - **Recommended anyway: no change.** The binary path — the one with statistics — gains
+    about half a percent, and its real cost is the bootstrap. The multi-output path gains
+    3-5× on an analysis that takes 217 ms once, when a user asks for it; cross-validation
+    cannot reach it, because `crossval`'s metrics are `TwoSet`-based and need one output.
+    Revisit if multi-output DFA ever moves onto a repeated path; the evidence is then
+    immediately actionable.
