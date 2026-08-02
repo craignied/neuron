@@ -3718,10 +3718,19 @@ and found more than the extraction it was written for.
   **SIGSEGV**. Only the out-of-range case was refused, and only because an out-of-range
   node necessarily raises the maximum. The contract is now an **exact partition**, with
   the caller's order preserved between and within groups.
-  This also answered whether the new no-comparable refusal was reachable: `df == 0` **is**
-  producible by a malformed structure, but `G2 <= 0` is handled upstream so `pX2` is never
-  called. `requireComparablePass` is therefore an invariant defense, characterized
-  directly rather than through a hook built to reach it.
+  This also answered whether the new no-comparable refusal was reachable *through a
+  malformed structure*: `df == 0` **is** producible that way, but `G2 <= 0` is handled
+  upstream so `pX2` is never called.
+  **It did not make the refusal unreachable, and saying so was an error** (corrected the
+  same day, `refactor_audit.md` §19): `stats::pX2` delegates to `gammq`, which throws out
+  of `gcf`/`gser` on **ITMAX exhaustion** with entirely valid degrees of freedom and
+  chi-square. The repository's own oracle transcript records exactly that —
+  `tests/oracle/xor_reference_output.txt` has "a too large, ITMAX too small in gcf"
+  defeating a Hosmer-Lemeshow p-value. So `requireComparablePass` and the callers'
+  `!isnan( p )` checks are **live numerical defenses**; what is missing is a portable
+  end-to-end fixture, not a reachable state. The mistake was reading `gammq`'s
+  entry guard as its only refusal while the two convergence throws sat forty lines below
+  it — a measurement stopped one step early because it already agreed.
 - **The extraction, finally:** `beginAnalysis`, `fitCandidate`, `reportComparison`,
   `endAnalysis` — four mechanisms, none of which knows which direction is running. Both
   selection loops stay whole, and every direction-specific statement is commented at its
@@ -3740,8 +3749,8 @@ and found more than the extraction it was written for.
   against the extracted code — every one with the object file deleted and the build log
   *required* to show `regressnet.cpp` recompiling, on introduction **and** on restoration.
   Three came back unguarded and are recorded as such rather than papered over: an
-  initializer made unreachable by `haveWinner`, and two invariant defenses whose call
-  sites an exact partition makes unreachable.
+  initializer made unreachable by `haveWinner`, and two live numerical defenses for which
+  no portable end-to-end fixture exists.
 - Gates on every commit: zero-warning clean Release build, three goldens byte-identical
   (`regress_seed42` never moved), `ctest` 30/30, `smoke.sh`, oracle numerically identical,
   tools, `git diff --check`, and 3/3 CI on the exact SHA.

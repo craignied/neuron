@@ -8006,9 +8006,11 @@ reader of this class needs to see.
       than naming a variable that was never compared.  This is {\em
       not} the case of a pass whose $p$-values are all zero: zero is a
       $p$-value, meaning maximally significant, and the first candidate
-      to produce one wins its pass.  Since {\em setInputStructure}
-      requires an exact partition of the input nodes, no caller-supplied
-      structure can reach this, and it stands as an invariant defense
+      to produce one wins its pass.  An exact partition of the input
+      nodes rules out {\em gammq}'s invalid-argument refusals, but not
+      its refusal when {\em gcf} or {\em gser} exhausts {\em ITMAX},
+      which happens on entirely valid degrees of freedom and chi-square,
+      so this is a live numerical defense rather than an unreachable one
 \item double beginAnalysis( const string\& $banner$, const string\&
       $question$ ): the cross-entropy refusal, the structure check, the
       first clone, the banner and the input-structure print; returns the

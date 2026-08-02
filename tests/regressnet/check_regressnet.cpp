@@ -1462,13 +1462,23 @@ static void test_candidate_eligibility_policy()
 // ---------------------------------------------------------------------------
 // 59. A PASS WITH NOTHING COMPARABLE REFUSES.
 //
-// Reached directly, because it cannot be reached by training: stats::pX2 is
-// gammq, which refuses only when its shape parameter is <= 0 or its argument is
-// negative -- df == 0 or a negative chi-square. The call site already handles
-// G2 <= 0 without calling pX2 at all, and df is the change in free parameters,
-// which is at least one node per variable. So the refusal is defensive code for
-// a state a valid input structure cannot produce, and the honest way to
-// characterize it is to invoke it rather than to pretend a fixture reaches it.
+// Invoked directly rather than reached through a run, and the reason is NOT that
+// it is unreachable -- an earlier version of this comment said so and was wrong.
+//
+// stats::pX2 is gammq. It rejects a non-positive shape parameter or a negative
+// argument, neither of which an exact input-node partition can produce -- but it
+// ALSO throws out of gcf and gser when the continued fraction or the series
+// fails to converge within ITMAX iterations, on entirely valid degrees of
+// freedom and chi-square. That is not hypothetical: this repository's own oracle
+// reference output records "a too large, ITMAX too small in gcf" defeating a
+// Hosmer-Lemeshow p-value (tests/oracle/xor_reference_output.txt).
+//
+// So a pass in which every candidate's calculation fails numerically is a real
+// state, and this refusal is a live defense. What is missing is a PORTABLE
+// end-to-end stepwise fixture that drives a whole pass into it -- and a fixture
+// tuned to sit on a numerical-convergence boundary would be exactly the bet the
+// DFA singular fixture lost on Ubuntu. Invoking the method is deterministic
+// everywhere; that is why it is done this way.
 // ---------------------------------------------------------------------------
 class PassProbe : public RegressNet {
 public:

@@ -3857,14 +3857,15 @@ a gap to paper over:**
   is read, so its initializer is unreachable belt-and-braces. It stays because it
   makes a future removal of `haveWinner` a wrong answer rather than undefined
   behavior; C1 is the guard that matters.
-- **C3a** — the *call site* is defensive code for a state a valid input structure
-  cannot produce. `stats::pX2` is `gammq`, which refuses only when its shape
-  parameter is `<= 0` or its argument is negative — i.e. `df == 0` or a negative
-  chi-square. The call site already handles `G2 <= 0` without calling `pX2`, and
-  `df` is the change in free parameters, at least one per variable. So no
-  training run reaches `!haveWinner`, and no behavioral test can turn that
-  sabotage red. The refusal's *body* is characterized directly (C3b, case 59),
-  which is what can be guarded.
+- **C3a** — the *call site*. No end-to-end fixture drives a whole pass into it, so
+  the sabotage turns nothing red; the refusal's *body* is characterized directly
+  (C3b, case 59), which is what can be guarded.
+  **This bullet originally gave a reason that was false — see §19.** It claimed
+  `stats::pX2` could refuse only on invalid arguments, which an exact partition
+  rules out. `gammq` also throws out of `gcf`/`gser` on ITMAX exhaustion, with
+  perfectly valid degrees of freedom and chi-square. The call site is a live
+  numerical defense that no *portable* fixture currently reaches, not an
+  unreachable one.
 
 ### 16.4 A new finding, recorded not fixed
 
@@ -3953,18 +3954,25 @@ structure either uses is already an exact partition. The GUI needs no change
 because it validates *through* this method (`gui.cpp:3105`) and returns its
 message.
 
-### 17.3 `requireComparablePass` is an invariant defense
+### 17.3 `requireComparablePass` is a live numerical defense
 
-Now that a structure must be a partition, no caller-supplied input can drive a
-whole pass into it: `gammq` refuses only on a non-positive shape parameter or a
-negative argument, a partition gives every variable at least one node, and the
-call site already handles `G2 <= 0` without calling `pX2`. What remains is an
-internal or statistical failure.
+**This section originally read "is an invariant defense" and argued the call
+sites were unreachable by construction. That was wrong; see §19 for the
+correction and the evidence.** What is true:
 
-So its call sites are **unreachable by construction**, no behavioral test can
-turn a sabotage of them red, and its body is characterized directly (case 59).
-This is written in the header. **No production hook exists whose purpose is to
-make the call site reachable, and none should be added.**
+An exact partition does rule out the *invalid-argument* refusals — `gammq`
+rejects a non-positive shape parameter or a negative argument, and a partition
+gives every variable at least one node while `G2 <= 0` is handled without
+calling `pX2` at all. But those are not the only way `pX2` refuses: `gammq`
+throws out of `gcf` and `gser` when the continued fraction or the series fails
+to converge within ITMAX, on entirely legitimate inputs.
+
+So a pass in which every candidate's calculation fails numerically is a real
+state and this refusal is live. What is missing is a **portable** end-to-end
+fixture that drives a whole pass into it, so a sabotage of the call sites turns
+nothing red; the body is characterized directly (case 59). **Do not add a
+production hook, a virtual, or a fixture tuned to sit on a numerical-convergence
+boundary in order to reach it.**
 
 ### 17.4 Sabotages — one per rule, all seven guarded
 
@@ -4106,14 +4114,15 @@ S1-S6 are the six direction differences of §15.1, all still caught after the
 extraction — which is the evidence that moving the bookkeeping did not blur the
 mathematics.
 
-**S13 is not guarded, for the reason §17.3 already established.** The NaN guard
-fires only when `stats::pX2` refuses, and with an exact partition enforced that
-cannot happen: `gammq` refuses on a non-positive shape parameter or a negative
-argument, every variable has at least one node, and `G2 <= 0` is handled without
-calling `pX2`. The guard is retained because it preserves the old behavior
-exactly and states the rule explicitly; like `requireComparablePass`'s call
-sites, it is an invariant defense rather than a live branch, and no artificial
-hook should be added to make it reachable.
+**S13 is not guarded — but it is a rare NUMERICAL branch, not an unreachable
+one.** This paragraph originally said an exact partition made `pX2` refusal
+impossible; that was false, and §19 corrects it with the evidence. `gammq` can
+throw on ITMAX exhaustion with valid degrees of freedom and chi-square, so the
+`!isnan( p )` guard is a live defense against a numerical failure — and it
+preserves exactly what the old winner-update-inside-the-`try` did. What is
+missing is a portable stepwise fixture that produces the failure end to end, and
+one tuned to sit on a convergence boundary would be the fixture class that broke
+CI before. Keep the guard; do not build a hook to reach it.
 
 ### 18.5 Verification
 
@@ -4126,3 +4135,67 @@ build, all three goldens, `ctest` 30/30, oracle numerically identical, tools,
 One pre-existing trailing space was removed from a comment in
 `forward_regress` — it had been in the file before, and re-adding the line
 during the rewrite made `git diff --check` see it as new.
+
+---
+
+## 19. CORRECTION — `pX2` can refuse on valid arguments (2026-08-02)
+
+**A factual error in §§16-18, found by Sol. No behavior changes; the code was
+right and the reasoning about it was wrong.**
+
+Sections 16.3, 17.3 and 18.4 all argued the same thing: that once
+`setInputStructure` enforces an exact partition, `stats::pX2` cannot refuse, so
+`requireComparablePass`'s call sites and the callers' `!isnan( p )` guards are
+**unreachable by construction**.
+
+That is false. The argument rested on reading only `gammq`'s entry guard:
+
+```cpp
+if ( x < 0.0 || a <= 0.0 )
+    throw statsErr( "Invalid arguments in routine gammq" );
+```
+
+`gammq` has two further throw sites, in the routines it delegates to:
+
+```cpp
+// stats.cpp:102, in gcf
+throw statsErr( "a too large, ITMAX too small in gcf" );
+// stats.cpp:145, in gser
+throw statsErr( "a too large, ITMAX too small in routine gser" );
+```
+
+Those fire when the continued fraction or the series **fails to converge within
+ITMAX iterations**, on a perfectly valid shape parameter and argument. Numerical
+non-convergence, not invalid input.
+
+**And it is established behavior in this repository, not a hypothetical.** The
+oracle's own reference transcript records it:
+
+```
+tests/oracle/xor_reference_output.txt:219
+Hosmer-Lemeshow goodness of fit p = Could not calculate Hosmer-Lemeshow
+goodness of fit: a too large, ITMAX too small in gcf
+```
+
+**What this changes:**
+
+| Claim | Was | Is |
+|---|---|---|
+| `reportComparison` returning NaN | only on impossible inputs | **can happen on valid inputs**, via ITMAX exhaustion |
+| the callers' `!isnan( p )` checks | formalities preserving old placement | **live numerical guards**, which also preserve the old placement |
+| `requireComparablePass` | invariant defense, unreachable by construction | **the refusal for a pass whose every p-value calculation failed**, numerical non-convergence included |
+| S13 / C3a unguarded | unreachable, so unguardable | **a rare numerical branch with no portable end-to-end fixture** |
+
+The disposition is unchanged: keep the explicit NaN guards, keep
+`requireComparablePass` characterized directly through its body, and add no
+virtual hook, production callback, public mutable state, or floating-point
+fixture tuned to sit on a convergence boundary merely to force the path. What
+changes is why — a missing portable fixture, not an impossible state.
+
+**Why the error is worth recording.** The `gcf` and `gser` throws were in the
+same forty lines of `stats.cpp` read while checking whether `statsErr` was
+reachable at all; the entry guard was taken as the whole answer and the two
+convergence throws below it went unused. That is the §14.3 mistake in a new
+place — a measurement stopped one step early because it already agreed with the
+expected conclusion — and the disproof was sitting in a committed reference
+transcript the whole time.

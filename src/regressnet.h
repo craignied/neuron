@@ -159,20 +159,26 @@ protected:
 	//    if it is the first one. This is the case where stats::pX2 itself
 	//    refused every time.
 	//
-	//    AN INVARIANT DEFENSE, NOT A PUBLIC-INPUT BRANCH. Since the input
-	//    structure must be an exact partition (see setInputStructure), no
-	//    caller-supplied structure can drive a whole pass into it: pX2 is
-	//    gammq, which refuses only on a non-positive shape parameter or a
-	//    negative argument -- df == 0 or G2 < 0 -- and a partition gives every
-	//    variable at least one node, while the call site already handles
-	//    G2 <= 0 without calling pX2 at all. What remains is an internal or
-	//    statistical failure, and this refuses it rather than naming a winner
-	//    that does not exist.
+	//    IT CAN REFUSE ON PERFECTLY VALID ARGUMENTS. stats::pX2 delegates to
+	//    gammq, which rejects a non-positive shape parameter or a negative
+	//    argument -- neither of which an exact input-node partition can produce
+	//    -- but which ALSO throws out of gcf and gser when the continued
+	//    fraction or the series fails to converge within ITMAX iterations. That
+	//    is numerical non-convergence on a legitimate chi-square, and it is
+	//    established behavior in this repository rather than a hypothetical:
+	//    tests/oracle/xor_reference_output.txt records
+	//    "a too large, ITMAX too small in gcf" defeating a Hosmer-Lemeshow
+	//    p-value on the XOR fixture.
 	//
-	//    So its call sites are unreachable by construction and no behavioral
-	//    test can turn a sabotage of them red; the BODY is characterized
-	//    directly instead (check_regressnet case 59). Do not add a production
-	//    hook whose only purpose is to make the call site reachable.
+	//    So this is a live numerical defense. If every candidate in a pass hits
+	//    that, the pass has nothing to select from and says so instead of naming
+	//    a variable it never compared.
+	//
+	//    No portable end-to-end stepwise fixture is known that drives an ENTIRE
+	//    pass into it, so a sabotage of the call sites turns nothing red; the
+	//    BODY is characterized directly instead (check_regressnet case 59). Do
+	//    not add a production hook, a virtual, or an unstable floating-point
+	//    fixture whose only purpose is to reach the call site.
 	void requireComparablePass( unsigned step );
 
 private:
@@ -253,9 +259,16 @@ private:
 	//    statistic the caller computed: it does not call Wilks, does not know
 	//    which model was nested in which, and does not decide who wins.
 	//    Returns the p-value, or NaN when stats::pX2 refused -- which is
-	//    reported and is not fatal. A NaN return must not take the pass; the
-	//    callers check for it, exactly as the winner update used to sit inside
-	//    the try block that is now here.
+	//    reported and is not fatal.
+	//
+	//    A NaN RETURN MUST NOT TAKE THE PASS, and both callers check for it.
+	//    That check is a LIVE numerical guard, not a formality: gammq throws
+	//    out of gcf and gser when they fail to converge within ITMAX, which
+	//    happens on entirely valid degrees of freedom and chi-square (see
+	//    requireComparablePass, and the ITMAX failure recorded in
+	//    tests/oracle/xor_reference_output.txt). It preserves exactly what the
+	//    old code did by keeping the winner update INSIDE the try block that
+	//    now lives here.
 	double reportComparison( const CandidateFit& fit, double priorError,
 		double G2, unsigned df, unsigned variable, ptable& innerPs );
 
