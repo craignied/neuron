@@ -54,8 +54,8 @@ void save_guesses( Model* ); // save guesses for a model with 1 output
 bool logLastOp = true, // initial log last operation to file flag
 	logHistory = true; // initial log to history file flag
 
-// Main method
-int main( int argc, char* argv[] )
+// The driver proper. main() below is the process boundary that wraps it.
+static int neuronMain( int argc, char* argv[] )
 {
 	// Parse command-line arguments
 	bool guiFlag = false, // start the embedded web GUI instead of the menus
@@ -1497,3 +1497,26 @@ void save_guesses( Model* modelPtr )
 	}
 }
 
+
+// THE PROCESS BOUNDARY (D9). The CLI is the other entry point into the same
+//    engine, and it had no top-level handler at all: a Matrix contract failure
+//    -- shapes or indices a caller cannot have meant -- terminated the program
+//    opaquely, with no message and no useful status. The menus are untouched;
+//    this only decides what happens when something reaches the top.
+int main( int argc, char* argv[] )
+{
+	try
+	{
+		return neuronMain( argc, argv );
+	}
+	catch ( const exception& e )
+	{
+		cerr << "neuron: fatal: " << e.what() << endl;
+		return 1;
+	}
+	catch ( ... )
+	{
+		cerr << "neuron: fatal: unrecognized error" << endl;
+		return 1;
+	}
+}

@@ -3,6 +3,7 @@
 #include "crossval.h"
 
 #include <chrono>
+#include <functional>
 #include <set>
 
 #include "split.h"
@@ -64,6 +65,19 @@ static unsigned hashName( const string& s )
 //    Any metric not computable on a degenerate held-out set (one class, empty)
 //    comes back as -1. This is the ONE place out-of-fold pairs become metrics
 //    (rule 6): the runner scores each fold with it and the report reuses it.
+// Runs one optional metric calculation, keeping an unavailable metric absent
+//    while letting a Matrix CONTRACT failure through. See the note at the call
+//    site: the difference is between "this fold has no estimable AUC", which is
+//    a result, and "the arithmetic was invalid", which is a defect.
+static void metricFor( const function< void() >& calculate )
+{
+	try { calculate(); }
+	catch ( const Matrix< double >::BoundsViolation& ) { throw; }
+	catch ( const Matrix< double >::DimensionMismatch& ) { throw; }
+	catch ( const Matrix< double >::BadSize& ) { throw; }
+	catch ( ... ) { } // an unavailable metric stays absent
+}
+
 crossval::Metrics crossval::metricsFor( const vector< unsigned >& outcome,
 	const vector< double >& pred, const vector< unsigned >& rows )
 {
@@ -83,11 +97,22 @@ crossval::Metrics crossval::metricsFor( const vector< unsigned >& outcome,
 	ts.setThreshold( 0.5 );
 	ts.setBootstrapResamples( 0 ); // point areas only
 
-	try { m.trap = ts.getTrapROCarea(); } catch ( ... ) {}
-	try { m.az = ts.getStatROCarea(); } catch ( ... ) {}
-	try { m.sens = ts.getSens(); } catch ( ... ) {}
-	try { m.spec = ts.getSpec(); } catch ( ... ) {}
-	try { m.ca = ts.getClassAcc(); } catch ( ... ) {}
+	// Each metric is optional -- a degenerate fold has no estimable AUC, and a
+	//    TwoSet with no positives has no sensitivity. Those are ANSWERS and the
+	//    catch-all below records them as absent.
+	//
+	//    A Matrix contract failure is not one of them (D9). It says a caller
+	//    handed the numerical layer shapes or indices that cannot be right, and
+	//    swallowing it here would report "this fold's AUC was not estimable"
+	//    when the truth is that the arithmetic was invalid. metricFor rethrows
+	//    those three types so they reach the worker or CLI boundary with their
+	//    message; Singular is deliberately NOT among them, because a singular
+	//    fit legitimately means an unavailable metric.
+	metricFor( [ & ] { m.trap = ts.getTrapROCarea(); } );
+	metricFor( [ & ] { m.az = ts.getStatROCarea(); } );
+	metricFor( [ & ] { m.sens = ts.getSens(); } );
+	metricFor( [ & ] { m.spec = ts.getSpec(); } );
+	metricFor( [ & ] { m.ca = ts.getClassAcc(); } );
 	return m;
 }
 

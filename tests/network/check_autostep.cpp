@@ -113,13 +113,20 @@ public:
 	double gammaNow() const { return this->gamma; }
 
 	// One number standing for the whole weight state
+	// forward() takes the MODEL's own input matrix -- Model::Train, which each
+	//    model built for itself in setDataSet, with a bias column appended where
+	//    its architecture has one. It is NOT the DataSet's training matrix: that
+	//    one still carries the outcome in its last column, so passing it read the
+	//    LABEL into the bias slot of every biased model, and for BareProp -- whose
+	//    input vector is narrower still -- it read a short row. Both were silent
+	//    until Matrix::row acquired its contract (D9); the same defect was found
+	//    and fixed in check_onehidden a day earlier by an assert-enabled build.
 	double signature()
 	{
 		double sum = 0;
-		Matrix< double >& m = this->theData.getTrainMatrix();
-		for ( unsigned r = 0; r < m.rows(); r++ )
+		for ( unsigned r = 0; r < this->Train.rows(); r++ )
 		{
-			this->forward( m, r );
+			this->forward( this->Train, r );
 			sum += this->o;
 		}
 		return sum;

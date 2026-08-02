@@ -1236,6 +1236,50 @@ string jsonAutoAlgo( const autoalgo::Result& r )
 	return out.str();
 }
 
+// THE WORKER BOUNDARY -- one implementation, four callers (D9).
+//
+// Every long job runs on a std::thread, and an exception that escapes a
+//    thread's function calls std::terminate: the server dies while the page is
+//    still polling /api/train/status. That was reachable -- Network::
+//    computeCondNum throws Matrix< double >::BoundsViolation on a non-square
+//    argument, and until D9 the Matrix exceptions did not derive from
+//    std::exception, so runTrainingAndBuildResult's catch( const exception& )
+//    could not see one. They derive from it now, so the inner handlers report
+//    properly; this is the LAST RESORT, and it exists so that the answer to
+//    "what if something else throws" is never "the process".
+//
+// It also owns the publish-then-clear ordering the status endpoint depends on:
+//    job.result under the mutex FIRST, job.running cleared afterward, on every
+//    path including the throwing ones. That ordering was maintained in four
+//    places; now it is maintained in one.
+//
+// std::function is right here: this is called once per JOB, not once per
+//    exemplar. The hot path is inside body.
+void runOnWorker( const function< string() >& body )
+{
+	string result;
+
+	try
+	{
+		result = body();
+	}
+	catch ( const exception& e )
+	{
+		// jsonMsg escapes its own message -- do not escape it twice
+		result = jsonMsg( false, string( "the run failed: " ) + e.what() );
+	}
+	catch ( ... )
+	{
+		result = jsonMsg( false, "the run failed with an unrecognized error" );
+	}
+
+	{
+		lock_guard< mutex > lock( job.progressMutex );
+		job.result = result; // publish BEFORE running goes false
+	}
+	job.running = false;
+}
+
 // The whole training job: optional auto algorithm selection (probe all
 //    three from identical weights, adopt the winner -- which REPLACES
 //    modelPtr, so every pointer is re-derived after it), then the real
@@ -1468,13 +1512,8 @@ string handleTrain( const httplib::Request& req )
 	//    Captures inside runTrainJob redirect it for the run.
 	job.worker = thread( [ continued, autoSelect, maxIter ]
 	{
-		string result = runTrainJob( continued, autoSelect, maxIter, true );
-
-		{
-			lock_guard< mutex > lock( job.progressMutex );
-			job.result = result; // publish BEFORE running goes false
-		}
-		job.running = false;
+		runOnWorker( [ continued, autoSelect, maxIter ]
+			{ return runTrainJob( continued, autoSelect, maxIter, true ); } );
 	} );
 
 	return jsonMsg( true, autoSelect
@@ -1775,14 +1814,7 @@ string handleObd( const httplib::Request& req )
 	job.running = true;
 
 	job.worker = thread( [ cfg ]
-	{
-		string result = runObdJob( cfg );
-		{
-			lock_guard< mutex > lock( job.progressMutex );
-			job.result = result; // publish BEFORE running goes false
-		}
-		job.running = false;
-	} );
+		{ runOnWorker( [ cfg ] { return runObdJob( cfg ); } ); } );
 
 	return jsonMsg( true, "OBD hidden-layer search started" );
 }
@@ -2870,14 +2902,7 @@ string handleCv( const httplib::Request& req )
 	job.running = true;
 
 	job.worker = thread( [ c ]
-	{
-		string result = runCvJob( c );
-		{
-			lock_guard< mutex > lock( job.progressMutex );
-			job.result = result;
-		}
-		job.running = false;
-	} );
+		{ runOnWorker( [ c ] { return runCvJob( c ); } ); } );
 
 	return jsonMsg( true, "cross-validation started" );
 }
@@ -3102,13 +3127,9 @@ string handleRegress( const httplib::Request& req )
 
 		job.worker = thread( [ net, variable_defs, direction, threshold ]
 		{
-			string result = runRegressJob( net, variable_defs, direction,
-				threshold );
-			{
-				lock_guard< mutex > lock( job.progressMutex );
-				job.result = result; // publish BEFORE running goes false
-			}
-			job.running = false;
+			runOnWorker( [ net, variable_defs, direction, threshold ]
+				{ return runRegressJob( net, variable_defs, direction,
+					threshold ); } );
 		} );
 
 		return jsonMsg( true, direction + " stepwise regression started" );

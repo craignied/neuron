@@ -117,13 +117,20 @@ static void expect( bool ok, const string& what )
 // weight state, comparable bitwise.
 class Probe : public BackProp {
 public:
+	// forward() takes the MODEL's own input matrix -- Model::Train, which each
+	//    model built for itself in setDataSet, with a bias column appended where
+	//    its architecture has one. It is NOT the DataSet's training matrix: that
+	//    one still carries the outcome in its last column, so passing it read the
+	//    LABEL into the bias slot of every biased model, and for BareProp -- whose
+	//    input vector is narrower still -- it read a short row. Both were silent
+	//    until Matrix::row acquired its contract (D9); the same defect was found
+	//    and fixed in check_onehidden a day earlier by an assert-enabled build.
 	double signature()
 	{
 		double sum = 0;
-		Matrix< double >& m = theData.getTrainMatrix();
-		for ( unsigned r = 0; r < m.rows(); r++ )
+		for ( unsigned r = 0; r < Train.rows(); r++ )
 		{
-			forward( m, r );
+			forward( Train, r );
 			sum += o;
 		}
 		return sum;

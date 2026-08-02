@@ -175,21 +175,23 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
    had ever executed in the gate chain**: seventeen contracts, measured, unenforced
    in the shipped binary (D5; `refactor_audit.md` §11).
 
-   **`Matrix` has NOT reached it, measured 2026-08-01 (D9, `refactor_audit.md`
-   §12, OPEN).** Exactly two of its mechanisms enforce a bounds or dimension
-   contract in Release — `operator()` and `includerows`, both throwing
-   `BoundsViolation`. (`BadSize` and `Singular` are enforced too, but they report
-   a construction and a numerical failure, not a bounds or dimension violation.)
-   Roughly forty-five
-   other public entry points — `row`, `col`, `replacerow`, `replacecol`, the
-   arithmetic shape checks, `t`, all nine `dotprod`/`dotprodt`/`dotprod_row`
-   overloads, `outprod`, `colsums`, `toVector`, `toMatrix`, `includecols`,
-   `excludecols`, `covariance` — are `assert`-only, so in the shipped build an
-   invalid argument is an out-of-bounds read or write rather than an exception.
-   This sentence said "**both** classes" until the Commit-2 verification measured
-   it; it had been generalized from the one accessor that was checked. **Until D9
-   lands, an assert-enabled build is the only thing that tests a `Matrix`
-   precondition** — that is how the `check_onehidden` matrix defect was found.
+   **`Matrix` reached it on 2026-08-01 (D9, `refactor_audit.md` §12).** Until that
+   day exactly two of its mechanisms enforced anything in Release — `operator()`
+   and `includerows` — and roughly forty-five other public entry points were
+   `assert`-only, so an invalid argument was an out-of-bounds read or write. Now
+   an index, range or gather position outside one container throws
+   `BoundsViolation`; two shapes that cannot be combined, including a non-square
+   input to the inverse family, throw the new `DimensionMismatch`; an invalid
+   intrinsic size throws `BadSize`; and numerical non-invertibility still throws
+   `Singular`. All four derive from `std::exception`, so a generic handler can
+   report them. **Two contracts are deliberately permissive and must stay so:**
+   `dotprod( iVec, oVec )` accepts a SHORTER destination (the prefix rule the bias
+   arithmetic depends on — only a longer one is refused), and both empty column
+   selections are legal (`includecols( {} )` is an *n* × 0 result, which is a
+   supported shape for the bias-free stepwise baseline; `excludecols( {} )` is a
+   copy). This paragraph said "**both** classes" as a *guarantee* until the
+   `OneHiddenNet` Commit-2 verification measured it and found it false — it had
+   been generalized from the one accessor that was checked.
    New engine or
    statistics code uses those classes; when the layer lacks a primitive, **extend the
    layer** (as `includerows` was added 2026-07-16 for the bootstrap resample) rather
@@ -416,12 +418,12 @@ condition number of exactly 1 and was silently correct elsewhere only when the d
 happened not to be extremal. Fixed in its own commit, with no golden re-bless required. The leaked
 `gsl_vector` went with it. → HISTORY 2026-07-27.
 
-**Open work.** Two items. **D9 — the `Matrix` bounds policy** (`refactor_audit.md` §12,
-opened 2026-08-01): the inventory is written and reviewed, no code is changed yet, and it
-is sequenced **before** the DFA extraction because DFA leans on `Matrix`. See rule 4's
-second paragraph for what is actually enforced today. Then the one remaining ROADMAP 4
-item under "What remains" below (B9, the
-GUI-wide strict-parsing pass). **No GUI click-through is outstanding: Craig ran the live
+**Open work** is the one remaining ROADMAP 4 item under "What remains" below (B9, the
+GUI-wide strict-parsing pass), plus one gap D9 left behind: **the GUI worker boundary and
+the CLI `main` boundary have no automated test.** `runOnWorker` lives in `gui.cpp`, which
+is not in a library, and no endpoint can be made to fail a `Matrix` contract on purpose,
+so neither a unit test nor `smoke.sh` can reach them; the evidence is a recorded manual
+fault injection (`refactor_audit.md` §12.10). Close it before something else leans on it. **No GUI click-through is outstanding: Craig ran the live
 GUI on the group-aware CV batch and approved it (2026-07-31).** The CV panel's three new
 controls — fold stratification columns/bins, group columns, and the clustered sampling
 unit — are visible, selectable and submitted by the page, after the 2026-07-30 help-text

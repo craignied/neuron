@@ -3349,3 +3349,72 @@ deliver. OPEN; inventory written before any code.**
     inheritance (a separate question with catch-site consequences), do not normalize the
     deliberate `<=` prefix rule of `dotprod( iVec, oVec )`, and check preconditions at the
     entry point rather than inside any loop — measured on the scale probe, not assumed.
+
+**2026-08-01 (later still) — D9 implemented: the `Matrix` layer now refuses in the build
+we ship.**
+
+  - **`Matrix::DimensionMismatch` added**, and all four contract classes now derive from
+    `std::exception` with `what() const noexcept override`. The split is Sol's: one index,
+    range or gather position outside one container is a `BoundsViolation`; two shapes that
+    cannot be combined — including a non-square input to the inverse family — are a
+    `DimensionMismatch`; an invalid *intrinsic* size is `BadSize`; numerical
+    non-invertibility stays `Singular`. Every `assert` guarding a caller-reachable
+    precondition became a typed throw **at the entry point**, none inside an element loop.
+  - **55 contracts, all holding**, against 8 held and 44 absent before (39 silent, 4 fatal,
+    1 throwing incidentally). `check_matrix_bounds` is registered with `ctest` now — that
+    `add_test` line is what changed when the policy landed, and its absence beforehand was
+    the evidence, not an oversight.
+  - **Two contracts are deliberately permissive and are pinned as controls.**
+    `dotprod( iVec, oVec )` keeps its `<=` prefix rule — a shorter destination computes the
+    leading rows and the bias arithmetic depends on it — and both empty column selections
+    are legal. The second was a correction of mine: I proposed refusing `includecols( {} )`
+    as `BadSize`, and the class says otherwise in its own words — the `( rows, cols, value )`
+    constructor carries a note that zero columns was **deliberately** allowed for the
+    bias-free stepwise baseline network, with the `ncols != 0` half of both its assert and
+    its throw commented out beside it. Refusing it would have broken that.
+  - **`covariance` gained a row minimum it never had.** Its guard was `nrows_ > 0` and its
+    last line divides by `nrows_ - 1`, so a single-row matrix passed the check and then
+    divided by zero, reporting infinities where the sample covariance of one observation
+    does not exist. Found by writing the mapping table, not by the harness: no case had
+    asked. Now `nrows_ >= 2 && ncols_ >= 2`, both `BadSize`.
+  - **`inverse` on a non-square matrix was safe only by accident, and the pair proves it.**
+    A 2 × 3 threw — from `operator()` downstream, because LU indexes rows by `ncols_` and
+    ran off the end. A 3 × 2 has more rows than the loop bound, so every index stayed in
+    range and it **ran to completion on a matrix with no inverse**. Both are cases now, and
+    both throw `DimensionMismatch` for the stated reason.
+  - **The catch-all analysis was corrected, and the fix is larger than the claim was.** I
+    wrote that deriving from `std::exception` would make `autoalgo` and `crossval` newly
+    swallow `Matrix` failures; that is false — `catch ( ... )` catches everything regardless
+    of inheritance, and both always swallowed them. Sol caught it. The real defect is that
+    both convert *any* exception into a domain answer: `autoalgo` into "that optimizer
+    diverged", `crossval::metricsFor` into "this fold's AUC was not estimable". Both now
+    **rethrow** `BoundsViolation`, `DimensionMismatch` and `BadSize` ahead of their
+    catch-all, and keep their handling of genuine numerical failures — `Singular` included,
+    because there it legitimately means an unavailable fit or metric.
+  - **Two process boundaries, one implementation each.** `runOnWorker` in `gui.cpp` runs a
+    job body, turns any escape into a structured failure, and owns the publish-then-clear
+    ordering the status endpoint depends on — which four launch sites had been maintaining
+    separately. `main` in `neuron.cpp` wraps `neuronMain` and prints a fatal diagnostic.
+    Both were needed: an exception escaping a `std::thread` calls `std::terminate`, and
+    `Network::computeCondNum` already threw `BoundsViolation` with nothing anywhere to
+    catch it.
+  - **Four sabotages, each failing a distinct set**: dropping `row()`'s index check fails
+    2; making the prefix rule an equality fails **exactly the control that guards it**, with
+    the `CONTROL FAILED` verdict rather than a false red; swapping `submatrix`'s type fails
+    1 as `WRONG TYPE`, so the types are discriminated and not merely "something threw"; and
+    removing `runOnWorker`'s handlers with a fault injected in `runTrainJob` **kills the
+    server process** where the boundary keeps it answering.
+  - **It found a defect the moment it existed, and the defect was in the tests.**
+    `check_autostep` failed instantly: its `signature()` helper passed the DataSet's
+    training matrix to `forward()`, whose last column is the outcome — a short row for
+    `BareProp`, and **the label read into the bias slot** for every biased model.
+    `check_bpoptimizer` had the same copied helper. Both now use `Model::Train`. That is
+    three tests in two days measuring something other than what they claimed, the first
+    caught by an assert-enabled build and these two by the contract itself. **No engine code
+    changed**, which is what a behavior-preserving hardening should find.
+  - **One gap, recorded rather than papered over.** The worker and CLI boundaries have **no
+    automated test**: `runOnWorker` is in `gui.cpp`, which is not in a library, and no
+    endpoint can be made to fail a `Matrix` contract on purpose, so neither a unit test nor
+    `smoke.sh` reaches them. The evidence is a manual fault injection with its exact output
+    in `refactor_audit.md` §12.10. It is the one mechanism added here that rule 2 does not
+    yet guard.

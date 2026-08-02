@@ -1029,7 +1029,13 @@ needs. That takes 149 compilations to about 67 and speeds every platform.
     `finalFlag` / `storeGrads` comment blocks went with the move (§8.2 asymmetry
     D) — both identifiers were already deleted and the condition number is X'VX.
     All gates green including `tests/tools/run_tools.sh`; nothing re-blessed.
-10a. **D9 — the `Matrix` bounds policy. OPEN, and it comes BEFORE item 11.**
+10a. ~~**D9 — the `Matrix` bounds policy**~~ — **DONE**. Inventory (§12.2),
+    Release characterization proven red (§12.6), catch sites enumerated (§12.7),
+    Sol's policy mapped case by case (§12.8), the boundary helper (§12.9), and
+    the implementation with its four sabotages (§12.10). `DimensionMismatch`
+    added, all four classes derived from `std::exception`, 55 contracts enforced
+    at the entry points, `runOnWorker` and the CLI `main` boundary. Originally
+    recorded as:
     Discovered by Commit 2's verification and widened by Sol: `Matrix::operator()`
     and `includerows` throw in Release, and roughly forty-five other public entry
     points that can read or write outside the allocation are guarded by `assert`
@@ -2283,7 +2289,7 @@ matrix, runs to completion. Read the totals as **8 contracts held, 44 absent**
 | 42 | `toMatrix( v, r, c )`: source ≠ `r * c` | `DimensionMismatch` | silent |
 | 43 | `func( Mi, fx, Mo )`: the two matrices disagree | `DimensionMismatch` | silent |
 | 44 | `includecols`: position past the last column | `BoundsViolation` | silent |
-| 45 | `includecols`: an EMPTY selection | `BadSize` — **see below** | silent |
+| 45 | `includecols`: an EMPTY selection | **legal** — see below | silent |
 | 46 | `excludecols`: position past the last column | `BoundsViolation` | silent |
 | 47 | `addrow`: new row width ≠ `ncols_` | `DimensionMismatch` | silent |
 | 48 | `addcol`: new column height ≠ `nrows_` | `DimensionMismatch` | **SIGTRAP** |
@@ -2291,25 +2297,49 @@ matrix, runs to completion. Read the totals as **8 contracts held, 44 absent**
 | 50 | `inverse( I )`: a WIDER-than-tall matrix | `DimensionMismatch` | held, **incidentally** |
 | 51 | `Matrix( Q, Pt )`: empty vectors | `BadSize` | silent |
 | 52 | `inverse( I )`: a TALLER-than-wide matrix | `DimensionMismatch` | silent |
-| **53** | `covariance`: fewer than two columns (**new case**) | `DimensionMismatch` | to be measured |
+| **53** | `covariance`: fewer than two columns (**new case**) | `BadSize` | to be measured |
 | **54** | `excludecols`: an EMPTY selection (**new case**) | **legal** — see below | to be measured |
+| **55** | `covariance`: a single row (**new case**) | `BadSize` | to be measured |
 
-Totals: **14 `BoundsViolation`**, **33 `DimensionMismatch`**, **3 `BadSize`**,
-**1 `Singular`**, **3 deliberately legal**.
+Totals: **14 `BoundsViolation`**, **32 `DimensionMismatch`**, **4 `BadSize`**,
+**1 `Singular`**, **4 deliberately legal** — 55 cases.
+
+The counts moved twice under Sol's review, and both moves are recorded because
+each was a wrong classification rather than a wording choice: `includecols( {} )`
+left `BadSize` for **legal** (below), and `covariance`'s two *intrinsic* size
+failures are `BadSize` rather than `DimensionMismatch` — a source matrix too
+small to have a covariance is not two shapes that disagree, it is one shape that
+is invalid. Its *destination* shape (case 49) stays `DimensionMismatch`.
 
 **The empty include/exclude selections, resolved explicitly** — Sol's
-instruction, and the one place where I am deciding rather than classifying. They
-are *not* symmetric, and inheriting either from the broken `max_element` assert
-would have hidden that:
+instruction. **Both are legal**, and neither may inherit its behavior from the
+broken `max_element` assert:
 
-- **`includecols( {} )` is refused, as `BadSize`.** The request is "keep no
-  columns", whose result is an *n* × 0 matrix — an object no operation in this
-  class can use, which will fail later and further from the caller that asked for
-  it. `BadSize` is the existing name for a zero dimension, and this is one.
-- **`excludecols( {} )` is legal and returns a copy.** "Exclude nothing" is a
-  well-defined request with a well-defined answer, and refusing it would break a
-  caller that computes a removal list which legitimately comes out empty —
-  `removeInputs` is exactly that shape. Case 54 pins it as a positive control.
+- **`includecols( {} )` returns an *n* × 0 matrix.** I first proposed refusing
+  this as `BadSize`, arguing that a zero-column matrix is unusable. **That was
+  wrong, and the class says so in its own words.** `matrix.h:337-343`:
+
+  > *"I had to relax these conditions for stepwise regression of a network
+  > without biases, as the weights of the baseline network (that with no input
+  > nodes) will be a Matrix with 0 columns"*
+
+  — and the `ncols != 0` half of both the assert and the `BadSize` throw is
+  commented out beside it. Zero columns is a **supported** shape with a live
+  reason, so "keep no columns" has a valid answer and refusing it would break the
+  bias-free stepwise baseline. Case 45 pins the shape of the result.
+- **`excludecols( {} )` returns an unchanged copy.** "Exclude nothing" is a
+  well-defined request, and refusing it would break a caller whose removal list
+  legitimately comes out empty — `removeInputs` is exactly that shape. Case 54
+  pins it.
+
+**`covariance` gets a row minimum it never had.** `matrix.cpp:44` asserts
+`nrows_ > 0 && ncols_ > 1`, and the last line of the same function is
+`V /= static_cast< double >( nrows_ - 1 )`. A **single-row** matrix therefore
+passes the guard and divides by zero — the sample covariance of one observation
+does not exist, and the code produces infinities instead of saying so. The
+contract becomes `nrows_ >= 2 && ncols_ >= 2`, both `BadSize`, and case 55 is the
+row half. It was found by writing this table, not by the harness, because no case
+had asked.
 
 **Deliberately not cased, with reasons.** `Matrix( filename, ncols )`,
 `loadfile`, and `operator>>` have preconditions about file contents and about a
@@ -2434,22 +2464,99 @@ int main( int argc, char* argv[] )
 }
 ```
 
-**One consequence of the inheritance change, flagged rather than assumed.**
-Making the four classes derive from `std::exception` means every existing
+**The inheritance change, and a claim of mine that was false.** Making the four
+classes derive from `std::exception` means every existing
 `catch ( const exception& )` starts seeing `Matrix` failures it previously let
-past. That is the point, and at `src/gui.cpp:1070` and `:1150` it is a strict
-improvement — a DFA or training run that hits a contract now returns
-`{"ok":false,"message":"..."}` instead of httplib's `500 EXCEPTION_WHAT:
-UNKNOWN`. Two sites already swallow everything and are unchanged by it:
-`src/autoalgo.cpp:116` (`catch ( ... )`, "a diverged probe is a result, not a
-failure") and `src/crossval.cpp:86-90` (`catch ( ... ) {}` around optional
-metrics). Neither becomes *more* permissive, but both would now swallow a
-`Matrix` contract failure that today crosses them — worth stating, and worth a
-look during implementation, though changing them is not part of this phase.
+past. At `src/gui.cpp:1070` and `:1150` that is a strict improvement — a DFA or
+training run that hits a contract now returns `{"ok":false,"message":"..."}`
+instead of httplib's `500 EXCEPTION_WHAT: UNKNOWN`.
 
+I then wrote that `src/autoalgo.cpp:116` and `src/crossval.cpp:86-90` "would now
+swallow a `Matrix` contract failure that today crosses them". **That is wrong.**
+Both are `catch ( ... )`, which catches every exception regardless of what it
+derives from; they have always swallowed these. Sol caught it. The inheritance
+change does nothing at either site, and the sentence is corrected here rather
+than quietly deleted because it was an argument for leaving them alone, and the
+argument was empty.
+
+**The real problem at those two sites is worse than the one I claimed, and this
+phase fixes it.** Both convert *any* exception into a domain answer:
+
+- `src/autoalgo.cpp:116` — *"a diverged probe is a result, not a failure"* —
+  turns it into an unusable optimizer probe, so a `Matrix` contract failure is
+  silently reported as "that optimizer diverged" and the search continues with
+  the others.
+- `src/crossval.cpp:86-90` — `try { m.az = ts.getStatROCarea(); } catch ( ... ) {}`
+  — turns it into an absent metric, so a fold whose arithmetic violated a
+  contract is reported as a fold whose AUC was not estimable.
+
+A programmer-contract failure is neither of those things. Per Sol, both sites
+**rethrow `BoundsViolation`, `DimensionMismatch` and `BadSize` before** their
+existing catch-all, and keep their present handling of genuine numerical and
+statistical failures — including `Singular`, which at these sites legitimately
+means an unavailable fit or an unavailable metric. The contract errors then reach
+the worker and CLI boundaries with their messages intact, which is the whole
+point of giving them messages.
+
+
+
+### 12.10 D9 implemented, and what it proved (2026-08-01)
+
+`Matrix::DimensionMismatch` added; all four classes now derive from
+`std::exception` with `what() const noexcept override`. Every `assert` that
+guarded a caller-reachable precondition in `matrix.h` and `matrix.cpp` became a
+typed throw **at the entry point** — none inside an element loop. **All 55 cases
+hold**: 0 silent, 0 crashed, 0 wrong type, 0 control failed, against 8 held and
+44 absent before. `check_matrix_bounds` is now a registered `ctest` case, which
+is the line that changed when the policy landed.
+
+**Four sabotages of the implemented policy**, each failing a distinct set:
+
+| sabotage | result |
+|---|---|
+| drop `row()`'s index check | 2 cases, both `row` overloads, `NO THROW` |
+| make `dotprod( in, out )`'s prefix rule an equality | **1 case, and it is the CONTROL** — verdict `CONTROL FAILED`, the distinct exit status doing its job |
+| throw `DimensionMismatch` where `submatrix` should throw `BoundsViolation` | 1 case, `WRONG TYPE` — the types are discriminated, not merely "something threw" |
+| remove `runOnWorker`'s handlers, with a fault injected in `runTrainJob` | the **server process dies** (`libc++abi: terminating due to uncaught exception`), where with the boundary it survives |
+
+**The boundary, demonstrated end to end.** A `Matrix< double >::DimensionMismatch`
+temporarily injected into `runTrainJob`, then `/api/train&async=1`:
+
+```
+{"ok":true,"running":false,"series":{...},
+ "result":{"ok":false,"message":"the run failed: Matrix dimension mismatch"}}
+```
+
+`running` cleared, the result published carrying `what()`, and `/api/version`
+still answering. The CLI the same way: a throw injected at the top of
+`neuronMain` gives `neuron: fatal: Matrix bounds violation` and **exit 1**, where
+before it terminated with no message at all. Both injections were reverted; they
+are demonstrations, not tests — see the gap below.
+
+**It found a defect immediately, in a test.** `check_autostep` failed the moment
+the contract existed: its `Probe::signature()` passed the **DataSet's** training
+matrix to `forward()`, whose last column is the outcome. For `BareProp` the row
+copy was short and now throws; for every biased model the width happened to match
+and the **label was being read into the bias slot**. That is the same defect
+`check_onehidden` had, fixed a day earlier by an assert-enabled build — the
+helper had been copied. `check_bpoptimizer` carried it too and was silent on both
+counts. All three now use `Model::Train`. **No engine code needed to change**,
+which is the outcome a behavior-preserving hardening should have: the contract
+found three tests lying about what they measured, and nothing in the engine
+violating it.
+
+**The remaining gap, stated rather than papered over.** The worker and CLI
+boundaries have **no automated test**. `runOnWorker` lives in `gui.cpp`, which is
+not in a library, so nothing can link it; and no endpoint can be made to fail a
+`Matrix` contract on purpose, so `smoke.sh` cannot reach it either. The evidence
+above is a manual injection, recorded here with its exact output. Making it
+permanent needs either a fault hook in the GUI or `runOnWorker` extracted to a
+linkable unit, and both are larger than this phase. It is the one mechanism added
+here that standing rule 2 does not yet guard, and it should be closed before the
+next thing leans on it.
 
 
 *Prepared by Claude (Opus 5). Reviewed by Sol (2026-07-31); revised §8 in response.
 §9–§12 are the implementation record: §§8.7–8.8 and 9–10 describe work now
 committed, §11 is the D5 design, written before its code, and §12 is D9's,
-written the same way and not yet implemented.*
+written the same way and now implemented (§12.10).*

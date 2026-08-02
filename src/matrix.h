@@ -85,11 +85,24 @@ public:
 	// Loads from file, flag for report and filename string as arguments
 	Matrix( const bool, string&  ); // filename string may change!
 
-	// Throws a BadSize object if either size is zero
-	class BadSize /* : public std::exception */
+	// THE CONTRACT EXCEPTIONS (D9, 2026-08-01). All four derive from
+	//    std::exception so that a generic handler can report them: the GUI's
+	//    catch( const exception& ) and the new worker/CLI boundaries all read
+	//    what(). They derive from std::exception DIRECTLY and not from a more
+	//    specialized standard type -- std::out_of_range and std::invalid_argument
+	//    carry std::logic_error's string allocation and say less than these names
+	//    do. Existing exact-type catches (Matrix< double >::Singular in ldfa,
+	//    qdfa and logistic) are unaffected.
+	//
+	//    An invalid INTRINSIC SIZE: a dimension a Matrix cannot have, or one too
+	//    small for the operation asked of it. Note that ZERO COLUMNS is a
+	//    supported shape -- see the constructor's own note about the bias-free
+	//    stepwise baseline -- so this is not "any zero".
+	class BadSize : public std::exception
 	{
 		public:
-			const char * what() const { return "Matrix dimension zero"; }
+			const char * what() const noexcept override
+				{ return "Matrix dimension zero or too small for this operation"; }
 	};
 
 	// Based on the Law Of The Big Three:
@@ -117,11 +130,25 @@ public:
 	// Access methods to get the ( i, j ) element:
 	T&       operator() ( const unsigned, const unsigned );
 	const T& operator() ( const unsigned, const unsigned ) const;
-	// These throw a BoundsViolation object if i or j is too big
-	class BoundsViolation /* : public std::exception */
+	// These throw a BoundsViolation object if i or j is too big.
+	//    ONE index, range or gather position outside ONE container.
+	class BoundsViolation : public std::exception
 	{
 		public:
-			const char * what() const { return "Matrix bounds violation"; }
+			const char * what() const noexcept override
+				{ return "Matrix bounds violation"; }
+	};
+
+	// TWO shapes that cannot be combined: a vector, a destination Matrix or a
+	//    second operand whose dimensions do not agree with this one's -- and a
+	//    non-square input to the inverse family, which is the same fact about a
+	//    single object. Distinct from BoundsViolation because nothing here is
+	//    an index: both objects are internally valid and simply do not fit.
+	class DimensionMismatch : public std::exception
+	{
+		public:
+			const char * what() const noexcept override
+				{ return "Matrix dimension mismatch"; }
 	};
 
 	// Accessors for the number of rows, columns
@@ -262,11 +289,14 @@ public:
 	Matrix< double >& inverse( Matrix< double >&, unsigned ) const; // pass return Matrix
 	Matrix< double > inverse( unsigned ) const; // returns new Matrix
 
-	// Singular Matrix error
-	class Singular
+	// Singular Matrix error -- a NUMERICAL outcome, not a programmer error:
+	//    a well-formed square matrix that has no inverse. Callers legitimately
+	//    treat it as an analytical answer (ldfa, qdfa, logistic all do).
+	class Singular : public std::exception
 	{
 		public:
-			const char * what() const { return "singular Matrix"; }
+			const char * what() const noexcept override
+				{ return "singular Matrix"; }
 	};
 
 	// Sets the output header flag
@@ -362,7 +392,9 @@ Matrix< T >::Matrix( const vector< T >& Q, const vector< T >& Pt ) :
 	nrows_ ( Q.size() ), ncols_ ( Pt.size() ), outputHeaderFlag ( true )
 {
 	// Make sure dimensions are nonzero
-	assert ( nrows_ != 0 && ncols_ != 0 );
+	// An outer product of empty vectors has no dimensions to have (D9)
+	if ( nrows_ == 0 || ncols_ == 0 )
+		throw BadSize();
 
 	// Construct the Matrix data array
 	data_ = new T[ nrows_ * ncols_ ];
@@ -855,8 +887,10 @@ Matrix< T >& Matrix< T >::submatrix( const unsigned r1, const unsigned rN,
 	const unsigned c1, const unsigned cN, Matrix< T >& SubM ) const
 {
 	// Make sure the receiving Matrix has the proper dimensions
-	assert ( r1 <= rN && rN <= nrows_ && c1 <= cN && cN <= ncols_
-		&& SubM.rows() == ( rN - r1 + 1 ) && SubM.cols() == ( cN - c1 + 1 ) );
+	if ( r1 > rN || rN > nrows_ || c1 > cN || cN > ncols_ )
+		throw BoundsViolation();
+	if ( SubM.rows() != ( rN - r1 + 1 ) || SubM.cols() != ( cN - c1 + 1 ) )
+		throw DimensionMismatch();
 
 	// Set pointers to the starts of the data arrays
 	T *pData = data_ + ( ncols_ * r1 + c1 ), *pSubMData = SubM.data_;
@@ -899,7 +933,10 @@ template< class T >
 vector< T >& Matrix< T >::row( const unsigned r, vector< T >& v ) const
 {
 	// Number of elements in v must equal number of columns in A
-	assert ( v.size() == ncols_ && r < nrows_ );
+	if ( r >= nrows_ )
+		throw BoundsViolation();
+	if ( v.size() != ncols_ )
+		throw DimensionMismatch();
 
 	// Set an iterator to the beginning of the row
 	T* pData = data_ + ( r * ncols_ );
@@ -936,7 +973,10 @@ template< class T >
 vector< T >& Matrix< T >::col( const unsigned c, vector< T >& v ) const
 {
 	// Number of elements in v must equal number of columns in A
-	assert ( v.size() == nrows_ && c < ncols_ );
+	if ( c >= ncols_ )
+		throw BoundsViolation();
+	if ( v.size() != nrows_ )
+		throw DimensionMismatch();
 
 	// Set a pointer to the beginning of the column
 	T* pData = data_ + c;
@@ -974,7 +1014,10 @@ template< class T >
 Matrix< T >& Matrix< T >::replacerow( const unsigned r, const vector< T >& v )
 {
 	// Number of elements in v must equal number of columns in Matrix
-	assert ( v.size() == ncols_ && r < nrows_ );
+	if ( r >= nrows_ )
+		throw BoundsViolation();
+	if ( v.size() != ncols_ )
+		throw DimensionMismatch();
 
 	// Set a pointer to the beginning of the row
 	T* pData = data_ + ( r * ncols_ );
@@ -997,7 +1040,10 @@ template< class T >
 Matrix< T >& Matrix< T >::replacecol( const unsigned c, const vector< T >& v )
 {
 	// Number of elements in v must equal number of columns in A
-	assert ( v.size() == nrows_ && c < ncols_ );
+	if ( c >= ncols_ )
+		throw BoundsViolation();
+	if ( v.size() != nrows_ )
+		throw DimensionMismatch();
 
 	// Set a pointer to the beginning of the column
 	T* pData = data_ + c;
@@ -1019,8 +1065,9 @@ template< class T >
 Matrix< T >& Matrix< T >::addrow( const vector< T >& v, Matrix< T >& bigM ) const
 {
 	// Make sure the Matrices have the proper dimensions
-	assert ( v.size() == ncols_ && bigM.ncols_ == ncols_
-		&& bigM.nrows_ == ( nrows_ + 1 ) );
+	if ( v.size() != ncols_ || bigM.ncols_ != ncols_
+		|| bigM.nrows_ != ( nrows_ + 1 ) )
+		throw DimensionMismatch();
 
 	unsigned size = nrows_ * ncols_; // size of the sending Matrix data array
 
@@ -1055,8 +1102,9 @@ template< class T >
 Matrix< T >& Matrix< T >::addcol( const vector< T >& v, Matrix< T >& bigM ) const
 {
 	// Make sure the Matrices have the proper dimensions
-	assert ( v.size() == nrows_ && bigM.nrows_ == nrows_
-		&& bigM.ncols_ == ( ncols_ + 1 ) );
+	if ( v.size() != nrows_ || bigM.nrows_ != nrows_
+		|| bigM.ncols_ != ( ncols_ + 1 ) )
+		throw DimensionMismatch();
 
 	// Set pointers to the beginning of the Matrices data arrays
 	T *pData = data_, *pBigData = bigM.data_;
@@ -1097,7 +1145,8 @@ template< class T >
 Matrix< T >& Matrix< T >::operator+= ( const Matrix< T >& rhs )
 {
 	// Catch different size matrices
-	assert ( nrows_ == rhs.nrows_ && ncols_ == rhs.ncols_ );
+	if ( nrows_ != rhs.nrows_ || ncols_ != rhs.ncols_ )
+		throw DimensionMismatch();
 
 	// Uses algorithm::transform and functional::plus
 	transform( data_, data_ + ( nrows_ * ncols_ ), rhs.data_, data_, plus< T >() );
@@ -1110,7 +1159,8 @@ template< class T >
 Matrix< T >& Matrix< T >::operator-= ( const Matrix< T >& rhs )
 {
 	// Catch different size matrices
-	assert ( nrows_ == rhs.nrows_ && ncols_ == rhs.ncols_ );
+	if ( nrows_ != rhs.nrows_ || ncols_ != rhs.ncols_ )
+		throw DimensionMismatch();
 
 	// Uses algorithm::transform and functional::minus
 	transform( data_, data_ + ( nrows_ * ncols_ ), rhs.data_, data_, minus< T >() );
@@ -1123,7 +1173,8 @@ template< class T >
 Matrix< T >& Matrix< T >::operator*= ( const Matrix< T >& rhs )
 {
 	// Catch different size matrices
-	assert ( nrows_ == rhs.nrows_ && ncols_ == rhs.ncols_ );
+	if ( nrows_ != rhs.nrows_ || ncols_ != rhs.ncols_ )
+		throw DimensionMismatch();
 
 	// Uses algorithm::transform and functional::multiplies
 	transform( data_, data_ + ( nrows_ * ncols_ ), rhs.data_, data_, multiplies< T >() );
@@ -1136,7 +1187,8 @@ template< class T >
 Matrix< T >& Matrix< T >::operator/= ( const Matrix< T >& rhs )
 {
 	// Catch different size matrices
-	assert ( nrows_ == rhs.nrows_ && ncols_ == rhs.ncols_ );
+	if ( nrows_ != rhs.nrows_ || ncols_ != rhs.ncols_ )
+		throw DimensionMismatch();
 
 	// Uses algorithm::transform and functional::divides
 	transform( data_, data_ + ( nrows_ * ncols_ ), rhs.data_, data_, divides< T >() );
@@ -1338,7 +1390,8 @@ template< class T >
 Matrix< T >& Matrix< T >::t( Matrix< T >& M_in ) const
 {
 	// Dimensions check
-	assert( ( M_in.rows() == ncols_ ) && ( M_in.cols() == nrows_ ) );
+	if ( M_in.rows() != ncols_ || M_in.cols() != nrows_ )
+		throw DimensionMismatch();
 
 	for ( unsigned c = 0; c < ncols_; c++ )
 		// Use previously coded replacerow method
@@ -1377,7 +1430,11 @@ vector< T >& Matrix< T >::dotprod( const vector< T >& iVec, vector< T >& oVec ) 
 {
 	// Number of Matrix columns must equal number of input vector elements
 	// Number of Matrix rows must be >= number of output vector elements
-	assert ( iVec.size() == ncols_ && oVec.size() <= nrows_);
+	//    The <= is the PREFIX RULE and is deliberate (refactor_audit.md 11.3):
+	//    a SHORTER destination computes the leading rows only, and the bias
+	//    arithmetic depends on it. Only a LONGER one is refused.
+	if ( iVec.size() != ncols_ || oVec.size() > nrows_ )
+		throw DimensionMismatch();
 
 	// Set a pointer ( pData ) to Matrix's data array
 	T* pData = data_;
@@ -1424,8 +1481,10 @@ vector< T >& Matrix< T >::dotprod( const vector< T >& iVec, vector< T >& oVec,
 	// Number of Matrix columns must equal number of input vector elements
 	//    number of Matrix rows must equal number of output vector elements,
 	//    and range must be in bounds
-	assert ( iVec.size() == ncols_ && nrows_ == ( iEnd - iBegin + 1 )
-		&& iEnd >= iBegin && iEnd < oVec.size() );
+	if ( iEnd < iBegin || iEnd >= oVec.size() )
+		throw BoundsViolation();
+	if ( iVec.size() != ncols_ || nrows_ != ( iEnd - iBegin + 1 ) )
+		throw DimensionMismatch();
 
 	// Set a pointer ( pData ) to Matrix's data array
 	T* pData = data_;
@@ -1464,7 +1523,9 @@ vector< T >& Matrix< T >::dotprodt( const vector< T >& iVec, vector< T >& oVec )
 {
 	// Number of Matrix columns must equal number of input vector elements
 	// Number of Matrix rows must be >= of output vector elements
-	assert ( iVec.size() == nrows_ && oVec.size() <= ncols_);
+	//    The <= is the PREFIX RULE, as in dotprod above.
+	if ( iVec.size() != nrows_ || oVec.size() > ncols_ )
+		throw DimensionMismatch();
 
 	// Set a pointer ( pData ) to Matrix's data array
 	T* pData = data_;
@@ -1521,8 +1582,10 @@ vector< T >& Matrix< T >::dotprodt( const vector< T >& iVec, vector< T >& oVec,
 	// Number of Matrix columns must equal number of input vector elements
 	//    number of Matrix rows must equal number of output vector elements,
 	//    and range must be in bounds
-	assert ( iVec.size() == nrows_ && ncols_ == ( iEnd - iBegin + 1 )
-		&& iEnd >= iBegin && iEnd < oVec.size() );
+	if ( iEnd < iBegin || iEnd >= oVec.size() )
+		throw BoundsViolation();
+	if ( iVec.size() != nrows_ || ncols_ != ( iEnd - iBegin + 1 ) )
+		throw DimensionMismatch();
 
 	// Set a pointer ( pData ) to Matrix's data array
 	T* pData = data_;
@@ -1574,8 +1637,10 @@ vector< T >& Matrix< T >::dotprod_row( const Matrix< T >& Dataset, const unsigne
 	// Number of columns in Matrix must equal number of columns in dataset Matrix
 	//    number of Matrix rows must equal number of output vector elements,
 	//    and row must be in bounds
-	assert ( ncols_ == Dataset.ncols_ && oVec.size() == nrows_
-		&& row < Dataset.nrows_ );
+	if ( row >= Dataset.nrows_ )
+		throw BoundsViolation();
+	if ( ncols_ != Dataset.ncols_ || oVec.size() != nrows_ )
+		throw DimensionMismatch();
 
 	// Set a pointer ( pData ) to Matrix's data array
 	T* pData = data_;
@@ -1630,8 +1695,10 @@ vector< T >& Matrix< T >::dotprod_row( const Matrix< T >& Dataset, const unsigne
 	// Number of columns in Matrix must equal number of columns in dataset Matrix
 	//    number of Matrix rows must equal number of output vector elements, and
 	//    row and range must be in bounds
-	assert ( ncols_ == Dataset.ncols_ && nrows_ == ( iEnd - iBegin + 1 )
-		&& iEnd >= iBegin && iEnd < oVec.size() && row < Dataset.nrows_ );
+	if ( row >= Dataset.nrows_ || iEnd < iBegin || iEnd >= oVec.size() )
+		throw BoundsViolation();
+	if ( ncols_ != Dataset.ncols_ || nrows_ != ( iEnd - iBegin + 1 ) )
+		throw DimensionMismatch();
 
 	// Set a pointer ( pData ) to Matrix's data array
 	T* pData = data_;
@@ -1668,7 +1735,8 @@ template< class T >
 Matrix< T >& Matrix< T >::dotprod( const Matrix< T >& B, Matrix< T >& C ) const
 {
 	// Dimensions check
-	assert ( ( C.rows() == nrows_ ) && ( C.cols() == B.cols() ) && ( ncols_ == B.rows() ) );
+	if ( C.rows() != nrows_ || C.cols() != B.cols() || ncols_ != B.rows() )
+		throw DimensionMismatch();
 
 	for ( unsigned col = 0; col < B.cols(); col++ )
 		// Use previously coded vector dotprod and replacecol methods
@@ -1698,7 +1766,8 @@ template < class T >
 Matrix< T >& Matrix< T >::outprod( const vector< T >& Q, const vector< T >& Pt )
 {
 	// Make sure Matrix is the right size
-	assert ( nrows_ == Q.size() && ncols_ == Pt.size() );
+	if ( nrows_ != Q.size() || ncols_ != Pt.size() )
+		throw DimensionMismatch();
 
 	// Set a pointer ( pData ) to Matrix's data array
 	T* pData = data_;
@@ -1764,7 +1833,8 @@ template < class T, class F >
 Matrix< T >& func( const Matrix< T >& Mi, F fx, Matrix< T >& Mo )
 {
 	// Catch different size matrices
-	assert ( Mo.rows() == Mi.rows() && Mo.cols() == Mi.cols() );
+	if ( Mo.rows() != Mi.rows() || Mo.cols() != Mi.cols() )
+		throw typename Matrix< T >::DimensionMismatch();
 
 	// Run through data array, and set output Matrix data array to passed function
 	for ( T *pMi = Mi.begin(), *pMo = Mo.begin(); pMi != Mi.end(); ++pMi, ++pMo )
@@ -1793,7 +1863,8 @@ Matrix< T > func( const Matrix< T >& Mi, F fx )
 template < class T >
 vector< T >& Matrix< T >::colsums( vector< T >& sums ) const
 {
-	assert ( ncols_ == sums.size() ); // check vector & Matrix dimensions
+	if ( ncols_ != sums.size() ) // check vector & Matrix dimensions
+		throw DimensionMismatch();
 
 	// Clear sums vector by setting all elements to zero
 	std::fill( sums.begin(), sums.end(), 0 );
@@ -1833,7 +1904,8 @@ vector< T > Matrix< T >::colsums() const
 template < class T >
 bool Matrix< T >::rowindex( vector< unsigned >& v ) const
 {
-	assert ( v.size() == nrows_ ); // vector size must equal number of rows
+	if ( v.size() != nrows_ ) // vector size must equal number of rows
+		throw DimensionMismatch();
 
 	bool success = true; // flag to indicate if successful
 
@@ -1881,10 +1953,20 @@ Matrix< T >& Matrix< T >::includecols( Matrix< T >& M, const vector< unsigned >&
 	//    ncols_ - pos.size() -- excludecols' dimension -- since 2.x; the
 	//    method had no callers, so the wrong contract never fired. Fixed
 	//    2026-07-16 when includerows was added beside it.)
-	assert ( *( max_element( pos.begin(), pos.end() ) ) < ncols_ // bounds check
-		&& posC.end() == unique( posC.begin(), posC.end() ) // unique check
-		&& M.nrows_ == nrows_ // dimension checks
-		&& M.ncols_ == pos.size() );
+	// AN EMPTY SELECTION IS LEGAL and yields an nrows_ x 0 result. Zero columns
+	//    is a supported shape here -- see the ( rows, cols, value ) constructor's
+	//    own note about the bias-free stepwise baseline network, whose weight
+	//    Matrix has no columns. The bounds check below therefore runs only over
+	//    a non-empty selection: max_element on an empty range dereferences
+	//    end(), which is what the ASSERT this replaces did, giving a checked
+	//    build undefined behavior exactly where Release had no check at all (D9).
+	if ( !pos.empty()
+		&& *( max_element( pos.begin(), pos.end() ) ) >= ncols_ )
+		throw BoundsViolation();
+	if ( posC.end() != unique( posC.begin(), posC.end() ) ) // unique check
+		throw BoundsViolation();
+	if ( M.nrows_ != nrows_ || M.ncols_ != pos.size() )
+		throw DimensionMismatch();
 
 	vector< bool > vbool( ncols_ ); // indicates if column should be included
 	std::fill( vbool.begin(), vbool.end(), false ); // initialize to all false
@@ -1935,8 +2017,8 @@ Matrix< T > Matrix< T >::includecols( const vector< unsigned >& pos ) const
 template < class T >
 Matrix< T >& Matrix< T >::includerows( Matrix< T >& M, const vector< unsigned >& pos ) const
 {
-	assert ( M.nrows_ == pos.size() // dimension checks
-		&& M.ncols_ == ncols_ );
+	if ( M.nrows_ != pos.size() || M.ncols_ != ncols_ ) // dimension checks
+		throw DimensionMismatch();
 
 	T *pMData = M.data_; // pointer to the incoming Matrix data array
 
@@ -1979,10 +2061,18 @@ Matrix< T >& Matrix< T >::excludecols( Matrix< T >& M, const vector< unsigned >&
 	// Sort incoming positions vector, necessary for coming application of unique
 	sort( posC.begin(), posC.end() );
 
-	assert ( *( max_element( pos.begin(), pos.end() ) ) < ncols_ // bounds check
-		&& posC.end() == unique( posC.begin(), posC.end() ) // unique check
-		&& M.nrows_ == nrows_ // dimension checks
-		&& M.ncols_ == ( ncols_ - pos.size() ) );
+	// AN EMPTY SELECTION IS LEGAL and yields an unchanged copy: "exclude
+	//    nothing" is a well-defined request, and a caller whose removal list
+	//    legitimately comes out empty -- removeInputs is exactly that shape --
+	//    must not be refused. See includecols above on max_element and the
+	//    empty range.
+	if ( !pos.empty()
+		&& *( max_element( pos.begin(), pos.end() ) ) >= ncols_ )
+		throw BoundsViolation();
+	if ( posC.end() != unique( posC.begin(), posC.end() ) ) // unique check
+		throw BoundsViolation();
+	if ( M.nrows_ != nrows_ || M.ncols_ != ( ncols_ - pos.size() ) )
+		throw DimensionMismatch();
 
 	vector< bool > vbool( ncols_ ); // indicates if column should be excluded
 	std::fill( vbool.begin(), vbool.end(), true ); // initialize to all true
@@ -2029,7 +2119,8 @@ template < class T >
 vector< T >& Matrix< T >::toVector( vector< T >& v_in ) const
 {
 	// Passed vector must be same size as Matrix data structure
-	assert( v_in.size() == ( nrows_ * ncols_ ) );
+	if ( v_in.size() != ( nrows_ * ncols_ ) )
+		throw DimensionMismatch();
 
 	// We'll do this through iterators
 	typename vector< T >::iterator pv; // vector iterator
@@ -2064,7 +2155,8 @@ template < class T >
 Matrix< T >& toMatrix( Matrix< T >& M_in, vector< T >& v_in )
 {
 	// Passed Matrix must be same size as vector
-	assert( v_in.size() == ( M_in.rows() * M_in.cols() ) );
+	if ( v_in.size() != ( M_in.rows() * M_in.cols() ) )
+		throw typename Matrix< T >::DimensionMismatch();
 
 	// We'll do this through iterators
 	typename vector< T >::iterator pv; // vector iterator
@@ -2085,7 +2177,8 @@ template < class T >
 Matrix< T > toMatrix( vector< T >& v_in, unsigned nrows, unsigned ncols )
 {
 	// new Matrix must be same size as vector
-	assert( v_in.size() == ( nrows * ncols ) );
+	if ( v_in.size() != ( nrows * ncols ) )
+		throw typename Matrix< T >::DimensionMismatch();
 
 	// Construct a new matrix of the same size
 	Matrix< T > Mo( nrows, ncols );

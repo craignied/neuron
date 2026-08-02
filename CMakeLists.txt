@@ -414,14 +414,17 @@ target_link_libraries(check_vector_bounds PRIVATE neuron_core)
 target_compile_definitions(check_vector_bounds PRIVATE NDEBUG)
 add_test(NAME vector_ops_bounds COMMAND check_vector_bounds)
 
-# D9 characterization of the Matrix bounds and dimension contract, in the build
-# we ship (NDEBUG, as above). DELIBERATELY NOT an add_test yet: forty-three of
-# its cases are contracts that DO NOT EXIST in matrix.h today, so the suite
-# cannot pass and registering it would put the gate chain permanently red. It is
-# built (so it cannot rot) and driven by tests/matrix/run_matrix_bounds_demo.sh,
-# which runs each case in its own process. The add_test line lands in the commit
-# that implements the policy -- that ordering is the evidence, not an oversight.
-# See refactor_audit.md sections 12.4 and 12.5.
+# The Matrix bounds and dimension contract (D9), asserted in the build we ship
+# (NDEBUG, as above). 55 cases: 14 BoundsViolation, 32 DimensionMismatch, 4
+# BadSize, 1 Singular, 4 deliberately legal -- including the short-destination
+# prefix rule of dotprod and both empty column selections. It was written and
+# run BEFORE the policy existed, where 44 of its cases had no contract to catch
+# them (39 silent, 4 fatal, 1 throwing incidentally); that run is the red
+# evidence, recorded in refactor_audit.md section 12.6, and this add_test line
+# is what changed when the policy landed. tests/matrix/run_matrix_bounds_demo.sh
+# still runs each case in its own process, which is how a case that CRASHES
+# rather than returning is attributed to itself.
 add_executable(check_matrix_bounds tests/matrix/check_matrix_bounds.cpp)
 target_link_libraries(check_matrix_bounds PRIVATE neuron_core)
 target_compile_definitions(check_matrix_bounds PRIVATE NDEBUG)
+add_test(NAME matrix_bounds COMMAND check_matrix_bounds)

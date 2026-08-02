@@ -113,6 +113,17 @@ autoalgo::Result autoalgo::pick( const Network& start, unsigned budgetMs,
 			{
 				finalError = probe->train();
 			}
+			// A PROGRAMMER-CONTRACT FAILURE IS NOT A DIVERGED PROBE (D9).
+			//    These three say a caller handed the numerical layer shapes or
+			//    indices that cannot be right; turning one into a NaN would
+			//    report "that optimizer diverged" and quietly continue with the
+			//    others. They pass through to the worker or CLI boundary, which
+			//    reports what() to the user. Everything else -- a numerical
+			//    divergence, a singular matrix, a statistics failure -- keeps
+			//    its old meaning below.
+			catch ( const Matrix< double >::BoundsViolation& ) { throw; }
+			catch ( const Matrix< double >::DimensionMismatch& ) { throw; }
+			catch ( const Matrix< double >::BadSize& ) { throw; }
 			catch ( ... ) // a diverged probe is a result, not a failure
 			{
 				finalError = numeric_limits< double >::quiet_NaN();

@@ -222,7 +222,7 @@ static int c09()
 // 10. row( r, v ): the destination is not ncols_ wide.
 static int c10()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A = mat23(); vector< double > v( 3 ); A.row( 0, v );
 			return v[ 1 ] == 2; },
 		[] { M A = mat23(); vector< double > v( 9 ); A.row( 0, v ); } );
@@ -249,7 +249,7 @@ static int c12()
 // 13. col( c, v ): the destination is not nrows_ tall.
 static int c13()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A = mat23(); vector< double > v( 2 ); A.col( 0, v );
 			return v[ 1 ] == 4; },
 		[] { M A = mat23(); vector< double > v( 7 ); A.col( 0, v ); } );
@@ -266,7 +266,7 @@ static int c14()
 // 15. replacerow: the source vector is wider than the matrix. WRITES.
 static int c15()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A = mat23(); A.replacerow( 1, seq( 3, 10 ) ); return A( 1, 2 ) == 12; },
 		[] { M A = mat23(); A.replacerow( 1, seq( 12, 10 ) ); } );
 }
@@ -282,7 +282,7 @@ static int c16()
 // 17. replacecol: the source vector is taller than the matrix. WRITES.
 static int c17()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A = mat23(); A.replacecol( 2, seq( 2, 10 ) ); return A( 1, 2 ) == 11; },
 		[] { M A = mat23(); A.replacecol( 2, seq( 20, 10 ) ); } );
 }
@@ -299,7 +299,7 @@ static int c18()
 // 19. submatrix: the destination does not match the requested block.
 static int c19()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A = mat23(); M S( 1, 2 ); A.submatrix( 1, 1, 0, 1, S );
 			return S( 0, 0 ) == 4 && S( 0, 1 ) == 5; },
 		[] { M A = mat23(); M S( 5, 5 ); A.submatrix( 1, 1, 0, 1, S ); } );
@@ -310,28 +310,28 @@ static int c19()
 //     lockstep by element count.
 static int c20()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A = mat23(), B = mat23(); A += B; return A( 0, 2 ) == 6; },
 		[] { M A = mat23(); M B( 4, 4, 1.0 ); A += B; } );
 }
 
 static int c21()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A = mat23(), B = mat23(); A -= B; return A( 0, 2 ) == 0; },
 		[] { M A = mat23(); M B( 4, 4, 1.0 ); A -= B; } );
 }
 
 static int c22()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A = mat23(), B = mat23(); A *= B; return A( 1, 0 ) == 16; },
 		[] { M A = mat23(); M B( 4, 4, 1.0 ); A *= B; } );
 }
 
 static int c23()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A = mat23(), B = mat23(); A /= B; return A( 1, 1 ) == 1; },
 		[] { M A = mat23(); M B( 4, 4, 1.0 ); A /= B; } );
 }
@@ -340,7 +340,7 @@ static int c23()
 //     must inherit the contract rather than restate it.
 static int c24()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A = mat23(), B = mat23(); M C = A + B; return C( 1, 2 ) == 12; },
 		[] { M A = mat23(); M B( 4, 4, 1.0 ); M C = A + B; ( void ) C; } );
 }
@@ -348,7 +348,7 @@ static int c24()
 // 25. t( M_in ): the destination is not the transpose's shape. WRITES.
 static int c25()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A = mat23(); M T( 3, 2 ); A.t( T ); return T( 2, 1 ) == 6; },
 		[] { M A = mat23(); M T( 2, 3 ); A.t( T ); } );
 }
@@ -356,7 +356,7 @@ static int c25()
 // 26. dotprod( iVec, oVec ): the input is not ncols_ long.
 static int c26()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A = mat23(); vector< double > in = seq( 3 ), out( 2 );
 			A.dotprod( in, out ); return out[ 1 ] == 32; },
 		[] { M A = mat23(); vector< double > in = seq( 9 ), out( 2 );
@@ -367,7 +367,7 @@ static int c26()
 //     permits shorter (case 7); longer walks off the data array.
 static int c27()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A = mat23(); vector< double > in = seq( 3 ), out( 2 );
 			A.dotprod( in, out ); return out[ 0 ] == 14; },
 		[] { M A = mat23(); vector< double > in = seq( 3 ), out( 12 );
@@ -377,7 +377,7 @@ static int c27()
 // 28. Ranged dotprod: the range does not span nrows_ rows.
 static int c28()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A = mat23(); vector< double > in = seq( 3 ), out( 4, -1.0 );
 			A.dotprod( in, out, 1, 2 );
 			return out[ 0 ] == -1 && out[ 1 ] == 14 && out[ 2 ] == 32; },
@@ -398,7 +398,7 @@ static int c29()
 // 30. dotprodt( iVec, oVec ): the input is not nrows_ long.
 static int c30()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A = mat23(); vector< double > in = seq( 2 ), out( 3 );
 			A.dotprodt( in, out ); return out[ 0 ] == 9; }, // 1*1 + 2*4
 		[] { M A = mat23(); vector< double > in = seq( 9 ), out( 3 );
@@ -408,7 +408,7 @@ static int c30()
 // 31. Ranged dotprodt: the range does not span ncols_ columns.
 static int c31()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A = mat23(); vector< double > in = seq( 2 ), out( 3 );
 			A.dotprodt( in, out, 0, 2 ); return out[ 2 ] == 15; },
 		[] { M A = mat23(); vector< double > in = seq( 2 ), out( 3 );
@@ -428,7 +428,7 @@ static int c32()
 // 33. dotprod_row: the two matrices disagree about width.
 static int c33()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A = mat23(), D = mat23(); vector< double > out( 2 );
 			A.dotprod_row( D, 1, out ); return out[ 1 ] == 77; },
 		[] { M A = mat23(); M D( 2, 7, 1.0 ); vector< double > out( 2 );
@@ -438,7 +438,7 @@ static int c33()
 // 34. dotprod( B, C ): the inner dimensions do not agree.
 static int c34()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A = mat23(); M B = A.t(); M C( 2, 2 ); A.dotprod( B, C );
 			return C( 0, 0 ) == 14 && C( 1, 1 ) == 77; },
 		[] { M A = mat23(); M B( 5, 2, 1.0 ); M C( 2, 2 ); A.dotprod( B, C ); } );
@@ -447,7 +447,7 @@ static int c34()
 // 35. dotprod( B, C ): the destination is the wrong shape. WRITES.
 static int c35()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A = mat23(); M B = A.t(); M C( 2, 2 ); A.dotprod( B, C );
 			return C( 0, 1 ) == 32; },
 		[] { M A = mat23(); M B = A.t(); M C( 6, 6 ); A.dotprod( B, C ); } );
@@ -457,7 +457,7 @@ static int c35()
 //     per-exemplar training path (hWup.outprod( h_err, I )).
 static int c36()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A( 2, 3 ); A.outprod( seq( 2 ), seq( 3 ) ); return A( 1, 2 ) == 6; },
 		[] { M A( 2, 3 ); A.outprod( seq( 11 ), seq( 3 ) ); } );
 }
@@ -465,7 +465,7 @@ static int c36()
 // 37. outprod: the right vector is not ncols_ long. WRITES.
 static int c37()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A( 2, 3 ); A.outprod( seq( 2 ), seq( 3 ) ); return A( 0, 2 ) == 3; },
 		[] { M A( 2, 3 ); A.outprod( seq( 2 ), seq( 13 ) ); } );
 }
@@ -473,7 +473,7 @@ static int c37()
 // 38. colsums: the destination is not ncols_ long. WRITES.
 static int c38()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A = mat23(); vector< double > s( 3 ); A.colsums( s );
 			return s[ 0 ] == 5 && s[ 2 ] == 9; },
 		[] { M A = mat23(); vector< double > s( 1 ); A.colsums( s ); } );
@@ -482,7 +482,7 @@ static int c38()
 // 39. rowindex: the destination is not nrows_ long. WRITES.
 static int c39()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A = mat23(); vector< unsigned > v( 2 ); A.rowindex( v );
 			return v.size() == 2; },
 		[] { M A = mat23(); vector< unsigned > v( 1 ); A.rowindex( v ); } );
@@ -491,7 +491,7 @@ static int c39()
 // 40. toVector( v ): the destination is not rows*cols long. WRITES.
 static int c40()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A = mat23(); vector< double > v( 6 ); A.toVector( v );
 			return v[ 0 ] == 1 && v[ 5 ] == 6; },
 		[] { M A = mat23(); vector< double > v( 2 ); A.toVector( v ); } );
@@ -500,7 +500,7 @@ static int c40()
 // 41. toMatrix( M, v ): the source is not rows*cols long.
 static int c41()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A( 2, 3 ); vector< double > v = seq( 6 ); toMatrix( A, v );
 			return A( 1, 2 ) == 6; },
 		[] { M A( 2, 3 ); vector< double > v = seq( 2 ); toMatrix( A, v ); } );
@@ -509,7 +509,7 @@ static int c41()
 // 42. toMatrix( v, r, c ): the free returning form, same contract.
 static int c42()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { vector< double > v = seq( 6 ); M A = toMatrix( v, 2, 3 );
 			return A( 0, 1 ) == 2; },
 		[] { vector< double > v = seq( 2 ); M A = toMatrix( v, 2, 3 ); ( void ) A; } );
@@ -518,7 +518,7 @@ static int c42()
 // 43. The free func( Mi, fx, Mo ): the two matrices disagree. WRITES.
 static int c43()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A = mat23(); M B( 2, 3 ); func( A, []( double x ){ return 2 * x; }, B );
 			return B( 1, 2 ) == 12; },
 		[] { M A = mat23(); M B( 1, 1 ); func( A, []( double x ){ return 2 * x; }, B ); } );
@@ -536,17 +536,21 @@ static int c44()
 			M C = A.includecols( pos ); ( void ) C; } );
 }
 
-// 45. includecols with an EMPTY position vector. Recorded because the guard is
-//     the pathology: the assert dereferences max_element on an empty range, so
-//     a checked build has undefined behavior exactly where Release has no check
-//     at all. What Release does with it is what this case reports.
+// 45. CONTROL: includecols with an EMPTY position vector is LEGAL, and yields
+//     an n x 0 matrix. Zero columns is a supported shape -- the ( rows, cols,
+//     value ) constructor says so in its own note about the bias-free stepwise
+//     baseline network, whose weight Matrix has no columns -- so "keep no
+//     columns" has a valid answer. The old guard was the pathology: its assert
+//     dereferenced max_element over an empty range, giving a checked build
+//     undefined behavior exactly where Release had no check at all.
 static int c45()
 {
-	return probe< M::BoundsViolation >(
-		[] { M A = mat23(); vector< unsigned > pos; pos.push_back( 1 );
-			M C = A.includecols( pos ); return C.cols() == 1 && C( 0, 0 ) == 2; },
-		[] { M A = mat23(); vector< unsigned > pos;
-			M C = A.includecols( pos ); ( void ) C; } );
+	return control_only( [] {
+		M A = mat23();
+		vector< unsigned > pos; // empty: keep no columns
+		M C = A.includecols( pos );
+		return C.rows() == 2 && C.cols() == 0;
+	} );
 }
 
 // 46. excludecols: a position past the last column.
@@ -563,7 +567,7 @@ static int c46()
 // 47. addrow: the new row is not ncols_ wide.
 static int c47()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A = mat23(); M B = A.addrow( seq( 3, 7 ) );
 			return B.rows() == 3 && B( 2, 0 ) == 7; },
 		[] { M A = mat23(); M B = A.addrow( seq( 9, 7 ) ); ( void ) B; } );
@@ -572,7 +576,7 @@ static int c47()
 // 48. addcol: the new column is not nrows_ tall.
 static int c48()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A = mat23(); M B = A.addcol( seq( 2, 7 ) );
 			return B.cols() == 4 && B( 0, 3 ) == 7; },
 		[] { M A = mat23(); M B = A.addcol( seq( 9, 7 ) ); ( void ) B; } );
@@ -581,7 +585,7 @@ static int c48()
 // 49. covariance( V ): the destination is not ncols_ x ncols_. WRITES.
 static int c49()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A( 3, 2 );
 			A( 0, 0 ) = 1; A( 0, 1 ) = 2; A( 1, 0 ) = 3; A( 1, 1 ) = 4;
 			A( 2, 0 ) = 5; A( 2, 1 ) = 6;
@@ -596,7 +600,7 @@ static int c49()
 //     shape check is an assert while the SINGULAR check is a throw.
 static int c50()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A( 2, 2 );
 			A( 0, 0 ) = 2; A( 0, 1 ) = 0; A( 1, 0 ) = 0; A( 1, 1 ) = 4;
 			M I( 2, 2 ); A.inverse( I ); return I( 0, 0 ) == 0.5; },
@@ -621,7 +625,7 @@ static int c51()
 //     is what shows the safety is incidental rather than contractual.
 static int c52()
 {
-	return probe< M::BoundsViolation >(
+	return probe< M::DimensionMismatch >(
 		[] { M A( 2, 2 );
 			A( 0, 0 ) = 2; A( 0, 1 ) = 0; A( 1, 0 ) = 0; A( 1, 1 ) = 4;
 			M I( 2, 2 ); A.inverse( I ); return I( 1, 1 ) == 0.25; },
@@ -629,6 +633,50 @@ static int c52()
 			A( 0, 0 ) = 1; A( 0, 1 ) = 2; A( 1, 0 ) = 3; A( 1, 1 ) = 4;
 			A( 2, 0 ) = 5; A( 2, 1 ) = 6;
 			M I( 3, 2 ); A.inverse( I ); } );
+}
+
+// 53. covariance on a matrix with fewer than two columns. An INTRINSIC size,
+//     not a disagreement: nothing here fails to match anything, the source is
+//     simply too small to have a covariance. BadSize, per the policy.
+static int c53()
+{
+	return probe< M::BadSize >(
+		[] { M A( 3, 2 );
+			A( 0, 0 ) = 1; A( 0, 1 ) = 2; A( 1, 0 ) = 3; A( 1, 1 ) = 4;
+			A( 2, 0 ) = 5; A( 2, 1 ) = 6;
+			M V = A.covariance(); return V.rows() == 2 && V( 0, 0 ) == 4; },
+		[] { M A( 3, 1 ); A( 0, 0 ) = 1; A( 1, 0 ) = 2; A( 2, 0 ) = 3;
+			M V = A.covariance(); ( void ) V; } );
+}
+
+// 54. CONTROL: excludecols with an EMPTY selection is LEGAL and returns an
+//     unchanged copy. "Exclude nothing" is a well-defined request, and a caller
+//     whose removal list legitimately comes out empty -- removeInputs is that
+//     shape -- must not be refused.
+static int c54()
+{
+	return control_only( [] {
+		M A = mat23();
+		vector< unsigned > pos; // empty: exclude nothing
+		M C = A.excludecols( pos );
+		return C.rows() == 2 && C.cols() == 3
+			&& C( 0, 0 ) == 1 && C( 1, 2 ) == 6;
+	} );
+}
+
+// 55. covariance on a SINGLE ROW. The old guard was nrows_ > 0, and the last
+//     line of the function divides by ( nrows_ - 1 ) -- so one row passed the
+//     check and then divided by zero, reporting infinities where the sample
+//     covariance of one observation does not exist. Found by writing the
+//     mapping table, not by the harness: no case had asked.
+static int c55()
+{
+	return probe< M::BadSize >(
+		[] { M A( 2, 2 );
+			A( 0, 0 ) = 1; A( 0, 1 ) = 2; A( 1, 0 ) = 3; A( 1, 1 ) = 4;
+			M V = A.covariance(); return V( 0, 0 ) == 2; },
+		[] { M A( 1, 2 ); A( 0, 0 ) = 1; A( 0, 1 ) = 2;
+			M V = A.covariance(); ( void ) V; } );
 }
 
 // --- the register ----------------------------------------------------------
@@ -680,7 +728,7 @@ static const Case cases[] = {
 	{ "ABSENT", "toMatrix( v, r, c ): source not r*c long", c42 },
 	{ "ABSENT", "func( Mi, fx, Mo ): the two matrices disagree (WRITES)", c43 },
 	{ "ABSENT", "includecols: position past the last column", c44 },
-	{ "ABSENT", "includecols: an EMPTY position vector", c45 },
+	{ "HOLDS ", "CONTROL includecols: an EMPTY selection is n x 0", c45 },
 	{ "ABSENT", "excludecols: position past the last column", c46 },
 	{ "ABSENT", "addrow: new row not ncols_ wide", c47 },
 	{ "ABSENT", "addcol: new column not nrows_ tall", c48 },
@@ -688,6 +736,9 @@ static const Case cases[] = {
 	{ "ABSENT", "inverse( I ): a non-square matrix", c50 },
 	{ "ABSENT", "Matrix( Q, Pt ): empty vectors", c51 },
 	{ "ABSENT", "inverse( I ): a TALLER-than-wide matrix (see case 50)", c52 },
+	{ "ABSENT", "covariance: fewer than two columns", c53 },
+	{ "HOLDS ", "CONTROL excludecols: an EMPTY selection is a copy", c54 },
+	{ "ABSENT", "covariance: a single row (divides by nrows - 1)", c55 },
 };
 
 static const unsigned nCases = sizeof( cases ) / sizeof( cases[ 0 ] );

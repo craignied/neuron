@@ -38,11 +38,19 @@ template <> Matrix< double >& Matrix< double >::random( const double n )
 template <> Matrix< double >& Matrix< double >::covariance( Matrix< double >& V ) const
 {
 	// Check dimensions of current and new Matrices
-	assert ( V.rows() == ncols_ && V.cols() == ncols_ );
+	if ( V.rows() != ncols_ || V.cols() != ncols_ )
+		throw DimensionMismatch();
 
-	// Make sure there's at least one row in the data Matrix, and that the
-	//    covariance matrix will be at least 2 x 2
-	assert ( nrows_ > 0 && ncols_ > 1 );
+	// The INTRINSIC size this operation needs, which is BadSize rather than
+	//    DimensionMismatch: nothing here disagrees with anything, the source is
+	//    simply too small to have a covariance. Two columns because the result
+	//    is at least 2 x 2, and TWO ROWS because the last line of this function
+	//    divides by ( nrows_ - 1 ): the old guard was nrows_ > 0, so a
+	//    single-row matrix passed it and then divided by zero, reporting
+	//    infinities where the sample covariance of one observation simply does
+	//    not exist (D9).
+	if ( nrows_ < 2 || ncols_ < 2 )
+		throw BadSize();
 
 	V.fill( 0 ); // fill incoming covariance Matrix with zeros
 
@@ -102,8 +110,13 @@ template <> Matrix< double > Matrix< double >::covariance() const
 
 template <> Matrix< double >& Matrix< double >::inverseGaussJordan( Matrix< double >& I ) const
 {
-	// Check sizes of Matrices are equal and square
-	assert ( I.nrows_ == nrows_ && I.ncols_ == ncols_ && nrows_ == ncols_ );
+	// Check sizes of Matrices are equal and square. A non-square input is a
+	//    DimensionMismatch by policy (D9): it was "safe" before only because LU
+	//    indexes rows by ncols_, so a WIDER-than-tall matrix ran operator() off
+	//    the end -- and a TALLER-than-wide one ran to completion on a matrix
+	//    with no inverse.
+	if ( I.nrows_ != nrows_ || I.ncols_ != ncols_ || nrows_ != ncols_ )
+		throw DimensionMismatch();
 
 	I = *this; // copy current Matrix into incoming Matrix
 
@@ -192,7 +205,8 @@ template <> Matrix< double > Matrix< double >::inverseGaussJordan() const
 template <> Matrix< double >& Matrix< double >::ludcmp( Matrix< double >& L, double& d ) const
 {
 	// Check sizes of Matrices are equal and square
-	assert ( L.nrows_ == nrows_ && L.ncols_ == ncols_ && nrows_ == ncols_ );
+	if ( L.nrows_ != nrows_ || L.ncols_ != ncols_ || nrows_ != ncols_ )
+		throw DimensionMismatch();
 
 	L = *this; // copy current Matrix into incoming Matrix
 
@@ -291,7 +305,8 @@ template <> Matrix< double >& Matrix< double >::ludcmp( Matrix< double >& L,
 	vector< int >& indx, double& d )
 {
 	// Check sizes of Matrices are equal and square
-	assert ( L.nrows_ == nrows_ && L.ncols_ == ncols_ && nrows_ == ncols_ );
+	if ( L.nrows_ != nrows_ || L.ncols_ != ncols_ || nrows_ != ncols_ )
+		throw DimensionMismatch();
 
 	L = *this; // copy current Matrix into incoming Matrix
 
@@ -380,7 +395,8 @@ template <> Matrix< double >& Matrix< double >::lubksb( Matrix< double >& L,
 	vector< int >& indx, vector< double >& b )
 {
 	// Check sizes of Matrices are equal and square
-	assert ( L.nrows_ == nrows_ && L.ncols_ == ncols_ && nrows_ == ncols_ );
+	if ( L.nrows_ != nrows_ || L.ncols_ != ncols_ || nrows_ != ncols_ )
+		throw DimensionMismatch();
 
 	L = *this; // copy current Matrix into incoming Matrix
 
@@ -422,8 +438,9 @@ template <> Matrix< double >& Matrix< double >::lubksb( Matrix< double >& L,
 
 template <> Matrix< double >& Matrix< double >::inverseLU( Matrix< double >& I ) const
 {
-	// Check sizes of Matrices are equal and square
-	assert ( I.nrows_ == nrows_ && I.ncols_ == ncols_ && nrows_ == ncols_ );
+	// Check sizes of Matrices are equal and square (D9)
+	if ( I.nrows_ != nrows_ || I.ncols_ != ncols_ || nrows_ != ncols_ )
+		throw DimensionMismatch();
 
 	I = *this; // copy current Matrix into incoming Matrix
 
@@ -479,8 +496,9 @@ template <> Matrix< double > Matrix< double >::inverseLU() const
 
 template <> Matrix< double >& Matrix< double >::inverse( Matrix< double >& I ) const
 {
-	// Check sizes of Matrices are equal and square
-	assert ( I.nrows_ == nrows_ && I.ncols_ == ncols_ && nrows_ == ncols_ );
+	// Check sizes of Matrices are equal and square (D9)
+	if ( I.nrows_ != nrows_ || I.ncols_ != ncols_ || nrows_ != ncols_ )
+		throw DimensionMismatch();
 
 	return this->inverseLU( I ); // use previously coded inverseLU method
 }
@@ -504,8 +522,9 @@ template <> Matrix< double > Matrix< double >::inverse() const
 template <> Matrix< double >& Matrix< double >::inverse( Matrix< double >& I,
 	double& det ) const
 {
-	// Check sizes of Matrices are equal and square
-	assert ( I.nrows_ == nrows_ && I.ncols_ == ncols_ && nrows_ == ncols_ );
+	// Check sizes of Matrices are equal and square (D9)
+	if ( I.nrows_ != nrows_ || I.ncols_ != ncols_ || nrows_ != ncols_ )
+		throw DimensionMismatch();
 
 	I = *this; // copy current Matrix into incoming Matrix
 
@@ -589,8 +608,9 @@ template <> double Matrix< double >::determinant() const
 template <> Matrix< double >& Matrix< double >::inverse( Matrix< double >& I,
 	unsigned choice ) const
 {
-	// Check sizes of Matrices are equal and square
-	assert ( I.nrows_ == nrows_ && I.ncols_ == ncols_ && nrows_ == ncols_ );
+	// Check sizes of Matrices are equal and square (D9)
+	if ( I.nrows_ != nrows_ || I.ncols_ != ncols_ || nrows_ != ncols_ )
+		throw DimensionMismatch();
 
 	// User chooses which type of inverse procedure
 	if ( choice == GaussJordan )
