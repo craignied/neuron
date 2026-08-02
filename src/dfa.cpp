@@ -69,6 +69,20 @@ void DFA::setDataSet( DataSet& dataObj )
 		// Use Model utility function to extract input Matrices
 		Model::extractInputMatrices();
 
+		// DISCARD THE PREVIOUS LOAD'S PER-CLASS STRUCTURES. This method is the
+		//    entry point that establishes them, so it is the one that owns
+		//    resetting them. The n-output branch below FILLS D and U with
+		//    push_back, so without this a second setDataSet left the FIRST
+		//    dataset's class matrices and mean vectors at positions
+		//    0 .. nOutput-1 -- which is exactly where every reader indexes.
+		//    The object then reported a model of the data it no longer held:
+		//    measured at 37.3% (LDFA) and 30.0% (QDFA) training accuracy on a
+		//    reloaded 3-class set where a fresh object reaches 100%, against
+		//    33% chance. Cleared before the arity branch, not inside it, so a
+		//    1-output load after an n-output one cannot leave them either.
+		D.clear();
+		U.clear();
+
 		if ( theData.trainLoaded() ) // a training set was loaded
 		{
 			if ( nOutput == 1 ) // if 1-output model

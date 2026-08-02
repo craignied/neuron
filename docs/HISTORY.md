@@ -3499,3 +3499,41 @@ toolchain's rounding. CI on two platforms found it.**
     **not** normalize, so the `inLowerLimit` reasoning I was about to rely on was moot — the
     raw constant passes straight through. Reasoned first, measured second, and the
     measurement was what settled it. Rule 3, again.
+
+**2026-08-02 — a reused multi-output DFA object reported a stale model. Fixed, fail-first,
+before the extraction that would have moved the code.**
+
+  - **Sol found it by reading my own proposal**: the characterization proved repeated
+    reports were identical but said nothing about internal state, and identical reports are
+    exactly what an accumulating object produces.
+  - **Two accumulations, measured.** `DFA::setDataSet()` multi-output appends to `D` and `U`
+    with `push_back` on every call (3 → 6); `QDFA::train()` multi-output appends to `C`, `S`
+    and `K` on every run (3 → 6 → 9). `LDFA::train()` was already bounded — it resizes `K`
+    and assigns by index — and `Det` likewise.
+  - **The consequence was not memory, it was a wrong model.** Every reader indexes
+    `[ 0 .. nOutput - 1 ]`, so after a second load those are the FIRST dataset's class
+    matrices and means. Loading a different 3-class dataset into an existing object gave
+    **37.3%** (LDFA) and **30.0%** (QDFA) training accuracy where a fresh object reached
+    100%, against 33% chance.
+  - **Not reachable from any shipped path today**: the GUI and CV construct a model per
+    request and per fold, and the CLI constructs its DFA objects on entry to the submenu,
+    the only scope in which the dataset cannot change. What was reachable was the growth,
+    and every run after the first silently reporting the first run's fit. Same shape as D1.
+  - **Fail-first: 7 assertions watched failing** against the unfixed engine — four
+    bounded-state counts, QDFA's constant count, and both reload comparisons. The fix is
+    **six lines**: `D`/`U` cleared in `DFA::setDataSet` before the arity branch, `C`/`S`/`K`
+    cleared in `QDFA::train`'s multi-output branch.
+  - **The two sabotages fail different sets, and the difference is measured rather than
+    assumed.** Removing the `setDataSet` reset fails 6 including both reload assertions.
+    Removing only QDFA's fit reset fails **1** — the constant count — and nothing else,
+    because a reused QDFA with stale covariance inverses and *fresh* means still reports
+    66% on that fixture, exactly what a fresh object reports: the stale quadratic term does
+    not change the `min_element` ordering for those rows. The reload assertion therefore
+    does not cover that half; the integer state count does, deterministically. Written into
+    the test so no one later mistakes one for the other.
+  - **A vacuity guard earned its keep.** The reload comparison is preceded by an assertion
+    that the two fixtures give different reports at all — and it fired immediately: my first
+    "different" dataset separated just as cleanly, so both reported 100% and the comparison
+    would have been satisfied by two identical strings. The replacement overlaps its classes
+    and fits to 66%.
+  - Single-load and repeated-same-data reports are byte-identical; all gates green.

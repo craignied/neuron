@@ -672,6 +672,165 @@ static void test_train_twice_multi( const char* who )
 		+ " multi: a second run of the same analysis reports the same thing" );
 }
 
+
+// --- 11. INTERNAL STATE MUST STAY BOUNDED, and a reload must not be stale ----
+//
+// The characterization above proves that repeated reports are IDENTICAL. It
+// does not prove the object is still correct, and on this engine those are not
+// the same thing: DFA::setDataSet() appends to D and U with push_back on every
+// call, and QDFA::train() appends to C, S and K on every run. Every reader then
+// indexes [ 0 .. nOutput - 1 ], so the leading entries stay the FIRST load's
+// class matrices and means. Repeated runs on unchanged data therefore report
+// the same numbers -- test_train_twice_multi passes BECAUSE of the defect, not
+// despite it -- while the object silently grows and, after a second load of
+// different data, fits the wrong dataset entirely.
+//
+// The probe reaches the protected members through a subclass, which is the
+// narrowest way to assert a size that has no accessor. It asserts nothing about
+// values, only about COUNTS -- so it is exact on every platform.
+
+template < class DFAMODEL >
+class StateProbe : public DFAMODEL {
+public:
+	size_t classMatrices() const { return this->D.size(); }
+	size_t meanVectors() const { return this->U.size(); }
+	size_t constants() const { return this->K.size(); }
+};
+
+template < class DFAMODEL >
+static void test_state_is_bounded( const char* who, unsigned nOutput )
+{
+	cout << "-- " << who << ": internal state stays bounded --" << endl;
+
+	DataSet d = multiData();
+	StateProbe< DFAMODEL > m;
+	{
+		util::ScreenCapture hush;
+		m.setDataSet( d );
+		m.setHistory( false );
+		m.setLastop( false );
+	}
+
+	expect( m.classMatrices() == nOutput && m.meanVectors() == nOutput,
+		string( who ) + ": one class matrix and one mean vector per class after "
+		"the first load" );
+
+	// A SECOND load of the same data. An object that accumulates has 2n here.
+	{
+		util::ScreenCapture hush;
+		m.setDataSet( d );
+	}
+	expect( m.classMatrices() == nOutput, string( who )
+		+ ": a second load leaves " + to_string( nOutput ) + " class matrices, not "
+		+ to_string( m.classMatrices() ) );
+	expect( m.meanVectors() == nOutput, string( who )
+		+ ": a second load leaves " + to_string( nOutput ) + " mean vectors, not "
+		+ to_string( m.meanVectors() ) );
+
+	// Three runs. An object that accumulates has 3n constants here.
+	{
+		util::ScreenCapture hush;
+		m.train(); m.train(); m.train();
+	}
+	expect( m.constants() == nOutput, string( who )
+		+ ": three runs leave " + to_string( nOutput ) + " constants, not "
+		+ to_string( m.constants() ) );
+}
+
+// A genuinely DIFFERENT three-class dataset. Two things it must satisfy, and
+//    the second is one my first attempt missed: the classes must sit ELSEWHERE
+//    (so a model fitted on the other dataset scores near chance), AND a correct
+//    fit must produce a DIFFERENT REPORT. My first version separated just as
+//    cleanly, so both datasets reported 100% / 100% and the whole comparison
+//    would have been satisfied by two identical strings. The vacuity guard
+//    below caught it. So these classes OVERLAP: a correct fit lands well short
+//    of 100%, which is a number dataset A cannot produce.
+static DataSet otherMultiData( unsigned n = 150 )
+{
+	Matrix< double > raw( n, 5 );
+	for ( unsigned i = 0; i < n; i++ )
+	{
+		unsigned c = i % 3;
+		double t = ( ( i * 41 ) % 89 ) / 88.0, u = ( ( i * 59 ) % 83 ) / 82.0;
+		raw( i, 0 ) = -0.45 * c + 1.3 * ( t - 0.5 );
+		raw( i, 1 ) = ( c == 2 ? -0.35 : 0.3 ) + 1.3 * ( u - 0.5 );
+		raw( i, 2 ) = ( c == 0 ) ? 1 : 0;
+		raw( i, 3 ) = ( c == 1 ) ? 1 : 0;
+		raw( i, 4 ) = ( c == 2 ) ? 1 : 0;
+	}
+	DataSet d;
+	d.setInput( 2 );
+	d.setOutput( 3 );
+	d.setDiscrete( true );
+	d.setHistory( false );
+	util::ScreenCapture hush;
+	d.setRawMatrix( raw );
+	d.setTrainMatrix( raw );
+	d.setTestMatrix( raw );
+	return d;
+}
+
+// A reused object must answer for the data it was LAST given. Compared against
+//    a fresh object on the same data -- the only definition of "correct" that
+//    does not require pinning a number.
+//
+// WHAT THIS DOES AND DOES NOT COVER, measured rather than assumed. It catches
+//    the D / U accumulation in DFA::setDataSet: removing that reset makes both
+//    models report their previous dataset's model and this assertion fails for
+//    both. It does NOT catch QDFA's C / S / K accumulation on its own --
+//    measured, with only that reset removed the reused object still reports 66%
+//    on this fixture, exactly what a fresh object reports, because the stale
+//    covariance inverses combine with FRESH means and happen not to change the
+//    argmin ordering for these rows. The guard for that half is the bounded
+//    state count above, which is an integer and fails deterministically. Two
+//    mechanisms, two different assertions; neither is a spare.
+template < class DFAMODEL >
+static void test_reload_is_not_stale( const char* who )
+{
+	cout << "-- " << who << ": a reload is not stale --" << endl;
+
+	DataSet a = multiData(), b = otherMultiData();
+
+	DFAMODEL reused;
+	string onA, onB;
+	{
+		util::ScreenCapture cap;
+		reused.setDataSet( a );
+		reused.setHistory( false );
+		reused.setLastop( false );
+		reused.train();
+		onA = cap.text();
+	}
+	{
+		util::ScreenCapture cap;
+		reused.setDataSet( b );
+		reused.train();
+		onB = cap.text();
+	}
+
+	DFAMODEL fresh;
+	string freshOnB;
+	{
+		util::ScreenCapture cap;
+		fresh.setDataSet( b );
+		fresh.setHistory( false );
+		fresh.setLastop( false );
+		fresh.train();
+		freshOnB = cap.text();
+	}
+
+	// EXISTENCE FIRST: three empty reports would compare equal and prove nothing.
+	expect( !onA.empty() && !onB.empty() && !freshOnB.empty(),
+		string( who ) + ": all three runs produced a report" );
+
+	// The fixtures must actually differ, or the comparison below is vacuous.
+	expect( onA != freshOnB, string( who )
+		+ ": the two datasets give different reports, so the test can see a difference" );
+
+	expect( onB == freshOnB, string( who )
+		+ ": a reused object reports what a fresh object reports on the same data" );
+}
+
 int main()
 {
 	test_report< LDFA >( "LDFA", "I'm running LDFA:" );
@@ -705,6 +864,12 @@ int main()
 	test_train_twice< QDFA >( "QDFA" );
 	test_train_twice_multi< LDFA >( "LDFA" );
 	test_train_twice_multi< QDFA >( "QDFA" );
+
+	test_state_is_bounded< LDFA >( "LDFA", 3 );
+	test_state_is_bounded< QDFA >( "QDFA", 3 );
+
+	test_reload_is_not_stale< LDFA >( "LDFA" );
+	test_reload_is_not_stale< QDFA >( "QDFA" );
 
 	cout << endl << ( failures ? "FAILURES: " : "all passed (" ) << failures
 		<< ( failures ? "" : " failures)" ) << endl;

@@ -2778,9 +2778,18 @@ Two declarations change. One is added.
 // dfa.h
 class DFA : public Model {
 public:
-    // Was pure virtual. Becomes the shared scaffold -- NON-virtual, because
-    //    there is nothing left for a subclass to override in it.
-    double train();                                   // was: = 0
+    // THE SHARED SCAFFOLD, and it is still a VIRTUAL FUNCTION. Model::train()
+    //    is pure virtual (model.h:65), so this overrides it and remains virtual
+    //    whether or not the keyword is repeated -- an earlier draft of this
+    //    section said it "becomes non-virtual", which is wrong in the only
+    //    sense that matters. `final` says the real intent: no subclass may
+    //    replace the scaffold. `override` states what it is.
+    //
+    //    THE POLYMORPHISM IS LIVE, not incidental: cvadapters::dfaProcedure
+    //    holds a unique_ptr< Model > and fitQuietly( Model& ) calls m.train()
+    //    through that reference (cvadapters.cpp:43-54), so every
+    //    cross-validation fold reaches this override virtually.
+    double train() override final;                    // was: virtual ... = 0
 
     virtual void reportAccuracy( ostream& ) = 0;      // UNCHANGED
 
@@ -2801,7 +2810,9 @@ protected:
 Call flow, once per run, top to bottom:
 
 ```
-caller -> DFA::train()                       non-virtual
+caller -> DFA::train()                       VIRTUAL: the final override of
+                                             Model::train(); CV reaches it
+                                             through unique_ptr< Model >
             ostringstream setup
             "I'm running " << objType << ":"
             outputHeader( screenStream )     virtual, 1x   (already virtual today)
@@ -2817,6 +2828,9 @@ caller -> DFA::train()                       non-virtual
             return -1
 ```
 
+`final` requires nothing of the compiler baseline beyond C++11; this project is
+C++17. If it ever needs to come off, `override` alone still states the contract.
+
 One behavioral ordering note, stated because it is the only thing that moves:
 today `reportAccuracy` is called *inside* each arity branch, immediately after
 that branch's constants are computed; afterwards it is called once, immediately
@@ -2827,15 +2841,23 @@ so is what the `try` block covers.
 
 | call | virtual? | executions per `train()` |
 |---|---|---|
+| `train` itself | **yes** — the final override of `Model::train()`, dispatched through `Model&` by CV | 1 |
 | `outputHeader` | yes, already | 1 |
 | `fitDiscriminant` | yes, **new** | 1 |
 | `reportAccuracy` | yes, already | 1 |
 
 **One new virtual call per run.** Nothing is introduced inside any loop:
 per-exemplar dispatch is prohibited and this proposal adds none, because the
-per-exemplar code is not being shared at all (§13.5). `DFA::train()` itself
-becomes non-virtual — a subclass has no reason to override the scaffold, and
-leaving it virtual would invite exactly that.
+per-exemplar code is not being shared at all (§13.5). `train` is marked `final`
+rather than made non-virtual: it cannot *be* non-virtual — it overrides a pure
+virtual — and `final` is the accurate way to say that no subclass may replace
+the scaffold.
+
+**The characterization must exercise that polymorphism.** Two assertions are
+added before the extraction: an `LDFA` and a `QDFA` each driven through a
+`Model&` (and a `unique_ptr< Model >`, which is the shape `cvadapters` uses),
+running to a full report. Without them the suite would only ever call `train()`
+on a concrete type, and could not tell a working override from a broken one.
 
 ### 13.5 The per-exemplar loops are NOT shared here (item 6)
 
@@ -2858,14 +2880,13 @@ The honest consequence: this extraction removes far less duplication than
 §2.4/§2.5 imagined, because most of the duplication is in the half that may not
 be shared. That is the correct outcome, not a shortfall.
 
-*One sub-option, offered rather than assumed.* Inside the multi-output branch of
-each `reportAccuracy` there is an identical **once-per-run** block: size
-`testClasses`, take the output submatrix, call `rowindex`, and print
-`"Sorry, that test set had bad output columns."` on failure. It is ~8 identical
-lines and touches no discriminant. It could become
-`bool DFA::classesFromTestOutputs()`. It is *not* included in the recommendation
-above because it edits the same function this section otherwise defers, and
-Sol may prefer one function per commit. Sol's call.
+*A sub-option I offered and Sol declined, recorded so it is not re-proposed.*
+The identical once-per-run block inside each multi-output `reportAccuracy`
+(size `testClasses`, take the output submatrix, call `rowindex`, print
+`"Sorry, that test set had bad output columns."`) could become
+`bool DFA::classesFromTestOutputs()`. **It is excluded from this commit.** Both
+`reportAccuracy` implementations stay wholly concrete: one function per commit,
+and the function this section defers is not edited at all.
 
 ### 13.6 The mathematics stays visible (items 4 and 5)
 
@@ -2903,14 +2924,27 @@ red. To be run and recorded before the commit is offered.
 | 1 | hard-code the banner to `"I'm running LDFA:"` for both | 1 — *QDFA: the report names itself* |
 | 2 | hard-code the refusal to `"Can't do LDFA: "` | 1 — *QDFA: a singular covariance is refused* |
 | 3 | remove the `catch ( Singular& )` entirely | both refusal cases, and the run terminates rather than reporting — 4 assertions plus a non-zero exit |
-| 4 | call `reportAccuracy()` **before** `fitDiscriminant()` | the direction and separation assertions for both models (4), since the constants are not yet computed |
+| 4 | reverse the scaffold's two calls, or omit either | the **scaffold-order probe** below, deterministically |
 | 5 | drop `writeLastop( fileStream.str() )` | 2 — the last-operation content assertions, for both models |
 | 6 | drop `addHistory( fileStream )` | 2 — the history-file content assertions |
 | 7 | give `DFA` a non-virtual `fitDiscriminant` so `QDFA`'s is never reached | QDFA's direction, separation and multi-output accuracy assertions |
 
-Sabotage 4 is the important one: it is the only way the scaffold could silently
-break the *order* the models depend on, and nothing but the direction assertions
-would notice.
+**Sabotage 4 needed replacing, and Sol is right about why.** My first version
+called `reportAccuracy()` before a fresh model had fitted and expected the
+direction assertions to fail. That is not a deterministic test: it reads
+unsized or uninitialised fit state, so the outcome is a wrong number on one
+platform, an exception on another, and undefined behavior in principle — the
+same class of mistake as the collinear singular fixture, which is exactly the
+lesson that should have carried over.
+
+The replacement is a **test-only scaffold probe**: a small `DFA` subclass whose
+`fitDiscriminant()` and `reportAccuracy()` do nothing but append a token to a
+call log. Driving `train()` on it asserts, with no floating-point arithmetic
+anywhere, that the log is exactly `fit` then `report` — fitting **once**,
+before reporting **once**. Reversing the two calls, or dropping either, fails
+that assertion deterministically on every platform. It needs no production hook
+beyond the `fitDiscriminant()` contract this proposal already adds, and it is
+the only assertion that covers the ordering the models silently depend on.
 
 ### 13.8 Expected reduction and documentation (item 8)
 
@@ -2988,12 +3022,78 @@ identified exactly that: repeated reports being identical does not prove interna
 state is bounded. A correctness commit must add an assertion on the *state*, not
 only on the output.
 
+**FIXED in its own commit, before the extraction — see §13.10.**
+
 **Disposition, per Sol: do not clear or otherwise fix this during the
-behavior-preserving extraction.** It is a separate correctness commit, and it
-should come with its own characterization — a bounded-state assertion, and a
-reload-different-data assertion that fails against today's engine. Whether it
-lands before or after the scaffold extraction is Sol's call; the extraction does
-not touch `setDataSet` or either fit, so the two do not collide.
+behavior-preserving extraction.** It is a separate correctness commit with its
+own fail-first characterization — a bounded-state assertion and a
+reload-different-data assertion, both watched failing against today's engine.
+
+**And it goes FIRST, before the scaffold extraction.** I had written that the
+two "do not collide"; Sol corrected that on two grounds, both right. The
+extraction *moves* QDFA's `push_back` calls out of `train()` and into
+`fitDiscriminant()`, so it edits the very statements the defect lives in — the
+same mechanism, not a neighbouring one. And more importantly the existing
+repeated-run assertion is **satisfied by the stale state**, so extracting first
+would mean carrying a green test that is green for the wrong reason across a
+refactor. Establish the correct baseline, then move the code.
+
+
+### 13.10 The stale-state correctness commit (done, before the extraction)
+
+Fail-first, per Sol, and landed on its own so that the scaffold extraction moves
+code whose tests are green for the right reason.
+
+**Watched failing against today's engine — 7 assertions**, before a line of
+production code changed:
+
+```
+FAIL  LDFA: a second load leaves 3 class matrices, not 6
+FAIL  LDFA: a second load leaves 3 mean vectors, not 6
+FAIL  QDFA: a second load leaves 3 class matrices, not 6
+FAIL  QDFA: a second load leaves 3 mean vectors, not 6
+FAIL  QDFA: three runs leave 3 constants, not 9
+FAIL  LDFA: a reused object reports what a fresh object reports on the same data
+FAIL  QDFA: a reused object reports what a fresh object reports on the same data
+```
+
+**The reset policy, at the two owning entry points, and nothing more.**
+`DFA::setDataSet()` clears `D` and `U` — it is the method that establishes them,
+so it owns discarding the previous load's, and the clear sits **before** the
+arity branch so a 1-output load after an n-output one cannot leave them either.
+`QDFA::train()`'s multi-output branch clears `C`, `S` and `K` before the loop
+that appends them. `LDFA::train()` needed nothing: it already resizes `K` and
+assigns by index. `Det` needed nothing, for the same reason. Six lines.
+
+**Two sabotages, and they fail different sets — which is the point.**
+
+| sabotage | fails |
+|---|---|
+| remove `DFA::setDataSet`'s `D`/`U` reset | **6** — both models' class-matrix and mean-vector counts, and **both** reload assertions |
+| remove `QDFA::train`'s `C`/`S`/`K` reset | **1** — QDFA's constant count, and *nothing else* |
+
+**That second row is a measured limitation, not an oversight, and it is written
+into the test.** With only the `C`/`S`/`K` reset removed, a reused QDFA still
+reports **66%** on the reloaded dataset — exactly what a fresh object reports —
+because the stale covariance inverses combine with *fresh* means and happen not
+to change the `min_element` ordering for those rows. So the reload assertion does
+**not** cover that half; the bounded-state count does, and being an integer it
+fails deterministically everywhere. Two mechanisms, two assertions, neither
+spare. I measured this rather than assuming the reload test covered both, which
+it visibly did not.
+
+**A vacuity guard earned its place.** The reload comparison is preceded by an
+assertion that the two fixtures *give different reports at all*. It fired
+immediately: my first "different" dataset separated just as cleanly, so both
+reported 100% / 100% and `onB == freshOnB` would have been satisfied by two
+identical strings regardless of staleness. The second fixture now overlaps its
+classes and a correct fit lands at 66%, a number the first dataset cannot
+produce.
+
+**Byte-for-byte preservation.** Single-load and repeated-same-data reports are
+unchanged, because clearing and refilling from the same data produces the same
+values at the same indices. All gates green, including the three goldens and the
+oracle.
 
 *Prepared by Claude (Opus 5). Reviewed by Sol (2026-07-31); revised §8 in response.
 §9–§12 are the implementation record: §§8.7–8.8 and 9–10 describe work now

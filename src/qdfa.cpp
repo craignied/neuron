@@ -71,6 +71,17 @@ double QDFA::train()
 		{
 			Det.resize( nOutput ); // size the determinant vector
 
+			// DISCARD THE PREVIOUS RUN'S FIT. The loop below appends with
+			//    push_back, so without this a second train() left the first
+			//    run's covariances, inverses and constants at 0 .. nOutput-1
+			//    and appended the new ones past the end where nothing reads
+			//    them: three runs held nine of each, and every run after the
+			//    first silently reported the first run's fit. Det escaped it
+			//    only because it is resized rather than appended.
+			C.clear();
+			S.clear();
+			K.clear();
+
 			// Build covariance & inverse Matrices, determinant & constant vectors
 			for ( unsigned o = 0; o < nOutput; o++ )
 			{
