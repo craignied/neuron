@@ -3537,3 +3537,40 @@ before the extraction that would have moved the code.**
     would have been satisfied by two identical strings. The replacement overlaps its classes
     and fits to 66%.
   - Single-load and repeated-same-data reports are byte-identical; all gates green.
+
+**2026-08-02 (later) — the stale-state guard did not actually guard two of the five
+containers.**
+
+  - **Sol read the sabotage rather than the summary.** My correctness commit cleared `D`,
+    `U`, `C`, `S` and `K`, and I sabotaged all three QDFA clears **together** — so the one
+    failing assertion, `K`'s count, proved only that `K.clear()` mattered. `C` and `S` are
+    QDFA's **private** members, invisible to the state probe, so deleting either alone would
+    have left the whole suite green. I had even measured that stale covariance inverses did
+    not change the mean-separated fixture's answer, and filed it as a limitation instead of
+    treating it as the gap it was.
+  - **Closed with a fixture, not with wider visibility.** Three classes with the **same
+    mean**, separated only by the SHAPE of their spread — wide-in-x, wide-in-y, moderate.
+    That is the case quadratic DA exists for, so the covariance decides the answer: with a
+    stale `S` every class shares one covariance and a single class wins every row.
+  - **Measured, one reset removed at a time**, against a fresh QDFA's 80%: only `C.clear()`
+    removed → **40.6%**; only `S.clear()` → **41.7%**; only `K.clear()` → 79.4% (plus its
+    count assertion). Each of the three now fails at least one assertion when deleted alone.
+    The `C` and `S` margins halve the accuracy, so nothing rests on a one-row difference;
+    `K`'s behavioural margin is one row, which is why its guard is the exact integer count.
+  - **Distinguishability is asserted before the comparison** — a fresh QDFA must exceed 60%
+    on the fixture. Without that, a fixture no fit can solve would let a stale one compare
+    equal and the assertion would guard nothing. That is the second time this week the
+    vacuity guard was the thing that mattered.
+  - **Widening `C`/`S` to protected, or a friend declaration, was considered and rejected.**
+    The fixture asserts what the covariance *does* rather than that a container was emptied,
+    which is the stronger test and leaves production visibility alone.
+  - **§13 sabotage #7 corrected too**: making `fitDiscriminant` non-virtual and expecting the
+    direction assertions to fail reads an unfitted model — the same undefined-behavior
+    mistake as the sabotage #4 it sat beside. The deterministic scaffold-order probe covers
+    dispatch as well as order: if the override is bypassed its call log is not `fit, report`,
+    with no numerical state read.
+  - **A build trap, hit three times today and now written down.** `cmake --build` reported
+    "Built target" without recompiling after a source restore, leaving a sabotaged object
+    linked into the test: twice the suite "failed" against correct source and once "passed"
+    against sabotaged source. `git diff src/` empty while the tests disagree is the
+    signature; deleting the specific object files is the fix.

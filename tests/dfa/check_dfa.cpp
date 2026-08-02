@@ -831,6 +831,116 @@ static void test_reload_is_not_stale( const char* who )
 		+ ": a reused object reports what a fresh object reports on the same data" );
 }
 
+
+// --- 12. QDFA's COVARIANCE state, guarded behaviourally ---------------------
+//
+// The bounded-state probe above reaches D, U and K, which are DFA's. It cannot
+// reach C and S, which are QDFA's own private members -- and the state test
+// would therefore stay green if C.clear() or S.clear() were deleted
+// individually. This case closes that, without widening any production
+// visibility, by choosing a fixture on which the covariance DECIDES the answer.
+//
+// THE FIXTURE IS THE POINT. Three classes with the SAME mean, separated only by
+// the SHAPE of their spread: one wide in x and narrow in y, one the reverse, one
+// moderate in both. That is the case quadratic discriminant analysis exists for
+// and a linear one cannot touch. If S were stale, every class would share one
+// covariance and only the constants would differ, so a single class would win
+// every row.
+//
+// Measured, one reset removed at a time, against a fresh QDFA's 80%:
+//
+//     only C.clear() removed   reused reports 40.6%
+//     only S.clear() removed   reused reports 41.7%
+//     only K.clear() removed   reused reports 79.4%
+//
+// so the single comparison below fails for each of the three independently. The
+// C and S margins are enormous (a stale covariance halves the accuracy); K's is
+// one row, but K does not depend on this case -- it has the exact integer count
+// assertion in test_state_is_bounded, and this is not its guard.
+static DataSet covarianceShapeData( unsigned n = 180 )
+{
+	Matrix< double > raw( n, 5 );
+	for ( unsigned i = 0; i < n; i++ )
+	{
+		unsigned c = i % 3;
+		double t = ( ( i * 41 ) % 89 ) / 88.0 - 0.5,
+			u = ( ( i * 59 ) % 83 ) / 82.0 - 0.5;
+		double sx = ( c == 0 ) ? 1.8 : ( c == 1 ? 0.18 : 0.7 ),
+			sy = ( c == 0 ) ? 0.18 : ( c == 1 ? 1.8 : 0.7 );
+		raw( i, 0 ) = sx * t * 2.0; // same mean for every class, by construction
+		raw( i, 1 ) = sy * u * 2.0;
+		raw( i, 2 ) = ( c == 0 ) ? 1 : 0;
+		raw( i, 3 ) = ( c == 1 ) ? 1 : 0;
+		raw( i, 4 ) = ( c == 2 ) ? 1 : 0;
+	}
+	DataSet d;
+	d.setInput( 2 );
+	d.setOutput( 3 );
+	d.setDiscrete( true );
+	d.setHistory( false );
+	util::ScreenCapture hush;
+	d.setRawMatrix( raw );
+	d.setTrainMatrix( raw );
+	d.setTestMatrix( raw );
+	return d;
+}
+
+static double trainingAccuracy( const string& report )
+{
+	const string key = "Classification accuracy in the training set = ";
+	size_t p = report.find( key );
+	return p == string::npos ? -1.0 : atof( report.c_str() + p + key.size() );
+}
+
+static void test_qdfa_covariance_not_stale()
+{
+	cout << "-- QDFA: a reload does not keep stale covariances --" << endl;
+
+	DataSet meanSeparated = multiData(), shapeSeparated = covarianceShapeData();
+
+	QDFA fresh;
+	string freshReport;
+	{
+		util::ScreenCapture cap;
+		fresh.setDataSet( shapeSeparated );
+		fresh.setHistory( false );
+		fresh.setLastop( false );
+		fresh.train();
+		freshReport = cap.text();
+	}
+
+	QDFA reused;
+	string reusedReport;
+	{
+		util::ScreenCapture cap;
+		reused.setDataSet( meanSeparated );
+		reused.setHistory( false );
+		reused.setLastop( false );
+		reused.train();
+	}
+	{
+		util::ScreenCapture cap;
+		reused.setDataSet( shapeSeparated );
+		reused.train();
+		reusedReport = cap.text();
+	}
+
+	expect( !freshReport.empty() && !reusedReport.empty(),
+		"QDFA covariance: both runs produced a report" );
+
+	// DISTINGUISHABILITY FIRST. The comparison below is only meaningful if a
+	//    correct fit can actually solve this fixture -- if it sat at chance,
+	//    a stale covariance would sit there too and the assertion would pass
+	//    while guarding nothing.
+	double freshAcc = trainingAccuracy( freshReport );
+	expect( freshAcc > 60.0, "QDFA covariance: a correct fit solves this fixture ("
+		+ to_string( freshAcc ) + "%), well above the 33% chance a stale "
+		"covariance collapses to" );
+
+	expect( reusedReport == freshReport,
+		"QDFA covariance: a reused object reports what a fresh object reports" );
+}
+
 int main()
 {
 	test_report< LDFA >( "LDFA", "I'm running LDFA:" );
@@ -870,6 +980,8 @@ int main()
 
 	test_reload_is_not_stale< LDFA >( "LDFA" );
 	test_reload_is_not_stale< QDFA >( "QDFA" );
+
+	test_qdfa_covariance_not_stale();
 
 	cout << endl << ( failures ? "FAILURES: " : "all passed (" ) << failures
 		<< ( failures ? "" : " failures)" ) << endl;

@@ -2858,6 +2858,9 @@ added before the extraction: an `LDFA` and a `QDFA` each driven through a
 `Model&` (and a `unique_ptr< Model >`, which is the shape `cvadapters` uses),
 running to a full report. Without them the suite would only ever call `train()`
 on a concrete type, and could not tell a working override from a broken one.
+The scaffold-order probe (§13.7) covers the other direction — that the scaffold
+reaches the *concrete* class's `fitDiscriminant` and `reportAccuracy`, in that
+order, exactly once each.
 
 ### 13.5 The per-exemplar loops are NOT shared here (item 6)
 
@@ -2927,7 +2930,16 @@ red. To be run and recorded before the commit is offered.
 | 4 | reverse the scaffold's two calls, or omit either | the **scaffold-order probe** below, deterministically |
 | 5 | drop `writeLastop( fileStream.str() )` | 2 — the last-operation content assertions, for both models |
 | 6 | drop `addHistory( fileStream )` | 2 — the history-file content assertions |
-| 7 | give `DFA` a non-virtual `fitDiscriminant` so `QDFA`'s is never reached | QDFA's direction, separation and multi-output accuracy assertions |
+| 7 | bypass the override — make `fitDiscriminant` non-virtual, so the base's is called instead of the concrete class's | the **scaffold-order probe**: its overrides no longer run, so its call log is not `fit, report` |
+
+**Sabotage 7 needed the same replacement, for the same reason.** My first version
+made `fitDiscriminant` non-virtual and then expected QDFA's *direction* and
+*accuracy* assertions to fail — which is again reading a model that was never
+fitted, and again undefined. The scaffold-order probe covers dispatch as well as
+order: if the probe's override is bypassed, its overrides simply do not run and
+its call log is not `fit, report`. No numerical state is read, so the failure is
+deterministic on every platform. One probe, two properties — the order of the
+two calls and the fact that they reach the concrete class at all.
 
 **Sabotage 4 needed replacing, and Sol is right about why.** My first version
 called `reportAccuracy()` before a fresh model had fitted and expected the
@@ -3072,8 +3084,15 @@ assigns by index. `Det` needed nothing, for the same reason. Six lines.
 | remove `DFA::setDataSet`'s `D`/`U` reset | **6** — both models' class-matrix and mean-vector counts, and **both** reload assertions |
 | remove `QDFA::train`'s `C`/`S`/`K` reset | **1** — QDFA's constant count, and *nothing else* |
 
-**That second row is a measured limitation, not an oversight, and it is written
-into the test.** With only the `C`/`S`/`K` reset removed, a reused QDFA still
+**That second row was a REAL GAP, not an acceptable limitation — Sol's second
+correction, and the right one.** I had recorded it as a measured limitation of
+the reload fixture and moved on. But `C` and `S` are QDFA's own private members,
+which the state probe cannot reach, so deleting `C.clear()` or `S.clear()`
+*individually* left the whole suite green: the only failing assertion in that
+sabotage was `K`'s count, and it proved nothing about the other two. §13.11
+closes it.
+
+The original observation stands as an observation: With only the `C`/`S`/`K` reset removed, a reused QDFA still
 reports **66%** on the reloaded dataset — exactly what a fresh object reports —
 because the stale covariance inverses combine with *fresh* means and happen not
 to change the `min_element` ordering for those rows. So the reload assertion does
@@ -3094,6 +3113,59 @@ produce.
 unchanged, because clearing and refilling from the same data produces the same
 values at the same indices. All gates green, including the three goldens and the
 oracle.
+
+
+### 13.11 Closing the `C` / `S` gap (2026-08-02)
+
+**The gap, stated plainly.** `test_state_is_bounded` reaches `D`, `U` and `K`,
+which are `DFA`'s protected members. `C` and `S` are `QDFA`'s **private** ones,
+so no probe could see them, and the sabotage that removed all three clears
+together proved only that `K.clear()` mattered. Either of the other two could
+have been deleted alone and the suite would have stayed green — I had even
+measured that stale covariance inverses left the mean-separated fixture's answer
+unchanged and recorded it as a limitation rather than fixing it.
+
+**Closed behaviourally, with no change to production visibility.** The fixture
+does the work: three classes with the **same mean**, separated only by the SHAPE
+of their spread — one wide in x and narrow in y, one the reverse, one moderate.
+That is the case quadratic discriminant analysis exists for and a linear one
+cannot touch, and it makes the covariance decide the answer. With a stale `S`
+every class shares one covariance, only the constants differ, and a single class
+wins every row.
+
+Measured, **one reset removed at a time**, against a fresh QDFA's 80%:
+
+| removed | reused object reports | suite result |
+|---|---|---|
+| only `C.clear()` | **40.6%** | 1 failure — the covariance comparison |
+| only `S.clear()` | **41.7%** | 1 failure — the covariance comparison |
+| only `K.clear()` | 79.4% | 2 failures — the constant COUNT, and the comparison |
+| `D`/`U` reset | — | 9 failures |
+
+So each of the three now has at least one assertion that fails when it alone is
+deleted, which is what Sol required. The `C` and `S` margins are the entire
+point: a stale covariance halves the accuracy, so the comparison is not resting
+on a one-row difference. `K`'s behavioural margin *is* one row, and that is fine
+— `K` is guarded by the exact integer count, which is platform-independent, and
+this fixture is not its guard.
+
+**Distinguishability is asserted before the comparison**, not assumed: the test
+requires a fresh QDFA to reach above 60% on this fixture. If a correct fit sat
+near chance, a stale one would sit there too and the comparison would pass while
+guarding nothing — the same vacuity trap the reload fixture already hit once.
+
+**A test-access mechanism was considered and not needed.** The alternative was
+widening `C` and `S` to protected, or a friend declaration, purely for
+inspection. Both were rejected in favour of a fixture that makes the state
+observable through the model's own output, which is the stronger test anyway:
+it asserts what the covariance *does*, not merely that a container was emptied.
+
+**A build note, because it cost time three times today.** `cmake --build`
+reported "Built target" without recompiling after a source restore, leaving a
+sabotaged object file linked into the test — twice the suite "failed" against
+correct source, and once it "passed" against sabotaged source. `git diff src/`
+being empty while the tests disagree is the signature. Deleting the specific
+object files is the reliable fix; trusting "Built target" is not.
 
 *Prepared by Claude (Opus 5). Reviewed by Sol (2026-07-31); revised §8 in response.
 §9–§12 are the implementation record: §§8.7–8.8 and 9–10 describe work now
