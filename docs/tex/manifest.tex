@@ -7902,7 +7902,17 @@ models.
       input node 2, and variable 2 by input nodes 3, 4 and 5,
       vector[0] in $v$ would contain (0,1), vector[1] in $v$ would
       contain (2), and vector[3] in $v$ would contain (3,4,5).  All
-      input nodes {\em must} be represented in $v$.  See section
+      input nodes {\em must} be represented in $v$, and the groups must
+      form an {\em exact partition} of them: {\em setNetwork} must have
+      been called first, the structure and every group within it must be
+      non-empty, every node index must belong to the network, and every
+      input node must appear exactly once.  Duplicates, overlaps,
+      omissions --- including an omission whose largest index still
+      looks correct --- and out-of-range nodes are each refused with
+      their own message.  The caller's order is preserved, between
+      groups and within one: variable numbering in every report,
+      progress announcement and audit-trail row is the caller's own, so
+      normalizing here would renumber the answer.  See section
       \ref{parsefx} for an utility method that parses a string
       description
       of input variables, and returns a vector of vector of unsigned.
@@ -7969,6 +7979,56 @@ outputs
       \index{Error function!Cross-entropy}
 \item void copy( const RegressNet\& rhs ): copy utility function, see
       section \ref{copy_fx} for discussion.
+\end{itemize}
+
+\item {\em Protected} contract and shared scaffold
+
+The two selection procedures of sections \ref{revreg} and \ref{forreg}
+share their bookkeeping and nothing else.  Each keeps its own outer and
+inner loops, its own nesting of the two models, its own Wilks argument
+order, its own degrees-of-freedom expression, its own choice of the
+largest or smallest $p$-value, its own stopping test, and its own way
+of arriving at the final variable set.  Those are the published
+mathematics of the two procedures, and a shared descriptor carrying a
+comparator and an argument order would conceal exactly the difference a
+reader of this class needs to see.
+
+\begin{itemize}
+\item static bool candidateFitEligible( Iterative::StopReason $r$,
+      double $E$ ): may a candidate fit's error enter a Wilks
+      comparison?  Two independent conditions, and the second is not
+      implied by the first: a stopping {\em rule} must have ended the
+      run, {\em and} the error must be a real number.  A saturated fit
+      satisfies the first and fails the second, its gradients having
+      underflowed to zero while its cross-entropy overflowed
+\item void requireComparablePass( unsigned $step$ ): refuses a pass in
+      which no candidate's $p$-value could be calculated at all, rather
+      than naming a variable that was never compared.  This is {\em
+      not} the case of a pass whose $p$-values are all zero: zero is a
+      $p$-value, meaning maximally significant, and the first candidate
+      to produce one wins its pass.  Since {\em setInputStructure}
+      requires an exact partition of the input nodes, no caller-supplied
+      structure can reach this, and it stands as an invariant defense
+\item double beginAnalysis( const string\& $banner$, const string\&
+      $question$ ): the cross-entropy refusal, the structure check, the
+      first clone, the banner and the input-structure print; returns the
+      $p$-value threshold
+\item CandidateFit fitCandidate( \ldots, double $E_{prior}$, unsigned
+      $df$ ): trains one candidate subnetwork and records it, owning
+      both progress announcements, the fit count, the record-{\em
+      before}-judge ordering and the eligibility refusal.  The caller
+      has already cloned the network, removed the nodes and computed
+      $df$, all three being direction-specific
+\item double reportComparison( const CandidateFit\& $f$, double
+      $E_{prior}$, double $G^2$, unsigned $df$, unsigned $v$, ptable\&
+      $t$ ): reports one comparison and completes its audit-trail row.
+      It is handed the statistic; it does not call Wilks, does not know
+      which model was nested in which, and does not decide who wins.
+      Returns the $p$-value, or not-a-number when the chi-square routine
+      refused
+\item void endAnalysis( const string\& $direction$, const string\&
+      $verb$ ): the completion flag and the closing summary, reached
+      only when a selection loop has decided
 \end{itemize}
 
 \end{itemize}

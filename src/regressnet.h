@@ -202,6 +202,68 @@ private:
 	unsigned fitsCompleted; // candidate subnetworks trained
 	bool analysisComplete;  // did the selection loop reach a decision?
 
+	// Define stepwise regression table type, p-value first, followed by variable
+	//    number. Declared here because the shared scaffold below takes one.
+	typedef multimap< double, unsigned, less< double > > ptable;
+
+	// --- the shared scaffold -------------------------------------------------
+	//
+	// FOUR MECHANISMS, AND NOT ONE OF THEM KNOWS WHICH DIRECTION IS RUNNING.
+	// reverse_regress() and forward_regress() keep their whole selection loops:
+	// the nesting of the two models, the Wilks argument order, the degrees of
+	// freedom, which p-value wins, the tie sense, the stop test and its prose,
+	// and how the final variable set is arrived at are all written out twice, on
+	// purpose. They are two published procedures (manifest ch. "Stepwise
+	// regression", sections revreg and forreg) with opposite senses, and a
+	// direction descriptor carrying a comparator and an argument order would
+	// hide exactly the thing a reader of this file needs to see (standing
+	// rule 7). What is shared below is bookkeeping that is identical in both.
+
+	// Everything that must happen before either direction's first candidate:
+	//    the cross-entropy refusal, the structure check, the first clone, the
+	//    banner and the input-structure print. Returns the threshold, prompting
+	//    on stdin only when setThreshold() was not used. Throws if the analysis
+	//    may not run at all, so a caller that returns has a usable clone.
+	double beginAnalysis( const string& banner, const string& question );
+
+	// What one candidate fit yielded. Deliberately NOT a p-value and NOT a
+	//    winner: the caller makes its own comparison from these.
+	struct CandidateFit {
+		double error;    // what train() returned
+		unsigned trail;  // its row in candidates[]
+	};
+
+	// Train ONE candidate subnetwork and record it. Owns the two progress
+	//    announcements, the fit, the fit count, the RECORD-BEFORE-JUDGE
+	//    ordering and the eligibility refusal -- the last of which is why this
+	//    is shared at all: it is a Sol-established invariant that was
+	//    previously maintained in two places.
+	//
+	//    The caller has already cloned the Network and removed the nodes,
+	//    because WHICH nodes go is the difference between the directions (one
+	//    removes the set under test, the other its complement), and because the
+	//    comparison's degrees of freedom -- also direction-specific -- must be
+	//    known before the record is written. Both are passed in, already
+	//    decided. This method derives neither.
+	CandidateFit fitCandidate( const string& direction, unsigned step,
+		unsigned candidateNo, unsigned candidatesThisStep, unsigned variable,
+		double priorError, unsigned df );
+
+	// Report one comparison and complete its audit-trail row. It is HANDED the
+	//    statistic the caller computed: it does not call Wilks, does not know
+	//    which model was nested in which, and does not decide who wins.
+	//    Returns the p-value, or NaN when stats::pX2 refused -- which is
+	//    reported and is not fatal. A NaN return must not take the pass; the
+	//    callers check for it, exactly as the winner update used to sit inside
+	//    the try block that is now here.
+	double reportComparison( const CandidateFit& fit, double priorError,
+		double G2, unsigned df, unsigned variable, ptable& innerPs );
+
+	// The completion flag and the closing summary, once a selection loop has
+	//    reached a decision. Every failure path throws out of the loop before
+	//    this, so a run that stopped early prints no final variable set.
+	void endAnalysis( const string& direction, const string& verb );
+
 	// Push one progress fact to the callback, if a caller installed one. Costs
 	//    nothing when nobody is listening, so the CLI path is unchanged.
 	//    finished=false announces a candidate about to train; finished=true
@@ -227,9 +289,6 @@ private:
 	//    final variable set -- it has none to report.
 	void report_summary( const string& direction, const string& verb );
 
-	// Define stepwise regression table type, p-value first, followed by variable number
-	typedef multimap< double, unsigned, less< double > > ptable;
-	
 	ostringstream out; // for writing to screen & file
 	stringstream errorOut; // for exceptions
 	

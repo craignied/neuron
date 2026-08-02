@@ -3997,3 +3997,132 @@ demonstrably recompiled: **exit 139 (SIGSEGV)**, with 37e, 37f, 37h, 37i and 37j
 already red before the process died, and the three valid-partition controls
 green. The crash truncated the run before 37k-37o, which is itself the evidence
 those cases exist for.
+
+---
+
+## 18. Item 12 — the extraction, AS LANDED (2026-08-02)
+
+§15's proposal, implemented. Item 12 is complete.
+
+### 18.1 What was extracted, and what was not
+
+Four mechanisms, none of which knows which direction is running:
+
+| Mechanism | Owns |
+|---|---|
+| `beginAnalysis( banner, question )` | the cross-entropy refusal, the structure check, the first clone, the threshold, the banner, the input-structure print |
+| `fitCandidate( direction, step, no, thisStep, variable, priorError, df )` | both progress announcements, the fit, the fit count, the **record-before-judge** ordering, the eligibility refusal |
+| `reportComparison( fit, priorError, G2, df, variable, innerPs )` | the comparison's report, the p-value, the inner table, the audit row's completion |
+| `endAnalysis( direction, verb )` | the completion flag and the closing summary |
+
+Everything §15.3 said stays concrete, stays concrete, and each is now commented
+at its call site with the direction it belongs to: forward's trained empty
+baseline, both Wilks calls and their opposite argument order, both df
+expressions, reverse's largest-p with strict `>` (first of tied maxima),
+forward's smallest-p with `<=` (last of tied minima), both stop tests and their
+prose, reverse's complement and forward's direct `finalVariables`.
+
+**No direction descriptor, comparator, sign, formula-order flag, shared
+selection loop, `std::function`, virtual dispatch or type switch was
+introduced.** The four mechanisms are non-virtual private members on a
+non-polymorphic class; the extraction adds no allocation and no dispatch.
+
+### 18.2 Two refinements of the §15.4 signatures, and why
+
+**`fitCandidate` does not clone the network or remove the nodes**, though
+§15.3's table said it would. Two reasons, and the second is the binding one:
+
+- *which* nodes go is the difference between the directions — one removes the
+  set under test, the other its complement — and Sol's condition was that
+  `fitCandidate` must not derive complements;
+- the comparison's **degrees of freedom** are also direction-specific and must
+  be known **before** the audit row is written, because a candidate rejected by
+  the eligibility check keeps the df it was recorded with. Since df depends on
+  the candidate's own free parameters, it is knowable only after the nodes are
+  gone — so the removal has to happen at the call site for the record to carry
+  the same value it carried before.
+
+The alternative was to let `fitCandidate` compute df as "the larger model's
+parameters fewer the smaller's", which is the manifest's own definition and
+direction-free — but that would have moved a degrees-of-freedom expression out
+of the concrete sites, which Sol's instruction forbids. Training does not change
+a network's free parameters, so computing df after `removeInputs` and before the
+fit is exact.
+
+**`reportComparison` does not update the winner**, and the callers gained an
+explicit `!std::isnan( p )` guard. In the old code the winner update sat
+*inside* the `try` that computes the p-value, so a `stats::statsErr` skipped it.
+Moving the update to the call site without that guard would have let a NaN take
+the pass through `!haveWinner`. The guard restores the old behavior exactly and
+states the rule the old placement only implied: **only a successfully calculated
+p-value may win.**
+
+### 18.3 The measured reduction, which is smaller than §15.10 claimed
+
+| | executable lines |
+|---|---|
+| before: `reverse_regress` + `forward_regress` | 140 + 149 = **289** |
+| after: the same two functions | 94 + 103 = **197** |
+| the four shared mechanisms | **71** |
+| **net** | **-21** |
+
+**§15.10 estimated -70 to -90 and that was wrong.** The error was estimating the
+*gross* removal from the loops (92 lines, which is about right) and forgetting
+that the extracted mechanism costs its own signature, locals, braces and
+comments once — and that the call sites grow argument lists. The honest figure
+is -21.
+
+Line count was never the argument (rule 7: *"DRY means one authoritative
+mechanism at the correct layer, never minimum line count"*), and the real result
+is the one worth stating: **the record-before-judge ordering and the eligibility
+refusal now exist once instead of twice.** Those are the two invariants §1.3
+named as the specific danger, both established by review, and both previously
+maintained in two places.
+
+### 18.4 Sabotages — fifteen, thirteen guarded
+
+Every one with the object file deleted and the build log required to show
+`regressnet.cpp` recompiling, on introduction and again on restoration.
+
+| # | Sabotage | Cases red |
+|---|---|---|
+| S1 | reverse Wilks arguments swapped | 11 |
+| S2 | forward Wilks arguments swapped | 5 |
+| S3 | reverse takes the smallest p | 3 |
+| S4 | forward takes the largest p | 4 |
+| S5 | reverse df subtraction reversed | 13 |
+| S6 | forward uses the source error as its baseline | 7 |
+| S7 | `fitCandidate` records AFTER the eligibility check | 7 |
+| **S7b** | `fitCandidate` announces completion AFTER the refusal | 1 (49b) |
+| S8 | the convergence check removed | 13 |
+| S9 | a grouped variable split to its first node | 2 |
+| S10 | the source model's objective mutated | 2 |
+| S11 | `finalVariables` computed once, after the loop | 5 |
+| S12 | `endAnalysis` does not set the completion flag | 7 |
+| **S12b** | `beginAnalysis` marks the run complete up front | 3 |
+| S13 | the `!isnan` guard dropped at the reverse call site | **none** |
+
+S1-S6 are the six direction differences of §15.1, all still caught after the
+extraction — which is the evidence that moving the bookkeeping did not blur the
+mathematics.
+
+**S13 is not guarded, for the reason §17.3 already established.** The NaN guard
+fires only when `stats::pX2` refuses, and with an exact partition enforced that
+cannot happen: `gammq` refuses on a non-positive shape parameter or a negative
+argument, every variable has at least one node, and `G2 <= 0` is handled without
+calling `pX2`. The guard is retained because it preserves the old behavior
+exactly and states the rule explicitly; like `requireComparablePass`'s call
+sites, it is an invariant defense rather than a live branch, and no artificial
+hook should be added to make it reachable.
+
+### 18.5 Verification
+
+`regress_seed42` **byte-identical**. All 125 `check_regressnet` assertions
+unchanged and green. `smoke.sh` green including forward grouped selection and
+the blocking/async structured-result comparison. Zero-warning clean Release
+build, all three goldens, `ctest` 30/30, oracle numerically identical, tools,
+`git diff --check`.
+
+One pre-existing trailing space was removed from a comment in
+`forward_regress` — it had been in the file before, and re-adding the line
+during the rewrite made `git diff --check` see it as new.

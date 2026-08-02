@@ -3652,3 +3652,96 @@ containers.**
     cannot reach it, because `crossval`'s metrics are `TwoSet`-based and need one output.
     Revisit if multi-output DFA ever moves onto a repeated path; the evidence is then
     immediately actionable.
+
+**2026-08-02 (later still) — stepwise: no unit coverage at all, and reverse read an
+uninitialized winner. Item 12, in four commits.**
+`d0bac14`, `e4e0bad`, `a4a878a`, plus the extraction. The characterization came first
+and found more than the extraction it was written for.
+
+- **`RegressNet` had zero `ctest` coverage.** `refactor_audit.md` §1.3 had made the
+  extraction conditional on confirming that the forward direction was tested, since
+  `regress_seed42` runs only the reverse pass and legacy bug #11 hid in the forward one
+  for exactly that reason. Forward turned out to be covered — but only through
+  `smoke.sh`'s HTTP surface, two layers of adapter away, and **nothing anywhere pinned
+  the direction semantics as such**: not that reverse takes the largest p and forward the
+  smallest, not that their Wilks arguments nest opposite ways, not that forward's baseline
+  is a trained empty network rather than the source fit. `tests/regressnet/`
+  (`regressnet_characterization`) now does: 125 assertions, 15 cases, ~6 s.
+- **The duplication is 64.8%, not "identical skeletons"** — 83 of reverse's 128
+  executable lines. (My first measurement was wrong: BSD `sed` reads `\+` literally, so
+  the strip mangled `+=` into `=`. Redone with `difflib`.) And there are **six** genuine
+  differences, not the five §1.3 listed: it missed that **only forward trains an empty
+  baseline network**, which is the largest structural difference between the two.
+- **§1.3's own proposal was withdrawn.** One loop with a `Direction` descriptor carrying
+  "a comparator, the verb strings, and the Wilks argument order" is the sign-flag shape
+  rule 7 forbids and Sol had already refused for `DFA::reportAccuracy`. Larger-p-wins
+  versus smaller-p-wins **is** the published mathematics, exactly as larger-wins versus
+  smaller-wins is for the discriminants.
+- **Legacy bug #13 — reverse read an uninitialized `largest_var`, and it crashed.**
+  Declared with no initializer, assigned only inside `if ( p > largest_p )` from
+  `largest_p = 0`. `stats::pX2` is `gammq`, which underflows to exactly 0 for a large
+  chi-square — i.e. for a *strongly significant* variable, the ordinary case in a
+  well-powered study — so a pass in which every candidate is significant never assigned
+  it, and the foot of the pass read it unconditionally. Measured: the report printed
+  `the largest was variable 83256288`, a different number on every run, exactly
+  `0xAAAAAAAA` under `-ftrivial-auto-var-init=pattern`. At `threshold = 0` — an accepted
+  input, the CLI prompt is `askD( q, 0, 1 )` inclusive — the value was pushed into
+  `removed` and used to index `variable_defs` on the next pass: **SIGBUS**.
+  *Worth remembering:* in the ctest binary the same read happened to be **stable and in
+  range**, so a determinism assertion passed there while the standalone probe crashed.
+  Undefined behavior in two stack layouts. The pattern build is the evidence, never a run
+  count.
+- **The policy was corrected by Sol before implementation.** The audit had proposed
+  reading an all-zero pass as "no comparable candidate / remove nothing". Wrong twice:
+  `p == 0` means the candidate **was** compared and is maximally significant, and the stop
+  test is strictly `largest_p < threshold`, so at threshold 0 a valid zero stays
+  **eligible for removal**. Reading it as a refusal would have silently changed published
+  threshold behavior. What shipped: the first *successfully calculated* p-value takes the
+  pass, zero included; later candidates replace it only on strict `p > largest_p`,
+  preserving reverse's first-of-tied behavior; the stop test untouched.
+- **`candidateFitEligible( StopReason, double )`** closes a guard that no fixture could
+  reach. `requireConvergedFit` refuses on two independent conditions, and only the first
+  was covered. A saturated fit ends on a convergence reason with a non-finite error —
+  gradients underflow while cross-entropy overflows — but a sweep of 270 training
+  configurations produced **zero** portable hits, and the single point that did hit moved
+  under a change of learning rate, input scale, row count or seed. A fixture there would
+  have been a bet on one toolchain's arithmetic, which is the bet the DFA singular fixture
+  lost on Ubuntu. A pure static predicate answers all four combinations everywhere.
+- **Legacy bug #14 — `setInputStructure` validated only the maximum node index.**
+  Measured against the old code on a four-input dataset: `{{0},{0},{1},{2},{3}}` was
+  accepted and produced a complete, entirely reasonable-looking analysis of *five*
+  variables over four nodes; `{{3}}` and `{{0},{3}}` were accepted and silently analyzed a
+  model the user never described; `{{0},{1},{2},{3},{}}` was accepted and the **empty group
+  hijacked the selection** — removing no nodes leaves the error unchanged, so `G2` is 0,
+  `p` is 1, and a p-value of 1 wins every reverse pass (measured path `4 2 3`, removed
+  first, having removed nothing); `{}` and calling before `setNetwork()` were both
+  **SIGSEGV**. Only the out-of-range case was refused, and only because an out-of-range
+  node necessarily raises the maximum. The contract is now an **exact partition**, with
+  the caller's order preserved between and within groups.
+  This also answered whether the new no-comparable refusal was reachable: `df == 0` **is**
+  producible by a malformed structure, but `G2 <= 0` is handled upstream so `pX2` is never
+  called. `requireComparablePass` is therefore an invariant defense, characterized
+  directly rather than through a hook built to reach it.
+- **The extraction, finally:** `beginAnalysis`, `fitCandidate`, `reportComparison`,
+  `endAnalysis` — four mechanisms, none of which knows which direction is running. Both
+  selection loops stay whole, and every direction-specific statement is commented at its
+  concrete call site. Two refinements of the proposal, both forced: `fitCandidate` does
+  **not** clone or remove nodes, because which nodes go is the directional difference and
+  because the comparison's `df` must be known before the audit row is written; and
+  `reportComparison` does **not** pick the winner, so the callers gained an explicit
+  `!isnan( p )` guard that restores exactly what the old inside-the-`try` placement did.
+- **The reduction is −21 executable lines, not the −70 to −90 the audit predicted.** That
+  estimate counted the gross removal from the loops and forgot that an extracted mechanism
+  costs its own signature, locals and braces once. Line count was never the argument
+  (rule 7); the result worth stating is that **record-before-judge and the eligibility
+  refusal now exist once instead of twice** — the two review-established invariants §1.3
+  named as the specific danger.
+- Sabotages: 12 for the characterization, 6 for the winner fix, 7 for validation, 15
+  against the extracted code — every one with the object file deleted and the build log
+  *required* to show `regressnet.cpp` recompiling, on introduction **and** on restoration.
+  Three came back unguarded and are recorded as such rather than papered over: an
+  initializer made unreachable by `haveWinner`, and two invariant defenses whose call
+  sites an exact partition makes unreachable.
+- Gates on every commit: zero-warning clean Release build, three goldens byte-identical
+  (`regress_seed42` never moved), `ctest` 30/30, `smoke.sh`, oracle numerically identical,
+  tools, `git diff --check`, and 3/3 CI on the exact SHA.

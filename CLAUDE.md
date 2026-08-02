@@ -322,8 +322,13 @@ stay in the concrete classes. Statistics: exact non-parametric trapezoidal
 AUC and binormal Az (least-squares z-ROC fit via fitexy over distinct operating points),
 stratified bootstrap CI plus Hanley-McNeil, Kolmogorov-Smirnov, Pearson X² (statistic
 only — see settled decisions), Hosmer-Lemeshow Ĉ on 10 fixed deciles, Wald tests,
-condition number. **Twelve numbered legacy bugs** were found and fixed during the
+condition number. **Fourteen numbered legacy bugs** were found and fixed during the
 reanimation; each is written up in HISTORY with the measurement that proved it. The
+thirteenth and fourteenth (2026-08-02) are both in stepwise and are both crashes: reverse
+read an **uninitialized winner** whenever every p-value in a pass underflowed to zero
+(SIGBUS at threshold 0), and `setInputStructure` validated only the *maximum* node index,
+so overlapping and under-specified structures produced complete, plausible-looking, wrong
+analyses while an empty structure segfaulted. The
 twelfth (2026-08-01) is the one to read if you are about to trust a passing test:
 batch `BackProp` computed the CGD/Shanno search direction and then updated its weights
 from the raw accumulator instead, so **selecting an optimizer was nominal rather than
@@ -331,18 +336,22 @@ computational** for twenty years — while the optimizer tests executed the disp
 passed, because they carry expected values for SimpleProp and BareProp only and no
 golden fixture uses `BackProp` at all.
 
-**The refactor (`refactor_audit.md`) is at item 11 of 14, and items 1-11 are done.**
-The audit is the working document: §11 is D5's `vector_ops` bounds policy, §12 is D9's
-`Matrix` policy, §13 the DFA scaffold extraction, §14 the DFA scoring measurement. What
-landed 2026-08-01/02: `OneHiddenNet` (above); **D9** — `Matrix::DimensionMismatch` added,
-all four contract classes derived from `std::exception`, 55 contracts enforced at the entry
-points, plus `runOnWorker` in the GUI and a `main` boundary in the CLI so a contract failure
-reports instead of killing the process; a **stale-state fix** — a reused multi-output DFA
-object reported the *previous* dataset's model, because `DFA::setDataSet` appended to `D`/`U`
-and `QDFA::train` to `C`/`S`/`K`; and the **DFA scaffold**, `DFA::train() override final`
+**The refactor (`refactor_audit.md`) is at item 12 of 14, and items 1-12 are done.**
+The audit is the working document and it is sectioned: §11 is D5's `vector_ops` bounds
+policy, §12 is D9's `Matrix` policy, §13 the DFA scaffold, §14 the DFA scoring measurement,
+§§15-18 stepwise. Read the section, not the file. What landed 2026-08-01/02:
+`OneHiddenNet` (above); **D9** — `Matrix::DimensionMismatch` added, all four contract
+classes derived from `std::exception`, 55 contracts enforced at the entry points, plus
+`runOnWorker` in the GUI and a `main` boundary in the CLI so a contract failure reports
+instead of killing the process; a **stale-state fix** — a reused multi-output DFA object
+reported the *previous* dataset's model; the **DFA scaffold**, `DFA::train() override final`
 owning the once-per-run bookkeeping while each model keeps its whole fit in
-`fitDiscriminant()`. Remaining: 12 stepwise (needs real forward coverage first), 13 the GUI
-async launcher, 14 the measured `gramRows()` / CGD-Shanno allocation work.
+`fitDiscriminant()`; and **stepwise**, which took two fail-first correctness commits
+(legacy bugs #13 and #14, above) before its extraction was allowed to start.
+`RegressNet` now shares `beginAnalysis` / `fitCandidate` / `reportComparison` /
+`endAnalysis` — four mechanisms, **none of which knows which direction is running** — while
+both selection loops stay whole. Remaining: 13 the GUI async launcher, 14 the measured
+`gramRows()` / CGD-Shanno allocation work.
 
 **Interfaces.** The CLI menus are **frozen** but fully working — they remain the
 authoritative feature list rule 5 measures the GUI against. `neuron --gui` (embedded
@@ -415,7 +424,7 @@ how many independent clusters an interval and a *p* rest on.
 
 **The gates, run at the end of every piece of work**: zero-warning
 Release build → `tests/golden/run_golden.sh` byte-identical (3 transcripts: `xor_seed42`,
-`regress_seed42`, `binormal_seed42`) → `ctest` (**29 tests** as of 2026-08-02 — run
+`regress_seed42`, `binormal_seed42`) → `ctest` (**30 tests** as of 2026-08-02 — run
 `ctest -N`, never a remembered number) → `tests/gui/smoke.sh` →
 `tests/oracle/verify_oracle.sh` numerically identical → **`tests/tools/run_tools.sh`** →
 `git diff --check` → live `neuron --gui` click-through for anything that adds a control.
@@ -611,6 +620,31 @@ Re-proposing one is rework, not initiative. Full reasoning at the cited HISTORY 
   because neither becomes `modelPtr`. Never label a standalone analysis "current model",
   and never let CV's report sit above an unlabelled panel from a different fit. → HISTORY
   2026-07-29.
+- **Stepwise shares its bookkeeping and NOTHING about its direction.** `beginAnalysis`,
+  `fitCandidate`, `reportComparison` and `endAnalysis` are the four shared mechanisms, and
+  not one of them knows whether reverse or forward is running. Both selection loops stay
+  whole, and every direction-specific statement stays at its concrete call site: forward's
+  **trained empty baseline** (reverse starts from `e_in`), both Wilks calls and their
+  opposite argument order, both df expressions, reverse's largest-p with strict `>` (first
+  of tied maxima), forward's smallest-p with `<=` (last of tied minima), both stop tests,
+  and reverse's complement versus forward's direct `finalVariables`. **No direction
+  descriptor, comparator, sign, formula-order flag or shared selection loop**, now or
+  later — the audit's own §1.3 proposed exactly that and it was withdrawn. The tie
+  asymmetry is deliberate and is NOT to be normalized: changing it changes which variable
+  a tie selects. → HISTORY 2026-08-02; `refactor_audit.md` §§15-18.
+- **`p == 0` is a p-value, not the absence of one.** It means maximally significant, so
+  the candidate WAS compared and it wins its pass if it is the first one — and the stop
+  test stays strictly `largest_p < threshold`, so at threshold 0 a valid zero remains
+  **eligible for removal**. Do not re-read an all-zero pass as "remove nothing"; that
+  silently changes published threshold behavior. "No comparable candidate" means every
+  p-value *calculation* was refused, which is a different state and is refused explicitly.
+  → HISTORY 2026-08-02.
+- **A stepwise input structure must be an EXACT PARTITION of the input nodes** —
+  `setNetwork` first, nothing empty, every index in range, every node exactly once.
+  Overlaps, duplicates and omissions (including ones whose maximum still looks right) are
+  refused, each with its own message, and the caller's order is preserved between and
+  within groups because variable numbering in every report and audit row is the caller's
+  own. → HISTORY 2026-08-02.
 - **The DFA scaffold is shared; both `reportAccuracy()` bodies are NOT.** `DFA::train()`
   owns the once-per-run bookkeeping (streams, banner, header, the `Singular` refusal, the
   single report call, history, last-operation, `return -1`) and each model keeps its entire

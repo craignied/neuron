@@ -353,8 +353,13 @@ string RegressNet::network_name() const
 	return netPtr->getType();
 }
 
-// Stepwise reverse regression
-void RegressNet::reverse_regress()
+// --- the shared scaffold ----------------------------------------------------
+//
+// Four mechanisms, none of which knows which direction is running. See the
+// header for why the selection loops themselves are NOT among them.
+
+// Everything that must happen before either direction's first candidate.
+double RegressNet::beginAnalysis( const string& banner, const string& question )
 {
 	requireCrossEntropySource(); // Wilks' GLRT compares log likelihoods
 	analysisComplete = false; // set only when the outer loop finishes
@@ -365,472 +370,479 @@ void RegressNet::reverse_regress()
 		throw RegressNetErr( errorOut.str().c_str() );
 	}
 
-	else if ( copy_network() ) // test copying the Network for a subnetwork
+	// copy_network() either throws or returns true -- the `success = false`
+	//    after its throw has never been reachable -- so the `else if
+	//    ( copy_network() )` this replaces could not take its false branch.
+	copy_network(); // copy the Network to make subnetworks from
+
+	// Get the threshold
+	const double threshold = thresholdSet ? regressThreshold
+		: util::askD( question, 0, 1 );
+
+	// Print message reporting what kind of Network is being regressed
+	out << endl << banner << network_name() << " Network:" << endl;
+	report( out ); // output to screen & history file
+	print_input_structure( variable_defs ); // print input variable structure
+
+	return threshold;
+}
+
+// Train ONE candidate subnetwork and record it. The caller has already cloned
+//    the Network and removed the nodes, and has computed the comparison's
+//    degrees of freedom -- both are direction-specific, and both are passed in
+//    already decided.
+RegressNet::CandidateFit RegressNet::fitCandidate( const string& direction,
+	unsigned step, unsigned candidateNo, unsigned candidatesThisStep,
+	unsigned variable, double priorError, unsigned df )
+{
+	announce( direction, step, candidateNo, candidatesThisStep, variable,
+		"training candidate" );
+
+	CandidateFit fit;
+	fit.error = netCopyPtr->train(); // train the subnetwork
+	fitsCompleted++;
+
+	// The fit is finished: say so, with how it ended, BEFORE the eligibility
+	//    check below can throw. Otherwise the last thing a watcher ever saw was
+	//    "training candidate" and a fit count one behind reality.
+	announce( direction, step, candidateNo, candidatesThisStep, variable,
+		"candidate complete", true );
+
+	// The audit trail is written BEFORE the eligibility check, because that
+	//    check THROWS -- and the candidate that fails is precisely the one a
+	//    reader needs recorded. Its Wilks statistic and p-value stay
+	//    not-a-number until a comparison is actually permitted; a rejected fit
+	//    contributes no statistic, but it is still a candidate the procedure
+	//    considered.
+	fit.trail = recordCandidate( step, candidateNo, variable, priorError,
+		fit.error, df, numeric_limits< double >::quiet_NaN(),
+		numeric_limits< double >::quiet_NaN() );
+
+	// An unfinished fit may not be compared (see the method)
 	{
-		double lastError = e_in; // prior Network's error
+		ostringstream who;
+		who << "variable " << variable << " = node(s) " << variable_defs[ variable ];
+		requireConvergedFit( who.str(), fit.error );
+	}
 
-		vector< unsigned > removed; // holds removed variables
+	return fit;
+}
 
-		ptable p_values; // multimap holds final table p-values of added variables
+// Report one comparison and complete its audit-trail row. HANDED the statistic
+//    the caller computed: this does not call Wilks, does not know which model
+//    was nested in which, and does not decide who wins.
+double RegressNet::reportComparison( const CandidateFit& fit, double priorError,
+	double G2, unsigned df, unsigned variable, ptable& innerPs )
+{
+	out << "Error prior network = " << priorError << endl
+		<< "Error this subnetwork = " << fit.error << endl
+		<< "Chi-square = " << G2 << ", degrees of freedom = " << df << endl;
 
-		// Get the threshold
-		string question = "\nWhat is the smallest p-value at which variables should\n";
-		question += "stop being removed in the stepwise regression? ";
-		double threshold = thresholdSet ? regressThreshold
-			: util::askD( question, 0, 1 );
-		
-		// Print message reporting what kind of Network is being regressed
-		out << endl << "Reverse regressing a " << network_name() << " Network:" << endl;
-		report( out ); // output to screen & history file
-		print_input_structure( variable_defs ); // print input variable structure
-		
-		// Prior Network's degrees of freedom
-		unsigned last_df = netPtr->df();
+	double pThis = numeric_limits< double >::quiet_NaN();
+	try // print p-value for this comparison
+	{
+		double p;
+		if ( G2 <= 0 ) // the network compared against did no worse
+			p = 1;
+		else // calculate p-value from chi-square
+			p = stats::pX2( df, G2 );
+		pThis = p;
+		innerPs.insert( ptable::value_type( p, variable ) ); // make table
+		out << "p = " << p << endl;
+	}
+	catch ( stats::statsErr& e ) // error in chi-square calculation
+	{
+		out << e.what() << endl;
+	}
 
-		// Outer loop: number of sets of comparisons = number of variables
-		for ( unsigned i = 0; i < variable_defs.size(); i++ )
+	// The comparison now exists: complete the record made before the
+	//    eligibility check
+	candidates[ fit.trail ].df = df;
+	candidates[ fit.trail ].G2 = G2;
+	candidates[ fit.trail ].p = pThis;
+	report( out ); // output to screen & history file
+
+	return pThis;
+}
+
+// The completion flag and the closing summary.
+void RegressNet::endAnalysis( const string& direction, const string& verb )
+{
+	analysisComplete = true; // the loop ran to a decision, not an exception
+	report_summary( direction, verb );
+}
+
+// Stepwise reverse regression
+//
+//    REVERSE TRAINS THE FULL NETWORK AND TAKES VARIABLES AWAY. Each candidate
+//    is nested WITHIN the network it is compared against, and the variable with
+//    the LARGEST p-value -- the least significant -- is the one removed
+//    (manifest ch. "Stepwise regression", section revreg).
+void RegressNet::reverse_regress()
+{
+	string question = "\nWhat is the smallest p-value at which variables should\n";
+	question += "stop being removed in the stepwise regression? ";
+	const double threshold = beginAnalysis( "Reverse regressing a ", question );
+
+	double lastError = e_in; // prior Network's error
+
+	vector< unsigned > removed; // holds removed variables
+
+	ptable p_values; // multimap holds final table p-values of removed variables
+
+	// Prior Network's degrees of freedom
+	unsigned last_df = netPtr->df();
+
+	// Outer loop: number of sets of comparisons = number of variables
+	for ( unsigned i = 0; i < variable_defs.size(); i++ )
+	{
+		double largest_p = 0, // largest p-value found
+			holdError = 0; // holds error of least significant variable
+
+		// THE FIRST SUCCESSFULLY CALCULATED p-VALUE IS THE WINNER, and later
+		//    candidates replace it only on a strict p > largest_p -- which is
+		//    what keeps the FIRST of several tied candidates.
+		//
+		//    This flag exists because largest_p starts at 0 and p == 0 is a
+		//    perfectly good p-value: it means maximally significant, and
+		//    stats::pX2 is gammq, which underflows to exactly 0 for a large
+		//    chi-square. A pass in which every candidate is strongly
+		//    significant therefore never satisfied `p > largest_p` at all, and
+		//    largest_var -- which had no initializer -- was read
+		//    unconditionally at the foot of the pass. Measured: the report
+		//    named "variable 83256288", a different number on every run,
+		//    0xAAAAAAAA under -ftrivial-auto-var-init=pattern, and at threshold
+		//    0 the value was pushed into `removed` and used to index
+		//    variable_defs on the next pass -- SIGBUS.
+		bool haveWinner = false;
+
+		unsigned largest_var = 0, // variable with largest p-value
+			hold_df = last_df; // holds df of least significant variable
+
+		ptable inner_ps; // holds p-values of removed variables within a single pass
+
+		// Exactly knowable now: this pass considers one candidate for every
+		//    variable still in the model. (What LATER passes will consider is
+		//    not knowable -- the threshold may stop the procedure first.)
+		unsigned candidateNo = 0,
+			candidatesThisStep = variable_defs.size() - removed.size();
+
+		// variable -> its row in the audit trail, so the pass can mark its
+		//    winner once the comparison is settled
+		map< unsigned, unsigned > passIndex;
+
+		// Inner loop: iterate through remaining variables, find largest p-value
+		for ( unsigned j = 0; j < variable_defs.size(); j++ )
 		{
-			double largest_p = 0, // largest p-value found
-				holdError = 0; // holds error of least significant variable
-
-			// THE FIRST SUCCESSFULLY CALCULATED p-VALUE IS THE WINNER, and
-			//    later candidates replace it only on a strict p > largest_p --
-			//    which is what keeps the FIRST of several tied candidates.
-			//
-			//    This flag exists because largest_p starts at 0 and p == 0 is a
-			//    perfectly good p-value: it means maximally significant, and
-			//    stats::pX2 is gammq, which underflows to exactly 0 for a large
-			//    chi-square. A pass in which every candidate is strongly
-			//    significant therefore never satisfied `p > largest_p` at all,
-			//    and largest_var -- which had no initializer -- was read
-			//    unconditionally at the foot of the pass. Measured: the report
-			//    named "variable 83256288", a different number on every run,
-			//    0xAAAAAAAA under -ftrivial-auto-var-init=pattern, and at
-			//    threshold 0 the value was pushed into `removed` and used to
-			//    index variable_defs on the next pass -- SIGBUS.
-			bool haveWinner = false;
-
-			unsigned largest_var = 0, // variable with largest p-value
-				hold_df = last_df; // holds df of least significant variable
-
-			ptable inner_ps; // holds p-values of removed variables within a single pass
-
-			// Exactly knowable now: this pass considers one candidate for every
-			//    variable still in the model. (What LATER passes will consider
-			//    is not knowable -- the threshold may stop the procedure first.)
-			unsigned candidateNo = 0,
-				candidatesThisStep = variable_defs.size() - removed.size();
-
-			// variable -> its row in the audit trail, so the pass can mark its
-			//    winner once the comparison is settled
-			map< unsigned, unsigned > passIndex;
-
-			// Inner loop: iterate through remaining variables, find largest p-value
-			for ( unsigned j = 0; j < variable_defs.size(); j++ )
+			// Only examine the variable if it hasn't already been removed
+			if ( find( removed.begin(), removed.end(), j ) == removed.end() )
 			{
-				// Only examine the variable if it hasn't already been removed
-				if ( find( removed.begin(), removed.end(), j ) == removed.end() )
+				removed.push_back( j ); // add the variable to those removed
+				candidateNo++;
+
+				// Build the structure containing removed variables
+				vector< vector< unsigned > > sub_variables;
+				for ( unsigned k = 0; k < removed.size(); k++ )
+					sub_variables.push_back( variable_defs[ removed[ k ] ] );
+
+				netCopyPtr.reset(); // delete copy if it exists
+				copy_network(); // copy the incoming Network to create a subnetwork
+
+				// Print message reporting which variables & nodes are being removed
+				out << endl << "Removing variable(s) " << removed << " = node(s) "
+					<< flatten( sub_variables ) << ":" << endl;
+				report( out );
+
+				// REVERSE removes the variables under test themselves
+				netCopyPtr->removeInputs( flatten( sub_variables ) );
+
+				// REVERSE: the candidate is nested WITHIN the prior model, so
+				//    the comparison's degrees of freedom are the prior's fewer
+				//    the candidate's. Known once the nodes are gone; training
+				//    does not change a network's free parameters.
+				const unsigned candidateDf = netCopyPtr->df();
+				const unsigned df = last_df - candidateDf;
+
+				CandidateFit fit = fitCandidate( "reverse", i, candidateNo,
+					candidatesThisStep, j, lastError, df );
+				passIndex[ j ] = fit.trail;
+
+				// REVERSE: Wilks compares the PRIOR as the full model against
+				//    the candidate as the reduced one
+				double G2 = Wilks( netPtr->getDataSet().getNumTrain(),
+					lastError, fit.error );
+
+				double p = reportComparison( fit, lastError, G2, df, j, inner_ps );
+
+				// REVERSE selects the LARGEST p-value: the least significant
+				//    variable is the one that may go. A refused calculation
+				//    returns NaN and must never take the pass -- which is what
+				//    keeping the update out of reportComparison's try block
+				//    would otherwise have changed. After the first winner,
+				//    strictly larger wins, so ties keep the first.
+				if ( !std::isnan( p ) && ( !haveWinner || p > largest_p ) )
 				{
-					removed.push_back( j ); // add the variable to those removed
-					candidateNo++;
-
-					// Build the structure containing removed variables
-					vector< vector< unsigned > > sub_variables;
-					for ( unsigned k = 0; k < removed.size(); k++ )
-						sub_variables.push_back( variable_defs[ removed[ k ] ] );
-					
-					netCopyPtr.reset(); // delete copy if it exists
-					copy_network(); // copy the incoming Network to create a subnetwork
-
-					// Print message reporting which variables & nodes are being removed
-					out << endl << "Removing variable(s) " << removed << " = node(s) "
-						<< flatten( sub_variables ) << ":" << endl;
-					report( out );
-
-					// Remove the input nodes from the Network object copy
-					netCopyPtr->removeInputs( flatten( sub_variables ) );
-
-					announce( "reverse", i, candidateNo, candidatesThisStep, j,
-						"training candidate" );
-
-					double subError = netCopyPtr->train(); // train the subnetwork
-					fitsCompleted++;
-
-					// The fit is finished: say so, with how it ended, BEFORE
-					//    the eligibility check below can throw. Otherwise the
-					//    last thing a watcher ever saw was "training candidate"
-					//    and a fit count one behind reality.
-					announce( "reverse", i, candidateNo, candidatesThisStep, j,
-						"candidate complete", true );
-
-					// The audit trail is written BEFORE the eligibility
-					//    check, because that check THROWS -- and the candidate
-					//    that fails is precisely the one a reader needs
-					//    recorded. Its Wilks statistic and p-value stay
-					//    not-a-number until a comparison is actually permitted;
-					//    a rejected fit contributes no statistic, but it is
-					//    still a candidate the procedure considered.
-					passIndex[ j ] = recordCandidate( i, candidateNo, j,
-						lastError, subError, last_df - netCopyPtr->df(),
-						numeric_limits< double >::quiet_NaN(), numeric_limits< double >::quiet_NaN() );
-
-					// An unfinished fit may not be compared (see the method)
-					{
-						ostringstream who;
-						who << "variable " << j << " = node(s) " << variable_defs[ j ];
-						requireConvergedFit( who.str(), subError );
-					}
-
-					// Calculate chi-square from Wilk's GLRT and print results
-					double G2 = Wilks( netPtr->getDataSet().getNumTrain(), lastError, subError );
-					unsigned df = last_df - netCopyPtr->df();
-					out << "Error prior network = " << lastError << endl
-						<< "Error this subnetwork = " << subError << endl
-						<< "Chi-square = " << G2 << ", degrees of freedom = " << df << endl;
-					double pThis = numeric_limits< double >::quiet_NaN();
-					try // print p-value for this comparison
-					{
-						double p;
-						if ( G2 <= 0 ) // subnetwork's error is less!
-							p = 1;
-						else // calculate p-value from chi-square
-							p = stats::pX2( df, G2 );
-						pThis = p;
-						inner_ps.insert( ptable::value_type( p, j ) ); // make table
-						out << "p = " << p << endl;
-						// The first calculated p-value takes the pass; after
-						//    that, strictly larger wins, so ties keep the first
-						if ( !haveWinner || p > largest_p )
-						{
-							holdError = subError; // record this subnetwork's error & df
-							hold_df = netCopyPtr->df();
-							largest_var = j; // remember which variable it is
-							largest_p = p; // record largest p for the final table
-							haveWinner = true;
-						}
-					}
-					catch ( stats::statsErr& e ) // error in chi-square calculation
-					{
-						out << e.what() << endl;
-					}
-					// The comparison now exists: complete the record made
-					//    before the eligibility check above
-					candidates[ passIndex[ j ] ].df = df;
-					candidates[ passIndex[ j ] ].G2 = G2;
-					candidates[ passIndex[ j ] ].p = pThis;
-					report( out ); // output to screen & history file
-
-					removed.pop_back(); // put the variable back for next round
+					holdError = fit.error; // record this subnetwork's error & df
+					hold_df = candidateDf;
+					largest_var = j; // remember which variable it is
+					largest_p = p; // record largest p for the final table
+					haveWinner = true;
 				}
+
+				removed.pop_back(); // put the variable back for next round
 			}
-
-			// Print results of this set of subnetwork comparisons
-			out << endl << "p-value of each removed variable in pass " << i << ":" << endl;
-			report( out );
-			print_regression_table( inner_ps );
-
-			// Nothing in this pass could be compared, so there is no least
-			//    significant variable to name (see the method)
-			if ( !haveWinner )
-				requireComparablePass( i );
-
-			out << "the largest was variable " << largest_var << endl;
-			report( out );
-
-			// Stop if all subnetwork comparisons are less than the threshold
-			bool stop = false;
-			if ( largest_p < threshold ) 
-			{
-				out << "All values were less than the threshold p = " << threshold << endl;
-				report( out );
-				stop = true;
-			}
-			else // copy temporary placeholders (error, df) for next round
-			{
-				lastError = holdError;
-				last_df = hold_df;
-				removed.push_back( largest_var ); // add variable to those removed
-				// Insert into p-value final table
-				p_values.insert( ptable::value_type( largest_p, largest_var ) );
-				// ... and record it in REMOVAL ORDER: the table above is sorted
-				//     by p-value, so it cannot say what happened first
-				selectionPath.push_back( make_pair( largest_p, largest_var ) );
-				if ( passIndex.count( largest_var ) )
-					candidates[ passIndex[ largest_var ] ].selected = true;
-			}
-
-			// Print p-values of removed variables
-			if ( !p_values.empty() ) // only print the table if it has something in it
-			{
-				out << endl << "p-values of all removed variables:" << endl;
-				report( out );
-				print_regression_table( p_values );
-			}
-
-			// The variables still in the model AFTER THIS COMPLETED PASS.
-			//    Maintained per pass, not once at the end: an exception (an
-			//    unconverged candidate, a cancel) leaves the loop early, and
-			//    reporting an empty list would claim the procedure retained
-			//    nothing when in fact every earlier pass had settled.
-			finalVariables.clear();
-			for ( unsigned v = 0; v < variable_defs.size(); v++ )
-				if ( find( removed.begin(), removed.end(), v ) == removed.end() )
-					finalVariables.push_back( v );
-
-			// Stop after printing if indicated
-			if ( stop )
-				break;
 		}
 
-		analysisComplete = true; // the loop ran to a decision, not an exception
-		report_summary( "Reverse", "removed" );
+		// Print results of this set of subnetwork comparisons
+		out << endl << "p-value of each removed variable in pass " << i << ":" << endl;
+		report( out );
+		print_regression_table( inner_ps );
+
+		// Nothing in this pass could be compared, so there is no least
+		//    significant variable to name (see the method)
+		if ( !haveWinner )
+			requireComparablePass( i );
+
+		out << "the largest was variable " << largest_var << endl;
+		report( out );
+
+		// REVERSE stops when even the least significant variable is significant
+		bool stop = false;
+		if ( largest_p < threshold )
+		{
+			out << "All values were less than the threshold p = " << threshold << endl;
+			report( out );
+			stop = true;
+		}
+		else // copy temporary placeholders (error, df) for next round
+		{
+			lastError = holdError;
+			last_df = hold_df;
+			removed.push_back( largest_var ); // add variable to those removed
+			// Insert into p-value final table
+			p_values.insert( ptable::value_type( largest_p, largest_var ) );
+			// ... and record it in REMOVAL ORDER: the table above is sorted
+			//     by p-value, so it cannot say what happened first
+			selectionPath.push_back( make_pair( largest_p, largest_var ) );
+			if ( passIndex.count( largest_var ) )
+				candidates[ passIndex[ largest_var ] ].selected = true;
+		}
+
+		// Print p-values of removed variables
+		if ( !p_values.empty() ) // only print the table if it has something in it
+		{
+			out << endl << "p-values of all removed variables:" << endl;
+			report( out );
+			print_regression_table( p_values );
+		}
+
+		// REVERSE'S RESULT is what it never took away: the complement of
+		//    `removed`. Maintained per pass, not once at the end -- an
+		//    exception (an unconverged candidate, a cancel) leaves the loop
+		//    early, and reporting an empty list would claim the procedure
+		//    retained nothing when in fact every earlier pass had settled.
+		finalVariables.clear();
+		for ( unsigned v = 0; v < variable_defs.size(); v++ )
+			if ( find( removed.begin(), removed.end(), v ) == removed.end() )
+				finalVariables.push_back( v );
+
+		// Stop after printing if indicated
+		if ( stop )
+			break;
 	}
+
+	endAnalysis( "Reverse", "removed" );
 
 	netCopyPtr.reset(); // get rid of copy of Network object for subnetworks
 }
 
 // Stepwise forward regression
+//
+//    FORWARD TRAINS AN EMPTY NETWORK AND PUTS VARIABLES IN. The network it
+//    compares against is nested within EACH CANDIDATE -- the opposite of
+//    reverse -- and the variable with the SMALLEST p-value, the most
+//    significant, is the one admitted (manifest ch. "Stepwise regression",
+//    section forreg).
 void RegressNet::forward_regress()
 {
-	requireCrossEntropySource(); // Wilks' GLRT compares log likelihoods
-	analysisComplete = false; // set only when the outer loop finishes
+	string question = "\nWhat is the largest p-value at which variables should\n";
+	question += "stop being added in the stepwise regression? ";
+	const double threshold = beginAnalysis( "Forward regressing a ", question );
 
-	if ( variable_defs.empty() ) // input structure specified requires Network specified
+	vector< unsigned > added; // holds added variables
+
+	ptable p_values; // multimap holds final table p-values of added variables
+
+	unsigned i; // the usual iterator
+
+	// Create a vector of all positions from which to derive complements
+	vector< unsigned > all;
+	for ( i = 0; i < netPtr->getDataSet().getInput(); i++ )
+		all.push_back( i );
+
+	// FORWARD'S BASELINE IS A NETWORK IT TRAINS ITSELF, with every input
+	//    removed -- not the source model's error, which is what reverse starts
+	//    from. There is nothing here for reverse to share.
+	netCopyPtr->removeInputs( all );
+	double lastError = netCopyPtr->train(); // train the baseline network
+
+	// The baseline is not a candidate, but every comparison in the first pass
+	//    is made against it: if it did not finish, nothing downstream means
+	//    anything
+	requireConvergedFit( "the baseline network (no variables)", lastError );
+
+	unsigned last_df = netCopyPtr->df(); // & get its df
+
+	// Outer loop: number of sets of comparisons = number of variables
+	for ( i = 0; i < variable_defs.size(); i++ )
 	{
-		errorOut << errorString << "stepwise regression not fully specified";
-		throw RegressNetErr( errorOut.str().c_str() );
-	}
+		double smallest_p = 1, // smallest p-value found
+			holdError = 0; // holds error of most significant variable
 
-	if ( copy_network() ) // test copying the Network for a subnetwork
-	{
-		vector< unsigned > added; // holds added variables
+		// The same flag reverse carries, for the same reason -- a pass in which
+		//    every p-value calculation was refused has no winner and must not
+		//    name one. Forward never had reverse's uninitialized read
+		//    (smallest_var is initialized, and p <= smallest_p from 1 always
+		//    takes the first candidate), so this changes no selection; it only
+		//    lets the no-comparable-candidate case be refused rather than
+		//    reported as "the smallest was variable 0".
+		bool haveWinner = false;
 
-		ptable p_values; // multimap holds final table p-values of added variables
+		unsigned smallest_var = 0, // variable with smallest p-value
+			hold_df = last_df; // holds df of most significant variable
 
-		// Get the threshold
-		string question = "\nWhat is the largest p-value at which variables should\n";
-		question += "stop being added in the stepwise regression? ";
-		double threshold = thresholdSet ? regressThreshold
-			: util::askD( question, 0, 1 );
-		
-		// Print message reporting what kind of Network is being regressed
-		out << endl << "Forward regressing a " << network_name() << " Network:" << endl;
-		report( out ); // output to screen & history file
-		print_input_structure( variable_defs ); // print input variable structure
-		
-		unsigned i; // the usual iterator
+		ptable inner_ps; // holds p-values of added variables within a single pass
 
-		// Create a vector of all positions from which to derive complements
-		vector< unsigned > all;
-		for ( i = 0; i < netPtr->getDataSet().getInput(); i++ )
-			all.push_back( i );
+		// Exactly knowable now: one candidate per variable not yet admitted
+		unsigned candidateNo = 0,
+			candidatesThisStep = variable_defs.size() - added.size();
 
-		// Baseline network to start has all nodes removed
-		netCopyPtr->removeInputs( all );
-		double lastError = netCopyPtr->train(); // train the baseline network
+		// variable -> its row in the audit trail (see reverse_regress)
+		map< unsigned, unsigned > passIndex;
 
-		// The baseline is not a candidate, but every comparison in the first
-		//    pass is made against it: if it did not finish, nothing downstream
-		//    means anything
-		requireConvergedFit( "the baseline network (no variables)", lastError );
-
-		unsigned last_df = netCopyPtr->df(); // & get its df
-
-		// Outer loop: number of sets of comparisons = number of variables
-		for ( i = 0; i < variable_defs.size(); i++ )
+		// Inner loop: iterate through remaining variables, find smallest p-value
+		for ( unsigned j = 0; j < variable_defs.size(); j++ )
 		{
-			double smallest_p = 1, // smallest p-value found
-				holdError = 0; // holds error of most significant variable
-
-			// The same flag reverse carries, for the same reason -- a pass in
-			//    which every p-value calculation was refused has no winner and
-			//    must not name one. Forward never had reverse's uninitialized
-			//    read (smallest_var is initialized, and p <= smallest_p from 1
-			//    always takes the first candidate), so this changes no
-			//    selection; it only lets the no-comparable-candidate case be
-			//    refused rather than reported as "the smallest was variable 0".
-			//
-			//    THE TIE SENSE IS DELIBERATELY NOT NORMALIZED against reverse's.
-			//    Reverse's strict `>` keeps the FIRST maximal candidate;
-			//    forward's `<=` keeps the LAST minimal one. That asymmetry is
-			//    preserved here on purpose -- changing it would change which
-			//    variable a tie selects, which is a selection change, not a
-			//    correctness fix, and does not belong in this commit.
-			bool haveWinner = false;
-
-			unsigned smallest_var = 0, // variable with smallest p-value
-				hold_df = last_df; // holds df of most significant variable
-
-			ptable inner_ps; // holds p-values of added variables within a single pass
-
-			// Exactly knowable now: one candidate per variable not yet admitted
-			unsigned candidateNo = 0,
-				candidatesThisStep = variable_defs.size() - added.size();
-
-			// variable -> its row in the audit trail (see reverse_regress)
-			map< unsigned, unsigned > passIndex;
-
-			// Inner loop: iterate through remaining variables, find largest p-value
-			for ( unsigned j = 0; j < variable_defs.size(); j++ )
+			// Only examine the variable if it hasn't already been added
+			if ( find( added.begin(), added.end(), j ) == added.end() )
 			{
-				// Only examine the variable if it hasn't already been added
-				if ( find( added.begin(), added.end(), j ) == added.end() )
+				added.push_back( j ); // add the variable to those added
+				candidateNo++;
+
+				// Build the structure containing added variables
+				vector< vector< unsigned > > sub_variables;
+				for ( unsigned k = 0; k < added.size(); k++ )
+					sub_variables.push_back( variable_defs[ added[ k ] ] );
+
+				netCopyPtr.reset(); // delete copy if it exists
+				copy_network(); // copy the incoming Network to create new network
+
+				// Print message reporting which variables & nodes are being added
+				out << endl << "Adding variable(s) " << added << " = node(s) "
+					<< flatten( sub_variables ) << ":" << endl;
+				report( out );
+
+				// FORWARD adds variables by removing their COMPLEMENT from the
+				//    full Network -- the step reverse has no counterpart to
+				vector< unsigned > flattened = flatten( sub_variables ), complement;
+				back_insert_iterator< vector< unsigned > > complement_i( complement );
+				sort( flattened.begin(), flattened.end() ); // must be sorted for set_difference
+				set_difference( all.begin(), all.end(), flattened.begin(), flattened.end(),
+					complement_i );
+
+				// Remove the complementary input nodes from the Network object copy
+				if ( !complement.empty() ) // only remove them if there are nodes to remove
+					netCopyPtr->removeInputs( complement );
+
+				// FORWARD: the PRIOR model is nested within the candidate, so
+				//    the degrees of freedom are the candidate's fewer the
+				//    prior's -- the opposite subtraction to reverse's
+				const unsigned candidateDf = netCopyPtr->df();
+				const unsigned df = candidateDf - last_df;
+
+				CandidateFit fit = fitCandidate( "forward", i, candidateNo,
+					candidatesThisStep, j, lastError, df );
+				passIndex[ j ] = fit.trail;
+
+				// FORWARD: Wilks compares the CANDIDATE as the full model
+				//    against the prior as the reduced one -- the opposite
+				//    argument order to reverse's
+				double G2 = Wilks( netPtr->getDataSet().getNumTrain(),
+					fit.error, lastError );
+
+				double p = reportComparison( fit, lastError, G2, df, j, inner_ps );
+
+				// FORWARD selects the SMALLEST p-value: the most significant
+				//    variable is the one admitted. `<=`, not `<`: forward keeps
+				//    the LAST of tied minima, where reverse keeps the FIRST of
+				//    tied maxima. That asymmetry is deliberate and is not
+				//    normalized -- changing it would change which variable a
+				//    tie selects.
+				if ( !std::isnan( p ) && ( !haveWinner || p <= smallest_p ) )
 				{
-					added.push_back( j ); // add the variable to those added
-					candidateNo++;
-
-					// Build the structure containing added variables
-					vector< vector< unsigned > > sub_variables;
-					for ( unsigned k = 0; k < added.size(); k++ )
-						sub_variables.push_back( variable_defs[ added[ k ] ] );
-
-					netCopyPtr.reset(); // delete copy if it exists
-					copy_network(); // copy the incoming Network to create new network
-
-					// Print message reporting which variables & nodes are being added
-					out << endl << "Adding variable(s) " << added << " = node(s) "
-						<< flatten( sub_variables ) << ":" << endl;
-					report( out );
-
-					// Adding variables is accomplished by removing their complements
-					//    from the full Network
-					vector< unsigned > flattened = flatten( sub_variables ), complement;
-					back_insert_iterator< vector< unsigned > > complement_i( complement );
-					sort( flattened.begin(), flattened.end() ); // must be sorted for set_difference
-					set_difference( all.begin(), all.end(), flattened.begin(), flattened.end(),
-						complement_i );
-
-					// Remove the complementary input nodes from the Network object copy
-					if ( !complement.empty() ) // only remove them if there are nodes to remove
-						netCopyPtr->removeInputs( complement );
-
-					announce( "forward", i, candidateNo, candidatesThisStep, j,
-						"training candidate" );
-
-					// Train this new network, note that it is considered the "full" network
-					double fullError = netCopyPtr->train();
-					fitsCompleted++;
-
-					// The fit is finished: say so, with how it ended, BEFORE
-					//    the eligibility check below can throw
-					announce( "forward", i, candidateNo, candidatesThisStep, j,
-						"candidate complete", true );
-
-					// The audit trail is written BEFORE the eligibility
-					//    check, because that check THROWS -- and the candidate
-					//    that fails is precisely the one a reader needs
-					//    recorded. Its Wilks statistic and p-value stay
-					//    not-a-number until a comparison is actually permitted;
-					//    a rejected fit contributes no statistic, but it is
-					//    still a candidate the procedure considered.
-					passIndex[ j ] = recordCandidate( i, candidateNo, j,
-						lastError, fullError, netCopyPtr->df() - last_df,
-						numeric_limits< double >::quiet_NaN(), numeric_limits< double >::quiet_NaN() );
-
-					// An unfinished fit may not be compared (see the method)
-					{
-						ostringstream who;
-						who << "variable " << j << " = node(s) " << variable_defs[ j ];
-						requireConvergedFit( who.str(), fullError );
-					}
-
-					// Calculate chi-square from Wilk's GLRT and print results
-					double G2 = Wilks( netPtr->getDataSet().getNumTrain(), fullError, lastError );
-					unsigned df = netCopyPtr->df() - last_df;
-					out << "Error prior network = " << lastError << endl
-						<< "Error this subnetwork = " << fullError << endl
-						<< "Chi-square = " << G2 << ", degrees of freedom = " << df << endl;
-					double pThis = numeric_limits< double >::quiet_NaN();
-					try // print p-value for this comparison
-					{
-						double p;
-						if ( G2 <= 0 ) // last network's error is less!
-							p = 1;
-						else // calculate p-value from chi-square
-							p = stats::pX2( df, G2 );
-						pThis = p;
-						inner_ps.insert( ptable::value_type( p, j ) ); // make table
-						out << "p = " << p << endl;
-						// `<=`, not `<`: forward keeps the LAST of tied minima.
-						//    See the haveWinner comment above -- preserved.
-						if ( !haveWinner || p <= smallest_p )
-						{
-							holdError = fullError; // record this network's error & df
-							hold_df = netCopyPtr->df();
-							smallest_var = j; // remember which variable it is
-							smallest_p = p; // record smallest p for the final table
-							haveWinner = true;
-						}
-					}
-					catch ( stats::statsErr& e ) // error in chi-square calculation
-					{
-						out << e.what() << endl;
-					}
-					// The comparison now exists: complete the record made
-					//    before the eligibility check above
-					candidates[ passIndex[ j ] ].df = df;
-					candidates[ passIndex[ j ] ].G2 = G2;
-					candidates[ passIndex[ j ] ].p = pThis;
-					report( out ); // output to screen & history file
-
-					added.pop_back(); // put the variable back for next round
+					holdError = fit.error; // record this network's error & df
+					hold_df = candidateDf;
+					smallest_var = j; // remember which variable it is
+					smallest_p = p; // record smallest p for the final table
+					haveWinner = true;
 				}
+
+				added.pop_back(); // put the variable back for next round
 			}
-
-			// Print results of this set of this network comparisons
-			out << endl << "p-value of each added variable in pass " << i << ":" << endl;
-			report( out );
-			print_regression_table( inner_ps );
-
-			// Nothing in this pass could be compared (see reverse_regress)
-			if ( !haveWinner )
-				requireComparablePass( i );
-
-			out << "the smallest was variable " << smallest_var << endl;
-			report( out );
-
-			// Stop if all network comparisons are greater than the threshold
-			bool stop = false;
-			if ( smallest_p > threshold )
-			{
-				out << "The smallest was greater than the threshold p = " << threshold << endl;
-				report( out );
-				stop = true;
-			}
-			else // copy temporary placeholders (error, df) for next round 
-			{
-				lastError = holdError;
-				last_df = hold_df;
-				added.push_back( smallest_var ); // add variable to those added
-				// Insert into p-value final table
-				p_values.insert( ptable::value_type( smallest_p, smallest_var ) );
-				// ... and record it in ADDITION ORDER (see reverse_regress)
-				selectionPath.push_back( make_pair( smallest_p, smallest_var ) );
-				if ( passIndex.count( smallest_var ) )
-					candidates[ passIndex[ smallest_var ] ].selected = true;
-			}
-
-			// Print p-values of added variables
-			if ( !p_values.empty() ) // only print the table if it has something in it
-			{
-				out << endl << "p-values of all added variables:" << endl << endl;
-				report( out );
-				print_regression_table( p_values );
-			}
-
-			// The variables admitted AFTER THIS COMPLETED PASS (see
-			//    reverse_regress: maintained per pass so an early exit still
-			//    reports what the completed passes established)
-			finalVariables = added;
-
-			// Stop after printing if indicated
-			if ( stop )
-				break;
 		}
 
-		analysisComplete = true; // the loop ran to a decision, not an exception
-		report_summary( "Forward", "added" );
+		// Print results of this set of this network comparisons
+		out << endl << "p-value of each added variable in pass " << i << ":" << endl;
+		report( out );
+		print_regression_table( inner_ps );
+
+		// Nothing in this pass could be compared (see reverse_regress)
+		if ( !haveWinner )
+			requireComparablePass( i );
+
+		out << "the smallest was variable " << smallest_var << endl;
+		report( out );
+
+		// FORWARD stops when even the most significant variable is not
+		bool stop = false;
+		if ( smallest_p > threshold )
+		{
+			out << "The smallest was greater than the threshold p = " << threshold << endl;
+			report( out );
+			stop = true;
+		}
+		else // copy temporary placeholders (error, df) for next round
+		{
+			lastError = holdError;
+			last_df = hold_df;
+			added.push_back( smallest_var ); // add variable to those added
+			// Insert into p-value final table
+			p_values.insert( ptable::value_type( smallest_p, smallest_var ) );
+			// ... and record it in ADDITION ORDER (see reverse_regress)
+			selectionPath.push_back( make_pair( smallest_p, smallest_var ) );
+			if ( passIndex.count( smallest_var ) )
+				candidates[ passIndex[ smallest_var ] ].selected = true;
+		}
+
+		// Print p-values of added variables
+		if ( !p_values.empty() ) // only print the table if it has something in it
+		{
+			out << endl << "p-values of all added variables:" << endl << endl;
+			report( out );
+			print_regression_table( p_values );
+		}
+
+		// FORWARD'S RESULT is simply what it admitted (see reverse_regress:
+		//    maintained per pass so an early exit still reports what the
+		//    completed passes established)
+		finalVariables = added;
+
+		// Stop after printing if indicated
+		if ( stop )
+			break;
 	}
+
+	endAnalysis( "Forward", "added" );
 
 	netCopyPtr.reset(); // get rid of copy of Network object for subnetworks
 }
