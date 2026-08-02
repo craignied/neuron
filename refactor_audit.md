@@ -2556,6 +2556,61 @@ here that standing rule 2 does not yet guard, and it should be closed before the
 next thing leans on it.
 
 
+### 12.11 The performance measurement §12.3 required (2026-08-01)
+
+Standing rule 7: *measure before you change an algorithm for speed* — and the
+same obligation runs the other way, for a change that might cost speed. `row`,
+the ranged `dotprod` and `outprod` are per-exemplar operations, so the entry
+checks had to be measured on real training rather than argued about.
+
+**`./build/scale_probe` was not used, and would not have answered this.** It
+measures the clustered-AUC path — placements, tie handling and contrast algebra
+over generated cluster data. It does not train a network, so it exercises none
+of the three operations in question. Sol's condition, met by not relying on it.
+
+**The measurement.** Both binaries built `Release` from the same generator, the
+old one in a separate worktree at `31880dc^` so the working tree was never
+touched. Identical dataset (4000 rows × 20 inputs, deterministic — no RNG in its
+construction), identical seed 42, identical architecture (SimpleProp 2-12-1
+sizing at 20 inputs), identical iteration ceiling of 3000, driven through the
+HTTP API so that algorithm, batch mode, seed and ceiling are all set explicitly.
+Timing covers the `/api/train` request only; dataset load and model construction
+sit outside it. Seven trials per configuration, **interleaved** old/new so that
+machine drift cannot land on one side.
+
+**The two binaries do identical work**, which is what makes the comparison a
+timing comparison: every run of configuration A ends at final error
+`1.306535e-01` and every run of B at `1.748305e-01`, on both binaries.
+
+**How much of the new code the runs executed.** 4000 rows × 3000 iterations =
+**12,000,000 exemplar passes**, each one calling `row( r, I )`, the ranged
+`hW.dotprod( I, hO, 0, nHidden - 1 )` and `hG.outprod( h_err, I )` — the
+separate-gradient branch, which is the default because gradient stopping is on.
+That is **36 million newly-checked entry points per run**; configuration B adds
+`toVector` and `toMatrix` 3000 times each through `pack`/`unpack`.
+
+| configuration | pre median | post median | delta | run-to-run spread |
+|---|---|---|---|---|
+| **A** on-line canonical | 8458 ms | 8442 ms | **−16 ms (−0.19%)** | pre 95 ms, post 266 ms |
+| **B** batch CGD | 8495 ms | 8530 ms | **+35 ms (+0.41%)** | pre 163 ms, post 256 ms |
+
+Subtracting the 510 ms of fixed overhead (server start plus dataset load,
+measured at `maxiter=5`), the training-only deltas are **−0.20%** and
+**+0.44%**.
+
+**Reading it honestly: this is noise, not a small regression.** Both deltas are
+smaller than the spread within either binary's own seven trials, and **they point
+in opposite directions** — a real per-exemplar cost would appear in both
+configurations with the same sign, since both run the same three checked
+operations 12 million times. What the measurement establishes is an upper bound:
+whatever the checks cost, it is under half a percent and under the run-to-run
+variance of this machine. No optimization is warranted, and none was done.
+
+**Why that is the expected result** rather than a lucky one: each check is a
+comparison of two `unsigned` members already in cache, at the entry point of an
+operation that then walks hundreds of doubles. The checks were deliberately not
+placed inside any element loop (§12.3), which is the decision this measurement
+confirms was the right one.
 *Prepared by Claude (Opus 5). Reviewed by Sol (2026-07-31); revised §8 in response.
 §9–§12 are the implementation record: §§8.7–8.8 and 9–10 describe work now
 committed, §11 is the D5 design, written before its code, and §12 is D9's,

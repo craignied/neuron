@@ -3412,6 +3412,20 @@ we ship.**
     three tests in two days measuring something other than what they claimed, the first
     caught by an assert-enabled build and these two by the contract itself. **No engine code
     changed**, which is what a behavior-preserving hardening should find.
+  - **Measured, because three of these are per-exemplar operations** (rule 7, and §12.3
+    required it). Both binaries built Release, the old one in a worktree at `31880dc^`;
+    identical dataset (4000 x 20, deterministic), seed, architecture and 3000-iteration
+    ceiling; seven **interleaved** trials each so machine drift cannot land on one side;
+    timing over the `/api/train` request alone. Every run ends at the same final error on
+    both binaries, so it is a timing comparison and not a behavior one. Each run makes
+    **12,000,000 exemplar passes**, so `row`, the ranged `dotprod` and `outprod` each
+    execute 12 million times -- 36 million newly-checked entry points per run. On-line
+    canonical: **-0.19%**. Batch CGD: **+0.41%**. Both are smaller than the spread within
+    either binary's own trials (95-266 ms) and they point in **opposite directions**, which
+    is what noise looks like and what a real per-exemplar cost would not: the same three
+    checks run 12 million times in both configurations. `scale_probe` was deliberately not
+    used -- it measures the clustered-AUC path and trains no network, so it exercises none
+    of these. No optimization warranted; none done.
   - **One gap, recorded rather than papered over.** The worker and CLI boundaries have **no
     automated test**: `runOnWorker` is in `gui.cpp`, which is not in a library, and no
     endpoint can be made to fail a `Matrix` contract on purpose, so neither a unit test nor

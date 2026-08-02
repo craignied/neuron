@@ -423,7 +423,10 @@ GUI-wide strict-parsing pass), plus one gap D9 left behind: **the GUI worker bou
 the CLI `main` boundary have no automated test.** `runOnWorker` lives in `gui.cpp`, which
 is not in a library, and no endpoint can be made to fail a `Matrix` contract on purpose,
 so neither a unit test nor `smoke.sh` can reach them; the evidence is a recorded manual
-fault injection (`refactor_audit.md` §12.10). Close it before something else leans on it. **No GUI click-through is outstanding: Craig ran the live
+fault injection (`refactor_audit.md` §12.10). **Sol's disposition (2026-08-01): this does
+not block DFA — close it during the planned GUI async-launcher consolidation, where
+`runOnWorker` moves into a linkable unit and gets concurrency tests with it. It must be
+resolved before the refactor is declared complete.** **No GUI click-through is outstanding: Craig ran the live
 GUI on the group-aware CV batch and approved it (2026-07-31).** The CV panel's three new
 controls — fold stratification columns/bins, group columns, and the clustered sampling
 unit — are visible, selectable and submitted by the page, after the 2026-07-30 help-text
