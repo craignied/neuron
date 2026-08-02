@@ -3372,3 +3372,392 @@ wrapper, and no equation moved out of `LDFA` or `QDFA`.
 §9–§12 are the implementation record: §§8.7–8.8 and 9–10 describe work now
 committed, §11 is the D5 design, written before its code, and §12 is D9's,
 written the same way and now implemented (§12.10).*
+
+---
+
+## 15. Item 12 — stepwise. CHARACTERIZATION AND PROPOSAL ONLY (2026-08-02)
+
+Item 1.3's turn. **No production source is modified by this section.** What
+lands with it is `tests/regressnet/check_regressnet.cpp` (ctest case
+`regressnet_characterization`) and this text.
+
+§1.3 made the extraction conditional on one thing: *"`regress_seed42` covers the
+reverse direction only; forward is covered by the GUI walkthrough and by
+`smoke.sh`. Confirm forward coverage before trusting the goldens here."* That
+condition is now discharged, and the answer is more interesting than expected —
+see §15.2.
+
+Two things found while measuring must be settled **before** any extraction, and
+neither is extraction scope: a reachable uninitialized read that crashes the
+process (§15.6), and an eligibility branch that no portable fixture reaches
+(§15.7).
+
+### 15.1 The duplication, measured (item 1)
+
+`reverse_regress()` is `regressnet.cpp:262-459`, `forward_regress()` is
+`:472-691` — 198 and 220 lines as written. Comments and blank lines are the
+difference between that and what actually executes:
+
+| | as written | executable lines |
+|---|---|---|
+| `reverse_regress()` | 198 | **128** |
+| `forward_regress()` | 220 | **145** |
+
+Aligned line-by-line after stripping comments (outside string literals) and
+normalizing whitespace: **83 lines are byte-identical**, 45 are reverse-only and
+62 forward-only. So **64.8% of reverse is literally forward**, not the ~100% the
+"identical skeletons" phrasing in §1.3 suggests.
+
+Of the 45 + 62 that differ, most are pure renaming — `removed`/`added`,
+`subError`/`fullError`, `largest_*`/`smallest_*` — about 30 lines that are the
+same code under different names. What is left is **six** genuine differences,
+one more than §1.3 listed:
+
+1. **The baseline.** Reverse starts from `lastError = e_in` and
+   `last_df = netPtr->df()` — the source model's own fit. Forward **trains a
+   network with every input removed**, requires it to converge, and starts from
+   that. Seven forward-only lines with no reverse counterpart. §1.3 did not list
+   this, and it is the largest structural difference between the two.
+2. **Which nodes are removed.** Reverse removes the tested set directly
+   (1 line); forward sorts the set and removes its `set_difference` complement
+   against `all` (7 lines).
+3. **The Wilks argument order.** `Wilks( N, lastError, subError )` versus
+   `Wilks( N, fullError, lastError )` — the candidate is nested within the prior
+   going backwards, and the prior within the candidate going forwards.
+4. **The degrees of freedom.** `last_df - netCopyPtr->df()` versus
+   `netCopyPtr->df() - last_df`, for the same reason.
+5. **The winner.** `p > largest_p` from 0 versus `p <= smallest_p` from 1 —
+   least significant wins going backwards, most significant going forwards.
+6. **The stop test, and `finalVariables`.** `largest_p < threshold` versus
+   `smallest_p > threshold`; and reverse computes the complement of `removed`
+   while forward assigns `added` directly.
+
+Items 3, 4 and 5 are the published mathematics (manifest ch. "Stepwise
+regression", §§`revreg` and `forreg`). Item 1 is a published procedural
+difference from the same chapter.
+
+### 15.2 What already covered forward, and what did not
+
+§1.3's worry was that forward was untested. It is **not** untested — `smoke.sh`
+drives `/api/regress direction=forward` over a grouped structure and asserts the
+completion summary, the final selected variables, and that a grouped variable is
+not split. What was missing is different and more useful to know:
+
+- **No ctest case reached `RegressNet` at all.** Before this commit the class had
+  zero unit coverage; everything ran through the GUI's HTTP surface or the one
+  reverse-only golden.
+- So every guarantee was asserted **through two layers of adapter**, and none of
+  the direction semantics was pinned as such. Nothing anywhere asserted that
+  reverse takes the largest p and forward the smallest, that their Wilks
+  arguments are nested opposite ways, or that forward's baseline is a trained
+  empty network rather than the source fit. Those are precisely the four things
+  a shared loop would put at risk.
+
+`check_regressnet.cpp` closes that: 101 assertions, 15 cases, 5.6 s.
+
+### 15.3 Ownership: what moves, what stays (item 2)
+
+The §1.3 proposal was *"one private `void stepwise( Direction dir )` with a small
+`Direction` descriptor carrying the five differences (a comparator, the verb
+strings, and the Wilks argument order)."*
+
+**That proposal is withdrawn.** A descriptor carrying a comparator and an
+argument order is exactly the sign-flag/comparator/formula-descriptor shape
+standing rule 7 forbids and that Sol refused for `DFA::reportAccuracy` — and it
+would hide the one thing a reader of this file most needs to see, which is that
+the two procedures nest their models in opposite directions. Larger-p-wins versus
+smaller-p-wins **is** the published mathematics, in the same way larger-wins
+versus smaller-wins is for the discriminants.
+
+What is proposed instead follows the DFA scaffold precedent: **share the
+once-per-run and once-per-candidate bookkeeping, which carries no direction
+semantics at all, and leave both selection loops written out.**
+
+| Mechanism | Today | Proposed owner | Why |
+|---|---|---|---|
+| Objective refusal, structure check, clone, banner, structure print, threshold prompt | written twice | **`RegressNet::beginAnalysis`** | identical but for one noun; no selection semantics |
+| Clone + remove nodes + announce + train + count + announce + record + eligibility refusal | written twice, ~35 executable lines each | **`RegressNet::fitCandidate`** | identical but for a verb and *which* nodes; contains the record-before-judge ordering, which is a Sol-established invariant currently maintained in two places |
+| Comparison report + p-value + inner table + trail completion | written twice, ~20 lines each | **`RegressNet::reportComparison`** | identical; it is handed the statistic, it does not compute one |
+| Completion flag, summary, teardown | written twice | **`RegressNet::endAnalysis`** | identical but for two nouns |
+| Outer/inner loop structure and its bookkeeping | twice | **stays in each direction** | the loops read differently and one has an extra baseline step |
+| `Wilks(...)` call and argument order | twice | **stays** | the nesting IS the mathematics |
+| `df` expression | twice | **stays** | same |
+| Winner comparison and its bookkeeping | twice | **stays** | same |
+| Stop test and its sentence | twice | **stays** | same |
+| `finalVariables` computation | twice | **stays** | complement vs. identity — two different statements about the same idea |
+| Forward's trained empty baseline | forward only | **stays** | reverse has no counterpart to share with |
+
+### 15.4 Signatures and call flow (items 3, 4)
+
+```cpp
+private:
+    // Everything that must happen before either direction's first candidate:
+    //    the cross-entropy refusal, the structure check, the first clone, the
+    //    banner and the input-structure print. Returns the threshold, prompting
+    //    only when setThreshold() was not used. Throws if the analysis may not
+    //    run at all, so a caller that returns has a usable clone.
+    double beginAnalysis( const string& banner, const string& question );
+
+    // What one candidate fit yields. Deliberately NOT a p-value or a winner:
+    //    the caller makes its own comparison from these.
+    struct CandidateFit {
+        double error;     // what train() returned
+        unsigned df;      // the candidate subnetwork's own degrees of freedom
+        unsigned trail;   // its row in candidates[]
+    };
+
+    // Train ONE candidate subnetwork and record it. Owns the clone, the node
+    //    removal, both progress announcements, the fit, the fit count, the
+    //    record-BEFORE-judge ordering and the eligibility refusal. It does not
+    //    decide which nodes to remove -- the caller passes them, and that is
+    //    where the two directions differ.
+    CandidateFit fitCandidate( const string& direction, const string& verb,
+        unsigned step, unsigned candidateNo, unsigned candidatesThisStep,
+        unsigned variable, const vector< unsigned >& underTest,
+        const vector< vector< unsigned > >& groups,
+        const vector< unsigned >& nodesToRemove, double priorError );
+
+    // The comparison's REPORT and the completion of its audit-trail row. It is
+    //    handed the statistic the caller computed; it neither computes one nor
+    //    decides who wins. Returns the p-value, or NaN when the chi-square
+    //    routine refused -- which is reported and is not fatal, exactly as now.
+    double reportComparison( const CandidateFit& fit, double priorError,
+        double G2, unsigned df, unsigned variable, ptable& innerPs );
+
+    // The completion flag, the summary and the teardown.
+    void endAnalysis( const string& direction, const string& verb );
+```
+
+Call flow, reverse (forward is the mirror, plus its baseline):
+
+```
+reverse_regress()
+  threshold = beginAnalysis( "Reverse regressing a ", question )
+  last_df = netPtr->df();  lastError = e_in            <-- REVERSE'S BASELINE
+  for each pass i
+      for each variable j not yet removed
+          build sub_variables from `removed`
+          fit = fitCandidate( "reverse", "Removing", ..., flatten( sub_variables ), lastError )
+          G2  = Wilks( N, lastError, fit.error )       <-- REVERSE'S NESTING
+          df  = last_df - fit.df                       <-- REVERSE'S df
+          p   = reportComparison( fit, lastError, G2, df, j, inner_ps )
+          if ( p > largest_p ) { ... }                 <-- REVERSE'S WINNER
+      print the pass tables
+      if ( largest_p < threshold ) stop                <-- REVERSE'S STOP TEST
+      else adopt the winner
+      finalVariables = complement of `removed`         <-- REVERSE'S RESULT
+  endAnalysis( "Reverse", "removed" )
+```
+
+**One behavior-preserving change is folded in and must be stated.** Today the
+winner update sits *inside* the `try` that computes the p-value, so a
+`stats::statsErr` skips it. Moving it to the call site changes nothing: on a
+refusal `reportComparison` returns NaN, and both `NaN > largest_p` and
+`NaN <= smallest_p` are false — the same skip, by IEEE comparison rather than by
+control flow. This is asserted rather than assumed by the extraction's
+verification (below), not merely reasoned about here.
+
+### 15.5 Virtual calls, allocation, hot loops (items 5, 6)
+
+**The extraction adds no virtual call and no allocation.** Every proposed member
+is a non-virtual private method on a non-polymorphic class, taking its containers
+by `const&` and returning a three-scalar struct once per candidate.
+
+Virtual calls in this file, all unchanged in count and frequency:
+
+| Call | Frequency | Note |
+|---|---|---|
+| `netCopyPtr->train()` | 1 per candidate (+1 baseline, forward) | the fit itself |
+| `netCopyPtr->removeInputs()` | 1 per candidate | |
+| `netCopyPtr->df()` | 2-3 per candidate | |
+| `cloneNetwork()` | 1 per candidate | typeid dispatch, `netclone.h` |
+
+**Nothing in `regressnet.cpp` executes per exemplar.** The finest granularity in
+the file is per candidate, and a candidate costs a whole training run — measured
+on the characterization fixture, 128-559 iterations over 800 exemplars, i.e.
+between 10^5 and 10^6 times the cost of the bookkeeping around it. Rule 7's
+prohibition on `std::function`, virtual dispatch and allocation in hot loops is
+therefore not in tension with anything proposed; none of these mechanisms is in
+one. (`std::function` is nevertheless **not** proposed anywhere here.)
+
+### 15.6 DEFECT — `largest_var` is read uninitialized, and it crashes
+
+**Found by inspection, confirmed by measurement. This is not extraction scope.**
+
+`regressnet.cpp:301` declares reverse's winner with no initializer:
+
+```cpp
+unsigned largest_var,          // variable with largest p-value
+    hold_df = last_df;
+```
+
+It is assigned only inside `if ( p > largest_p )` (`:389-394`) with
+`largest_p` starting at **0**, and read unconditionally at `:416`:
+
+```cpp
+out << "the largest was variable " << largest_var << endl;
+```
+
+So a pass in which **every** candidate has `p == 0` never assigns it.
+
+`p == 0` is not exotic. `stats::pX2( df, G2 )` is `gammq( df/2, G2/2 )`, which
+underflows to exactly 0.0 for a large chi-square — i.e. for a *strongly
+significant* variable, the ordinary case in a well-powered study. Measured
+directly: `pX2( 1, 2000 ) = 0`, `pX2( 2, 5000 ) = 0`.
+
+**Reproduced.** A four-variable logistic on 12,000 deterministic rows where every
+variable carries real signal: every candidate converges on `grad_max`, every
+`G2` lands between 3181 and 4556, every p-value underflows to 0, and the report
+says
+
+```
+the largest was variable 83256288
+```
+
+Three consecutive runs of the same binary printed 88892432, 49832928 and
+20014064; a perturbed environment gave different values again. Compiled with
+`-ftrivial-auto-var-init=pattern` it prints **2863311530** — `0xAAAAAAAA`,
+clang's uninitialized-memory pattern. That is conclusive.
+
+**And with `threshold = 0` it is a crash, not a bad line.** The stop test is
+`largest_p < threshold`; at threshold 0 that is `0 < 0`, false, so control takes
+the *else* branch and pushes the indeterminate value into `removed`
+(`:431`). The next pass indexes `variable_defs[ removed[ k ] ]` with it. Measured
+on the same fixture: **exit status 138 — SIGBUS.** `threshold = 0` is an accepted
+input: the CLI prompt is `util::askD( question, 0, 1 )`, inclusive.
+
+Forward has the same shape and is safe by one character — `smallest_var = 0` is
+initialized, and `p <= smallest_p` from 1 always assigns on the first candidate.
+The asymmetry is the defect.
+
+**Proposed as its own fail-first correctness commit, before any extraction**, on
+the DFA precedent (`8004058`/`87b9b32` preceding `52ed05b`):
+
+1. A red test first: the all-p-zero fixture asserting a *defined* answer, and the
+   threshold-0 case asserting the analysis does not crash.
+2. Initialize `largest_var`, and make "no candidate was comparable in this pass"
+   an explicit state rather than a value that happens to be left over — the
+   honest reading of a pass in which nothing could be compared is that there is
+   no winner, which is a refusal, not a selection.
+3. Decide, deliberately, what a pass of all-zero p-values *means*. Every variable
+   maximally significant is a real answer ("remove nothing"), and it should be
+   reported as that rather than inferred from a comparison that never fired.
+
+**Related, and to be settled in the same commit:** the tie-break senses are
+asymmetric — reverse's `>` keeps the *first* maximal candidate, forward's `<=`
+keeps the *last* minimal one. Whichever is intended, an extraction that shares
+this comparison would have to preserve both, so it should be a decision on the
+record rather than an accident of two independently written lines.
+
+### 15.7 An eligibility branch no portable fixture reaches
+
+`requireConvergedFit` refuses on two independent conditions:
+
+```cpp
+if ( Iterative::converged( why ) && std::isfinite( error ) )
+    return;
+```
+
+The characterization covers the first (ceiling exhaustion, case 29; cancellation,
+case 31). **The second is uncovered, and that is an absent guard, not an
+acceptable narrowness.** It is genuinely independent: a saturated logistic has
+gradients that underflow to zero — so `grad_max` fires and `converged()` is true
+— while its cross-entropy overflows.
+
+Measured before concluding anything. A sweep of 270 configurations (3 optimizers
+x 10 learning rates x 3 input scales x 3 ceilings, n = 200) produced **zero**
+converged-and-non-finite fits. At n = 400 exactly one point hit — Shanno, input
+scale 10, eta 10, `inf` error with `grad_max` at iteration 1 — and its
+neighbourhood is a spike, not a plateau: eta 5 and 20 miss, scale 8 and 15 miss,
+n 300 and 1200 miss, and three of five seeds miss.
+
+A fixture sitting on that point would be a bet on one toolchain's arithmetic,
+which is the bet the DFA singular fixture lost on Ubuntu (§13, `ad7ab14`). So it
+is deliberately **not** shipped. Cover it in the §15.6 correctness commit, which
+already has to open this code: a deliberate seam there beats both a test-only
+visibility hack and a fixture that is green on one machine.
+
+### 15.8 Smaller findings, recorded not fixed
+
+- **`e_in` is absent from the constructor's initializer list**
+  (`regressnet.cpp:23-25`), so a default-constructed `RegressNet` holds an
+  indeterminate baseline error. `copy()` does assign it. No path reaches it
+  today — `setInputStructure` dereferences `netPtr` and an empty
+  `variable_defs` throws first — but this is the family of the `quietFlag` and
+  `Model::errorType` findings, where "not reachable today" was the state before
+  it was reachable. One word to fix, in the correctness commit.
+- **Forward prints one blank line more than reverse** before its final p-value
+  table (`<< endl << endl` at `:671` against `<< endl` at `:444`). Cosmetic, and
+  invisible to `regress_seed42`, which is reverse-only. A behavior-preserving
+  extraction must preserve it; normalizing it is a separate one-line decision.
+- **`else if ( copy_network() )` in reverse against `if ( copy_network() )` in
+  forward** — equivalent, since the preceding branch throws.
+
+### 15.9 What must NOT be shared, deliberately (item 8)
+
+Beyond the six differences of §15.1, these look duplicated and must stay:
+
+- **The two `announce()` direction strings** are published API — they reach
+  `/api/train/status` as `stepwise.direction` and `smoke.sh` asserts
+  `"reverse"`. They are data, not a switch.
+- **The two threshold questions and the two stop sentences** are different
+  English about different tests. Sharing them behind one parameterized sentence
+  would put the stop test's meaning into a format string.
+- **`report_summary`'s `"Reverse" ? "retained" : "selected"`** already exists and
+  already carries the one place the two results are named differently. It should
+  not grow a second such switch elsewhere.
+- **The per-pass tables.** Identical in shape, three words apart, and each sits
+  immediately beside the stop test it describes. Extracting them buys four lines
+  and separates a sentence from the comparison that produced it.
+
+### 15.10 Expected reduction, and the sabotage evidence (items 9, 10)
+
+**Expected reduction: ~70-90 executable lines, not the ~180 §1.3 estimated.**
+That estimate assumed collapsing the two loops into one, which is exactly what is
+withdrawn in §15.3. Per mechanism: `fitCandidate` ~35, `reportComparison` ~20,
+`beginAnalysis` ~12, `endAnalysis` ~3, plus roughly 20 lines of duplicated
+comment — including the record-before-judge comment, which currently states a
+Sol-established invariant twice.
+
+Every proposed mechanism already has measured red evidence. Twelve sabotages were
+applied to `src/regressnet.cpp`, each with the object file deleted and the build
+log **required** to show `regressnet.cpp` recompiling, both when the sabotage was
+introduced and again after it was restored; each restoration was re-run and
+confirmed green before the next sabotage:
+
+| # | Sabotage | Guards which proposed mechanism | Cases turned red |
+|---|---|---|---|
+| S1 | reverse's Wilks arguments swapped | stays concrete (§15.3) | 8: 1e, 1f, 9, 10, 11, 23, 25, 26 |
+| S2 | forward's Wilks arguments swapped | stays concrete | 5: 19, 20, 21, 23, 27 |
+| S3 | reverse takes the smallest p | stays concrete | 3: 10, 11, 23 |
+| S4 | forward takes the largest p | stays concrete | 4: 20, 21, 23, 27 |
+| S5 | reverse's df subtraction reversed | stays concrete | 10: 1e, 1f, 7, 10, 11, 23, 25, 26, 33b, 34 |
+| S6 | forward uses `e_in` as its baseline | stays concrete | 7: 17, 18, 19, 20, 21, 23, 27 |
+| S7 | record moved after the eligibility check | **`fitCandidate`** | 7: 29d-h, 31d, 31e |
+| S8 | the convergence check removed | **`fitCandidate`** | 13: 29b, 29c, 29g, 29i-k, 31b, 31c, 31e, 31f, 32a-c |
+| S9 | a grouped variable split to its first node | **`fitCandidate`** | 2: 33b, 34 |
+| S10 | the source model's objective mutated | **`beginAnalysis`** | 2: 38c, 39a |
+| S11 | `finalVariables` computed once, after the loop | **`endAnalysis`** boundary | 4: 10, 23, 25, 26 |
+| S12 | `complete` set before any decision | **`endAnalysis`** | 2: 29c, 31c |
+
+S1-S6 are the six differences of §15.1 and every one of them is caught — which is
+the evidence that the direction semantics are pinned *as such*, and the reason
+they are safe to leave concrete rather than parameterized.
+
+**Documentation the extraction itself will require:** the manifest's
+`\label{regressnet}` class listing gains the four private methods (its public
+listing does not change, because the public API does not); `docs/HISTORY.md` gets
+the session entry; `AGENTS.md` needs nothing, since no tool, menu or recipe
+changes; `docs/gui_cli_parity.md` needs nothing, since no capability changes.
+This section becomes the as-landed record, as §13 did.
+
+### 15.11 Recommended order
+
+1. **The correctness commit** — §15.6's uninitialized winner and crash, §15.7's
+   uncovered branch, §15.8's `e_in`. Fail-first, red tests before the fix.
+2. **The extraction** — §15.3's four mechanisms, behavior-preserving, verified by
+   `regress_seed42` byte-identical, `check_regressnet` unchanged, `smoke.sh`
+   green, and the S1-S12 battery re-run against the extracted code.
+
+Doing them in the other order would extract code around a defect and make the
+crash a regression in the new shared path rather than a finding in the old one.

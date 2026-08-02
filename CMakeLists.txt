@@ -436,6 +436,19 @@ add_executable(check_dfa tests/dfa/check_dfa.cpp)
 target_link_libraries(check_dfa PRIVATE neuron_engine)
 add_test(NAME dfa_characterization COMMAND check_dfa)
 
+# CHARACTERIZATION of stepwise regression before reverse_regress() and
+# forward_regress() share anything (refactor_audit.md item 1.3, section 15).
+# 83 of reverse's 128 executable lines are byte-identical to forward's; the
+# other 45 are the published direction semantics -- opposite nesting, opposite
+# Wilks argument order, opposite winner sense, and a trained empty baseline that
+# only forward has. This pins those, plus the audit trail's record-before-judge
+# rule, the convergence contract on candidates, grouped variables, the LMS
+# refusal, and that the source network is never mutated. Trains real Logistic
+# and SimpleProp models, so it links the engine.
+add_executable(check_regressnet tests/regressnet/check_regressnet.cpp)
+target_link_libraries(check_regressnet PRIVATE neuron_engine)
+add_test(NAME regressnet_characterization COMMAND check_regressnet)
+
 add_executable(check_matrix_bounds tests/matrix/check_matrix_bounds.cpp)
 target_link_libraries(check_matrix_bounds PRIVATE neuron_core)
 target_compile_definitions(check_matrix_bounds PRIVATE NDEBUG)
