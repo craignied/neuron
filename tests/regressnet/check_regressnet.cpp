@@ -118,6 +118,33 @@ static bool exists( const string& path )
 	return std::filesystem::exists( path );
 }
 
+// Strip carriage returns, for the ONE comparison that puts a file written
+//    through a text-mode ofstream beside a string held in memory.
+//
+//    RegressNet::report() opens the history file with ios::out | ios::app and
+//    no ios::binary, so on Windows the runtime translates every '\n' it writes
+//    into "\r\n" -- which is correct behavior for a text log, and is what a
+//    Windows user's editor expects. slurp() reads binary, deliberately, because
+//    the model-file comparisons elsewhere in this file are byte-identity claims
+//    and must not have any translation applied to them. Those compare two files
+//    written the same way, so they need no normalization and get none.
+//
+//    Case 46e is the odd one out: a file against a std::string. What it claims
+//    is that the history file carries the same TEXT as the screen report, and
+//    that claim is still exact after this -- any difference in a character, a
+//    number or a line survives it. Only the platform's line-ending convention
+//    is forgiven. (Measured: this is what failed CI on windows-latest and
+//    passed on macOS and Ubuntu, at 85dff61.)
+static string sameNewlines( const string& s )
+{
+	string out;
+	out.reserve( s.size() );
+	for ( size_t i = 0; i < s.size(); i++ )
+		if ( s[ i ] != '\r' )
+			out += s[ i ];
+	return out;
+}
+
 static bool has( const string& hay, const string& needle )
 {
 	return hay.find( needle ) != string::npos;
@@ -1026,7 +1053,25 @@ static void test_history()
 		expect( has( logged, "Reverse regressing" )
 			&& has( logged, "Reverse stepwise regression complete." ),
 			"46d: the history file carries the analysis, banner through summary" );
-		expect( logged == r.report,
+		// The normalization must forgive line endings and NOTHING else, or 46e
+		//    is weaker than the assertion it replaced. Proven on this run's own
+		//    report: a CRLF copy must compare equal, and a copy differing by a
+		//    single character must not.
+		string crlf;
+		for ( size_t i = 0; i < r.report.size(); i++ )
+		{
+			if ( r.report[ i ] == '\n' ) crlf += '\r';
+			crlf += r.report[ i ];
+		}
+		expect( crlf != r.report && sameNewlines( crlf ) == sameNewlines( r.report ),
+			"46f: the newline normalization forgives CRLF (control)" );
+		string tampered = r.report;
+		tampered[ tampered.size() / 2 ] = ( tampered[ tampered.size() / 2 ] == 'x' )
+			? 'y' : 'x';
+		expect( sameNewlines( tampered ) != sameNewlines( r.report ),
+			"46g: ... and forgives nothing else -- one changed character still fails" );
+
+		expect( sameNewlines( logged ) == sameNewlines( r.report ),
 			"46e: the history file and the screen report are the same text" );
 	}
 }

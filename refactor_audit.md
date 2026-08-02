@@ -3453,7 +3453,7 @@ not split. What was missing is different and more useful to know:
   empty network rather than the source fit. Those are precisely the four things
   a shared loop would put at risk.
 
-`check_regressnet.cpp` closes that: 101 assertions, 15 cases, 5.6 s.
+`check_regressnet.cpp` closes that: 103 assertions, 15 cases, 5.6 s.
 
 ### 15.3 Ownership: what moves, what stays (item 2)
 
@@ -3692,6 +3692,16 @@ visibility hack and a fixture that is green on one machine.
   extraction must preserve it; normalizing it is a separate one-line decision.
 - **`else if ( copy_network() )` in reverse against `if ( copy_network() )` in
   forward** — equivalent, since the preceding branch throws.
+- **The history file is written in TEXT mode.** `report()` opens it with
+  `ios::out | ios::app` and no `ios::binary`, so on Windows every `\n` it writes
+  becomes `\r\n`. That is correct for a text log and is what a Windows editor
+  expects — but it means nothing may put that file beside an in-memory string
+  and demand byte equality. `85dff61` did exactly that and failed on
+  `windows-latest` while passing on macOS and Ubuntu; case 46e now compares with
+  line endings normalized, and 46f/46g prove the normalization forgives CRLF and
+  nothing else. Recorded here because it is a property of the production writer,
+  not of the test: anything that later compares this file against generated text
+  meets the same trap.
 
 ### 15.9 What must NOT be shared, deliberately (item 8)
 
