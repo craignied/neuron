@@ -185,6 +185,44 @@ static DataSet mixedData( unsigned n = 800 )
 	return s;
 }
 
+// Four variables, EVERY ONE of them strongly predictive, over enough rows that
+// every candidate's chi-square underflows its p-value to exactly 0.0.
+//
+// This is the ordinary case in a well-powered study, not a contrivance:
+// stats::pX2 is gammq, whose gcf branch returns exp( -x + a ln x - lngamma a )
+// with x = G2/2. Measured on this fixture the weakest candidate has
+// G2 = 1557.5, so that exponent is about -776 -- and exp underflows to exactly
+// zero below about -745 in IEEE double, on every platform. The margin is ~31 in
+// the exponent, i.e. the value would have to move by a factor of 10^13 to stop
+// being zero. That is a property of double's range, not of one toolchain's
+// arithmetic, which is what separates this fixture from the non-finite spike
+// rejected in audit section 15.7.
+//
+// Case 50 asserts the underflow rather than assuming it: if a platform ever
+// stopped producing exact zeros here, every case after it would be testing
+// nothing, and it should say so loudly instead.
+static DataSet allSignificantData( unsigned n = 6000 )
+{
+	Matrix< double > raw( n, 5 );
+	for ( unsigned i = 0; i < n; i++ )
+	{
+		double a = ( ( i * 37 ) % 101 ) / 100.0 - 0.5;
+		double b = ( ( i * 53 ) % 97 ) / 96.0 - 0.5;
+		double c = ( ( i * 71 ) % 89 ) / 88.0 - 0.5;
+		double d = ( ( i * 43 ) % 83 ) / 82.0 - 0.5;
+		double noise = ( ( i * 29 ) % 71 ) / 70.0 - 0.5;
+		raw( i, 0 ) = a; raw( i, 1 ) = b; raw( i, 2 ) = c; raw( i, 3 ) = d;
+		double z = 2.2 * a + 2.0 * b + 1.9 * c + 1.8 * d + 1.6 * noise;
+		raw( i, 4 ) = ( z > 0 ) ? 1 : 0;
+	}
+	DataSet s;
+	s.setInput( 4 ); s.setOutput( 1 ); s.setDiscrete( true ); s.setHistory( false );
+	util::ScreenCapture hush;
+	s.setRawMatrix( raw );
+	s.randomize( 0 );
+	return s;
+}
+
 // Three variables, none of which carries any signal at all: the label depends
 // only on a term absent from the inputs. A forward run over this must admit
 // NOTHING, which is a completed analysis with an empty result -- not a failure.
@@ -1152,6 +1190,241 @@ static void test_progress_is_observation_only()
 }
 
 // ---------------------------------------------------------------------------
+// 50-54. THE WINNER OF A PASS IN WHICH EVERY p-VALUE IS EXACTLY ZERO.
+//
+// FAIL-FIRST. Against the code before this commit, 52 reported a different
+// variable on every run and 53 killed the process with SIGBUS: `largest_var`
+// was declared without an initializer and assigned only inside
+// `if ( p > largest_p )` from largest_p = 0, so a pass in which every candidate
+// underflows to exactly 0.0 never assigned it, and the unconditional read at
+// the foot of the pass was undefined behavior.
+//
+// THE POLICY, and it is not the one this file's author first proposed:
+// **p == 0 is a p-value, not the absence of one.** It is a candidate that was
+// successfully compared and found maximally significant. So the first
+// successfully calculated p-value becomes the winner -- zero included -- and
+// later candidates replace it only on a strict `p > largest_p`, which is what
+// preserves reverse's existing first-candidate tie behavior. The stop test
+// stays strictly `largest_p < threshold`, so at threshold 0 a valid p == 0
+// remains ELIGIBLE FOR REMOVAL and the pass proceeds. Reading an all-zero pass
+// as "remove nothing" would have quietly changed published threshold behavior.
+// ---------------------------------------------------------------------------
+static void test_all_pvalues_zero()
+{
+	DataSet d = allSignificantData();
+	Logistic net;
+	double e_in = fitSource( net, d );
+
+	Run r = regress( net, e_in, singles( 4 ), false, 0.05 );
+
+	// THE FIXTURE'S OWN PRECONDITION. Without exact zeros, 51-54 are testing an
+	//    ordinary pass and guard nothing they claim to.
+	unsigned zeros = 0, firstPass = 0;
+	for ( size_t i = 0; i < r.candidates.size(); i++ )
+		if ( r.candidates[ i ].step == 0 )
+		{
+			firstPass++;
+			if ( r.candidates[ i ].p == 0.0 ) zeros++;
+		}
+	expect( firstPass == 4 && zeros == 4,
+		"50: every first-pass p-value underflows to exactly zero (fixture precondition)" );
+
+	// 51 -- it completes, and it does not crash
+	expect( r.threw.empty() && r.complete,
+		"51a: an all-zero pass completes rather than crashing or refusing" );
+	// largest_p is 0, and the stop test is strict, so 0 < 0.05 stops the
+	//    procedure with nothing removed. That is the correct reading.
+	expect( r.path.empty()
+		&& r.finalVariables == vector< unsigned >( { 0, 1, 2, 3 } ),
+		"51b: at threshold 0.05 the strict stop test removes nothing" );
+
+	// 52 -- THE WINNER IS DEFINED AND DETERMINISTIC. This is the assertion the
+	//    uninitialized read fails: before the fix, two runs of the same binary
+	//    printed two different variable numbers here.
+	Logistic net2;
+	double e2 = fitSource( net2, d );
+	Run again = regress( net2, e2, singles( 4 ), false, 0.05 );
+	expect( r.report == again.report,
+		"52: two runs of an all-zero pass produce identical reports" );
+
+	// 53 -- EXACT-ZERO TIES KEEP THE FIRST ELIGIBLE CANDIDATE. All four are
+	//    tied at zero, so the first one considered must be the one named.
+	expect( has( r.report, "the largest was variable 0" ),
+		"53: on an exact-zero tie the FIRST eligible candidate is the winner" );
+}
+
+// 54 -- THRESHOLD 0 KEEPS THE EXISTING STRICT SEMANTICS, and this is the case
+// that crashed. `largest_p < threshold` is 0 < 0, which is false, so the pass
+// takes the else branch and ADOPTS its winner. Before the fix it adopted an
+// indeterminate variable number and indexed variable_defs with it next pass:
+// measured exit status 138, SIGBUS.
+//
+// RUN LAST, and alone: it is the case most likely to abort the process, and an
+// abort here must not cost the observation of every case before it.
+static void test_threshold_zero_is_still_strict()
+{
+	DataSet d = allSignificantData();
+	Logistic net;
+	double e_in = fitSource( net, d );
+
+	Run r = regress( net, e_in, singles( 4 ), false, 0.0 );
+
+	expect( !r.path.empty(),
+		"54a: at threshold 0 a valid p == 0 is still eligible, so removal proceeds" );
+	expect( !r.path.empty() && r.path[ 0 ].second == 0 && r.path[ 0 ].first == 0.0,
+		"54b: the variable removed is the first eligible candidate, at p == 0" );
+	// Every variable it names must be a real one -- the indeterminate value was
+	//    a number far outside this range
+	bool named = true;
+	for ( size_t i = 0; i < r.path.size(); i++ )
+		if ( r.path[ i ].second > 3 ) named = false;
+	for ( size_t i = 0; i < r.candidates.size(); i++ )
+		if ( r.candidates[ i ].variable > 3 ) named = false;
+	expect( named, "54c: every variable the analysis names actually exists" );
+}
+
+// ---------------------------------------------------------------------------
+// 55-58. THE ELIGIBILITY POLICY, ALL FOUR COMBINATIONS.
+//
+// requireConvergedFit refuses on two INDEPENDENT conditions, and case 29 only
+// ever exercised the first. The second cannot be reached by training on any
+// portable fixture -- measured in audit section 15.7: 270 configurations, zero
+// converged-and-non-finite fits, and the single point that did hit moved under
+// a change of learning rate, input scale, row count or seed. Asking the
+// predicate directly is deterministic on every platform, which a fixture built
+// on floating-point overflow is not.
+//
+// The subclass exposes a protected STATIC PURE PREDICATE. No numerical state
+// becomes visible, and nothing mutable is widened.
+// ---------------------------------------------------------------------------
+class EligibilityProbe : public RegressNet {
+public:
+	using RegressNet::candidateFitEligible;
+};
+
+static void test_candidate_eligibility_policy()
+{
+	const double finite = 0.25;
+	const double inf = numeric_limits< double >::infinity();
+	const double nan = numeric_limits< double >::quiet_NaN();
+
+	// The control: the predicate must ACCEPT something, or "refused" below is
+	//    satisfied by a function that refuses everything
+	expect( EligibilityProbe::candidateFitEligible(
+			Iterative::STOP_GRADMAX, finite ),
+		"55: converged + finite is eligible" );
+
+	// THE INDEPENDENT HALF. A saturated fit ends on a convergence reason with a
+	//    non-finite error; the stop reason alone cannot see the numbers.
+	expect( !EligibilityProbe::candidateFitEligible(
+			Iterative::STOP_GRADMAX, inf ),
+		"56a: converged + infinite is REFUSED" );
+	expect( !EligibilityProbe::candidateFitEligible(
+			Iterative::STOP_GRADMAX, nan ),
+		"56b: converged + not-a-number is REFUSED" );
+
+	expect( !EligibilityProbe::candidateFitEligible(
+			Iterative::STOP_MAX_ITERATIONS, finite ),
+		"57: unconverged + finite is refused" );
+	expect( !EligibilityProbe::candidateFitEligible(
+			Iterative::STOP_MAX_ITERATIONS, nan ),
+		"58a: unconverged + not-a-number is refused" );
+	expect( !EligibilityProbe::candidateFitEligible(
+			Iterative::STOP_CANCELLED, inf ),
+		"58b: cancelled + infinite is refused" );
+
+	// Every convergence reason the engine recognizes must pass the first half,
+	//    so 56 is about the SECOND half rather than about one lucky token
+	bool everyConvergedReasonAccepted =
+		EligibilityProbe::candidateFitEligible( Iterative::STOP_MIN_ERROR, finite )
+		&& EligibilityProbe::candidateFitEligible( Iterative::STOP_CHANGE, finite )
+		&& EligibilityProbe::candidateFitEligible( Iterative::STOP_WINDOW, finite )
+		&& EligibilityProbe::candidateFitEligible( Iterative::STOP_PLATEAU, finite )
+		&& EligibilityProbe::candidateFitEligible( Iterative::STOP_EARLY_STOP, finite );
+	expect( everyConvergedReasonAccepted,
+		"58c: every convergence reason is eligible when the error is finite" );
+}
+
+// ---------------------------------------------------------------------------
+// 59. A PASS WITH NOTHING COMPARABLE REFUSES.
+//
+// Reached directly, because it cannot be reached by training: stats::pX2 is
+// gammq, which refuses only when its shape parameter is <= 0 or its argument is
+// negative -- df == 0 or a negative chi-square. The call site already handles
+// G2 <= 0 without calling pX2 at all, and df is the change in free parameters,
+// which is at least one node per variable. So the refusal is defensive code for
+// a state a valid input structure cannot produce, and the honest way to
+// characterize it is to invoke it rather than to pretend a fixture reaches it.
+// ---------------------------------------------------------------------------
+class PassProbe : public RegressNet {
+public:
+	using RegressNet::requireComparablePass;
+};
+
+static void test_no_comparable_candidate_refuses()
+{
+	PassProbe probe;
+	string threw, said;
+	{
+		util::ScreenCapture hush;
+		try { probe.requireComparablePass( 3 ); }
+		catch ( RegressNet::RegressNetErr& e ) { threw = e.what(); }
+		said = hush.text();
+	}
+
+	expect( !threw.empty(), "59a: a pass with nothing comparable refuses" );
+	expect( has( threw, "pass 3" ) && has( threw, "no variable was selected" ),
+		"59b: the refusal names the pass and says nothing was selected" );
+	expect( has( said, "no p-value could be calculated" )
+		&& has( said, "none is selected" ),
+		"59c: it explains itself in the report before throwing" );
+	// It must not present a conclusion, and must not name a winner it has not got
+	expect( !has( said, "the largest was variable" )
+		&& !has( said, "stepwise regression complete." ),
+		"59d: it names no winner and prints no completion conclusion" );
+	expect( probe.getSelectionPath().empty() && probe.getFinalVariables().empty()
+		&& !probe.getComplete(),
+		"59e: no candidate is marked selected and the analysis is not complete" );
+}
+
+// ---------------------------------------------------------------------------
+// 60. copy() CARRIES e_in.
+//
+// e_in is the baseline every first-pass reverse comparison is made against. The
+// constructor now initializes it, but that default is not observable through the
+// public API -- setNetwork() overwrites it on every path that reaches an
+// analysis, and no path reaches one without setNetwork(). What IS observable,
+// and is the same family of defect, is whether copy() carries it: a RegressNet
+// copied before it is run must compare against the same baseline as the
+// original. Deleting `e_in = rhs.e_in` from copy() makes this indeterminate.
+// ---------------------------------------------------------------------------
+static void test_copy_carries_the_baseline()
+{
+	DataSet d = mixedData();
+	Logistic net;
+	double e_in = fitSource( net, d );
+
+	RegressNet original;
+	original.setNetwork( &net, e_in );
+	original.setInputStructure( singles( 4 ) );
+	original.setThreshold( 0.05 );
+
+	RegressNet copy( original ); // copy constructor -> copy()
+
+	string threw;
+	{
+		util::ScreenCapture hush;
+		try { copy.reverse_regress(); }
+		catch ( exception& e ) { threw = e.what(); }
+	}
+	expect( threw.empty() && !copy.getCandidates().empty(),
+		"60a: the copied analysis ran (control)" );
+	expect( !copy.getCandidates().empty()
+		&& copy.getCandidates()[ 0 ].priorError == e_in,
+		"60b: a copied RegressNet compares against the same baseline error" );
+}
+
+// ---------------------------------------------------------------------------
 int main()
 {
 	test_fixture_is_discriminating();
@@ -1169,6 +1442,11 @@ int main()
 	test_source_is_immutable();
 	test_history();
 	test_progress_is_observation_only();
+	test_candidate_eligibility_policy();
+	test_no_comparable_candidate_refuses();
+	test_copy_carries_the_baseline();
+	test_all_pvalues_zero();
+	test_threshold_zero_is_still_strict(); // last: the case that used to abort
 
 	cout << ( failures ? "FAILURES: " : "all stepwise characterization cases pass (" )
 		<< failures << ( failures ? "" : " failures)" ) << endl;

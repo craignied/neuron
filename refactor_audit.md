@@ -3771,3 +3771,118 @@ This section becomes the as-landed record, as §13 did.
 
 Doing them in the other order would extract code around a defect and make the
 crash a regression in the new shared path rather than a finding in the old one.
+
+---
+
+## 16. Item 12 — the correctness commit, AS LANDED (2026-08-02)
+
+§15.6, §15.7 and §15.8, implemented. **The extraction is still not started.**
+
+**One policy in §15.6 was wrong and Sol corrected it before implementation.** That
+section proposed treating an all-zero pass as "no comparable candidate" and
+reporting it as "remove nothing". That is wrong twice: `p == 0` is a p-value —
+the candidate *was* compared and found maximally significant — and the stop test
+is strictly `largest_p < threshold`, so at threshold 0 a valid `p == 0` remains
+**eligible for removal**. Reading it as a refusal would have silently changed
+published threshold behavior. What landed instead:
+
+- the **first successfully calculated** p-value takes the pass, zero included;
+- later candidates replace it only on a strict `p > largest_p`, which is what
+  preserves reverse's existing first-of-tied behavior;
+- the stop test is untouched;
+- "no comparable candidate" now means *every* p-value calculation was refused,
+  which is a different state and is refused explicitly.
+
+### 16.1 Fail-first evidence
+
+The new cases were run against the unfixed source, with `regressnet.cpp`
+demonstrably recompiled:
+
+| Build | Result |
+|---|---|
+| ordinary Release | **53 and 54b red** — the winner of an all-zero pass was not the first eligible candidate |
+| `-ftrivial-auto-var-init=pattern` on `regressnet.cpp` | **exit status 138, SIGBUS**, aborting inside the threshold-0 case |
+
+**Worth recording, because it is the reason the ordinary build looks tamer than
+§15.6 reported:** in *this* test binary the uninitialized read happened to be
+stable and in range, so 52 (determinism) and 54c (every named variable exists)
+passed. In the standalone probe of §15.6 the same read produced a different
+value on every run and crashed. That is undefined behavior behaving differently
+in two binaries with different stack layouts, and it is exactly why the
+`-ftrivial-auto-var-init=pattern` build is the evidence that settles it rather
+than a run count.
+
+### 16.2 What changed in `src/`
+
+- `RegressNet::RegressNet()` initializes **`e_in`**.
+- **`static bool candidateFitEligible( Iterative::StopReason, double )`**,
+  protected, pure. `requireConvergedFit()` is its only production caller.
+- **`void requireComparablePass( unsigned step )`**, protected: reports, then
+  throws `RegressNetErr`.
+- Both directions gain a `haveWinner` flag and take the first calculated
+  p-value; reverse's `largest_var` is initialized; each pass refuses through
+  `requireComparablePass` when nothing was comparable.
+- **Reverse's `>` and forward's `<=` are unchanged.** The tie asymmetry —
+  reverse keeps the first maximal candidate, forward the last minimal one — is
+  preserved deliberately and is now stated in a comment at both sites. Changing
+  it would change which variable a tie selects, which is a selection change, not
+  a correctness fix.
+
+`regress_seed42` is **byte-identical**, which is the evidence that no existing
+selection moved.
+
+### 16.3 Sabotage results — including two that are NOT guarded
+
+Each with the object file deleted and the build log required to show
+`regressnet.cpp` recompiling, on introduction **and** on restoration.
+
+| # | Sabotage | Cases red |
+|---|---|---|
+| C1 | `haveWinner` / first-candidate initialization removed | **5**: 51a, 51b, 53, 54a, 54b |
+| C2 | reverse's `largest_var` initializer removed | **none** |
+| C3a | the no-comparable refusal dropped at the reverse call site | **none** |
+| C3b | the no-comparable refusal reports but never throws | **2**: 59a, 59b |
+| C4 | the non-finite half of eligibility dropped | **2**: 56a, 56b |
+| C5 | `copy()` no longer carries `e_in` | **1**: 60b |
+
+**C4 is the one §15.7 said could not be guarded**, and the seam is what changed
+that: asking a pure predicate all four questions is deterministic everywhere,
+where arriving at converged-and-non-finite by training was a spike that moved
+under learning rate, input scale, row count and seed.
+
+**C2 and C3a are unguarded by construction, and that is the honest reading, not
+a gap to paper over:**
+
+- **C2** — with `haveWinner` in place, `largest_var` is always assigned before it
+  is read, so its initializer is unreachable belt-and-braces. It stays because it
+  makes a future removal of `haveWinner` a wrong answer rather than undefined
+  behavior; C1 is the guard that matters.
+- **C3a** — the *call site* is defensive code for a state a valid input structure
+  cannot produce. `stats::pX2` is `gammq`, which refuses only when its shape
+  parameter is `<= 0` or its argument is negative — i.e. `df == 0` or a negative
+  chi-square. The call site already handles `G2 <= 0` without calling `pX2`, and
+  `df` is the change in free parameters, at least one per variable. So no
+  training run reaches `!haveWinner`, and no behavioral test can turn that
+  sabotage red. The refusal's *body* is characterized directly (C3b, case 59),
+  which is what can be guarded.
+
+### 16.4 A new finding, recorded not fixed
+
+**`setInputStructure` validates only the maximum node index.** It computes the
+largest node mentioned and requires it to equal `getInput() - 1`; it does not
+check that the variable groups **partition** the inputs. So both of these are
+accepted today:
+
+- **overlapping groups** — `{{0},{0},{1},{2},{3}}` on a four-input dataset, where
+  node 0 belongs to two variables;
+- **under-specified structures** — `{{3}}` alone on a four-input dataset, where
+  nodes 0, 1 and 2 belong to no variable at all.
+
+Neither is exercised by any test, and what a repeated node does to
+`removeInputs` and to the degrees of freedom is unexamined. This is the nearest
+thing to a route into `!haveWinner` — a group that removes nothing changes `df`
+by zero, which is precisely `gammq`'s refusal — but building a test on it would
+be building on behavior nobody has characterized, which is the objection that
+retired two earlier sabotage proposals. Recorded here as its own candidate
+correctness item, ahead of the extraction or after it, but not smuggled into
+either.

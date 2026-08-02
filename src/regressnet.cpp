@@ -20,8 +20,15 @@
 #include "stats.h"
 
 // Default constructor
+//    e_in is initialized here for the same reason Iterative::copy writes
+//    "not copied" out explicitly: a member left out of this list holds
+//    indeterminate memory, not a zero. setNetwork() overwrites it on every
+//    path that reaches the analysis today, which is exactly the argument that
+//    was made about quietFlag and about Model::errorType before each of them
+//    became reachable.
 RegressNet::RegressNet() : netPtr ( 0 ),
-	historyFlag ( false ), regressThreshold ( 0 ), thresholdSet ( false ),
+	historyFlag ( false ), e_in ( 0 ),
+	regressThreshold ( 0 ), thresholdSet ( false ),
 	errorString ( "RegressNet error: " ), candidateObserver ( 0 ),
 	fitsCompleted ( 0 ), analysisComplete ( false ) { }
 
@@ -298,7 +305,24 @@ void RegressNet::reverse_regress()
 			double largest_p = 0, // largest p-value found
 				holdError = 0; // holds error of least significant variable
 
-			unsigned largest_var, // variable with largest p-value
+			// THE FIRST SUCCESSFULLY CALCULATED p-VALUE IS THE WINNER, and
+			//    later candidates replace it only on a strict p > largest_p --
+			//    which is what keeps the FIRST of several tied candidates.
+			//
+			//    This flag exists because largest_p starts at 0 and p == 0 is a
+			//    perfectly good p-value: it means maximally significant, and
+			//    stats::pX2 is gammq, which underflows to exactly 0 for a large
+			//    chi-square. A pass in which every candidate is strongly
+			//    significant therefore never satisfied `p > largest_p` at all,
+			//    and largest_var -- which had no initializer -- was read
+			//    unconditionally at the foot of the pass. Measured: the report
+			//    named "variable 83256288", a different number on every run,
+			//    0xAAAAAAAA under -ftrivial-auto-var-init=pattern, and at
+			//    threshold 0 the value was pushed into `removed` and used to
+			//    index variable_defs on the next pass -- SIGBUS.
+			bool haveWinner = false;
+
+			unsigned largest_var = 0, // variable with largest p-value
 				hold_df = last_df; // holds df of least significant variable
 
 			ptable inner_ps; // holds p-values of removed variables within a single pass
@@ -386,12 +410,15 @@ void RegressNet::reverse_regress()
 						pThis = p;
 						inner_ps.insert( ptable::value_type( p, j ) ); // make table
 						out << "p = " << p << endl;
-						if ( p > largest_p ) // if this p is largest found
+						// The first calculated p-value takes the pass; after
+						//    that, strictly larger wins, so ties keep the first
+						if ( !haveWinner || p > largest_p )
 						{
 							holdError = subError; // record this subnetwork's error & df
 							hold_df = netCopyPtr->df();
 							largest_var = j; // remember which variable it is
 							largest_p = p; // record largest p for the final table
+							haveWinner = true;
 						}
 					}
 					catch ( stats::statsErr& e ) // error in chi-square calculation
@@ -413,6 +440,12 @@ void RegressNet::reverse_regress()
 			out << endl << "p-value of each removed variable in pass " << i << ":" << endl;
 			report( out );
 			print_regression_table( inner_ps );
+
+			// Nothing in this pass could be compared, so there is no least
+			//    significant variable to name (see the method)
+			if ( !haveWinner )
+				requireComparablePass( i );
+
 			out << "the largest was variable " << largest_var << endl;
 			report( out );
 
@@ -521,6 +554,22 @@ void RegressNet::forward_regress()
 			double smallest_p = 1, // smallest p-value found
 				holdError = 0; // holds error of most significant variable
 
+			// The same flag reverse carries, for the same reason -- a pass in
+			//    which every p-value calculation was refused has no winner and
+			//    must not name one. Forward never had reverse's uninitialized
+			//    read (smallest_var is initialized, and p <= smallest_p from 1
+			//    always takes the first candidate), so this changes no
+			//    selection; it only lets the no-comparable-candidate case be
+			//    refused rather than reported as "the smallest was variable 0".
+			//
+			//    THE TIE SENSE IS DELIBERATELY NOT NORMALIZED against reverse's.
+			//    Reverse's strict `>` keeps the FIRST maximal candidate;
+			//    forward's `<=` keeps the LAST minimal one. That asymmetry is
+			//    preserved here on purpose -- changing it would change which
+			//    variable a tie selects, which is a selection change, not a
+			//    correctness fix, and does not belong in this commit.
+			bool haveWinner = false;
+
 			unsigned smallest_var = 0, // variable with smallest p-value
 				hold_df = last_df; // holds df of most significant variable
 
@@ -614,12 +663,15 @@ void RegressNet::forward_regress()
 						pThis = p;
 						inner_ps.insert( ptable::value_type( p, j ) ); // make table
 						out << "p = " << p << endl;
-						if ( p <= smallest_p ) // if this p is smallest found
+						// `<=`, not `<`: forward keeps the LAST of tied minima.
+						//    See the haveWinner comment above -- preserved.
+						if ( !haveWinner || p <= smallest_p )
 						{
 							holdError = fullError; // record this network's error & df
 							hold_df = netCopyPtr->df();
 							smallest_var = j; // remember which variable it is
 							smallest_p = p; // record smallest p for the final table
+							haveWinner = true;
 						}
 					}
 					catch ( stats::statsErr& e ) // error in chi-square calculation
@@ -641,6 +693,11 @@ void RegressNet::forward_regress()
 			out << endl << "p-value of each added variable in pass " << i << ":" << endl;
 			report( out );
 			print_regression_table( inner_ps );
+
+			// Nothing in this pass could be compared (see reverse_regress)
+			if ( !haveWinner )
+				requireComparablePass( i );
+
 			out << "the smallest was variable " << smallest_var << endl;
 			report( out );
 
@@ -777,11 +834,18 @@ void RegressNet::report_summary( const string& direction, const string& verb )
 //    recoverable; a quietly reordered selection is not. The partial audit trail
 //    is reported first, so the user can see every candidate that did complete
 //    and exactly where the procedure stopped.
+// The eligibility policy itself, separated from the reporting so it can be
+//    asked all four questions directly. See the header for why.
+bool RegressNet::candidateFitEligible( Iterative::StopReason reason, double error )
+{
+	return Iterative::converged( reason ) && std::isfinite( error );
+}
+
 void RegressNet::requireConvergedFit( const string& what, double error )
 {
 	Iterative::StopReason why = netCopyPtr->getStopReason();
 
-	if ( Iterative::converged( why ) && std::isfinite( error ) )
+	if ( candidateFitEligible( why, error ) )
 		return; // a finished fit: it may be compared
 
 	out << endl << "STOPPING: the fit for " << what
@@ -808,6 +872,23 @@ void RegressNet::requireConvergedFit( const string& what, double error )
 	errorOut.str( "" ); // one-shot, but never inherit a previous message
 	errorOut << errorString << what << " did not converge ("
 		<< Iterative::stopReasonToken( why ) << "); no variable was selected";
+	throw RegressNetErr( errorOut.str().c_str() );
+}
+
+// A pass with nothing to select from. See the header for the distinction this
+//    turns on: an all-ZERO pass is not this case -- zero is a p-value, and the
+//    first candidate to produce one wins the pass.
+void RegressNet::requireComparablePass( unsigned step )
+{
+	out << endl << "STOPPING: no p-value could be calculated for any candidate "
+		<< "in pass " << step << "." << endl
+		<< "Every chi-square comparison in the pass was refused, so no variable "
+		<< "is least significant and none is selected." << endl;
+	report( out ); // the partial trail reaches the reader before the throw
+
+	errorOut.str( "" ); // one-shot, but never inherit a previous message
+	errorOut << errorString << "no candidate in pass " << step
+		<< " could be compared; no variable was selected";
 	throw RegressNetErr( errorOut.str().c_str() );
 }
 

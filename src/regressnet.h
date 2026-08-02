@@ -133,6 +133,33 @@ public:
 		RegressNetErr( const char* message ) throw() : runtime_error( message ) {}
 	};
 
+protected:
+	// May a candidate fit's error enter a Wilks comparison? TWO INDEPENDENT
+	//    conditions, and the second is not implied by the first: a stopping
+	//    RULE must have ended the run (Iterative::converged -- the engine-wide
+	//    predicate), AND the error it returned must be a real number. A
+	//    saturated fit can satisfy the first and fail the second, because its
+	//    gradients underflow to zero while its cross-entropy overflows.
+	//
+	//    Pure and static so that the policy can be pinned directly. Reaching
+	//    converged-and-non-finite through training is a knife edge -- measured,
+	//    270 configurations gave zero portable hits and the one that hit moved
+	//    under a change of learning rate, input scale, row count or seed -- so a
+	//    test that had to arrive here by training would be asserting one
+	//    toolchain's arithmetic. A predicate can be asked all four questions
+	//    directly. requireConvergedFit() is its only production caller.
+	static bool candidateFitEligible( Iterative::StopReason reason, double error );
+
+	// A pass in which NO candidate's p-value could be calculated has nothing to
+	//    select from, and must say so rather than name a variable it never
+	//    compared. Reports, then throws.
+	//
+	//    This is NOT the all-p-values-are-zero case. Zero is a p-value: it means
+	//    maximally significant, the candidate WAS compared, and it wins its pass
+	//    if it is the first one. This is the case where stats::pX2 itself
+	//    refused every time.
+	void requireComparablePass( unsigned step );
+
 private:
 	Network *netPtr; // incoming Network (not owned)
 	unique_ptr< Network > netCopyPtr; // owned copy of incoming Network to make subnetworks
