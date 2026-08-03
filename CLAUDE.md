@@ -383,9 +383,13 @@ passed, because they carry expected values for SimpleProp and BareProp only and 
 golden fixture uses `BackProp` at all.
 
 **The refactor (`refactor_audit.md`) is COMPLETE — all fourteen items (2026-08-03).**
-The audit is the working document and it is sectioned: §11 is D5's `vector_ops` bounds
-policy, §12 is D9's `Matrix` policy, §13 the DFA scaffold, §14 the DFA scoring measurement,
-§§15-18 stepwise, §19 a factual correction to §§16-18. Read the section, not the file. What landed 2026-08-01/02:
+**It is a record now, not a plan** — read a section for why something is the way it is,
+never as work outstanding. It is sectioned: §11 is D5's `vector_ops` bounds policy, §12 is
+D9's `Matrix` policy, §13 the DFA scaffold, §14 the DFA scoring measurement, §§15-18
+stepwise, §19 a factual correction to §§16-18, §20 the GUI async launcher, §21 the item-14
+measurement. Read the section, not the file. **Two of the fourteen items ended in a
+measured decision to change nothing** (§14, §21), which is the outcome rule 7 exists to
+make possible. What landed 2026-08-01/02:
 `OneHiddenNet` (above); **D9** — `Matrix::DimensionMismatch` added, all four contract
 classes derived from `std::exception`, 55 contracts enforced at the entry points, plus
 `runOnWorker` in the GUI and a `main` boundary in the CLI so a contract failure reports
@@ -483,7 +487,7 @@ how many independent clusters an interval and a *p* rest on.
 
 **The gates, run at the end of every piece of work**: zero-warning
 Release build → `tests/golden/run_golden.sh` byte-identical (3 transcripts: `xor_seed42`,
-`regress_seed42`, `binormal_seed42`) → `ctest` (**30 tests** as of 2026-08-02 — run
+`regress_seed42`, `binormal_seed42`) → `ctest` (**31 tests** as of 2026-08-03 — run
 `ctest -N`, never a remembered number) → `tests/gui/smoke.sh` →
 **`tests/gui/asyncjob.sh`** (the async-job lifecycle; separate from smoke so a hang or a
 terminated server cannot take the endpoint coverage with it) →

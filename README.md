@@ -281,6 +281,8 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ./tests/golden/run_golden.sh
 ./tests/tools/run_tools.sh
+./tests/gui/smoke.sh
+./tests/gui/asyncjob.sh
 ```
 
 The verification layers include:
@@ -292,7 +294,11 @@ The verification layers include:
   byte-identical apart from elapsed time;
 - explicit coverage assertions ensuring the goldens actually execute the statistical
   paths they claim to protect;
-- a full GUI/API smoke suite; and
+- a full GUI/API smoke suite;
+- a separate suite for the asynchronous-job lifecycle every long operation shares —
+  the single-owner gate, cancellation, and the ordering that publishes a result before
+  a job reports itself finished, the last of which is pinned in-process because it is
+  not observable across a network; and
 - a local oracle harness that builds the final neUROn2++ release and compares shared
   numerical paths with neuron 3.0.
 
@@ -325,6 +331,13 @@ available for automation and compatibility. Data grooming, model deployment, mod
 ROC intervals, scalable splitting, validation-aware OBD, cross-validation comparison,
 group-disjoint evaluation, clustered locked-test inference, and auditable experiment
 artifacts are implemented.
+
+A structural review of the engine, conducted against the project's layer-ownership
+rules, is complete. It consolidated duplicated mechanisms into the classes that own
+them, made the numerical layer refuse invalid arguments in release builds rather than
+only under assertions, and fixed fourteen defects inherited from the legacy code —
+each recorded with the measurement that proved it. Two of its items concluded, on
+measurement, that no change was warranted.
 The standing rules, current state, and remaining roadmap live in
 [`CLAUDE.md`](CLAUDE.md); the dated development record is
 [`docs/HISTORY.md`](docs/HISTORY.md).
