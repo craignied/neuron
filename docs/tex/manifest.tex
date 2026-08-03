@@ -629,6 +629,10 @@ that altering the value of $\sigma_w$ is formally equivalent to
 changing the network architecture.
 
 \subsubsection{Wilks Likelihood Ratio Test}\label{Wilks}
+\footnote{S. S. Wilks, ``The large-sample distribution of the likelihood ratio
+for testing composite hypotheses,'' \emph{The Annals of Mathematical
+Statistics} 9(1), 60--62, 1938,
+\url{https://doi.org/10.1214/aoms/1177732360}.}
 Wilk's Likelihood Ratio Test works as follows. Estimate the parameters
 of the network. Call that set of parameters ${\bf y}_{full}$. Now
 constrain $r$ free parameters of the network equal to the value of
@@ -655,6 +659,10 @@ significance level that the $r$ parameters could be set equal to zero
 without hurting the fit of the model to the data.
 
 \subsubsection{Another Version of Wilks Test called the Wald Test}
+\footnote{A. Wald, ``Tests of statistical hypotheses concerning several
+parameters when the number of observations is large,'' \emph{Transactions of
+the American Mathematical Society} 54(3), 426--482, 1943,
+\url{https://doi.org/10.1090/S0002-9947-1943-0012401-3}.}
 A generalization of the Z-test can be used to answer the same
 questions as Wilks test. This statistical test is called the Wald
 Test. It has the advantage that you can do the statistical test with
@@ -6816,6 +6824,9 @@ automagically be available for the user.  See SimpleProp::trainSet()
 and BareProp::trainSet() for examples.
 
 \subsubsection{Shanno algorithm}\index{Shanno algorithm}
+\footnote{D. F. Shanno, ``Conjugate gradient methods with inexact searches,''
+\emph{Mathematics of Operations Research} 3(3), 244--256, 1978,
+\url{https://doi.org/10.1287/moor.3.3.244}.}
 
 Briefly, Shanno's algorithm proceeds as follows: let the computed
 gradient be $\vec{g}$ ($stackG$), and the iteration be $t$ ({\bf
@@ -9709,7 +9720,6 @@ extraction definitions encoded in the header file were:
 \printindex
 
 \end{document}
-
 
 
 

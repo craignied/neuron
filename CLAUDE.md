@@ -317,6 +317,32 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
    it cannot report a semantic term that was never marked. The source-aware coverage gate
    closes that omission path.
 
+9. **Every Manifest addition must teach, not merely inventory.** This applies everywhere
+   in the Manifest, including architecture, interfaces, numerical foundations, object
+   contracts and appendices. Before signatures or fields, explain in ordinary language
+   what problem the addition solves, why the mechanism is appropriate, how to interpret
+   its result, and how it relates to neighboring mechanisms. Give the governing equation
+   or ordered algorithm when there is one. A class name, acronym, method list, or sentence
+   that merely repeats an identifier is not documentation, and a cross-reference counts
+   only when it points directly to a complete explanation.
+
+   **Named published tests, estimators and algorithms require a verifiable citation,**
+   preferably the primary paper and a DOI or stable publisher URL. State which part of the
+   implementation comes from that source and identify repository-specific adaptations as
+   such; never lend a local policy borrowed authority by presenting the whole thing under
+   a published name. For a project-defined mechanism, say explicitly that it is
+   project-defined and record the rationale instead of inventing a literature pedigree.
+   Review this explanatory and provenance requirement in the same source audit that checks
+   the index (rule 8), rebuild the PDF, and inspect the affected pages. **A public addition
+   is not complete when a reader must already know what its name means.**
+
+   *Why this is a rule and not advice:* the modern AUC sections initially said only that
+   `delong::analyze` ``estimates paired DeLong covariance.'' That restated the identifier;
+   it did not explain correlated ROC areas, structural components, the independence
+   assumption, the covariance formula, or what a paired contrast means, and it cited no
+   source. The older Manifest generally explains the mathematics before specifying the
+   callable. New documentation must meet that standard rather than becoming an API list.
+
 ## Housekeeping
 
 - **GitHub:** https://github.com/craignied/neuron (HTTPS remote per the locker's

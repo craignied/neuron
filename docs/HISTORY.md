@@ -3769,3 +3769,27 @@ and found more than the extraction it was written for.
   public objects and principal methods, and runs from `tests/tools/run_tools.sh`. Adding a
   source class without a Manifest index entry now fails instead of becoming another
   reader-discovered omission.
+
+## 2026-08-02 — Manifest-wide explanation and provenance standard
+
+- The index audit exposed a second, independent documentation failure: newer entries
+  sometimes named an object or method without teaching the reader what it meant.
+  `delong::analyze`, for example, had a mechanically accurate signature description but
+  assumed the reader already knew why correlated ROC areas require DeLong covariance.
+- The correction is Manifest-wide. Named statistical and optimization methods now state
+  the question they answer, the assumptions that make them appropriate, and how to read
+  their results. The AUC, Mann--Whitney, bootstrap, DeLong, clustered-Obuchowski, Wilks,
+  Wald, Optimal Brain Damage, nested-cross-validation and Shanno discussions cite their
+  primary published sources. The DeLong section now distinguishes the unchanged empirical
+  point AUC from the paired covariance estimator and derives the contrast variance; the
+  clustered section explains why clusters, not rows, are the independent units.
+- Repository inventions are identified as such rather than given borrowed authority:
+  `nsplit`, `evaldesign`, `PlateauDetector`, `autoalgo`, `modelfactory`/`netclone`, and
+  `cvreport` now explain their local policy or architectural purpose. The OBD section
+  likewise separates LeCun et al.'s saliency principle from neuron's validation-driven
+  grow/prune procedure.
+- Standing rule 9 and `docs/manifest_maintenance.md` make this the requirement for every
+  future addition: an inventory is not an explanation; published named methods need a
+  primary or authoritative citation; adaptations must say what is inherited and what is
+  local; project-defined mechanisms must say why they exist. A public addition is not
+  documented if understanding it requires already knowing its name.

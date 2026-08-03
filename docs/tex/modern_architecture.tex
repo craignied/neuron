@@ -216,6 +216,8 @@ stopped at its held-out minimum or by a valid training stopping
 condition.  With a three-way split, the search monitors validation and
 leaves test untouched.  A successful standalone OBD run replaces the
 current model with the selected, trained network.
+The published saliency idea, neuron's validation-driven adaptation, and the
+complete object contract are explained in section~\ref{obd_objects}.
 
 \subsection{Cross-validation}
 
@@ -235,6 +237,8 @@ It therefore estimates the performance of the selection procedure,
 not the performance of an architecture chosen using all observations.
 Cross-validation is a standalone analysis and does not replace the
 current model.
+Section~\ref{crossval_objects} explains why selection must be nested inside each
+assessment fold and cites the supporting model-selection evidence.
 
 The default plan is outcome-stratified.  A request may instead balance
 folds on outcome-by-covariate cells or assign whole groups with a
@@ -261,6 +265,8 @@ algebra.  They can therefore differ only in the covariance appropriate
 to the sampling unit.  Grouping prevents leakage but does not make rows
 independent; an independent-row declaration over a group-disjoint
 design is refused rather than passed to ordinary DeLong.
+Section~\ref{auc_estimators} derives the distinction, defines the paired
+contrast, and cites both estimators' primary papers.
 
 The point AUC remains the row-level Mann--Whitney probability under
 both methods.  Clustering changes uncertainty, not the point estimand.

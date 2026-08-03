@@ -118,7 +118,23 @@ mutate the model's objective to make it appear compatible.
 
 \subsection{TwoSet}
 \texttt{TwoSet} now exposes explicit cache invalidation and structured ROC
-results.  The following methods are available:
+results.  Its empirical AUC is a ranking probability: the probability that a
+random outcome-1 row receives a higher score than a random outcome-0 row, with
+half credit for a tie.  This is the normalized Mann--Whitney statistic, not an
+area obtained by choosing an arbitrary number of thresholds.\footnote{J. A.
+Hanley and B. J. McNeil, ``The meaning and use of the area under a receiver
+operating characteristic (ROC) curve,'' \emph{Radiology} 143(1), 29--36,
+1982, \url{https://doi.org/10.1148/radiology.143.1.7063747}.}
+
+The bootstrap interval repeatedly resamples outcome-0 and outcome-1 rows within
+their own classes, recomputes the fitted binormal area, and reports its 2.5th and
+97.5th empirical percentiles.  Resampling is stratified so a replicate cannot
+lose an outcome class merely by chance.  This is the ordinary nonparametric
+bootstrap applied to the statistic, with a repository-specific stratification
+rule.\footnote{B. Efron, ``Bootstrap methods: another look at the jackknife,''
+\emph{The Annals of Statistics} 7(1), 1--26, 1979,
+\url{https://doi.org/10.1214/aos/1176344552}.} The following methods are
+available:
 
 \begin{itemize}
 \item \texttt{void invalidate()}: clears every cached statistic after a caller
@@ -423,7 +439,15 @@ the original model is never mutated.
 \index{Stratified partition}
 
 The \texttt{nsplit} namespace is an index-level service.  It never scales data,
-fits a model, or interprets an input column.
+fits a model, or interprets an input column.  Its allocation and validation
+rules are project-defined planning mechanisms, not a statistical test or a
+claim that one universally optimal split exists.  They make three policies
+explicit: preserve requested strata as closely as indivisible rows permit,
+keep a declared group wholly on one side, and audit the completed assignment
+rather than trusting the construction procedure.  ``Largest remainder'' below
+means that each stratum first receives its integer quota and the remaining test
+positions go to the largest fractional quotas until the requested total is
+reached.
 
 \texttt{Holdout} contains:
 
@@ -542,8 +566,13 @@ reported rather than hidden.  Fewer than \texttt{k} groups is a refusal.
 \index{evaldesign!chooseInference}
 \index{Evaluation design!typed vocabulary}
 
-\texttt{evaldesign} is the vocabulary and policy layer; it computes no
-statistic.  Its enumerations are:
+\texttt{evaldesign} is a project-defined vocabulary and policy layer; it
+computes no statistic.  It records what was actually partitioned and what the
+independent sampling unit is, then permits only the covariance method whose
+assumptions match those declarations.  The purpose is to prevent a GUI, report
+writer or caller from inferring statistical independence from a loose string
+such as ``grouped,'' or silently choosing an estimator merely because one is
+available.  Its enumerations are:
 
 \begin{itemize}
 \item \texttt{SamplingUnit}: \texttt{Unspecified}, \texttt{Row}, or
@@ -639,6 +668,20 @@ silently substitute for the other.
 \index{ROC area!zero-variance contrast}
 
 \texttt{auccov} owns the operations that are invariant to the sampling unit.
+For a positive score $X$ and negative score $Y$, it computes
+\begin{displaymath}
+ A = P(X>Y) + \frac{1}{2}P(X=Y),
+\end{displaymath}
+the probability that the model ranks a randomly chosen positive row above a
+randomly chosen negative row, with half credit for ties.  In the sample this is
+the Mann--Whitney pair count divided by $n_1n_0$.\footnote{H. B. Mann and D. R.
+Whitney, ``On a test of whether one of two random variables is stochastically
+larger than the other,'' \emph{The Annals of Mathematical Statistics} 18(1),
+50--60, 1947, \url{https://doi.org/10.1214/aoms/1177730491}.} The per-positive
+and per-negative pair averages are the structural components called
+\texttt{v10} and \texttt{v01}.  They are retained because both covariance
+estimators below use them; only the rule for combining their variation changes.
+
 \texttt{Placements} contains:
 
 \begin{itemize}
@@ -706,6 +749,31 @@ with \texttt{p=0}.  A materially negative difference variance is refused.
 \index{Clustered ROC data}
 
 \subsection{delong}
+DeLong, DeLong and Clarke-Pearson answer a specific question: when two or more
+procedures score the \emph{same independent subjects}, how uncertain is each
+empirical AUC, and how uncertain is the difference between two correlated AUCs?
+Treating the areas as independent would discard the pairing and generally give
+the wrong standard error.  Their nonparametric method views each AUC as a
+two-sample U-statistic and estimates the full procedure-by-procedure covariance
+from the positive and negative structural components.\footnote{E. R. DeLong,
+D. M. DeLong and D. L. Clarke-Pearson, ``Comparing the areas under two or more
+correlated receiver operating characteristic curves: a nonparametric
+approach,'' \emph{Biometrics} 44(3), 837--845, 1988,
+\url{https://doi.org/10.2307/2531595}.}
+
+If $S_{10}$ is the sample covariance of the per-positive components and
+$S_{01}$ the sample covariance of the per-negative components, the implemented
+estimator is
+\begin{displaymath}
+ \widehat{\mathrm{Cov}}(A)=\frac{S_{10}}{n_1}+\frac{S_{01}}{n_0}.
+\end{displaymath}
+The diagonal entries are variances of individual AUCs; off-diagonal entries
+preserve the correlation between procedures evaluated on the same rows.  A
+contrast uses
+$\mathrm{Var}(A_i-A_j)=C_{ii}+C_{jj}-2C_{ij}$, then reports the normal
+z statistic and two-sided p-value.  ``DeLong'' therefore names the covariance
+estimator, not a different point-AUC calculation.
+
 \texttt{delong::Result} contains:
 
 \begin{itemize}
@@ -727,6 +795,24 @@ The following functions are available:
 \end{itemize}
 
 \subsection{clustered\_auc}
+Ordinary DeLong assumes rows are independent.  That is false when several rows
+belong to one patient, site, family or other sampling unit: those rows may move
+together, so counting them as independent can make an interval or comparison
+too confident.  Obuchowski extends DeLong's structural-component construction
+to clustered ROC data by centering and summing the positive and negative
+components within each cluster and adding the within-cluster cross-covariance
+term that the independent-row formula lacks.\footnote{N. A. Obuchowski,
+``Nonparametric analysis of clustered ROC curve data,'' \emph{Biometrics}
+53(2), 567--578, 1997, \url{https://doi.org/10.2307/2533958}.}
+
+The point AUC remains the same row-level ranking probability.  What changes is
+its uncertainty: the independent replication count is the number of informative
+clusters, not the number of rows.  A cluster containing many rows supplies more
+pairwise information but does not become many independent experimental units.
+This is why the implementation requires at least two clusters carrying each
+outcome class and why a group-disjoint split and clustered inference solve
+different problems.
+
 \texttt{clustered\_auc::Result} contains:
 
 \begin{itemize}
@@ -773,7 +859,12 @@ are not an independent test sample for either locked-test contrast.
 \index{Early stopping!plateau}
 \index{PlateauDetector!update}
 \index{PlateauDetector!reset}
-\texttt{PlateauDetector} maintains two adjacent moving-average windows.  The
+\texttt{PlateauDetector} is neuron's project-defined early-stopping heuristic,
+not a statistical convergence test.  It maintains two adjacent moving-average
+windows of the training error and compares their relative change.  A flat or
+rising newer window records a strike; the configured number of consecutive
+strikes requests a stop.  Windowing prevents one noisy iteration from deciding
+the run, while patience requires the lack of improvement to persist.  The
 following methods are available:
 
 \begin{itemize}
@@ -794,6 +885,13 @@ following methods are available:
 \index{autoalgo!Result}
 \index{autoalgo!pick}
 \index{Optimizer!probe budget}
+\texttt{autoalgo} is a project-defined bounded tournament among the three
+existing optimizers.  Each optimizer starts from a clone of the same weights,
+runs for the same wall-clock allowance, and is ranked by the finite training
+error it reached; the winning clone, including the progress it already made,
+continues the real fit.  It is an engineering choice under a time budget, not a
+claim that the selected optimizer is globally best.
+
 \texttt{autoalgo::Probe} contains:
 
 \begin{itemize}
@@ -829,6 +927,11 @@ following methods are available:
 \index{modelfactory!Spec}
 \index{modelfactory!createByTypeName}
 \index{Network!cloning}
+\texttt{modelfactory} and \texttt{netclone} are project-defined construction
+mechanisms.  They keep knowledge of concrete model types in one cold-path
+boundary: callers describe or clone a model without duplicating a type switch,
+while fitting remains virtual behavior owned by the constructed model.
+
 \texttt{modelfactory::Spec} contains \texttt{logistic}, \texttt{bias}, hidden
 layer sizes, \texttt{xentropy}, \texttt{logLastop}, and \texttt{logHistory}.
 
@@ -869,6 +972,20 @@ behavior of the concrete model.
 \index{obd!Result}
 \index{obd!run}
 \index{Iteration ceiling!OBD refusal}
+
+Optimal Brain Damage originally uses a second-order approximation to predict
+the increase in training error caused by deleting a parameter, then removes
+parameters with low saliency to reduce an over-large network.\footnote{Y.
+LeCun, J. S. Denker and S. A. Solla, ``Optimal Brain Damage,'' \emph{Advances
+in Neural Information Processing Systems 2}, 598--605, 1990,
+\url{https://proceedings.neurips.cc/paper/1989/hash/6c9882bbac1c7093bd25041881277658-Abstract.html}.}
+neuron applies that pruning idea at hidden-unit granularity and surrounds it
+with a project-defined validation search: it grows candidate hidden layers while
+held-out error improves, restores the best eligible size, then prunes by the
+engine's saliency calculation.  Thus \texttt{obd::run} is not a verbatim
+implementation of the paper's entire procedure; the cited method supplies the
+saliency-based pruning principle, while the grow/validation/eligibility policy
+is neuron-specific and is specified below.
 
 \texttt{obd::Eligibility} distinguishes \texttt{ELIGIBLE},
 \texttt{INCOMPLETE\_CEILING}, \texttt{INCOMPLETE\_CANCELLED}, and
@@ -941,6 +1058,24 @@ whole search, including optimizer choice, is repeated inside each fold.
 \index{crossval!evaluateOnce}
 \index{Out-of-fold prediction}
 \index{Deterministic substream}
+
+Cross-validation estimates out-of-sample behavior by partitioning the available
+rows into folds, fitting on all but one fold, predicting the held-out fold, and
+repeating until every row has exactly one out-of-fold prediction.  Those pooled
+predictions describe the performance of the \emph{procedure} that produced
+them, not a single model fitted once to all rows.  When the procedure includes
+model selection, that selection must be repeated using only each outer fold's
+training rows; otherwise the reported error is optimistically biased.  Nested
+cross-validation supplies the inner selection loop and leaves the outer fold for
+assessment.\footnote{S. Varma and R. Simon, ``Bias in error estimation when
+using cross-validation for model selection,'' \emph{BMC Bioinformatics} 7, 91,
+2006, \url{https://doi.org/10.1186/1471-2105-7-91}.}
+
+The objects below separate those roles: a caller supplies one complete fitting
+procedure, \texttt{crossval} owns repetition and out-of-fold assembly, and
+\texttt{cvadapters} defines procedures whose tuning steps are contained within
+the fold.  This ownership rule is the executable form of the statistical
+requirement above.
 
 \texttt{crossval} owns repetition over an immutable fold assignment.
 \texttt{Metrics} contains:
@@ -1069,6 +1204,14 @@ grouped design; infeasibility is a failure, never a row-wise fallback.
 \index{cvreport!LockedContrast}
 \index{cvreport!ArtifactResult}
 \index{Raw-row identity}
+
+\texttt{cvreport} is neuron's project-defined presentation and artifact layer.
+It performs no fitting, fold assignment or covariance estimation.  It receives
+already computed results and renders three levels of detail: a compact summary,
+an audit of every repetition and fold, and machine-readable files retaining
+raw-row identity.  Keeping those jobs here ensures that the screen report,
+CSV/JSON artifacts and REST response describe the same run rather than
+recomputing or reinterpreting it independently.
 
 \texttt{PlanInfo} contains the dataset label and whole-dataset totals, typed fold
 design, primary/reference names, optional per-row cluster identity, original

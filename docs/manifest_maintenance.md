@@ -117,12 +117,17 @@ implementation uses a namespace rather than a class. Do not reduce Section 7.1
 to a list of names. The entry must contain, in this order:
 
 1. **Natural-language purpose.** Say what problem the object or feature solves,
-   what it owns, and how a caller uses it. Use the conversational tone required
-   by Chapter 7.
+   what it owns, why this mechanism is appropriate, how a caller uses it, and
+   how its result should be interpreted. Use the conversational tone required
+   by Chapter 7. A sentence that merely expands or repeats the identifier does
+   not satisfy this requirement.
 2. **Algorithmic or mathematical description, when applicable.** State the
    transformation, estimator, selection rule, or data flow. Give an equation or
    ordered algorithm when that is clearer than prose. A method list alone does
-   not document an algorithm.
+   not document an algorithm. For a named published test, estimator or algorithm,
+   cite the primary paper (preferably by DOI or stable publisher URL), state what
+   the implementation takes from it, and identify repository-specific adaptations.
+   For a project-defined mechanism, say so explicitly and explain its rationale.
 3. **Complete public specification.** Give every caller-visible signature,
    parameter meaning, accepted range or units, return value, mutation or
    ownership effect, and documented failure behavior. Document overloads
@@ -515,6 +520,9 @@ Text extraction is not a substitute for visual inspection.
       result/configuration field, and error contract.
 - [ ] Document purpose, applicable algorithm or mathematics, complete signatures
       and parameter/return semantics, public state, a usable example, and notes.
+- [ ] Cite every named published test, estimator, or algorithm to a verifiable
+      primary or authoritative source, and distinguish cited mathematics from
+      project-defined policy or adaptations.
 - [ ] Verify the same contract immediately precedes the method in source and that
       implementation decisions needing explanation are commented in the code.
 - [ ] Apply the vertical-list test and caller test; reject compressed inventories.
