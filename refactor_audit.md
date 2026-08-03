@@ -4644,7 +4644,7 @@ manufacture it. Recorded here precisely because that distinction is easy to
 overstate.
 
 **The concurrency test's own overlap was assumed, and Windows caught it
-(`82cfe91` → `bc0`).** Case 5 constructs an observer thread and then releases the
+(`82cfe91` → `7d8336c`).** Case 5 constructs an observer thread and then releases the
 gate that unblocks the body. Constructing a thread is not scheduling it: on
 Windows the body ran to completion first, so the reader's first read found the
 job already finished and it exited having overlapped nothing. **Its own control
