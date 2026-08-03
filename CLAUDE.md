@@ -396,9 +396,15 @@ owning the once-per-run bookkeeping while each model keeps its whole fit in
 (legacy bugs #13 and #14, above) before its extraction was allowed to start.
 `RegressNet` now shares `beginAnalysis` / `fitCandidate` / `reportComparison` /
 `endAnalysis` — four mechanisms, **none of which knows which direction is running** — while
-both selection loops stay whole. **Next: 13, the GUI async launcher**, which is where the
-untested `runOnWorker` / CLI-boundary debt D9 left behind gets paid; then 14, the measured
-`gramRows()` / CGD-Shanno allocation work.
+both selection loops stay whole. **13, the GUI async launcher, is in progress: its
+characterization and proposal are landed (§20), the extraction awaits review.**
+`tests/gui/asyncjob.sh` is a new gate — 150 assertions against a live server, eleven
+sabotages, and **two came back NOT caught**: inverting publish-then-clear and setting
+`job.running` inside the worker are both invisible from outside the process (0/6 and
+0/3, measured), because a status request holds `progressMutex` for microseconds out of
+a round trip of hundreds. The ordering the launcher exists to maintain therefore has no
+effective test while it lives in `gui.cpp` — the measured form of the debt D9 recorded.
+Then 14, the measured `gramRows()` / CGD-Shanno allocation work.
 
 **Interfaces.** The CLI menus are **frozen** but fully working — they remain the
 authoritative feature list rule 5 measures the GUI against. `neuron --gui` (embedded
@@ -473,9 +479,12 @@ how many independent clusters an interval and a *p* rest on.
 Release build → `tests/golden/run_golden.sh` byte-identical (3 transcripts: `xor_seed42`,
 `regress_seed42`, `binormal_seed42`) → `ctest` (**30 tests** as of 2026-08-02 — run
 `ctest -N`, never a remembered number) → `tests/gui/smoke.sh` →
+**`tests/gui/asyncjob.sh`** (the async-job lifecycle; separate from smoke so a hang or a
+terminated server cannot take the endpoint coverage with it) →
 `tests/oracle/verify_oracle.sh` numerically identical → **`tests/tools/run_tools.sh`** →
 `git diff --check` → live `neuron --gui` click-through for anything that adds a control.
-CI runs the build, goldens, ctest, smoke, and the Python tools on macOS/Linux/Windows, and
+CI runs the build, goldens, ctest, smoke, asyncjob, and the Python tools on
+macOS/Linux/Windows, and
 **a commit is not finished until CI is green on its exact SHA** on all three.
 The automated gates are currently green, and **no GUI click-through is outstanding** —
 the last one, the group-aware CV controls, was run and approved by Craig on 2026-07-31. The

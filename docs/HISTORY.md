@@ -3793,3 +3793,73 @@ and found more than the extraction it was written for.
   primary or authoritative citation; adaptations must say what is inherited and what is
   local; project-defined mechanisms must say why they exist. A public addition is not
   documented if understanding it requires already knowing its name.
+
+## 2026-08-03 — Refactor item 13: the GUI async-job launcher, characterized
+
+Characterization and proposal only; `src/` was not touched. `refactor_audit.md` §20 is
+the full record.
+
+- **The duplication is a seven-statement prelude, character-identical at all four launch
+  sites** (train, OBD, CV, stepwise). Normalized and de-commented, the only executable
+  difference between them is the payload the thread carries; each site then writes its
+  capture list twice, once for the thread and once for the inner body. `runOnWorker` is
+  already one implementation — it is the prelude that exists four times.
+- **`tests/gui/asyncjob.sh` + `asyncjob_driver.py`, 150 assertions, ~9 s, its own CI step
+  on all three platforms.** Deliberately separate from `smoke.sh`: it starts and cancels
+  real long jobs, and a hang or a terminated server here must not take the endpoint
+  coverage with it. Every wait has a deadline and no assertion is about elapsed time;
+  `wait_for_overlap()` blocks until an observer has recorded `running:true` before Stop
+  is sent, so a cancellation case can never pass by stopping a job that already finished.
+  Every stale-state case asserts its own control first — the progress field must be seen
+  while its own job runs, or its later absence proves nothing.
+- **Eleven sabotages, each with the sabotaged translation unit demonstrably recompiled on
+  introduction and again on restoration.** Nine failed distinct assertion sets: removing
+  the reap at the training launch and at the CV launch each *terminates the server*
+  (`std::thread` move-assignment over a joinable thread); each of the three
+  `resetForNewRun` fields fails only its own case; dropping the cancel-latch clear at the
+  async launch fails three including "the second run must end at its own ceiling, got
+  cancelled"; dropping it in the blocking stepwise path fails three including "got
+  'reverse stepwise regression cancelled'"; removing one endpoint's busy gate fails
+  exactly that endpoint; dropping the published result fails seventeen.
+- **Two sabotages came back NOT caught, and that is the finding.** Inverting
+  publish-then-clear inside `runOnWorker` passes 3/3 with one observer and 3/3 with
+  eight; moving `job.running = true` into the worker passes 3/3. Both are *ordering*
+  invariants, and both are unreachable from outside the process for a structural reason:
+  a status request holds `progressMutex` for microseconds out of a round trip of
+  hundreds, so mutex **occupancy**, not observer count, is the ceiling — 24 observer-job
+  pairs caught the inversion zero times — and a thread starts in microseconds where the
+  next HTTP call takes hundreds. **The invariant the launcher exists to maintain has no
+  effective test while it lives in `gui.cpp`.** That is the measured form of the debt D9
+  recorded in §12.10, and the argument for the extraction. Both assertions stay, labeled
+  in the source with exactly what was measured, because the result assertion still
+  catches a dropped result seventeen times over.
+- **Nothing else is reachable either, searched rather than assumed.** No legitimate
+  request can make an async body throw: training is wrapped by
+  `runTrainingAndBuildResult`'s own handler, stepwise catches its own `RegressNetErr`,
+  and OBD and CV report refusals as `ok:false` results rather than throwing (`obd.cpp`
+  contains no `throw` at all). So `runOnWorker`'s two handlers are dead against every
+  accepted input — which is why D9's evidence had to be a manual injection — while
+  `runObdJob` and `runCvJob` have **no inner handler at all** and depend on the boundary
+  entirely. The CLI boundary has no reachable trigger either; a malformed dataset is
+  refused politely by the menus.
+- **`run_gui`'s shutdown join is correct and dead.** It sits after
+  `svr.listen_after_bind()`, and nothing calls `svr.stop()` — the process ends by signal,
+  which never returns from `listen`. "Normal server shutdown never destroys a joinable
+  thread" cannot be exercised because normal server shutdown does not occur.
+- **Three findings recorded for Sol rather than repaired in passing.** (1) All four sites
+  set `job.running = true` *before* constructing the thread, so a construction failure
+  leaves the GUI permanently busy — every endpoint 409s forever, Stop answers "stopping"
+  while nothing runs, and only a restart recovers. It cannot be made fail-first: the
+  trigger needs thread-resource exhaustion and is not portably forceable, though the
+  *repair* is directly unit-testable once the launcher is linkable. (2) The stepwise
+  launch captures a raw `Network*` while the training launch deliberately captures
+  nothing dereferenceable; both are safe today for different reasons, and the difference
+  is currently a convention in two comments rather than a stated rule. (3)
+  `handleTrainStop` can leave the latch set if the job finishes between its check and its
+  store — harmless only because of who reads the latch, an argument three legs deep, all
+  three of which the extraction must leave intact.
+- No race, deadlock or stale-state defect was found beyond those. The publish-then-clear
+  ordering is correct as written, and correct for a reason that is not local to the
+  worker: `handleTrainStatus` holds `progressMutex` across **both** the `running` read
+  and the `result` read, so an observer's critical section totally orders against the
+  worker's publish. The extracted unit must state that, since it constrains a caller.

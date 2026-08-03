@@ -706,6 +706,12 @@ the run does not change the neural net's numbers). See
   `./tests/golden/run_golden.sh` (three seeded engine sessions -- `xor_seed42`,
   `regress_seed42`, `binormal_seed42` -- must match
   committed transcripts byte-for-byte).
+- GUI: `./tests/gui/smoke.sh` (every endpoint and the page's own controls) and
+  `./tests/gui/asyncjob.sh` (the async-job lifecycle underneath all four long
+  jobs — the busy gate, the two open doors, cancellation, and the reset that
+  keeps one job's progress out of the next one's status). Both start a real
+  server on an OS-assigned port; the second is separate so that a hang or a
+  terminated server there cannot take the endpoint coverage with it.
 - The low-birth-weight dataset is a self-verifying reference: follow
   `docs/datasets/low-birth-weight/README.md` and the engine should report
   log likelihood −111.2865 on the committed betas.

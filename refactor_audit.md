@@ -1061,8 +1061,21 @@ needs. That takes 149 compilations to about 67 and speeds every platform.
     standalone analysis leaving a trained network's guesses alone. **Six
     sabotages**, each failing a distinct set — see §12.12. No implementation
     code was touched.
-12. Stepwise extraction — only after forward coverage exists.
-13. GUI async launcher, with its concurrency tests.
+12. ~~Stepwise extraction~~ — **DONE, five commits**, and the sequence is the
+    record: characterization (`d0bac14`), then the two crashes it found as
+    their own fail-first correctness commits (`e4e0bad` the uninitialized
+    reverse winner, `a4a878a` the input structure validated only by its
+    maximum node index), then the extraction (`28dcf22`), then a factual
+    correction (`edd1b64`). `beginAnalysis` / `fitCandidate` /
+    `reportComparison` / `endAnalysis` are shared; **both selection loops stay
+    written out whole** and no shared mechanism knows the direction. §§15-18,
+    corrected by §19.
+13. GUI async launcher, with its concurrency tests. **Characterization and
+    proposal done — §20.** `tests/gui/asyncjob.sh` (150 assertions, its own CI
+    step) with eleven sabotages, **two of which came back not caught**: the
+    publish-then-clear ordering and "running set before the launch returns" are
+    both unreachable from outside the process, which is the measured argument
+    for making the launcher linkable. Extraction awaiting review.
 14. Measured `gramRows()` / CGD-Shanno allocation work, only if justified.
 
 **The governing sentence, Sol's:** remove duplicated mechanisms, but never trade away the
@@ -4199,3 +4212,327 @@ convergence throws below it went unused. That is the §14.3 mistake in a new
 place — a measurement stopped one step early because it already agreed with the
 expected conclusion — and the disproof was sitting in a committed reference
 transcript the whole time.
+
+---
+
+## 20. Item 13 — the GUI async-job launcher: characterization and proposal (2026-08-03)
+
+Written first, per Sol, and pushed with **no implementation change**. This section
+is the characterization record, the findings, and the extraction proposal. Nothing
+in `src/` moved.
+
+### 20.1 The duplication, measured
+
+Four launch sites: `handleTrain` (`gui.cpp:1499-1517`, the only *optional* async
+path), `handleObd` (`:1806-1817`), `handleCv` (`:2895-2905`), `handleRegress`
+(`:3118-3133`, also optional). Normalizing whitespace and dropping comments, the
+**seven-statement prelude is character-identical at all four**:
+
+```cpp
+if ( job.worker.joinable() )
+    job.worker.join();
+{
+    lock_guard< mutex > lock( job.progressMutex );
+    job.resetForNewRun();
+}
+job.cancel = false;
+job.running = true;
+```
+
+The **only** executable difference between the four sites is the payload the
+thread carries. Every site then wraps its payload in the same two layers —
+`thread( [caps]{ runOnWorker( [caps]{ return runXJob( caps ); } ); } )` — so the
+capture list is written twice per site, once for the thread and once for the
+inner body.
+
+| site | captures | shape |
+|---|---|---|
+| train | `continued, autoSelect, maxIter` | three scalars, nothing dereferenceable |
+| OBD | `cfg` | one config struct by value |
+| CV | `c` | one config struct by value |
+| stepwise | `net, variable_defs, direction, threshold` | **a raw `Network*`**, a vector, a string, a double |
+
+`runOnWorker` (`:1258-1281`) is already one implementation; it is the launch
+*prelude* that is written four times, not the worker boundary.
+
+### 20.2 The characterization that now exists
+
+`tests/gui/asyncjob.sh` + `tests/gui/asyncjob_driver.py` — **150 assertions**,
+about 9 seconds, a real server on an OS-assigned port, stdlib-only Python. It is
+deliberately NOT part of `smoke.sh`: it starts and cancels real long jobs, and a
+hang or a terminated server here must not take the endpoint coverage with it.
+Registered as its own CI step on all three platforms.
+
+Every wait has a deadline, and **no assertion is about elapsed time**. Where a
+case needs the job to be genuinely in flight, `wait_for_overlap()` blocks until
+an observer has recorded `running:true` before Stop is sent — so a cancellation
+case can never pass by stopping a job that had already finished. Each stale-state
+case asserts its own control first (the field must be seen while its own job
+runs), because "no stale progress appeared" is vacuous if nothing was ever
+observed (standing rule 2's artifact clause).
+
+Covered: the blocking path publishing nothing to the job channel; the busy gate
+on six endpoints plus a second async start; both open doors; cancellation of all
+four job kinds, each keeping its own result shape; the reap; the cancellation
+latch not being inherited by the next async job; `resetForNewRun` field by field;
+concurrent observers never reading torn JSON; and the blocking-stepwise latch
+clear.
+
+### 20.3 The sabotage table
+
+Every sabotage deleted `neuron.dir/src/gui.cpp.o` and required the build log to
+name it recompiling, **on introduction and again on restoration** (standing rule
+2's fresh-compilation protocol).
+
+| # | sabotage | result |
+|---|---|---|
+| S1 | remove the reap at the **training** launch | the server **terminates**; "the server stopped answering /api/train" |
+| S10 | remove the reap at the **CV** launch | the server terminates at `/api/cv` — each site's reap is separately reached |
+| S3 | `resetForNewRun` stops clearing `obdPhase` | 2 — train-after-OBD **and** train-after-CV (CV sets the coarse phase too) |
+| S8 | `resetForNewRun` stops clearing `stepwise` | 1, and only that one |
+| S9 | `resetForNewRun` stops clearing the CV fields | 1, and only that one |
+| S4 | the training launch stops clearing `job.cancel` | 3, incl. "the second run must end at its own ceiling, got cancelled" |
+| S5 | blocking stepwise stops clearing a stale Stop | 3, incl. "got 'reverse stepwise regression cancelled'" |
+| S7 | `/api/stats` loses its busy gate | 1, and only that one |
+| S11 | `runOnWorker` drops the body's result | 17, across every job kind and the concurrent-observer case |
+| **S2** | **invert publish-then-clear in `runOnWorker`** | **NOT CAUGHT** — 0/3 with one observer, 0/3 with eight |
+| **S6** | **`job.running` set by the worker instead of before the launch returns** | **NOT CAUGHT** — 0/3 |
+
+### 20.4 The two negatives are the finding
+
+S2 and S6 are both **ordering** invariants, and neither is reachable from outside
+the process. The reason is structural, not a matter of polling harder:
+
+- **S2.** With the inversion, an observer catches it only by holding
+  `progressMutex` at the instant the worker clears `running` — a window of
+  nanoseconds. A status request holds that mutex for a few microseconds out of a
+  round trip of hundreds, so *occupancy*, not observer count, is the ceiling.
+  Eight concurrent pollers over three rounds — 24 observer-job pairs — caught it
+  zero times.
+- **S6.** A `std::thread` starts in microseconds; the next HTTP request takes
+  hundreds. The "next call is already 409" assertion cannot see the difference
+  between `running` set before the launch returns and set by the worker.
+
+**So the invariant the launcher exists to maintain has no effective test today**,
+and cannot acquire one while it lives in `gui.cpp`. That is the concrete form of
+the debt §12.10 recorded, and it is the argument for this item. The two
+assertions stay in the file — S11 shows the result assertion catches a dropped
+result 17 times over — but they are labeled in the source with exactly what was
+measured, so neither is read as more than it is.
+
+### 20.5 What is NOT reachable at all today, searched rather than assumed
+
+**No legitimate request can make an async body throw**, so `runOnWorker`'s two
+handlers (proposal items 7-9) are dead against every input the API accepts:
+
+- `runTrainJob` — `runTrainingAndBuildResult` catches `const exception&` itself;
+- `runRegressJob` — catches its own `RegressNet::RegressNetErr`;
+- `runObdJob` — OBD reports ceiling exhaustion as an `ok:false` **result**, not a
+  throw (`obd.cpp` contains no `throw` at all);
+- `runCvJob` — a failed fold sets `ok = false` on its record; `crossval.cpp`
+  throws only in its three deliberate *rethrows* of `Matrix` contract types.
+
+That is why D9's evidence had to be a manual injection. Note that **`runObdJob`
+and `runCvJob` have no inner handler at all**, so they depend entirely on the
+boundary for anything unexpected — which makes testing it more than a formality.
+
+**The CLI boundary (item 17) likewise has no reachable trigger.** Probed: a
+malformed dataset is refused politely by the menus and returns to the prompt.
+
+**Item 14 (shutdown) cannot be exercised because the code is unreachable in
+production.** `run_gui`'s `if ( job.worker.joinable() ) { cancel; join; }` sits
+after `svr.listen_after_bind()`, and nothing calls `svr.stop()` — the process
+ends by signal, which never returns from `listen`. The guard is correct and dead.
+
+### 20.6 Findings to settle before the extraction
+
+**F1 — thread-construction failure leaves the GUI permanently busy.** All four
+sites set `job.running = true` **before** constructing the thread. If the
+constructor throws, the exception leaves the handler with `running` still true
+and nothing to clear it: every engine endpoint 409s forever, status reports
+`running:true` with `result:null`, and Stop answers "stopping at the end of this
+iteration" while nothing is running. Only restarting the server recovers.
+
+Sol asked for a fail-first correctness commit for exactly this class of hole.
+**It cannot be fail-first: the trigger is not portably forceable** (it needs
+thread-resource exhaustion). What *can* be tested, once the launcher is
+linkable, is the repair — a directly callable abort path that clears `running`
+and publishes a structured failure. Recommendation: fold the guard into the
+extraction with the abort path unit-tested directly, and record here that the
+trigger is justified by inspection alone. **Sol's call, not mine.**
+
+**F2 — the stepwise launch captures a raw `Network*`; the training launch
+deliberately captures nothing dereferenceable.** Both are safe today, for
+different reasons: training re-derives its pointers because auto-selection may
+*replace* `modelPtr`, and stepwise's pointer stays valid only because the busy
+gate prevents `/api/model` from replacing the model while a job runs. The
+difference is currently a convention in two comments. It should become a stated
+rule of the extracted unit (proposal item 7), not a habit.
+
+**F3 — `handleTrainStop` can leave the latch set.** It checks `job.running`, then
+sets `job.cancel = true`; a job that finishes in between leaves `cancel` set with
+nothing running. This is harmless *today* only because of who reads the latch:
+async starts clear it, blocking stepwise clears it (`gui.cpp:3144`), and blocking
+training never reads it (the observer is only installed when `observed` is true,
+and `autoalgo::pick` gets `nullptr`). Recorded because it is an argument
+three-deep, and the extraction must not disturb any of its legs. S5 is its guard.
+
+No race, deadlock, or stale-state defect was found beyond these. The
+publish-then-clear ordering is correct as written: `handleTrainStatus` holds
+`progressMutex` across **both** the `running` read and the `result` read, so an
+observer's critical section is either entirely before the worker's publish (and
+must then see `running:true`, because the clear comes after that publish) or
+entirely after (and sees the result). That is why the invariant needs the status
+handler to keep holding one lock across both reads — a fact worth stating in the
+extracted unit, since it is not local to the worker.
+
+### 20.7 The proposal
+
+**Lowest legitimate owner.** The job state is strings, vectors, atomics, a mutex
+and a thread — no engine type appears in it. It belongs in its own linkable unit,
+`src/asyncjob.{h,cpp}`, in a new `neuron_job` static library that depends on
+nothing but the standard library and `Threads::Threads`. `gui.cpp` links it; so
+do the new tests. It must **not** go into `neuron_core`: the numerical layer has
+no business gaining a thread.
+
+**State ownership.** `AsyncJob` keeps exactly what it has now — `worker`,
+`running`, `cancel`, `progressMutex`, the decimated series, `result`, and the
+four per-job progress payloads — plus `resetForNewRun()` and `pushSample()`
+unchanged. The GUI keeps every *rendering* decision: `handleTrainStatus` stays in
+`gui.cpp` and formats the fields it reads.
+
+**Proposed interface**, three methods where there are now seven statements:
+
+```cpp
+// Reap the finished worker, clear every per-run field, arm the latch, mark the
+//    engine owned, and start the body -- in that order, which is the order the
+//    busy gate and the status endpoint both depend on. Callers hold the engine
+//    lock. Returns false only if the worker could not be started, in which case
+//    nothing is left running.
+bool start( std::function< std::string() > body );
+
+// The worker boundary: run the body, convert any escape to a structured
+//    failure, publish the result under the mutex, and only then clear running.
+void runBody( const std::function< std::string() >& body );   // worker-side
+
+void requestStop();      // the latch, unchanged
+void joinForShutdown();  // cancel + join, for the (currently dead) exit path
+```
+
+Each launch site becomes one statement:
+
+```cpp
+if ( !job.start( [ cfg ] { return runObdJob( cfg ); } ) )
+    return jsonMsg( false, "could not start a worker thread" );
+```
+
+**Call flow.** `start()` — under the caller's engine lock — joins a joinable
+worker; takes `progressMutex` and calls `resetForNewRun()`; releases it; sets
+`cancel = false`; sets `running = true`; constructs the thread. If construction
+throws, it catches, clears `running`, publishes a failure result, and returns
+false (F1). `runBody()` runs on the worker: try/catch/catch, then `result` under
+`progressMutex`, then `running = false`. Status and stop are unchanged.
+
+**Lock ordering.** One rule, and it is the reason `start()` is written the way it
+is: **the join happens before `progressMutex` is taken, never while holding it.**
+The outgoing worker's last act before returning is to take that same mutex to
+publish; joining under it would deadlock. `progressMutex` is never held across a
+join, a thread construction, or any engine call.
+
+**Happens-before.** Stated in the header, because it is a property of two files
+at once: the worker stores `result` under `progressMutex` and clears the
+`atomic<bool> running` after releasing it; `handleTrainStatus` holds
+`progressMutex` across **both** reads. An observer's critical section therefore
+totally orders against the worker's publish, and `running == false` implies the
+result is visible. `running` stays `std::atomic` with default (seq_cst) ordering
+— **the ordering is not to be "optimized" to relaxed**; the mutex is what carries
+it and the atomic is what makes the gate readable without one.
+
+**Callable lifetime.** The body is a `std::function< string() >` **owned by the
+job** for the run's duration. The rule F2 asks for, stated once: *a body captures
+by value, and captures a pointer only to something the busy gate guarantees will
+outlive the run.* Request objects are never captured — every site already copies
+what it needs out of `httplib::Request` before launching, and that stays true.
+
+**Costs, with frequency.** One `std::function` construction, one thread creation,
+one `resetForNewRun`, two mutex acquisitions and one join **per job** — a job
+being seconds to hours of training. Nothing is added to any per-exemplar,
+per-iteration or per-candidate path; `GuiObserver::onIteration` and
+`pushSample()` are untouched. Rule 7's prohibition is about hot loops, and this
+is one call per long job, exactly as §12.9 argued for `runOnWorker` itself.
+
+**How it becomes testable, with no production fault hook.** The tests link
+`neuron_job` and supply their own bodies. `check_asyncjob` (a new ctest case)
+drives the real `AsyncJob` with bodies built from `std::promise`/`std::latch`-
+style handshakes: a body that signals "entered" and blocks until the test allows
+it to return; a body that throws `std::runtime_error`; a body that throws an
+`int`. That makes the two measured-unguarded invariants deterministic at last:
+
+- **ordering** — the test's body signals, the test then polls the *same*
+  snapshot accessor `handleTrainStatus` uses, and asserts across many
+  start/finish cycles that no snapshot shows `running == false` with an empty
+  result. In-process, the sampler can spin without a network round trip, so the
+  window it must hit is microseconds of its own critical section rather than
+  nanoseconds inside a millisecond request;
+- **`running` set before `start()` returns** — a body that blocks forever on a
+  latch, and the assertion that `running` is already true on the line after
+  `start()` returns, before the latch is released. Deterministic, no timing.
+
+Plus: the reap (start twice, assert the second returns and the first body ran to
+completion); reset (dirty every field, start, assert all clear); the exception
+paths (item 7 gives exactly `the run failed: <what>`, item 8 the generic
+message, item 9 that neither escapes); and F1's abort path called directly.
+
+Every wait gets an explicit timeout so a broken test fails instead of hanging
+CI, and the exception cases are ordered so that one aborting cannot hide the
+rest — the `check_matrix_bounds` precedent.
+
+**The CLI boundary, item 11 of Sol's list.** Same shape, no fault hook: extract
+`main`'s body into a linkable
+
+```cpp
+int boundary::guard( const std::function< int() >& body, std::ostream& err );
+```
+
+in the same unit. `main` becomes
+`return boundary::guard( [&]{ return neuronMain( argc, argv ); }, cerr );`, and
+`check_asyncjob` calls `guard` with a body that returns 0, one that throws
+`std::runtime_error`, one that throws `Matrix< double >::BoundsViolation`, and
+one that throws an `int` — asserting the return code **and** the exact text on an
+`ostringstream`. The production binary gains no injectable path.
+
+**Expected reduction.** 28 lines of prelude become 4, plus the four doubled
+capture lists collapse to one each: roughly **−35 lines at the call sites, +90 in
+the new unit** for the header contract and the two guards F1 needs. As with item
+12, the extraction does not save lines — it buys one implementation of an
+ordering that is currently written four times and tested none. Line count is not
+the objective (rule 7).
+
+**Sabotage plan for the extraction commit.** Each new shared mechanism mapped to
+the assertions that must fail: drop the join → the reap cases; drop
+`resetForNewRun` → the reset cases; clear `running` before publishing → the
+in-process ordering case (which is the whole point: S2 must go from *not caught*
+to *caught deterministically*); set `running` inside the body → the
+"already true when `start()` returns" case (S6, likewise); drop the
+`catch ( const exception& )` → the exact-message case; drop `catch ( ... )` →
+the unknown-exception case must abort rather than pass; make `guard` return 0 on
+a throw → the CLI exit-code case.
+
+**Documentation that lands with the extraction:** the Manifest's GUI source-map
+row and the asynchronous-jobs description, `docs/gui_cli_parity.md` (unchanged
+in content — no endpoint, parameter or JSON field moves — but re-checked and
+said so), `AGENTS.md`, this section as an as-landed record, `CLAUDE.md`'s gate
+list and roadmap, and the `docs/HISTORY.md` entry.
+
+### 20.8 What the extraction must NOT do
+
+Consolidate lifecycle mechanics only. **No generic task framework** — the type
+serves these four GUI jobs and takes a `string()` body, nothing more. No engine
+domain logic moves into the launcher; no operation's cancellation result is
+normalized in the shared layer (a cancelled OBD, CV, training run and stepwise
+analysis keep four different shapes, and the characterization pins all four). No
+endpoint name, JSON field, progress semantic, busy behavior or parity entry
+changes. Blocking training and blocking stepwise do not pass through the
+launcher and keep behaving exactly as they do now. No detached threads. The
+publish-then-clear ordering is written explicitly, never left to incidental
+atomic behavior.

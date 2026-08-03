@@ -76,3 +76,10 @@ jobs:
       - name: GUI endpoint smoke test
         shell: bash
         run: ./tests/gui/smoke.sh
+
+      # The async-job lifecycle, kept separate from smoke.sh on purpose: it
+      # starts and cancels real long jobs, and a hang or a terminated server
+      # here must not take the endpoint coverage down with it.
+      - name: GUI async-job lifecycle test
+        shell: bash
+        run: ./tests/gui/asyncjob.sh
