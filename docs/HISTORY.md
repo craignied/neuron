@@ -1,23 +1,27 @@
 # neuron-3.0 — development history
 
-**This file is the archive, not the spec.** `CLAUDE.md` governs: it holds the standing
-rules, the current state, the settled decisions, and the active work. This file holds the
-dated record of how the project got there — every session entry, and the completed
-roadmaps in the form they were agreed and executed.
+**This file is the archive, not the spec.** `CLAUDE.md` is the concise task router;
+`docs/development_rules.md`, the Design Manifest, and the focused documents it
+names govern current work.  This file holds the dated record of how the project
+got there — session evidence and completed roadmaps in the form executed.
 
 **Do not import this file** (no `@docs/HISTORY.md`) — it is ~160 KB and would be pasted
 into every prompt. Read or grep it on demand when you need the forensic detail behind a
 decision: why a rule exists, why an approach was rejected, what a legacy bug actually did.
 
-**Where new entries go.** Session entries are appended to the status log below, newest
-last, in the house style (findings first, measurements over stories). `CLAUDE.md`'s
-"Where things stand" is *rewritten in place* rather than grown — that is what keeps it
-readable. If you find yourself adding a fourth paragraph of narrative to `CLAUDE.md`, it
-belongs here instead.
+**Where new entries go.** Append dated evidence at the end, findings first and
+measurements over stories.  Keep `CLAUDE.md` to current state and routing; detailed
+rationale belongs here.
 
-The eleven numbered legacy bugs, the ROC/Wickens reconciliation, the H-L and Pearson
-forensics, the nested-OBD nondeterminism hunt, and the reasoning behind every rejected
-approach are all below or in the `docs/` files they cite.
+The numbered legacy bugs, ROC/Wickens reconciliation, H-L and Pearson forensics,
+nested-OBD nondeterminism hunt, completed refactor, ROADMAP 4, and rejected
+approaches are below or in the documents they cite.  Search by mechanism or date;
+do not read this file sequentially unless reconstructing the whole project.
+
+Quick routes: optimizer/training history — search `Shanno`, `CGD`, `autostep`,
+`gradient`, or `ROADMAP 2`; numerical contracts — `D5` and `D9`; refactor —
+`OneHiddenNet`, `DFA`, `stepwise`, and `AsyncJob`; evaluation design — `ROADMAP 4`,
+`DeLong`, `Obuchowski`, and `locked test`; parsing — `B9`.
 
 ---
 
@@ -4126,3 +4130,31 @@ would have asked Windows for 2,147,483,647 iterations and returned only because 
 condition left over from an earlier case happened to fire. The rule: **a test that pins a
 defect must pin the defect, not one platform's arithmetic**. Rewritten on `/api/cv folds`
 with a value that saturates on both widths, and asserting only what is common to both.
+
+## 2026-08-03 — post-refactor Manifest and instruction audit
+
+The completed refactor and ROADMAP 4 received a source-to-Manifest audit under
+the documentation chapter's caller and vertical-list tests.  Recent compressed
+inventories were expanded into purposes, ownership boundaries, complete callable
+contracts, public fields, failure semantics, examples, and notes.  In particular,
+`cvadapters` now explains why a model-family translation layer exists, when CV and
+locked evaluation use it, and how it prevents nested-selection leakage.  The
+index gate grew from 43 major objects/124 methods to 54/203, covering nested
+records, callbacks, current accessors, and reporting validators.
+
+Figure 12.1 was rebuilt from its editable Graphviz source.  It now includes
+`OneHiddenNet`, separates `crossval` from `cvadapters`, separates optimizer probes
+from factories, fixes `RegressNet`'s relationship to cloned networks, and includes
+the GUI/CLI process boundaries and strict parsers.  Three unpublished `\iffalse`
+blocks (MSVC/Makefile setup, MSVC RTTI, and Perl/Palm/iPhone utilities) were
+physically removed.  Obsolete configurable ROC threshold/bin members were removed
+from the foundational `TwoSet` inventory.
+
+The always-loaded AI context was reduced rather than merely rearranged:
+`CLAUDE.md` is now a 129-line router and current constitution, and `AGENTS.md` no
+longer embeds hundreds of lines of REST detail already maintained in the
+Manifest.  `docs/README.md` routes current versus historical authorities;
+`docs/development_rules.md` holds engine rules; and
+`docs/optimizer_research.md` is the lazy-loaded protocol for the next research
+phase.  Completed plans and the refactor audit are explicitly marked historical,
+while this file remains the searchable forensic archive.

@@ -1,45 +1,65 @@
 digraph neuron_objects {
-  graph [rankdir=TB, bgcolor="transparent", margin=0.04, nodesep=0.22,
-         ranksep=0.30, fontname="Helvetica"];
-  node [shape=box, style="rounded", fontname="Helvetica", fontsize=9,
+  graph [rankdir=TB, bgcolor="transparent", margin=0.03, nodesep=0.16,
+         ranksep=0.24, fontname="Helvetica", ratio="compress"];
+  node [shape=box, style="rounded", fontname="Helvetica", fontsize=10,
         margin="0.08,0.05"];
-  edge [fontname="Helvetica", fontsize=7, arrowsize=0.55];
+  edge [fontname="Helvetica", fontsize=8, arrowsize=0.55];
 
   DataSet [label="DataSet"];
   TwoSet [label="TwoSet"];
   Model [label="Model"];
   Iterative [label="Iterative"];
   Network [label="Network"];
-  Concrete [label="BareProp | SimpleProp | BackProp | Logistic"];
-  DFA [label="DFA -> LDFA / QDFA"];
+  OneHidden [label="OneHiddenNet"];
+  Simple [label="BareProp | SimpleProp"];
+  OtherNet [label="BackProp | Logistic"];
+  DFA [label="DFA"];
+  ConcreteDFA [label="LDFA | QDFA"];
   RegressNet [label="RegressNet"];
 
   Split [label="nsplit\npartition planners", shape=component];
   Eval [label="evaldesign\ndesign + inference policy", shape=component];
   OBD [label="obd\narchitecture selection", shape=component];
-  CV [label="crossval + cvadapters\nrepetition + procedure fits", shape=component];
+  Adapters [label="cvadapters\nmodel -> procedure", shape=component];
+  CV [label="crossval\nrepetition + pairing", shape=component];
   Report [label="cvreport\nthree-tier reporting", shape=component];
   Cov [label="auccov\nshared AUC algebra", shape=component];
   Est [label="delong | clustered_auc\ncovariance estimators", shape=component];
-  Factory [label="modelfactory | netclone | autoalgo\nconstruction, cloning, optimizer probes", shape=component];
+  Factory [label="modelfactory | netclone\nconstruction + cloning", shape=component];
+  Auto [label="autoalgo\noptimizer probes", shape=component];
   Plateau [label="PlateauDetector", shape=component];
+  Async [label="AsyncJob\nGUI worker lifecycle", shape=component];
+  Parse [label="util strict parsers\nrequest syntax", shape=component];
+  Guard [label="procguard\nCLI exception boundary", shape=component];
 
   DataSet -> TwoSet [label="owns"];
   Model -> Iterative [label="base of", dir=back];
   Iterative -> Network [label="base of", dir=back];
-  Network -> Concrete [label="base of", dir=back];
+  Network -> OneHidden [label="base of", dir=back];
+  OneHidden -> Simple [label="base of", dir=back];
+  Network -> OtherNet [label="base of", dir=back];
   Model -> DFA [label="base of", dir=back];
-  Network -> RegressNet [label="cloned by"];
+  DFA -> ConcreteDFA [label="base of", dir=back];
+  RegressNet -> Network [label="clones + refits"];
 
   Split -> DataSet [label="indices"];
-  DataSet -> CV [label="materializes"];
+  DataSet -> CV [label="materializes folds"];
   Factory -> Network [label="creates/clones"];
   Plateau -> Iterative [label="stop signal"];
+  Auto -> Network [label="probes clones"];
   OBD -> Network [label="selects"];
-  CV -> OBD [label="nested"];
+  Adapters -> Network [label="fits"];
+  Adapters -> DFA [label="fits"];
+  Adapters -> OBD [label="nests"];
+  CV -> Adapters [label="calls procedure"];
   Eval -> Split [label="describes"];
   CV -> Report [label="results"];
   Eval -> Report [label="policy"];
   Cov -> Est [label="combined by"];
   Est -> Report [label="inference"];
+  Parse -> Async [label="validated request"];
+  Async -> CV [label="runs long job"];
+  Async -> OBD [label="runs long job"];
+  Async -> RegressNet [label="runs long job"];
+  Guard -> Model [label="CLI boundary"];
 }

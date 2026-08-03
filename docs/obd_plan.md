@@ -1,5 +1,9 @@
 # ROADMAP 2 Phase 4 — OBD hidden-layer sizing: implementation plan
 
+> **Historical implementation plan.** OBD has shipped.  The current contract is
+> in the Design Manifest and `src/obd.*`; load this file only for the original
+> measurements, rejected alternatives, and implementation sequence.
+
 > **STATUS: LANDED 2026-07-20** (commits 3c054ab engine primitives, 070bd21
 > driver, fe354ce GUI, 4da6f48 per-size CA). This document is the design
 > record; where it and the code disagree, the code and CLAUDE.md's status

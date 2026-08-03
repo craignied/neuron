@@ -29,29 +29,63 @@ outer coordinator reimplements a lower layer's rule.
 \index{DataSet!validation set}
 \index{DataSet!covariate stratification}
 \index{DataSet!group columns}
+\index{DataSet!valLoaded}\index{DataSet!getValMatrix}\index{DataSet!getNumVal}
+\index{DataSet!monitorSetName}\index{DataSet!randomize3D}
+\index{DataSet!setStrataColumns}\index{DataSet!getStrataColumns}
+\index{DataSet!setStrataBins}\index{DataSet!getStrataBins}
+\index{DataSet!setGroupColumns}\index{DataSet!getGroupColumns}
 
-The original \texttt{DataSet} contract earlier in this chapter remains valid.
-The following public methods extend it for validation and planned partitions:
+The foundational \texttt{DataSet} design later in this chapter explains its
+ownership and normalization model.  The source and the current contract here
+govern where an older signature or field description differs.  The following
+public methods extend it for validation and planned partitions:
 
 \begin{itemize}
-\item \texttt{valLoaded()}, \texttt{getValMatrix()}, and \texttt{getNumVal()}
-      expose the optional validation set.
-\item \texttt{monitorSet()} returns \texttt{MONITOR\_NONE},
+\item \texttt{bool valLoaded()}: reports whether a validation matrix is
+      present; it does not inspect or create one.
+\item \texttt{Matrix<double>\& getValMatrix()}: returns the owned validation
+      matrix.  Call it only when \texttt{valLoaded()} is true; mutating it
+      changes the data used for validation.
+\item \texttt{unsigned getNumVal()}: returns the number of validation
+      exemplars, or zero when no validation set is loaded.
+\item \texttt{MonitorSet monitorSet()}: returns \texttt{MONITOR\_NONE},
       \texttt{MONITOR\_VALIDATION}, or \texttt{MONITOR\_TEST};
-      \texttt{monitorSetName()} returns the same choice for reports.
-\item \texttt{randomize3(nTest,nVal)} and
-      \texttt{randomize3D(testRatio,valRatio)} create an outcome-stratified
-      train/validation/test split.
-\item \texttt{makeFold(trainRows,testRows,valRows)} materializes explicit raw-row
-      indices and computes every scale from the training rows only.
-\item \texttt{setStrataColumns}, \texttt{getStrataColumns},
-      \texttt{setStrataBins}, and \texttt{getStrataBins} configure
-      outcome-by-covariate splitting.
-\item \texttt{setGroupColumns} and \texttt{getGroupColumns} configure exact
-      joint-value groups which may not be divided.
-\item \texttt{strataKey(columns,bins)} returns dense outcome-by-covariate cell
+      validation takes precedence over test, and multi-output data returns
+      \texttt{MONITOR\_NONE} because this monitor is defined only for one output.
+\item \texttt{const char* monitorSetName()}: returns the report label for the
+      same choice: ``validation'', ``test'', or ``none''.
+\item \texttt{bool randomize3(unsigned nTest,unsigned nVal)}: creates an
+      outcome-stratified train/validation/test split with exact requested test
+      and validation counts; it returns false and reports an impossible request.
+\item \texttt{bool randomize3D(double testRatio,double valRatio)}: supplies the
+      same operation in fractions, converts them to counts, and returns the
+      status from \texttt{randomize3}.
+\item \texttt{void makeFold(const vector<unsigned>\& trainRows,const
+      vector<unsigned>\& testRows,const vector<unsigned>\& valRows=\{\})}:
+      materializes explicit raw-row indices and computes every scale from the
+      training rows only.  Matrix bounds are enforced here; callers that require
+      a complete, non-overlapping partition validate it with \texttt{nsplit}
+      before materialization.
+\item \texttt{void setStrataColumns(const vector<unsigned>\& columns)}: stores
+      the zero-based input columns used for covariate strata.
+\item \texttt{const vector<unsigned>\& getStrataColumns() const}: returns that
+      stored configuration without rebuilding keys.
+\item \texttt{void setStrataBins(unsigned bins)}: stores the quantile-bin count
+      for continuous stratum columns; the caller validates its domain.
+\item \texttt{unsigned getStrataBins() const}: returns the configured count.
+\item \texttt{void setGroupColumns(const vector<unsigned>\& columns)}: stores
+      the zero-based columns whose joint values define indivisible groups.
+\item \texttt{const vector<unsigned>\& getGroupColumns() const}: returns that
+      configuration without calculating group identities.
+\item \texttt{vector<unsigned> strataKey(columns,bins) const}: returns dense outcome-by-covariate cell
       identifiers; \texttt{groupKey(columns)} returns dense exact-match group
-      identifiers.  Both read the raw matrix without changing configuration.
+      identifiers.  Both read the raw matrix without changing configuration;
+      columns outside the input range are ignored because the public REST caller
+      validates them before reaching this mechanism.
+\item \texttt{vector<unsigned> groupKey(columns) const}: returns one dense
+      identifier per raw row for exact joint values in the named columns.  If no
+      usable column remains, every row receives its own group rather than being
+      collapsed into one accidental cluster.
 \end{itemize}
 
 \subsubsection{Example}
@@ -99,10 +133,30 @@ with either policy.
 \index{RegressNet!progress}
 \index{RegressNet!candidate audit}
 \index{RegressNet!completion status}
+\index{Model!getXEerror}
+\index{TwoSet!ROCfit}\index{TwoSet!CI}
+\index{TwoSet!getTP}\index{TwoSet!getTN}\index{TwoSet!getFP}\index{TwoSet!getFN}
+\index{TwoSet!getROCx}\index{TwoSet!getROCy}\index{TwoSet!getStatCi}
+\index{TwoSet!setBootstrapResamples}\index{TwoSet!getBootstrapResamples}
+\index{TwoSet!getStatPoints}\index{TwoSet!getStatChi2}\index{TwoSet!getPearsonX2}
+\index{Iterative!stopReasonToken}\index{Iterative!setObserver}\index{Iterative!getObserver}
+\index{Iterative!getStopReason}\index{Iterative!getIterations}
+\index{Iterative!setAutoStop}\index{Iterative!getAutoStop}
+\index{Iterative!getAutoStopTol}\index{Iterative!getAutoStopWindow}
+\index{Iterative!setQuiet}\index{Iterative!getQuiet}
+\index{Network!getCondNum}\index{Network!getCondMaxEig}\index{Network!getCondMinEig}
+\index{OneHiddenNet!pack}
+\index{SimpleProp!hiddenSaliency}
+\index{Logistic!getBetas}\index{Logistic!getBetaSE}\index{Logistic!getWaldP}
+\index{RegressNet!Progress}\index{RegressNet!Candidate}
+\index{RegressNet!setThreshold}\index{RegressNet!setProgress}\index{RegressNet!setObserver}
+\index{RegressNet!getCandidates}\index{RegressNet!getSelectionPath}
+\index{RegressNet!getFinalVariables}\index{RegressNet!getFitsCompleted}\index{RegressNet!getComplete}
 
-The detailed specifications later in this chapter describe the established
-objects.  The following additions are part of their current public contracts and
-must be read with those specifications.
+The detailed specifications later in this chapter preserve the foundational
+design and equations.  The source and this section govern the current public API
+where the older record differs; the contracts below must not be read as optional
+addenda to a superseded signature or field.
 
 \subsection{Model}
 The following method exposes the objective needed by likelihood-based callers:
@@ -115,6 +169,14 @@ The following method exposes the objective needed by likelihood-based callers:
 Callers whose mathematics depends on likelihood, notably stepwise Wilks
 comparisons, query this state and refuse an incompatible source fit; they do not
 mutate the model's objective to make it appear compatible.
+
+\subsubsection{Example and notes}
+\begin{verbatim}
+if (!model.getXEerror())
+    throw runtime_error("Wilks comparison requires cross-entropy");
+\end{verbatim}
+The query is observational and does not promise that every cross-entropy model
+is otherwise eligible for a particular likelihood analysis.
 
 \subsection{TwoSet}
 \texttt{TwoSet} now exposes explicit cache invalidation and structured ROC
@@ -139,13 +201,16 @@ available:
 \begin{itemize}
 \item \texttt{void invalidate()}: clears every cached statistic after a caller
       changes predictions through a mutable accessor.
-\item \texttt{unsigned getTP()}, \texttt{getTN()}, \texttt{getFP()}, and
-      \texttt{getFN()}: return the four confusion-matrix counts at the current
-      threshold.
+\item \texttt{unsigned getTP()}: returns true positives at the current threshold.
+\item \texttt{unsigned getTN()}: returns true negatives at the current threshold.
+\item \texttt{unsigned getFP()}: returns false positives at the current threshold.
+\item \texttt{unsigned getFN()}: returns false negatives at the current threshold.
 \item \texttt{double getTrapROCarea()}: returns the exact empirical
       Mann--Whitney AUC over every distinct operating point.
-\item \texttt{const vector<double>\& getROCx()} and \texttt{getROCy()}:
-      return the empirical ROC coordinates, $1-$specificity and sensitivity.
+\item \texttt{const vector<double>\& getROCx()}: returns the empirical ROC
+      false-alarm coordinates, $1-$specificity.
+\item \texttt{const vector<double>\& getROCy()}: returns the aligned empirical
+      hit-rate coordinates, sensitivity.
 \item \texttt{ROCfit getROCfit()}: returns the current binormal ROC fit as a
       structured value; an unsupported fit has \texttt{valid=false}.
 \item \texttt{void bootstrapROC()}: performs the configured number of
@@ -183,6 +248,18 @@ available:
 \item \texttt{bool valid}: whether enough resamples succeeded.
 \end{itemize}
 
+\subsubsection{Example and notes}
+\begin{verbatim}
+TwoSet& test = data.getTestTwoSet();
+double empirical = test.getTrapROCarea();
+test.bootstrapROC();
+TwoSet::CI interval = test.getStatCi();
+\end{verbatim}
+Mutable prediction access requires \texttt{invalidate()} before another cached
+statistic is read.  The bootstrap uses an independent resampling stream and
+cannot perturb training.  A caller checks \texttt{valid} and the failure count
+before presenting an interval.
+
 \subsection{Iterative}
 \texttt{StopReason} identifies why the last run ended:
 
@@ -206,19 +283,20 @@ The following methods expose and control this state:
       single machine-readable name used in reports and JSON.
 \item \texttt{static bool converged(StopReason r)}: returns \texttt{true} only
       for the six stopping-rule outcomes listed above.
-\item \texttt{void setObserver(Observer* obs)} and
-      \texttt{Observer* getObserver()}: install or return the non-owning
-      iteration observer.
+\item \texttt{void setObserver(Observer* obs)}: installs a non-owning iteration
+      observer; null removes it, and clones do not copy the pointer.
+\item \texttt{Observer* getObserver()}: returns the installed pointer or null.
 \item \texttt{StopReason getStopReason()}: returns the last run's reason.
 \item \texttt{unsigned getIterations()}: returns iterations completed by the
       last run.
 \item \texttt{void setAutoStop(bool flag,double tol,unsigned win)}: enables or
       disables plateau stopping and sets its tolerance and window.
-\item \texttt{bool getAutoStop()}, \texttt{double getAutoStopTol()}, and
-      \texttt{unsigned getAutoStopWindow()}: return that configuration.
-\item \texttt{void setQuiet(bool flag)} and \texttt{bool getQuiet()}:
-      suppress or query narration and the reporting epilogue.  Quiet mode never
-      suppresses a calculation used by fitting or stopping.
+\item \texttt{bool getAutoStop()}: reports whether plateau stopping is enabled.
+\item \texttt{double getAutoStopTol()}: returns its relative-improvement tolerance.
+\item \texttt{unsigned getAutoStopWindow()}: returns its window width.
+\item \texttt{void setQuiet(bool flag)}: enables or disables training narration
+      and the reporting epilogue; it never suppresses fitting or stopping work.
+\item \texttt{bool getQuiet()}: returns the current narration setting.
 \end{itemize}
 
 An \texttt{Iterative::Observer} supplies:
@@ -229,6 +307,16 @@ An \texttt{Iterative::Observer} supplies:
 \item \texttt{StopReason whyStopped() const}: identifies why the observer
       returned \texttt{false}; the conservative default is cancellation.
 \end{itemize}
+
+\subsubsection{Example and notes}
+\begin{verbatim}
+network.setAutoStop(true, 1e-4, 100);
+double error = network.train();
+if (!Iterative::converged(network.getStopReason())) rejectFit(error);
+\end{verbatim}
+Reaching \texttt{STOP\_MAX\_ITERATIONS} means the operation returned weights,
+not that the fit converged.  The observer is non-owning and must outlive the run.
+Quiet mode changes output only.
 
 \subsection{Network and concrete models}
 The following current methods supplement the detailed \texttt{Network}
@@ -241,9 +329,10 @@ specification later in this chapter:
       one-output monitoring set exists.
 \item \texttt{double getCondNum() const}: returns the last computed condition
       number, or $-1$ before calculation.
-\item \texttt{double getCondMaxEig() const} and
-      \texttt{getCondMinEig() const}: return the extreme eigenvalues used in
-      that condition number.
+\item \texttt{double getCondMaxEig() const}: returns the largest absolute
+      eigenvalue used in the condition number, or $-1$ before calculation.
+\item \texttt{double getCondMinEig() const}: returns the corresponding smallest
+      absolute eigenvalue, or $-1$ before calculation.
 \end{itemize}
 
 \texttt{OneHiddenNet} sits between \texttt{Network} and the two
@@ -278,7 +367,7 @@ depend on the bias architecture:
       output layer.
 \item \texttt{virtual bool load(string\& filename)}: reads that file back,
       refusing a file whose input count disagrees with the loaded dataset.
-\item \texttt{virtual void pack()}: flattens the hidden and output gradients
+\item \texttt{virtual void pack()} (protected): flattens the hidden and output gradients
       into the packed gradient vector the conjugate-direction optimizers use.
 \item \texttt{virtual double innerTrainSet()}: performs one training pass over
       the training set and returns the set error.  This is the training loop
@@ -342,6 +431,17 @@ The bias architecture is a property of the concrete type.
       Wald-test p-values.
 \end{itemize}
 
+\subsubsection{Example and notes}
+\begin{verbatim}
+double monitor = network.sampleTestError(20);
+if (monitor >= 0) plot(monitor);
+const vector<double>& beta = logistic.getBetas();
+\end{verbatim}
+The sampling call is diagnostic and does not invalidate the full test report.
+Condition-number values are populated only after their calculation.  Hidden-unit
+growth/removal applies only to \texttt{SimpleProp}; callers retain type identity
+and never use the shared base to infer a bias architecture.
+
 \subsection{DFA, LDFA and QDFA}
 \index{DFA}
 \index{DFA!train}
@@ -388,6 +488,16 @@ class that owns it.  Both models write a \emph{graded} score through the
 logistic function rather than a hard decision, so the ROC sweep sees a curve;
 the classification boundary is unchanged.
 
+\subsubsection{Example and notes}
+\begin{verbatim}
+unique_ptr<Model> analysis(new LDFA);
+analysis->setDataSet(data);
+analysis->train();              // dispatches to DFA's final scaffold
+\end{verbatim}
+A singular covariance is reported by the scaffold as an analysis refusal.  The
+opposite linear/quadratic winner senses are mathematical contracts and may not
+be normalized through a sign or comparator flag.
+
 \subsection{RegressNet}
 The following methods support non-interactive, cancellable stepwise analysis:
 
@@ -408,30 +518,54 @@ The following methods support non-interactive, cancellable stepwise analysis:
       from a partial audit after failure or cancellation.
 \end{itemize}
 
-\texttt{Progress} contains direction, pass number, candidate number and pass
-total, completed-fit count, conceptual variable, its full input-node group,
-phase, completion flag, convergence flag, and stop-reason token.
+\texttt{Progress} is one callback snapshot:
 
-\texttt{Candidate} contains pass/candidate/variable identity, the full input
-group, prior and candidate errors, degrees of freedom, $G^2$, p-value,
-convergence, stop reason, iterations, and whether it won its pass.
+\begin{itemize}
+\item \texttt{string direction}: ``forward'' or ``reverse''.
+\item \texttt{unsigned step}: zero-based outer selection pass.
+\item \texttt{unsigned candidate} and \texttt{candidatesThisStep}: one-based
+      position and the fixed candidate count for this pass.
+\item \texttt{unsigned fitsCompleted}: candidates finished across all passes.
+\item \texttt{unsigned variable} and \texttt{vector<unsigned> inputs}:
+      conceptual variable and its complete, never-split input-node group.
+\item \texttt{string phase}: human-readable work currently underway.
+\item \texttt{bool finished}, \texttt{bool converged}, and
+      \texttt{string stopReason}: status of the most recently completed
+      candidate; convergence and reason are meaningful when finished.
+\end{itemize}
+
+\texttt{Candidate} is the permanent audit row written before eligibility is judged:
+
+\begin{itemize}
+\item \texttt{step}, \texttt{candidate}, and \texttt{variable}: selection identity.
+\item \texttt{inputs}: complete input-node group tested together.
+\item \texttt{priorError} and \texttt{error}: likelihood objectives compared.
+\item \texttt{df}: difference in free parameters.
+\item \texttt{G2} and \texttt{p}: Wilks statistic and p-value; not-a-number when
+      a failed or cancelled fit was recorded but never compared.
+\item \texttt{converged}, \texttt{stopReason}, and \texttt{iterations}: fit validity
+      and work used.
+\item \texttt{selected}: whether this candidate won its pass.
+\end{itemize}
 
 \subsubsection{Example}
 \begin{verbatim}
-network.setAutoStop(true, 1e-4, 100);
-double error = network.train();
-if (!Iterative::converged(network.getStopReason())) rejectFit();
-
-TwoSet::ROCfit fit = data.getTestTwoSet().getROCfit();
-const vector<double>& p = logistic.getWaldP();
+RegressNet stepwise(network);
+stepwise.setThreshold(0.05);
+stepwise.setProgress([](const RegressNet::Progress& p) {
+    cout << p.direction << " pass " << p.step << endl;
+});
+stepwise.reverse_regress();
+if (stepwise.getComplete())
+    use(stepwise.getFinalVariables());
 \end{verbatim}
 
 \subsubsection{Notes}
-Reaching \texttt{STOP\_MAX\_ITERATIONS} is operation completion but not fit
-convergence.  Quiet mode changes output only.  The ROC bootstrap uses an
-independent resampling stream and cannot perturb training.  Stepwise candidate
-fits must converge under cross-entropy before entering a Wilks comparison, and
-the original model is never mutated.
+Stepwise candidate fits must converge under cross-entropy before entering a
+Wilks comparison, and the original model is never mutated.  A grouped variable
+is always added or removed as a unit.  A partial audit after cancellation or a
+failed candidate remains inspectable, but \texttt{getComplete()} must be true
+before \texttt{getFinalVariables()} is reported as the procedure's conclusion.
 
 \section{Partition planning: nsplit}\label{nsplit_objects}
 \index{nsplit}
@@ -563,6 +697,12 @@ reported rather than hidden.  Fewer than \texttt{k} groups is a refusal.
 \index{evaldesign!InferenceChoice}
 \index{evaldesign!SamplingUnit}
 \index{evaldesign!PartitionMethod}
+\index{evaldesign!AucInference}
+\index{evaldesign!parseSamplingUnit}\index{evaldesign!samplingUnitName}
+\index{evaldesign!samplingUnitPhrase}\index{evaldesign!independenceStatus}
+\index{evaldesign!inferenceName}\index{evaldesign!inferenceText}
+\index{evaldesign!inferenceShortName}\index{evaldesign!partitionMethodName}
+\index{evaldesign!describeFolds}\index{evaldesign!describeHoldout}
 \index{evaldesign!chooseInference}
 \index{Evaluation design!typed vocabulary}
 
@@ -609,9 +749,13 @@ available.  Its enumerations are:
 \item \texttt{unsigned largestGroup}: largest indivisible cluster size.
 \end{itemize}
 
-\texttt{InferenceChoice} contains \texttt{AucInference method} and
-\texttt{string reason}; the reason is required when the method is
-\texttt{None}.
+\texttt{InferenceChoice} contains:
+
+\begin{itemize}
+\item \texttt{AucInference method}: estimator permitted by the declared design.
+\item \texttt{string reason}: required explanation when \texttt{method} is
+      \texttt{None}; empty when an estimator is permitted.
+\end{itemize}
 
 The following functions are available:
 
@@ -693,14 +837,30 @@ estimators below use them; only the rule for combining their variation changes.
 \item \texttt{vector<double> auc}: exact point AUC for each procedure.
 \end{itemize}
 
-\texttt{Interval} contains point \texttt{auc}, standard error \texttt{se},
-limits \texttt{lo}/\texttt{hi}, and \texttt{valid}.
+\texttt{Interval} contains:
 
-\texttt{Contrast} contains the two areas and their standard errors, difference
-\texttt{delta} and \texttt{seDelta}, each area's interval, the difference
-interval, \texttt{z}, two-sided \texttt{p}, zero-variance flags
-\texttt{degenerate}/\texttt{separated}, explanatory \texttt{note}, and
-\texttt{valid}.
+\begin{itemize}
+\item \texttt{double auc}: point area.
+\item \texttt{double se}: covariance-derived standard error.
+\item \texttt{double lo} and \texttt{hi}: normal-interval limits.
+\item \texttt{bool valid}: whether the covariance supported an interval.
+\end{itemize}
+
+\texttt{Contrast} contains:
+
+\begin{itemize}
+\item \texttt{aucI}, \texttt{aucJ}, \texttt{seI}, and \texttt{seJ}: the two
+      point areas and their marginal standard errors.
+\item \texttt{delta} and \texttt{seDelta}: $AUC_i-AUC_j$ and its paired error.
+\item \texttt{ciLoI}/\texttt{ciHiI}, \texttt{ciLoJ}/\texttt{ciHiJ}, and
+      \texttt{ciLoDelta}/\texttt{ciHiDelta}: interval limits for both areas and
+      their difference.
+\item \texttt{z} and \texttt{p}: normal statistic and two-sided p-value.
+\item \texttt{degenerate}: equal areas with zero difference variance.
+\item \texttt{separated}: nonzero deterministic difference with zero variance.
+\item \texttt{string note}: qualification for either zero-variance case or refusal.
+\item \texttt{bool valid}: whether the requested paired contrast was computable.
+\end{itemize}
 
 The following functions are available:
 
@@ -932,8 +1092,18 @@ mechanisms.  They keep knowledge of concrete model types in one cold-path
 boundary: callers describe or clone a model without duplicating a type switch,
 while fitting remains virtual behavior owned by the constructed model.
 
-\texttt{modelfactory::Spec} contains \texttt{logistic}, \texttt{bias}, hidden
-layer sizes, \texttt{xentropy}, \texttt{logLastop}, and \texttt{logHistory}.
+\texttt{modelfactory::Spec} is the interface-independent construction request:
+
+\begin{itemize}
+\item \texttt{bool logistic}: request binary logistic regression; when true,
+      neural-layer fields do not select the concrete type.
+\item \texttt{bool bias}: include neural-network bias nodes.
+\item \texttt{vector<unsigned> hidden}: hidden-layer widths in forward order.
+\item \texttt{bool xentropy}: use cross-entropy rather than least-mean-square
+      output error for a neural network.
+\item \texttt{bool logLastop}: write the most recent operation record.
+\item \texttt{bool logHistory}: append the session history.
+\end{itemize}
 
 \begin{itemize}
 \item \texttt{unique\_ptr<Model> build(const Spec\& spec,DataSet\& data,
@@ -971,6 +1141,7 @@ behavior of the concrete model.
 \index{obd!Eligibility}
 \index{obd!Result}
 \index{obd!run}
+\index{obd!ProgressFn}\index{obd!classify}\index{obd!stopToken}
 \index{Iteration ceiling!OBD refusal}
 
 Optimal Brain Damage originally uses a second-order approximation to predict
@@ -987,13 +1158,29 @@ implementation of the paper's entire procedure; the cited method supplies the
 saliency-based pruning principle, while the grow/validation/eligibility policy
 is neuron-specific and is specified below.
 
-\texttt{obd::Eligibility} distinguishes \texttt{ELIGIBLE},
-\texttt{INCOMPLETE\_CEILING}, \texttt{INCOMPLETE\_CANCELLED}, and
-\texttt{NUMERICAL\_FAILURE}.
+\texttt{obd::Eligibility} gives one authoritative admission decision:
 
-\texttt{SizeTrial} contains hidden-unit count, training and held-out errors and
-classification accuracies at the validation minimum, stop reason, growth/prune
-phase, eligibility, and iterations.
+\begin{itemize}
+\item \texttt{ELIGIBLE}: a declared stopping rule ended a finite trial.
+\item \texttt{INCOMPLETE\_CEILING}: the iteration safety limit ended an
+      unfinished descent.
+\item \texttt{INCOMPLETE\_CANCELLED}: external cancellation ended the trial.
+\item \texttt{NUMERICAL\_FAILURE}: the score or training error is non-finite.
+\end{itemize}
+
+\texttt{SizeTrial} is the audit row for one evaluated architecture:
+
+\begin{itemize}
+\item \texttt{unsigned hidden}: hidden-unit count.
+\item \texttt{double trainErr} and \texttt{testErr}: training error and minimum
+      held-out monitor error at the saved validation minimum.
+\item \texttt{double trainCA} and \texttt{testCA}: corresponding classification
+      accuracies in $[0,1]$.
+\item \texttt{Iterative::StopReason stop}: engine reason the fit ended.
+\item \texttt{bool phaseGrow}: true for growth, false for pruning.
+\item \texttt{Eligibility eligibility}: whether this trial may be compared.
+\item \texttt{unsigned iterations}: work used by the trial.
+\end{itemize}
 
 \texttt{Config} contains:
 
@@ -1009,9 +1196,19 @@ phase, eligibility, and iterations.
 \item \texttt{plateauTol, plateauWindow}: training-error plateau backstop.
 \end{itemize}
 
-\texttt{Result} contains success/refusal message, selected hidden size, complete
-trial history, owning winner, cancellation and ceiling-exhaustion flags,
-resolved optimizer, and whether it was selected automatically.
+\texttt{Result} is the owning outcome of the complete search:
+
+\begin{itemize}
+\item \texttt{bool ok} and \texttt{string message}: success or precise refusal.
+\item \texttt{unsigned selectedHidden}: chosen hidden-unit count on success.
+\item \texttt{vector<SizeTrial> history}: every trial in execution order.
+\item \texttt{unique\_ptr<Network> winner}: trained selected model; null on refusal.
+\item \texttt{bool cancelled}: external cancellation ended the search.
+\item \texttt{bool ceilingExhausted}: a required trial reached its safety limit,
+      distinguished so the caller can recommend a larger budget.
+\item \texttt{int algorithm}: resolved optimizer, 0 through 2, or $-1$ if none ran.
+\item \texttt{bool autoSelected}: whether the optimizer tournament chose it.
+\end{itemize}
 
 The following functions are available:
 
@@ -1056,6 +1253,7 @@ whole search, including optimizer choice, is repeated inside each fold.
 \index{crossval!run}
 \index{crossval!compare}
 \index{crossval!evaluateOnce}
+\index{crossval!metricsFor}\index{crossval!Procedure}\index{crossval!ProgressFn}
 \index{Out-of-fold prediction}
 \index{Deterministic substream}
 
@@ -1107,44 +1305,113 @@ requirement above.
 \item \texttt{double pooledAz, pooledTrap}: pooled OOF binormal and exact AUCs.
 \end{itemize}
 
-The remaining coordination structures are:
+\texttt{ProcResult} is the adapter's answer for one fold:
 
 \begin{itemize}
-\item \texttt{ProcResult}: success, cancellation, refusal reason, and held-out
-      predictions returned by one procedure invocation.
-\item \texttt{Progress}: stage, current procedure and total procedures, current
-      fold and total folds.
-\item \texttt{FoldSelection}: selected hidden size and optimizer, plus whether
-      automatic optimizer selection was used.
-\item \texttt{ProcedureSpec}: display name, procedure callback, and optional
-      selection-audit sink.
-\item \texttt{Comparison}: shared outcome and fold arrays, fold count, and one
-      timed \texttt{RunResult} entry per procedure.
-\item \texttt{LockedEntry}: procedure name, fit status and reason, paired test
-      predictions, elapsed seconds, and selection audit.
-\item \texttt{LockedResult}: shared original test-row identities and outcomes,
-      cancellation/message, and all \texttt{LockedEntry} values.
+\item \texttt{bool ok}: true only when the adapter produced one prediction for
+      every held-out row.
+\item \texttt{bool cancelled}: distinguishes cooperative cancellation from a
+      fitting refusal.
+\item \texttt{vector<double> pred}: held-out predictions in test-row order;
+      empty on failure, never padded with fabricated values.
+\item \texttt{string reason}: explanation when \texttt{ok} is false.
 \end{itemize}
 
-\texttt{Procedure} is the model-family callback which fits one materialized
-training fold and returns held-out predictions.  \texttt{ProgressFn} reports the
-current procedure, fold, and stage.
+\texttt{Procedure} is the callback type that turns one already materialized
+fold into a \texttt{ProcResult}.  Its arguments are the fold's \texttt{DataSet},
+the corresponding raw-row training and test identities, and an optional
+cancellation latch.  The indices let a nested procedure make an inner split
+without seeing the outer held-out rows; a plain model may ignore them.
+
+\texttt{Progress} is a snapshot of the repetition coordinator:
+
+\begin{itemize}
+\item \texttt{Stage stage}: \texttt{CROSS\_VALIDATION} while folds repeat or
+      \texttt{LOCKED\_EVALUATION} during the final once-only refit.
+\item \texttt{string procedure}: name of the procedure currently fitting.
+\item \texttt{procIndex} and \texttt{procCount}: one-based current position and total.
+\item \texttt{completedProcedures}: procedures finished in this stage.
+\item \texttt{fold} and \texttt{k}: one-based current outer fold and total;
+      both are zero during locked evaluation because no folding occurs there.
+\item \texttt{completedFolds}: folds finished within the current procedure.
+\end{itemize}
+
+\texttt{ProgressFn} is an optional callback receiving these snapshots on the
+thread running the comparison.  A callback that writes shared GUI state supplies
+its own synchronization; a null callback costs only the branch at fold boundaries.
+
+\texttt{FoldSelection} records what a procedure selected inside one fold:
+
+\begin{itemize}
+\item \texttt{unsigned hidden}: selected hidden-unit count.
+\item \texttt{int algorithm}: resolved optimizer number, 0 through 2.
+\item \texttt{bool autoSelected}: whether an automatic probe chose it.
+\item equality operators compare the complete record for reproducibility tests.
+\end{itemize}
+
+\texttt{ProcedureSpec} names and wires a procedure:
+
+\begin{itemize}
+\item \texttt{string name}: stable display and deterministic-substream identity.
+\item \texttt{Procedure proc}: complete fit-and-score callback.
+\item \texttt{vector<FoldSelection>* selections}: optional non-owning audit
+      sink shared with a nested adapter; null for procedures that select nothing.
+\end{itemize}
+
+\texttt{Comparison} is the paired result over one immutable fold plan:
+
+\begin{itemize}
+\item \texttt{bool ok}, \texttt{bool cancelled}, and \texttt{string message}:
+      overall status, cancellation distinction, and refusal explanation.
+\item \texttt{outcome} and \texttt{foldId}: row-aligned truth and shared fold identity.
+\item \texttt{unsigned k}: number of folds.
+\item each \texttt{Entry} contains a procedure \texttt{name}, its
+      \texttt{RunResult}, elapsed \texttt{seconds}, and per-fold
+      \texttt{selections}; \texttt{entries} preserves request order.
+\end{itemize}
+
+\texttt{LockedEntry} is one procedure's once-only locked-test result:
+
+\begin{itemize}
+\item \texttt{name}, \texttt{ok}, and \texttt{reason}: identity and fit status.
+\item \texttt{pred}: predictions in the common locked-test row order; empty on refusal.
+\item \texttt{seconds}: elapsed fit-and-score time.
+\item \texttt{selections}: architecture/optimizer choices made by that frozen refit.
+\end{itemize}
+
+\texttt{LockedResult} keeps all procedures paired on the untouched test:
+
+\begin{itemize}
+\item \texttt{ok}, \texttt{cancelled}, and \texttt{message}: overall status.
+\item \texttt{testRows}: original raw-row identities of the locked sample.
+\item \texttt{outcome}: aligned binary outcomes.
+\item \texttt{entries}: one \texttt{LockedEntry} per procedure in request order.
+\end{itemize}
 
 The following functions are available:
 
 \begin{itemize}
-\item \texttt{Metrics metricsFor(outcome,pred,rows)}: calculates held-out
+\item \texttt{Metrics metricsFor(const vector<unsigned>\& outcome,const
+      vector<double>\& pred,const vector<unsigned>\& rows)}: calculates held-out
       classification and ROC metrics for the named rows; unavailable metrics
       are $-1$.
-\item \texttt{RunResult run(DataSet\& data,foldId,Procedure proc,...)}: runs one
+\item \texttt{RunResult run(DataSet\& data,const vector<unsigned>\& foldId,
+      Procedure proc,const atomic<bool>* cancel=nullptr,bool substreams=false,
+      unsigned seed=0,ProgressFn progress=nullptr)}: runs one
       procedure over every fold and scatters successful predictions back to
-      their original row positions.
-\item \texttt{Comparison compare(DataSet\& data,foldId,procs,...)}: runs several
+      their original row positions.  It refuses a malformed plan and records a
+      failed fold rather than manufacturing its missing predictions.
+\item \texttt{Comparison compare(DataSet\& data,const vector<unsigned>\& foldId,
+      const vector<ProcedureSpec>\& procs,const atomic<bool>* cancel=nullptr,
+      bool substreams=false,unsigned seed=0,ProgressFn progress=nullptr)}: runs several
       named procedures over one immutable fold plan and returns paired OOF
       results.
-\item \texttt{LockedResult evaluateOnce(DataSet\& data,trainRows,testRows,
-      procs,...)}: refits each procedure once on the development rows and scores
-      the common untouched locked test.
+\item \texttt{LockedResult evaluateOnce(DataSet\& data,const
+      vector<unsigned>\& trainRows,const vector<unsigned>\& testRows,const
+      vector<ProcedureSpec>\& procs,const atomic<bool>* cancel=nullptr,bool
+      substreams=false,unsigned seed=0,ProgressFn progress=nullptr)}: refits each
+      procedure once on the development rows and scores the common untouched
+      locked test.  No cross-validation metric is reused as a locked-test result.
 \end{itemize}
 
 \subsection{cvadapters}
@@ -1155,21 +1422,49 @@ The following functions are available:
 \index{cvadapters!nestedObdProcedure}
 \index{cvadapters!innerValidationSplit}
 \index{Nested cross-validation}
-\texttt{InnerSplit} contains \texttt{ok}, refusal \texttt{reason}, and raw-row
-\texttt{train} and \texttt{validation} vectors.  The following functions adapt
-model families to the generic procedure contract:
+\texttt{crossval} deliberately knows no model family: its \texttt{Procedure}
+callback says only ``fit on these rows and return predictions for those rows.''
+Concrete model APIs do not naturally have that signature.  \texttt{cvadapters}
+is the narrow translation layer between the two.  It captures the construction
+and fitting rule for a Network, DFA, or nested OBD search and returns a callback
+the generic runner can repeat.  The adapters are used when a CV or locked-test
+comparison is assembled; they are not used by ordinary one-model training, and
+they neither choose folds nor compute metrics or reports.  Keeping the translation
+here prevents the runner from acquiring a model-type switch and, for nested OBD,
+keeps architecture selection inside the outer training rows where it cannot leak.
+
+\texttt{InnerSplit} is the explicit result of that nested adapter's inner
+train/validation decision:
+
+\begin{itemize}
+\item \texttt{bool ok}: true only when both inner sets satisfy the requested design.
+\item \texttt{string reason}: refusal explanation when no usable split exists.
+\item \texttt{vector<unsigned> train}: raw-row identities used to fit candidates.
+\item \texttt{vector<unsigned> validation}: disjoint raw-row identities used to
+      select and early-stop them.
+\end{itemize}
+
+The following functions create procedure callbacks or the inner split they need:
 
 \begin{itemize}
 \item \texttt{Procedure trainProcedure(const Network\& templateNet,
       unsigned maxIter)}: clones and trains a configured network from fresh
-      weights in each fold.
+      weights in each fold.  The template is captured by value through a deep
+      clone; \texttt{maxIter} is the per-fold safety ceiling.  A nonconverged or
+      cancelled fit returns a failed \texttt{ProcResult}.
 \item \texttt{Procedure dfaProcedure(bool quadratic)}: returns an LDFA adapter
-      when false and QDFA adapter when true.
+      when false and QDFA adapter when true.  Each invocation fits only the
+      fold training matrix and returns the concrete DFA's graded held-out score.
 \item \texttt{Procedure nestedObdProcedure(const obd::Config\& cfg,
-      double innerValFraction,...)}: performs the complete OBD architecture
+      double innerValFraction,vector<FoldSelection>* selections=nullptr,
+      obd::ProgressFn progress=nullptr,const vector<unsigned>\& rowGroup=\{\})}:
+      performs the complete OBD architecture
       search within each outer training fold and returns only outer held-out
-      predictions.
-\item \texttt{InnerSplit innerValidationSplit(trainRows,rowLabel,rowGroup,
+      predictions.  The optional sinks expose selection and inner-search
+      progress without teaching \texttt{crossval} about OBD.  When group
+      identities are supplied, the inner split is group-disjoint or the fold fails.
+\item \texttt{InnerSplit innerValidationSplit(const vector<unsigned>\& trainRows,
+      const vector<unsigned>\& rowLabel,const vector<unsigned>\& rowGroup,
       double fraction)}: returns a stratified inner split, group-disjoint when
       \texttt{rowGroup} is supplied; returns \texttt{ok=false} rather than
       falling back when the grouped split is infeasible.
@@ -1203,6 +1498,10 @@ grouped design; infeasibility is a failure, never a row-wise fallback.
 \index{cvreport!LockedColumn}
 \index{cvreport!LockedContrast}
 \index{cvreport!ArtifactResult}
+\index{cvreport!foldPlanText}\index{cvreport!rawRowError}
+\index{cvreport!inferenceRan}\index{cvreport!splitPlanText}
+\index{cvreport!samplingUnitText}\index{cvreport!independenceText}
+\index{cvreport!inferenceText}\index{cvreport!clusterError}
 \index{Raw-row identity}
 
 \texttt{cvreport} is neuron's project-defined presentation and artifact layer.
@@ -1213,9 +1512,26 @@ raw-row identity.  Keeping those jobs here ensures that the screen report,
 CSV/JSON artifacts and REST response describe the same run rather than
 recomputing or reinterpreting it independently.
 
-\texttt{PlanInfo} contains the dataset label and whole-dataset totals, typed fold
-design, primary/reference names, optional per-row cluster identity, original
-raw-row identity, and original row count.  Its methods are:
+\texttt{PlanInfo} supplies descriptive context not owned by a
+\texttt{Comparison}:
+
+\begin{itemize}
+\item \texttt{string dataset}: optional label printed in the report header.
+\item \texttt{unsigned n} and \texttt{events}: whole-dataset row and outcome-1
+      counts; these are not development-fold counts.
+\item \texttt{evaldesign::Partition folds}: achieved typed fold design from
+      which every displayed plan sentence is derived.
+\item \texttt{string primary} and \texttt{reference}: prespecified names for
+      the headline contrast.
+\item \texttt{vector<unsigned> cluster}: optional cluster identity aligned to
+      CV rows; empty means ungrouped.
+\item \texttt{vector<unsigned> rawRow}: optional original-row identity aligned
+      to CV rows; empty means the CV index already is the raw identity.
+\item \texttt{unsigned rawRowCount}: source row count used to range-check a
+      supplied identity map; zero means the bound is unknown.
+\end{itemize}
+
+Its methods are:
 
 \begin{itemize}
 \item \texttt{string foldPlanText() const}: derives the fold-plan heading from
@@ -1272,8 +1588,16 @@ raw-row identity, and original row count.  Its methods are:
 Its \texttt{clusterError()} method validates cluster identity before clustered
 inference or artifact writing.
 
-\texttt{ArtifactResult} contains attempted artifact name and path, success, and
-error text.  The following functions are available:
+\texttt{ArtifactResult} reports one attempted Tier-3 write:
+
+\begin{itemize}
+\item \texttt{string name}: artifact filename.
+\item \texttt{string path}: full destination attempted.
+\item \texttt{bool ok}: true only after open, write, flush, and close succeed.
+\item \texttt{string error}: I/O failure explanation when \texttt{ok} is false.
+\end{itemize}
+
+The following functions are available:
 
 \begin{itemize}
 \item \texttt{string tier1(cmp,info,locked)}: returns the one-screen headline
@@ -1542,9 +1866,17 @@ produce them.
 \subsection{The parsers}
 
 \begin{itemize}
-\item \texttt{ParseStatus parseUnsigned(const string\& text,unsigned\& out)}
-\item \texttt{ParseStatus parseDouble(const string\& text,double\& out)}
-\item \texttt{ParseStatus parseBool(const string\& text,bool\& out)}
+\item \texttt{ParseStatus parseUnsigned(const string\& text,unsigned\& out)}:
+      parses a base-10 nonnegative whole number, requiring full consumption and
+      a magnitude no greater than \texttt{UINT\_MAX}.  It returns a specific
+      status and leaves \texttt{out} untouched on every refusal.
+\item \texttt{ParseStatus parseDouble(const string\& text,double\& out)}:
+      parses a finite decimal or scientific-notation value, requiring full
+      consumption.  Overflow and non-finite spellings are refused; representable
+      underflow is accepted.  \texttt{out} changes only on \texttt{Ok}.
+\item \texttt{ParseStatus parseBool(const string\& text,bool\& out)}:
+      accepts exactly \texttt{"1"} or \texttt{"0"}, after trimming boundary
+      whitespace, and writes the corresponding value only on \texttt{Ok}.
 \end{itemize}
 
 Each writes \texttt{out} \emph{only} when it returns \texttt{Ok}, so a caller
@@ -1582,9 +1914,16 @@ would silently change the meaning of requests that are accepted today.
 \subsection{The messages}
 
 \begin{itemize}
-\item \texttt{string unsignedError(const string\& field,const string\& text,ParseStatus)}
-\item \texttt{string numberError(const string\& field,const string\& text,ParseStatus)}
-\item \texttt{string boolError(const string\& field,const string\& text,ParseStatus)}
+\item \texttt{string unsignedError(const string\& field,const string\& text,
+      ParseStatus status)}: turns an unsigned-parser refusal into a field-specific
+      message such as ``is not a whole number,'' ``cannot be negative,'' or ``is
+      out of range.''  Call it only with a non-\texttt{Ok} status.
+\item \texttt{string numberError(const string\& field,const string\& text,
+      ParseStatus status)}: renders floating syntax, trailing text, range, and
+      finiteness failures while preserving the original field and token.
+\item \texttt{string boolError(const string\& field,const string\& text,
+      ParseStatus status)}: states the accepted \texttt{1}/\texttt{0} vocabulary
+      and quotes the refused token.
 \end{itemize}
 
 Three functions rather than one because the expectation differs by

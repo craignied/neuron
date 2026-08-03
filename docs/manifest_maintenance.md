@@ -541,6 +541,30 @@ Text extraction is not a substitute for visual inspection.
 - [ ] Copy the final PDF to `docs/manifest.pdf`.
 - [ ] Remove intermediates and run `git diff --check`.
 
+## Periodic whole-Manifest audit
+
+A feature checklist does not catch accumulated drift.  After a large roadmap or
+refactor, perform a source-to-Manifest audit:
+
+1. enumerate every public class and namespace, independently named public
+   result/configuration/progress object, and principal method;
+2. compare that inventory with the prose and
+   `tools/check_manifest_index.py`, extending the curated lists before declaring
+   coverage;
+3. apply the vertical-list and caller tests to every entry --- a compressed
+   sentence naming ten fields or methods is an inventory, not documentation;
+4. search foundational chapters for removed public symbols and claims
+   contradicted by the current contract;
+5. verify every named published method has a primary or authoritative citation
+   and identify neuron-specific adaptations as such;
+6. check every inheritance, ownership, use, and data-flow arrow in the editable
+   object figure against source;
+7. render and inspect the figure, rewritten pages, table boundaries, and index
+   pages at readable scale.
+
+The index gate cannot judge explanation quality.  It makes omissions visible;
+this periodic audit supplies the semantic review.
+
 ## Final principle
 
 The manifest is most valuable when it explains stable architecture and verified

@@ -1,11 +1,12 @@
 # DRY / architecture audit — neuron-3.0 engine
 
-**Status: part proposal, part implementation record.** Prepared 2026-07-31 as a
-proposal; from §8.7's list onward, most of it has shipped. §8.7 carries the
-authoritative per-item state with commit hashes — read that, not this line, for
-what is done. The findings in §§1–7 are preserved **as originally written**, so
-that what was proposed can be compared with what was built; where a finding has
-since shipped or been corrected, §8 and §8.7 govern.
+**Historical audit — the refactor is complete.** Prepared 2026-07-31 as a
+proposal and retained as characterization, sabotage, and decision evidence.
+It is not an active roadmap and should not be loaded for ordinary work.  Use
+`CLAUDE.md` for routing, `docs/development_rules.md` for current rules, and the
+Design Manifest plus source for current contracts.  Sections 8 onward record
+what landed; earlier proposals remain verbatim so they can be audited against
+the implementation.
 
 **Legacy bug #12 (§11.11) is FIXED** — `BackProp` discarded the conjugate
 direction in batch/epoch mode, so CGD and Shanno were silently plain gradient
@@ -17,8 +18,8 @@ descent there. Diagnosed, escalated, and corrected as a standalone commit on
 > (which was the wrong test for behavior-preserving work), records one claim in Sol's review
 > that I checked and found **incorrect**, adds three findings neither of us had, and gives the
 > agreed commit order. Where §8 and the body disagree, §8 governs.
-> Standing rule 7 — the missing efficiency rule this audit's §0 recommended — **is now in
-> `CLAUDE.md`** (commit `02870fd`), so §0 is history rather than a proposal.
+> Standing rule 7 — the missing efficiency rule this audit's §0 recommended — is
+> now in `docs/development_rules.md` (original commit `02870fd`), so §0 is history.
 
 Scope: every file in `src/` (26,965 lines), read in full or targeted-read. The brief was
 Craig's: the architecture exists so that (a) the code reads like the matrix notation in the

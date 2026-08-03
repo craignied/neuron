@@ -1,5 +1,10 @@
 # B9 — the GUI-wide strict-parsing pass
 
+> **Historical implementation record.** B9 is complete.  The current parser
+> contract is in the Design Manifest's strict-parsing and REST sections and in
+> `src/utility.*`; load this file only for measured pre-fix behavior and sabotage
+> evidence.
+
 ROADMAP 4's last open item. This file is the inventory, the measurements that
 produced it, and the settled parser contract. It is written the way
 `refactor_audit.md` is written: a record of what was measured and what was

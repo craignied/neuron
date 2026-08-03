@@ -97,16 +97,17 @@ deployment artifact, and uploading it anywhere static is the deployment.
 
 ## Worked example
 
-The bank-marketing walkthrough ends by deploying its trained logistic
-model; `docs/datasets/bank-marketing/bank_spec.txt` is a complete
-committed spec for a 42-input `--refcat` model. The short version:
+The prostate-biopsy dataset carries the maintained deployment example and a
+complete natural-units spec.  Its README explains why the historical normalized
+sets require the supplied hand-written natural-to-normalized scales.  The short
+version after training and saving a compatible network is:
 
 ```
 $ python3 tools/neuron2web.py \
-    --network bank_logistic_net.txt --scales bank_scales.txt \
-    --spec docs/datasets/bank-marketing/bank_spec.txt \
-    -o bank_calculator.html --serve
-Deployed Binary logistic (42 inputs) to bank_calculator.html
+    --network network.txt --scales scales.txt \
+    --spec docs/datasets/prostate-biopsy/psa_spec.txt \
+    -o prostate_calculator.html --serve
+Deployed <model type> to prostate_calculator.html
 Serving the calculator at http://127.0.0.1:<OS-assigned port>/  (Ctrl-C to stop)
 ```
 

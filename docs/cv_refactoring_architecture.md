@@ -1,5 +1,10 @@
 # Cross-validation refactoring: DRY within the neuron architecture
 
+> **Historical design record.** The refactor described here is complete.  The
+> current public contract is the Design Manifest and source; the permanent
+> ownership rule is maintained in `docs/development_rules.md`.  Load this file
+> only when investigating why the CV layer boundaries were chosen.
+
 > **Standing architectural rule (adopted 2026-07-22).** This document was written for
 > the Phase 4 cross-validation refactor, but its layer-ownership and dependency-direction
 > principles are **permanent and repo-wide** — they govern every engine refactor, not just
