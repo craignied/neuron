@@ -462,7 +462,7 @@ double Logistic::innerTrainSet()
 		// $\vec w_{t+1} = (1-2\eta\lambda)\vec w_t - \eta \left. \frac{\partial E}{\partial w} \right|_{w_t}$
 		//    It used to run once per EXEMPLAR inside the loop above, making the
 		//    effective factor (1-eta*decay)^N -- exponential in the number of
-		//    training rows (D4; refactor_audit.md section 9).
+		//    training rows (D4; docs/refactor_audit.md section 9).
 		if ( weightDecayFlag )
 			W *= decayTerm;
 

@@ -300,7 +300,7 @@ concerns GUI/API behavior. The verified end-to-end API gate is
   The same lifecycle's *ordering* rules — a result is published before the job
   reports itself idle, and the job is marked running before `start()` returns —
   are pinned in-process by the `asyncjob_lifecycle` ctest case, because neither
-  is observable through HTTP (`refactor_audit.md` §20.4).
+  is observable through HTTP (`docs/refactor_audit.md` §20.4).
 - Request fields: `./tests/gui/strictparse.sh` (every handler's omission rules,
   present-but-empty rules, domain refusals, and the malformed values each field
   must refuse by name). Third server-starting script, separate for the same

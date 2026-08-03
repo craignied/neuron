@@ -1,6 +1,6 @@
 // check_dfa.cpp : CHARACTERIZATION of LDFA and QDFA, before they share anything.
 //
-// refactor_audit.md items 2.4 and 2.5 propose extracting the reporting scaffold
+// docs/refactor_audit.md items 2.4 and 2.5 propose extracting the reporting scaffold
 // of DFA::train() and the loop structure of reportAccuracy(). Sol's condition on
 // that extraction is explicit, and this file exists to make it checkable:
 //

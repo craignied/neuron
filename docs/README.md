@@ -20,7 +20,7 @@ records by default.
 ## Historical records — search on demand
 
 - `HISTORY.md`: dated evidence and completed roadmaps.
-- `../refactor_audit.md`: completed engine-refactor characterization and decisions.
+- `refactor_audit.md`: completed engine-refactor characterization and decisions.
 - `obd_plan.md`, `cv_refactoring_architecture.md`, `b9_strict_parsing.md`:
   implementation records retained for provenance; the Manifest/source supersede
   them as current contracts.

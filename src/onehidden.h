@@ -3,7 +3,7 @@
 //
 // SimpleProp (bias nodes on every layer) and BareProp (no bias nodes) carry
 // byte-identical state and a handful of methods whose bodies differed by
-// nothing but the class name in the signature -- refactor_audit.md section 8.2,
+// nothing but the class name in the signature -- docs/refactor_audit.md section 8.2,
 // category A. Those live here once: randomize(), save(), load(), pack(), the
 // copy utility, and the automatic step-size weight snapshot.
 //

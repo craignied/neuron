@@ -1,6 +1,6 @@
 // check_decay.cpp : weight decay is a property of lambda and eta, not of N.
 //
-// THE DEFECT (D4, refactor_audit.md section 9). The canonical decay multiplier
+// THE DEFECT (D4, docs/refactor_audit.md section 9). The canonical decay multiplier
 //
 //     w *= decayTerm;          // decayTerm = 1 - eta*decay = 1 - 2*eta*lambda
 //

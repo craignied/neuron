@@ -13,7 +13,7 @@
 // or dimension contract in Release -- operator() and includerows, both throwing
 // BoundsViolation. Roughly forty-five other public entry points are assert-only,
 // so an invalid argument is an out-of-bounds read or WRITE rather than an
-// exception. Full inventory: refactor_audit.md section 12.2.
+// exception. Full inventory: docs/refactor_audit.md section 12.2.
 //
 // THE TWO HALVES, WHICH MUST NOT BE CONFLATED (section 12.4 step 2):
 //
@@ -177,7 +177,7 @@ static int c06()
 }
 
 // 7. CONTROL: the deliberate PREFIX rule of dotprod( iVec, oVec ), which takes
-//    oVec.size() <= nrows_ on purpose (refactor_audit.md 11.3). A shorter
+//    oVec.size() <= nrows_ on purpose (docs/refactor_audit.md 11.3). A shorter
 //    destination computes the first rows only and must KEEP working -- a
 //    policy that "fixed" this into an equality would break the bias arithmetic.
 static int c07()

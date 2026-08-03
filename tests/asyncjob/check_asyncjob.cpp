@@ -3,7 +3,7 @@
 //
 // WHY THIS FILE EXISTS. tests/gui/asyncjob.sh characterizes the same machinery
 // through the live server, and it cannot see the two invariants that matter
-// most. Measured, not assumed (refactor_audit.md section 20.4): inverting
+// most. Measured, not assumed (docs/refactor_audit.md section 20.4): inverting
 // publish-then-clear passes that suite 3/3 with one observer and 3/3 with
 // eight, and setting the running flag inside the worker passes it 3/3. A
 // status request holds the progress mutex for microseconds out of a round trip

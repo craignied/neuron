@@ -184,7 +184,7 @@ protected:
 	//    / collinearity diagnostic must be measured on. Until 2026-08-01 this
 	//    class instead built an outer product of per-exemplar gradients, and
 	//    obtained them by running a training iteration; the gradient harvest is
-	//    gone with it. See docs/tex and refactor_audit.md.
+	//    gone with it. See docs/tex and docs/refactor_audit.md.
 	void conditionOf( const Matrix< double >& symmetric );
 
 	// THE AUTOMATIC STEP-SIZE SEARCH -- the one implementation, for every model

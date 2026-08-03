@@ -14,7 +14,7 @@
 # loop, and every assertion is about what was observed, never about how long
 # something took.
 #
-# WHAT THIS CANNOT REACH, measured rather than assumed -- see refactor_audit.md
+# WHAT THIS CANNOT REACH, measured rather than assumed -- see docs/refactor_audit.md
 # item 13. runOnWorker's two exception handlers and the CLI's main boundary have
 # no automated coverage, because no legitimate request makes an async body throw:
 # runTrainJob's exceptions are caught by runTrainingAndBuildResult, stepwise

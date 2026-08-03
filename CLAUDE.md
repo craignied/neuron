@@ -19,7 +19,7 @@ Start here, then open the smallest relevant authority:
 | Cross-validation or inference | `docs/cross_validation.md`; `docs/evaluation_report_spec.md`; relevant Manifest services |
 | ROC/statistics | `docs/roc_theory.md`; relevant cited Manifest section |
 | Manifest editing | `docs/manifest_maintenance.md` in full |
-| Why an old decision was made | Search `docs/HISTORY.md` and `refactor_audit.md`; do not load either by default |
+| Why an old decision was made | Search `docs/HISTORY.md` and `docs/refactor_audit.md`; do not load either by default |
 
 Plans retained for provenance (`docs/obd_plan.md`,
 `docs/cv_refactoring_architecture.md`, `docs/b9_strict_parsing.md`) describe work
@@ -124,6 +124,6 @@ workflow and cleanup commands are in `docs/manifest_maintenance.md`.
 
 The detailed reanimation timeline, legacy defects, completed roadmaps, refactor
 evidence, and superseded decisions remain searchable in `docs/HISTORY.md` and
-`refactor_audit.md`.  They were removed from the always-loaded instruction file
-deliberately: use them when investigating provenance, not as ambient context for
-new implementation work.
+`docs/refactor_audit.md`.  They were removed from the always-loaded instruction
+file deliberately: use them when investigating provenance, not as ambient
+context for new implementation work.

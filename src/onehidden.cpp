@@ -271,7 +271,7 @@ double OneHiddenNet::innerTrainSet()
 		//    update below. It used to sit ABOVE the batch/on-line split and so
 		//    ran once per EXEMPLAR in both modes: batch makes ONE update per
 		//    epoch, so its effective per-epoch factor was (1-eta*decay)^N,
-		//    exponential in the dataset size (D4; refactor_audit.md section 9).
+		//    exponential in the dataset size (D4; docs/refactor_audit.md section 9).
 			if ( ( trainingType == 0 ) && !gradMaxFlag ) // where gradient doesn't need to be separated
 			{
 				if ( weightDecayFlag ) // once, for THIS exemplar's update

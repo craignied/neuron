@@ -52,7 +52,7 @@ namespace nvec {
 	//    includes the other; only matrix.cpp includes this one).
 	//
 	// Three types, flat, because they answer three different diagnostic
-	//    questions. See refactor_audit.md section 11.
+	//    questions. See docs/refactor_audit.md section 11.
 
 	// Parallel containers of incompatible length
 	class SizeMismatch : public std::exception

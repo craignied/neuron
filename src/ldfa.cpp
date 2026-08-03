@@ -30,7 +30,7 @@ void LDFA::copy( const LDFA& rhs )
 
 // The linear discriminant fit. The scaffold around it -- streams, banner,
 //    header, the Singular refusal, the report, history and last-operation --
-//    lives once in DFA::train (refactor_audit.md section 13).
+//    lives once in DFA::train (docs/refactor_audit.md section 13).
 void LDFA::fitDiscriminant()
 {
 	// Easier on the eyes

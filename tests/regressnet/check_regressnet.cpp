@@ -1,7 +1,7 @@
 // check_regressnet.cpp : CHARACTERIZATION of stepwise regression, before
 // reverse_regress() and forward_regress() share anything.
 //
-// refactor_audit.md item 1.3 proposes collapsing the two ~200-line selection
+// docs/refactor_audit.md item 1.3 proposes collapsing the two ~200-line selection
 // loops into one. Measured (audit section 15.1): 83 of reverse's 128 executable
 // lines are byte-identical to forward's. The remaining 45 are not decoration --
 // they are the published direction semantics:
@@ -35,7 +35,7 @@
 // NOT ASSERTED HERE, DELIBERATELY: reverse_regress() reads an uninitialized
 // `largest_var` when every candidate in a pass has p == 0, which crashes the
 // process when the threshold is 0. That is a live defect, measured and recorded
-// in refactor_audit.md section 15.6, and it is scheduled as its own fail-first
+// in docs/refactor_audit.md section 15.6, and it is scheduled as its own fail-first
 // correctness commit BEFORE the extraction. A characterization suite pins what
 // the code does today; it must not pin undefined behavior, and it must not
 // quietly assert the fix either.

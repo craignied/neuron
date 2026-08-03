@@ -1430,7 +1430,7 @@ vector< T >& Matrix< T >::dotprod( const vector< T >& iVec, vector< T >& oVec ) 
 {
 	// Number of Matrix columns must equal number of input vector elements
 	// Number of Matrix rows must be >= number of output vector elements
-	//    The <= is the PREFIX RULE and is deliberate (refactor_audit.md 11.3):
+	//    The <= is the PREFIX RULE and is deliberate (docs/refactor_audit.md 11.3):
 	//    a SHORTER destination computes the leading rows only, and the bias
 	//    arithmetic depends on it. Only a LONGER one is refused.
 	if ( iVec.size() != ncols_ || oVec.size() > nrows_ )

@@ -1,7 +1,7 @@
 // check_onehidden.cpp : SimpleProp and BareProp, pinned before they share a base.
 //
 // The two one-hidden-layer models carry byte-identical state and six methods
-// whose bodies differ only by the class name in the signature (refactor_audit.md
+// whose bodies differ only by the class name in the signature (docs/refactor_audit.md
 // section 8.2, category A): randomize, save, load, pack, the copy utility, and
 // the automatic step-size weight snapshot. Those move to a narrow intermediate
 // base, OneHiddenNet.

@@ -30,7 +30,7 @@ public:
 	//    header, the Singular refusal, the single reportAccuracy call, the
 	//    history and last-operation writes, and the -1. Everything here runs
 	//    ONCE per run and was written out twice, differing only in the model's
-	//    own name (refactor_audit.md section 13).
+	//    own name (docs/refactor_audit.md section 13).
 	//
 	//    It is still a VIRTUAL FUNCTION: Model::train() is pure virtual, so this
 	//    overrides it. `final` says the intent -- no subclass may replace the
@@ -44,7 +44,7 @@ public:
 	//    loops carry the discriminant formulae and the opposite senses (larger
 	//    wins for the linear, smaller for the quadratic), and sharing them
 	//    would need either per-exemplar dispatch or a comparator parameter.
-	//    Neither is permitted; see refactor_audit.md section 13.5.
+	//    Neither is permitted; see docs/refactor_audit.md section 13.5.
 	void reportAccuracy( ostream& ) override = 0;
 
 protected:

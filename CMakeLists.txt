@@ -35,7 +35,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS src/gui_page.html
 # Each source is compiled ONCE and linked wherever it is needed. Before this,
 # every test target listed its own copy of the engine sources: 208 compilation
 # units for 31 files, which is what stalled the hosted macOS CI runner when they
-# all built at once (refactor_audit.md section 10).
+# all built at once (docs/refactor_audit.md section 10).
 #
 # The layering is not decoration, and it is not one library on purpose. ONLY
 # network.cpp includes GSL. Several tests are documented as proving that the
@@ -177,7 +177,7 @@ target_link_libraries(check_obd PRIVATE neuron_engine)
 add_test(NAME obd_sizing COMMAND check_obd)
 
 # CHARACTERIZATION test: what SimpleProp and BareProp observably do, pinned
-# BEFORE the shared-mechanism extraction (refactor_audit.md 8.2) so that
+# BEFORE the shared-mechanism extraction (docs/refactor_audit.md 8.2) so that
 # extraction can be proven behavior-preserving. Asserts forward outputs, exact
 # errors on the batch/non-batch, auto-step-size and CGD/Shanno paths, the saved
 # file format, a save/load round trip, and validation-set monitoring for all
@@ -347,7 +347,7 @@ add_test(NAME iterative_iteration_init COMMAND check_iterinit)
 # Characterization test: SimpleProp and BareProp, before they share a base.
 #
 # The two one-hidden-layer models carry byte-identical state and six methods
-# differing only by the class name (refactor_audit.md 8.2 category A). Holds
+# differing only by the class name (docs/refactor_audit.md 8.2 category A). Holds
 # still what must NOT move when those go to an intermediate base: two distinct
 # runtime types and objType, saved-file bytes and their first line, the factory
 # dispatch, df() and outputHeader(), and -- the subtle one -- that the bias
@@ -440,12 +440,12 @@ add_test(NAME vector_ops_bounds COMMAND check_vector_bounds)
 # prefix rule of dotprod and both empty column selections. It was written and
 # run BEFORE the policy existed, where 44 of its cases had no contract to catch
 # them (39 silent, 4 fatal, 1 throwing incidentally); that run is the red
-# evidence, recorded in refactor_audit.md section 12.6, and this add_test line
+# evidence, recorded in docs/refactor_audit.md section 12.6, and this add_test line
 # is what changed when the policy landed. tests/matrix/run_matrix_bounds_demo.sh
 # still runs each case in its own process, which is how a case that CRASHES
 # rather than returning is attributed to itself.
 # CHARACTERIZATION test: what LDFA and QDFA observably do, pinned BEFORE the
-# reporting-scaffold extraction (refactor_audit.md 2.4/2.5). Reports, graded
+# reporting-scaffold extraction (docs/refactor_audit.md 2.4/2.5). Reports, graded
 # guesses, ROC availability per output arity, the DIRECTION of each
 # discriminant (larger wins for the linear, smaller for the quadratic -- the
 # thing a shared "which one wins" flag would risk), save behavior, history and
@@ -457,7 +457,7 @@ target_link_libraries(check_dfa PRIVATE neuron_engine)
 add_test(NAME dfa_characterization COMMAND check_dfa)
 
 # CHARACTERIZATION of stepwise regression before reverse_regress() and
-# forward_regress() share anything (refactor_audit.md item 1.3, section 15).
+# forward_regress() share anything (docs/refactor_audit.md item 1.3, section 15).
 # 83 of reverse's 128 executable lines are byte-identical to forward's; the
 # other 45 are the published direction semantics -- opposite nesting, opposite
 # Wilks argument order, opposite winner sense, and a trained empty baseline that
@@ -473,7 +473,7 @@ add_test(NAME regressnet_characterization COMMAND check_regressnet)
 # neuron_job (plus neuron_core, for the Matrix contract exception the CLI
 # boundary was built to report) -- no GSL, no engine, so it runs in a second.
 # It exists because the two ordering invariants below are unreachable through
-# HTTP; see refactor_audit.md section 20.4 for the measurement.
+# HTTP; see docs/refactor_audit.md section 20.4 for the measurement.
 add_executable(check_asyncjob tests/asyncjob/check_asyncjob.cpp)
 target_link_libraries(check_asyncjob PRIVATE neuron_job neuron_core)
 add_test(NAME asyncjob_lifecycle COMMAND check_asyncjob)

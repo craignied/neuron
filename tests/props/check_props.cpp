@@ -1,6 +1,6 @@
 // check_props.cpp : CHARACTERIZATION of SimpleProp and BareProp.
 //
-// These two classes share most of their mechanisms (refactor_audit.md 8.2), and
+// These two classes share most of their mechanisms (docs/refactor_audit.md 8.2), and
 // a later commit will extract the shared ones. This program exists so that
 // extraction can be PROVEN behavior-preserving: it pins what the two networks
 // observably do today, before anything moves.
@@ -114,7 +114,7 @@ public:
 
 // Swallow engine narration for the duration of a scope (the split report, a
 // save()'s success line). Restores the PREVIOUS stream, not cout -- a scoped
-// redirection is what src is about to grow (refactor_audit.md 8.7 step 3); this
+// redirection is what src is about to grow (docs/refactor_audit.md 8.7 step 3); this
 // local one keeps the test's own output readable in the meantime.
 struct Hush {
 	ostringstream sink;
@@ -191,7 +191,7 @@ static void quieten( NET& net )
 	net.setXEerror();
 	// Weight decay OFF for the training fixtures, so the batch/on-line,
 	// step-size and optimizer assertions measure those mechanisms and not the
-	// decay rule that is still under audit (refactor_audit.md D4/section 9).
+	// decay rule that is still under audit (docs/refactor_audit.md D4/section 9).
 	// test_weight_decay below characterizes decay on its own.
 	//
 	// (An earlier revision of this comment cited weights falling to ~2e-4 and
@@ -629,7 +629,7 @@ static void test_saveload()
 // Network::sampleTestError() reads it. A model whose Validation submatrix was
 // never built returns -1 here even though the DataSet says "validation" --
 // which is exactly the defect this asserts the absence of, for all four types.
-// (refactor_audit.md 8.3: Model::extractInputMatrices builds it for every
+// (docs/refactor_audit.md 8.3: Model::extractInputMatrices builds it for every
 // type; the biased models then append a bias column. BareProp must not.)
 
 static void test_validation_monitor()

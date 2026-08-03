@@ -422,7 +422,7 @@ double BackProp::innerTrainSet()
 			// Weight decay, ONCE PER WEIGHT UPDATE -- on-line makes one per
 			//    exemplar. It used to sit above the batch/on-line split and so ran
 			//    once per exemplar in BOTH modes, making the batch per-epoch factor
-			//    (1-eta*decay)^N (D4; refactor_audit.md section 9).
+			//    (1-eta*decay)^N (D4; docs/refactor_audit.md section 9).
 			if ( ( trainingType == 0 ) && !gradMaxFlag ) // canonical backprop
 			{
 				if ( weightDecayFlag )

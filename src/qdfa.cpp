@@ -36,7 +36,7 @@ void QDFA::copy( const QDFA& rhs )
 }
 
 // The quadratic discriminant fit. The scaffold around it lives once in
-//    DFA::train (refactor_audit.md section 13).
+//    DFA::train (docs/refactor_audit.md section 13).
 void QDFA::fitDiscriminant()
 {
 	// Easier on the eyes

@@ -506,7 +506,7 @@ if blocking_regress is not None:
 # ceiling, and no amount of external polling raises it. The ordering invariant
 # that the whole launcher exists to maintain is unreachable from outside the
 # process. That measurement is the argument for making the launcher linkable;
-# see refactor_audit.md item 13.
+# see docs/refactor_audit.md item 13.
 
 status, j = jhttp( "/api/load", { "mode": "train", "path": "xor_discrete.set" } )
 need( j is not None and j.get( "ok" ) is True, "control: reload XOR" )

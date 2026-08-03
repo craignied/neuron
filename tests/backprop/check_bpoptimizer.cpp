@@ -36,7 +36,7 @@
 // are allowed to differ in their low bits between compilers. Pinning one
 // machine's bytes as a universal contract was an overclaim, and a per-platform
 // table of expected values would be the same overclaim written three times.
-// The measured macOS before/after values live in refactor_audit.md as the
+// The measured macOS before/after values live in docs/refactor_audit.md as the
 // sabotage evidence they are.
 //
 // What is asserted instead is portable and is about the CODE, not the machine:

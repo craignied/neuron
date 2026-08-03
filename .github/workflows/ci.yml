@@ -59,7 +59,7 @@ jobs:
         # project, for 67 files. On the hosted macOS runner that many concurrent
         # clang processes stalled the machine (see timeout-minutes above). The
         # real fix is to compile the engine once into layered static libraries
-        # (refactor_audit.md D8); this bounds the damage until then.
+        # (docs/refactor_audit.md D8); this bounds the damage until then.
         run: cmake --build build --config Release --parallel 4
 
       - name: Unit tests (binormal ROC vs signal detection theory)

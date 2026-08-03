@@ -34,7 +34,7 @@
 //               working, and boundary-valid ranges must not be refused.
 //
 // The full inventory, the policy, and why `*=` takes a prefix while dotprod
-// requires equality are in refactor_audit.md section 11.
+// requires equality are in docs/refactor_audit.md section 11.
 
 #include <cstdlib>
 #include <cstring>
@@ -241,7 +241,7 @@ static bool c15()
 //     of an empty set has no value, and 0 is the one value a caller acts on --
 //     Network::getGradMax feeds it to the gradient stopping rule, where "the
 //     largest gradient is 0" means converged. No live caller passes empty
-//     (see refactor_audit.md 11.5), so refusing costs nothing and removes a
+//     (see docs/refactor_audit.md 11.5), so refusing costs nothing and removes a
 //     false convergence signal.
 static bool c16()
 {
