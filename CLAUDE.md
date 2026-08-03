@@ -382,7 +382,7 @@ computational** for twenty years — while the optimizer tests executed the disp
 passed, because they carry expected values for SimpleProp and BareProp only and no
 golden fixture uses `BackProp` at all.
 
-**The refactor (`refactor_audit.md`) is at item 12 of 14, and items 1-12 are done.**
+**The refactor (`refactor_audit.md`) is COMPLETE — all fourteen items (2026-08-03).**
 The audit is the working document and it is sectioned: §11 is D5's `vector_ops` bounds
 policy, §12 is D9's `Matrix` policy, §13 the DFA scaffold, §14 the DFA scoring measurement,
 §§15-18 stepwise, §19 a factual correction to §§16-18. Read the section, not the file. What landed 2026-08-01/02:
@@ -405,8 +405,12 @@ Both live in `neuron_job`, which depends on the standard library and threads alo
 two ordering invariants that were unreachable through HTTP are now deterministic** —
 inverting publish-then-clear went from 0 caught to 185-187 of 200 cycles, and marking the
 job running inside the worker from 0 caught to 200 of 200 starts — because in-process
-there is no round trip between the reader and the window. **Next: 14**, the measured
-`gramRows()` / CGD-Shanno allocation work, only if a measurement justifies it.
+there is no round trip between the reader and the window. **14 is DONE and the answer was
+NO CHANGE (§21):** `gramRows()` has no live caller — the gradient-Gram condition number
+was replaced by logistic's direct X'VX in 2026-07-27 — and the CGD/Shanno allocations,
+though real and removable bit-for-bit, measured **+0.35% to −0.95% with mixed signs inside
+the trial spread** on realistic workloads. **All fourteen items are complete; the audit is
+now a record, not a plan.**
 
 **Interfaces.** The CLI menus are **frozen** but fully working — they remain the
 authoritative feature list rule 5 measures the GUI against. `neuron --gui` (embedded
@@ -826,6 +830,19 @@ establish the endpoint and the workflow, not performance or memory at scale.
 - **Tier-2 calibration numbers, per-fold timing, and Tier-3 download buttons** in the CV
   report (files are written to disk and their paths reported; only the buttons are
   missing). → `docs/evaluation_report_spec.md`.
+- **The CGD/Shanno per-iteration allocations are NOT to be removed** (measured
+  2026-08-03, `refactor_audit.md` §21). They are real — `u = stackG - lastG` plus a scaled
+  temporary on every non-restart iteration of the two optimizers `algorithm=auto` picks
+  most often — and an allocation-free prototype preserves final errors **bit for bit**.
+  Across seven interleaved Release trials, realistic and deliberately wide workloads ranged
+  **+0.35% to −0.95%, always inside the trial spread and with mixed signs**: noise, not a
+  win. A real per-iteration saving would appear in every workload with the same sign. Only
+  a contrived 20-row, 10,000-iteration allocation-dominated case moved, by 0.8-1.4 ms in
+  total. Re-propose only with a profile of a REAL workload. → HISTORY 2026-08-03.
+- **`gramRows()` is not to be added.** It was proposed (§8.5) to keep
+  `computeCondNum` from materializing a transpose; that calculation was replaced by
+  logistic's direct X'VX in 2026-07-27, so `conditionOf`'s one caller now hands it a matrix
+  built directly and the primitive would have no caller at all. → `refactor_audit.md` §21.
 - **The ROC bootstrap is where DFA runtime actually is** — 99% of a binary discriminant
   analysis at 20,000 rows, measured 2026-08-02 (`refactor_audit.md` §14). Nobody has asked
   for it to be faster; if anyone does, that is the place, not the scoring loops.

@@ -1076,7 +1076,17 @@ needs. That takes 149 compilations to about 67 and speeds every platform.
     publish-then-clear ordering and "running set before the launch returns" are
     both unreachable from outside the process, which is the measured argument
     for making the launcher linkable. Extraction awaiting review.
-14. Measured `gramRows()` / CGD-Shanno allocation work, only if justified.
+14. ~~Measured `gramRows()` / CGD-Shanno allocation work~~ — **DONE, and the
+    answer was NO CHANGE (§21).** `gramRows()` has no live caller: the
+    gradient-Gram condition number was replaced by logistic's direct
+    X'VX in 2026-07-27, so the primitive it would have served no longer
+    exists. The CGD/Shanno allocations are real and removable bit-for-bit,
+    but across seven interleaved trials realistic workloads ranged
+    **+0.35% to −0.95% with mixed signs inside the trial spread** — noise,
+    not a win — and only a contrived allocation-dominated case moved, by
+    0.8-1.4 ms total. Prototype recorded and discarded, as in §14.
+
+**All fourteen items are complete.** This document is a record, not a plan.
 
 **The governing sentence, Sol's:** remove duplicated mechanisms, but never trade away the
 visible mathematics or introduce runtime abstraction costs merely to reduce line count. That is
@@ -4659,3 +4669,67 @@ the contract being written down somewhere a reader can find it. It was never
 going to save lines: it buys one implementation of an ordering that was written
 four times and tested none (rule 7 — DRY means one authoritative mechanism at
 the correct layer, never minimum line count).
+
+---
+
+## 21. Item 14 — measured, and closed with NO production change (2026-08-03)
+
+The last item of the audit, and it ends the way §14 ended for DFA scoring: a
+measurement, a recorded prototype, and a decision not to apply it. Rule 7 cuts
+both ways — measure before you change an algorithm for speed, and measure before
+you keep a change that only looks faster.
+
+### 21.1 `gramRows()` has no live production caller
+
+§8.5 proposed a class-layer `gramRows()` expressing $B = GG^{\mathsf{T}}/N$
+directly, so that `computeCondNum` would never materialize $G^{\mathsf{T}}$.
+**That caller no longer exists.** The gradient-Gram condition number was replaced
+on 2026-07-27 by logistic's direct $X^{\mathsf{T}}VX$ — the observed Fisher
+information, built once and used for both the Wald covariance and the condition
+number.
+
+Verified independently rather than taken on report: `conditionOf` has exactly one
+caller in the tree (`Logistic::` at `logistic.cpp:309`, handed the `XtVX` built
+fourteen lines above it), and the identifier `gramRows` appears nowhere in `src/`,
+`tests/` or `tools/` — it was a proposal, never written. **There is nothing to
+optimize, and the primitive would have no caller if it were added.** The item is
+closed as overtaken by a correctness fix, which is the best way for a performance
+item to end.
+
+### 21.2 The CGD/Shanno allocations: real, removable, and not worth removing
+
+The allocations are real and are visible in the source: `Network::CGD` and
+`Network::shanno` each construct `vector< double > u = stackG - lastG` plus one
+scaled temporary (`lastF * b`, `u * a`) on **every non-restart iteration**, for
+the two optimizers `algorithm=auto` picks most often.
+
+**Sol's measurement.** An allocation-free prototype removes four allocations per
+non-restart iteration and preserves final errors **bit for bit**. Across seven
+interleaved Release trials:
+
+| workload | result |
+|---|---|
+| realistic and deliberately wide | **+0.35% to −0.95%** — always inside trial spread, **signs mixed** |
+| contrived: 20 rows, 10,000 iterations, allocation-dominated | 2.9–5.4%, i.e. **0.8–1.4 ms total** |
+
+**Reading it the way §12.11 read the `Matrix` bounds checks: mixed signs inside
+the spread are noise, not a small win.** A real per-iteration saving would appear
+in every workload with the same sign, because every workload runs the same
+allocations. It does not. The only case that moves is one built to be dominated
+by allocation, and there the entire prize is about a millisecond.
+
+**Decision: no production change.** The prototype is recorded here and discarded,
+exactly as the 5.1x/3.4x multi-output DFA scoring prototype was (§14). Revisit
+only if a profile of a *real* workload ever shows these two functions'
+allocations mattering — and bring the profile.
+
+### 21.3 What "closed" means here
+
+No benchmark harness, prototype source or timing target was left in the
+repository; the measurement was run outside the tree and its numbers live in this
+section. `./build/scale_probe` is unrelated (clustered-AUC scale on generated
+data) and stays.
+
+**With this, all fourteen items of the audit are complete.** The document is now
+a record rather than a plan. Read a section for why something is the way it is;
+do not read it as work outstanding.

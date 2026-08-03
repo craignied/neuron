@@ -3955,3 +3955,41 @@ Full record: `refactor_audit.md` §20.9.
   lines and gains 58, and the two new units are 399 lines of which 193 are code. The
   extraction ADDS about 210 lines net, nearly all of it the ordering and lock-order
   contract written down where a caller can find it. It was never going to save lines.
+
+## 2026-08-03 — Refactor item 14 measured and closed: no production change; the refactor is complete
+
+The last item ends the way the DFA scoring phase ended (`refactor_audit.md` §14): a
+measurement, a recorded prototype, and a decision not to apply it. Full record: §21.
+
+- **`gramRows()` has no live caller, and never did.** §8.5 proposed a class-layer
+  primitive expressing $B = GG^{\mathsf{T}}/N$ so `computeCondNum` would not materialize
+  the transpose. That calculation was replaced on 2026-07-27 by logistic's direct
+  $X^{\mathsf{T}}VX$ — the observed Fisher information, built once and used for both the
+  Wald covariance and the condition number. Verified rather than accepted on report:
+  `conditionOf` has exactly one caller in the tree, handed the `XtVX` built fourteen lines
+  above it, and the identifier `gramRows` appears nowhere in `src/`, `tests/` or `tools/`.
+  **A performance item overtaken by a correctness fix is the best way for one to end.**
+- **The CGD/Shanno per-iteration allocations are real, removable, and not worth removing.**
+  `Network::CGD` and `Network::shanno` each build `vector< double > u = stackG - lastG`
+  plus a scaled temporary on every non-restart iteration, for the two optimizers
+  `algorithm=auto` picks most often. An allocation-free prototype removes four allocations
+  per non-restart iteration and preserves final errors **bit for bit**. Across seven
+  interleaved Release trials, realistic and deliberately wide workloads ranged **+0.35% to
+  −0.95% — always inside the trial spread, with mixed signs.** Only a contrived 20-row,
+  10,000-iteration allocation-dominated case improved, by 2.9–5.4%, which is **0.8–1.4 ms
+  in total**.
+- **Read that the way §12.11 read the `Matrix` bounds checks: mixed signs inside the
+  spread are noise, not a small win.** A real per-iteration saving appears in every
+  workload with the same sign, because every workload runs the same allocations. Decision:
+  no production change; the prototype is recorded and discarded, as the 5.1x/3.4x
+  multi-output DFA scoring prototype was. Revisit only with a profile of a real workload
+  showing these allocations mattering.
+- No benchmark harness, prototype source or timing target was left in the repository; the
+  measurement ran outside the tree and its numbers live in the audit. `scale_probe` is
+  unrelated and stays.
+
+**All fourteen audit items are complete**, and `refactor_audit.md` becomes a record rather
+than a plan: read a section for why something is the way it is, not as work outstanding.
+The engine refactor that began with standing rule 7 and the `OneHiddenNet` characterization
+ends here. Two of its fourteen items ended in a measured decision to change nothing, which
+is the outcome rule 7 was written to make possible.
