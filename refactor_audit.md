@@ -4278,6 +4278,36 @@ latch not being inherited by the next async job; `resetForNewRun` field by field
 concurrent observers never reading torn JSON; and the blocking-stepwise latch
 clear.
 
+**The overlap control fired on Windows, and the fix was structural, not a bigger
+number** (`dfffde8` → `f4a90f2`). Two cases sized their fixture — a
+3000-iteration XOR run, a 150-budget OBD search — and Windows finished both
+*inside the first HTTP round trip*, leaving a single terminal sample. The
+control did exactly its job: an absence assertion with no running sample behind
+it is vacuous, and it refused to pass. The correction separates the two kinds of
+case rather than enlarging the fixtures:
+
+- a case that asserts a **terminal** fact, or that a progress field was
+  published at all, no longer requires overlap. The progress fields are cleared
+  only when the *next* job starts, so the terminal sample still carries them;
+- a case that asserts an **absence during a run** now uses a job that cannot
+  finish on its own and is then stopped, so overlap is guaranteed by
+  construction.
+
+"Make the fixture bigger" would have been a bet on the slowest machine in CI,
+which is the shape of mistake `portable-test-expectations` already records. The
+run also got faster — 8.6 s to 2.1 s — because those jobs are now stopped as
+soon as they have been observed instead of running to a ceiling. All ten
+effective sabotages were re-proven against the restructured file; S4 now fails
+four assertions instead of three, the two extra being the storm's own overlap
+controls, which is the correct consequence of a latch that is never cleared.
+
+Three cancellation cases still depend on their job being long enough to observe
+— OBD at `iter_budget` 4000 over sizes 2-8, a five-fold three-procedure CV, and
+a reverse stepwise over five variables at roughly 150 ms. There is no way around
+that: Stop cannot reach a job that has already finished. The margins are two
+orders of magnitude, and `wait_for_overlap` fails with a message naming the
+cause rather than producing a confusing downstream failure.
+
 ### 20.3 The sabotage table
 
 Every sabotage deleted `neuron.dir/src/gui.cpp.o` and required the build log to

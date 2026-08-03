@@ -3863,3 +3863,35 @@ the full record.
   worker: `handleTrainStatus` holds `progressMutex` across **both** the `running` read
   and the `result` read, so an observer's critical section totally orders against the
   worker's publish. The extracted unit must state that, since it constrains a caller.
+
+## 2026-08-03 — the overlap control fired on Windows, and it was right
+
+`dfffde8` was green on macOS and Ubuntu and red on Windows, on two of its own
+vacuity controls: "no sample observed the job running". Neither is an engine
+finding. Two cases had *sized* their fixture — a 3000-iteration XOR run and a
+150-budget OBD search — and Windows finished both inside the first HTTP round
+trip, leaving one terminal sample and nothing to assert an absence against. The
+control refused to let that pass, which is the whole reason standing rule 2 asks
+for one.
+
+The fix is structural rather than a larger number. A case that asserts a
+**terminal** fact, or that a progress field was published at all, no longer asks
+for overlap — the progress fields are cleared when the *next* job starts, never
+when one ends, so the terminal sample still carries them. A case that asserts an
+**absence during a run** now uses a job that cannot finish on its own and stops
+it once an observer has seen it, so overlap is guaranteed by construction rather
+than by being fast enough. Enlarging the fixtures would have been a bet on the
+slowest machine in CI, which is the mistake `portable-test-expectations` already
+records; the suite also went from 8.6 s to 2.1 s, because those jobs are now
+stopped as soon as they have been observed instead of running to a ceiling.
+
+All ten effective sabotages were re-proven against the restructured file. S4 —
+the async launch no longer clearing the cancel latch — now fails four assertions
+instead of three; the two extra are the concurrent-observer case's own overlap
+controls, which is the correct consequence of a latch that is never cleared,
+since the long trains it depends on are cancelled at their first iteration.
+
+Three cancellation cases still need their job to be long enough to observe, and
+no restructuring removes that: Stop cannot reach a job that has already
+finished. The margins are two orders of magnitude, and the wait fails with a
+message naming the cause.

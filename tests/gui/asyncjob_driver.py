@@ -150,6 +150,15 @@ def drain( p, label, deadline = 180, expect_overlap = True ):
     Returns (poller, first idle sample). `expect_overlap` is the control that
     the observer really did overlap the worker: without it, "no stale progress
     appeared" could be true because nothing was ever observed at all.
+
+    It is required only where a case asserts the ABSENCE of something during a
+    run. A case that asserts a terminal fact, or that a progress field was
+    published at all, does not need it -- the progress fields are not cleared
+    when a job ends, only when the next one starts, so the terminal sample
+    still carries them. Where overlap IS required, the caller must use a job
+    that cannot finish on its own (see start_long_train), because "make the
+    fixture bigger" is a bet on the slowest machine in CI, and that bet was
+    lost on Windows at dfffde8.
     """
     p.join( deadline + 30 )
     need( not p.is_alive(), "%s: the status poller did not return" % label )
@@ -322,7 +331,10 @@ status, j = jhttp( "/api/train", { "algorithm": "1", "maxiter": "3000",
 need( j is not None and j.get( "ok" ) is True,
     "a second async run must start after the first was reaped" )
 
-poller, idle = poll_to_completion( "run after a cancelled run" )
+# No overlap control here: what this case asserts is the TERMINAL stop reason,
+#    and a run that ended before the first poll answers it just as well.
+poller, idle = poll_to_completion( "run after a cancelled run",
+    expect_overlap = False )
 if idle is not None and idle.get( "result" ):
     r = idle[ "result" ]
     need( r.get( "ok" ) is True, "the run after a cancelled one must succeed" )
@@ -337,8 +349,16 @@ if idle is not None and idle.get( "result" ):
 
 # ------------------------------------ 5. no job's progress reaches the next
 # Each long job publishes its OWN progress object, and resetForNewRun clears
-# every one of them. Each case below has its control first: the field must be
-# seen while its own job runs, or its later absence proves nothing.
+# every one of them. Each pair below runs its control first -- the field must
+# have been published by its own job -- because a later absence proves nothing
+# otherwise.
+#
+# The ABSENCE half is asserted against a job that cannot finish on its own, and
+# is then stopped. That is not caution about speed: a bounded fixture that
+# happens to end before the first poll leaves exactly one terminal sample, and
+# "no obd key in any sample" would then pass without a single running sample
+# behind it. Windows proved that at dfffde8, where a 3000-iteration XOR run
+# finished inside the first HTTP round trip.
 
 status, j = jhttp( "/api/load", { "mode": "raw",
     "path": "lowbwt2-2train.txt", "fraction": "0.25", "seed": "1" } )
@@ -349,19 +369,17 @@ status, j = jhttp( "/api/obd", { "hidden_start": "2", "hidden_max": "3",
     "iter_budget": "150", "seed": "42", "algorithm": "1" } )
 need( j is not None and j.get( "ok" ) is True, "an OBD search must start" )
 
-poller, idle = poll_to_completion( "OBD" )
+poller, idle = poll_to_completion( "OBD", expect_overlap = False )
 need( poller.any_key( "obd" ),
-    "control: a running OBD must publish its obd progress object" )
+    "control: an OBD search must publish its obd progress object" )
 need( idle is not None and idle.get( "result" ) is not None,
     "OBD must publish a result (a refusal is a result too)" )
 
 status, j = jhttp( "/api/model", { "type": "simpleprop", "hidden": "3" } )
 need( j is not None and j.get( "ok" ) is True, "control: model after OBD" )
-status, j = jhttp( "/api/train", { "algorithm": "1", "maxiter": "150000",
-    "seed": "42", "async": "1", "gradmax": "", "change": "", "errwindow": "",
-    "minerr": "", "autostop": "0" } )
+status, j = start_long_train()
 need( j is not None and j.get( "ok" ) is True, "train after OBD must start" )
-poller, idle = poll_to_completion( "training after OBD" )
+poller, idle = stop_and_drain( "training after OBD" )
 need( not poller.any_key( "obd" ),
     "a plain training run must not report the previous OBD run's progress" )
 need( not poller.any_key( "stepwise" ),
@@ -381,10 +399,9 @@ status, j = jhttp( "/api/regress", { "structure": "0;1;2;3;4",
     "direction": "reverse", "threshold": "0.05", "async": "1" } )
 need( j is not None and j.get( "ok" ) is True,
     "an async stepwise regression must start" )
-poller, idle = poll_to_completion( "stepwise" )
+poller, idle = poll_to_completion( "stepwise", expect_overlap = False )
 need( poller.any_key( "stepwise" ),
-    "control: a running stepwise analysis must publish its candidate "
-    "accounting" )
+    "control: a stepwise analysis must publish its candidate accounting" )
 if idle is not None and idle.get( "result" ):
     need( idle[ "result" ].get( "ok" ) is True,
         "the stepwise analysis must complete" )
@@ -393,11 +410,9 @@ if idle is not None and idle.get( "result" ):
 
 status, j = jhttp( "/api/model", { "type": "simpleprop", "hidden": "3" } )
 need( j is not None and j.get( "ok" ) is True, "control: model after stepwise" )
-status, j = jhttp( "/api/train", { "algorithm": "1", "maxiter": "150000",
-    "seed": "42", "async": "1", "gradmax": "", "change": "", "errwindow": "",
-    "minerr": "", "autostop": "0" } )
+status, j = start_long_train()
 need( j is not None and j.get( "ok" ) is True, "train after stepwise" )
-poller, idle = poll_to_completion( "training after stepwise" )
+poller, idle = stop_and_drain( "training after stepwise" )
 need( not poller.any_key( "stepwise" ),
     "a plain training run must not report the previous stepwise run's "
     "progress" )
@@ -406,19 +421,17 @@ need( not poller.any_key( "stepwise" ),
 status, j = jhttp( "/api/cv", { "folds": "3", "seed": "42", "maxiter": "300",
     "logistic": "1", "ldfa": "1", "neural": "0" } )
 need( j is not None and j.get( "ok" ) is True, "a CV comparison must start" )
-poller, idle = poll_to_completion( "cross-validation" )
+poller, idle = poll_to_completion( "cross-validation", expect_overlap = False )
 need( poller.any_key( "cv" ),
-    "control: a running CV must publish its repetition grid" )
+    "control: a CV run must publish its repetition grid" )
 need( idle is not None and idle.get( "result" ) is not None,
     "CV must publish a result" )
 
 status, j = jhttp( "/api/model", { "type": "simpleprop", "hidden": "3" } )
 need( j is not None and j.get( "ok" ) is True, "control: model after CV" )
-status, j = jhttp( "/api/train", { "algorithm": "1", "maxiter": "150000",
-    "seed": "42", "async": "1", "gradmax": "", "change": "", "errwindow": "",
-    "minerr": "", "autostop": "0" } )
+status, j = start_long_train()
 need( j is not None and j.get( "ok" ) is True, "train after CV" )
-poller, idle = poll_to_completion( "training after CV" )
+poller, idle = stop_and_drain( "training after CV" )
 need( not poller.any_key( "cv" ),
     "a plain training run must not report the previous CV run's progress" )
 need( not poller.any_key( "obd" ),
