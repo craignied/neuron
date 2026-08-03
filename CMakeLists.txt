@@ -147,6 +147,16 @@ add_executable(check_capture
 target_link_libraries(check_capture PRIVATE neuron_data)
 add_test(NAME screen_capture COMMAND check_capture)
 
+# Unit test: the strict request-field parsers (ROADMAP 4 item B9) -- the
+# whitespace rule, the boolean token set, sign and overflow policy, the
+# non-finite refusal, underflow acceptance, and the rule that a refused parse
+# never writes its destination. Links neuron_core alone; no GSL, no engine.
+# It does NOT prove the handlers use them -- tests/gui/strictparse.sh does.
+add_executable(check_parse
+    tests/parse/check_parse.cpp)
+target_link_libraries(check_parse PRIVATE neuron_core)
+add_test(NAME strict_field_parsers COMMAND check_parse)
+
 # Unit test: the stratified test-set splitter (ROADMAP 4 Phase 1). Pins exact
 # apportionment, stratification, a leakage-free partition, and seed
 # reproducibility at the index level, PLUS a DataSet::randomize integration

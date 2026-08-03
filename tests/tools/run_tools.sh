@@ -12,6 +12,7 @@ BLESS=0
 [ "$1" = "--bless" ] && BLESS=1
 
 "$PY" ../../tools/check_manifest_index.py
+"$PY" ../../tools/check_strict_parsing.py
 
 mkdir -p runs && cd runs
 

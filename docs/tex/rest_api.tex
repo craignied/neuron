@@ -49,6 +49,100 @@ The server deliberately binds only to loopback and has no
 authentication.  It is intended for a user or local agent on the same
 computer.  It must not be exposed as a public web service.
 
+\section{How a field's value is read}
+\label{sec:rest-field-parsing}
+\index{REST API!field parsing}
+\index{REST API!accepted boolean tokens}
+\index{REST API!omitted and empty fields}
+
+A request field arrives as text, and the endpoint has to decide what
+number, count or flag it names.  Until 2026-08-03 that decision was made
+by the C conversions \texttt{atol} and \texttt{atof}, which consume as
+much of the text as they understand, stop, and report nothing.  A caller
+who wrote \texttt{folds=5junk} got five folds; \texttt{fraction=abc} got
+zero, which is a request for a train/test split that produces no test
+set and still answers \texttt{"ok":true}; and \texttt{async=true} ran
+synchronously, because the only token compared was \texttt{1}.  A local
+agent driving this API has no prompt to re-read and no chance to notice.
+
+Every field is now read through the strict parsers described in
+Section~\ref{sec:util-strict-parsing}, and the rules below are the whole
+contract.
+
+\subsection*{Whitespace and completeness}
+Leading and trailing spaces and tabs are removed, and the rest of the
+text must be consumed entirely.  \texttt{fraction=~0.3~} is accepted,
+because the old conversions accepted it too; \texttt{fraction=0.3junk}
+is refused.  There is no partial reading of any field.
+
+\subsection*{Whole numbers}
+Optional sign \texttt{+}, then decimal digits.  No hexadecimal, no
+exponent, no decimal point.  A negative value is refused as a sign
+error rather than wrapping to an enormous unsigned one, and a value
+above the width of the type is refused as out of range rather than
+truncating: before this change \texttt{maxiter=4294967297} trained for
+one iteration and then reported that it had reached the maximum
+iteration count.
+
+\subsection*{Numbers}
+Anything \texttt{strtod} accepts in the C locale, consumed entirely, and
+finite.  \texttt{nan}, \texttt{inf} and their signed and mixed-case
+spellings are refused for every field: an infinite gradient limit is a
+stopping rule that can never fire, and an infinite variate bound is not
+a bound.  Overflow to infinity is refused as out of range; underflow
+yields the closest representable value, which may be zero, and the
+field's own domain check then decides whether zero is allowed.
+
+\subsection*{Flags}
+Exactly \texttt{1} and \texttt{0}, case-sensitively, on every endpoint.
+No other spelling is accepted anywhere, so a misspelled flag can no
+longer silently mean false.  Until 2026-08-03 the five procedure flags
+of \texttt{/api/cv} also accepted lowercase \texttt{true}; they no
+longer do, and that is the one previously valid request this change
+refuses.
+
+\subsection*{Omitted, and present but empty}
+A field that is absent leaves the value it configures alone: the
+model's current setting, the engine's own default, or the documented
+default for that endpoint.  A field that is present with an empty value
+does the same for numbers and counts, because the page submits several
+of them unconditionally --- \texttt{fraction}, \texttt{seed} and
+\texttt{decay} arrive on every request whether or not the user filled
+them in.
+
+Two exceptions, both deliberate.  On \texttt{/api/train} a present but
+empty \texttt{minerr}, \texttt{change}, \texttt{errwindow} or
+\texttt{gradmax} \emph{disables} that stopping condition, while an
+empty \texttt{printcount} is simply ignored.  And an empty
+\emph{flag} is refused: there is no field on this API where a blank
+checkbox means anything.
+
+\subsection*{What a refusal looks like}
+A malformed field is refused with \texttt{"ok":false} and a message
+naming the field and quoting the text it was given, so that a caller can
+tell which of twenty parameters was wrong:
+
+\begin{verbatim}
+folds: '5junk' is not a whole number
+maxiter: '4294967297' is out of range
+test_n: '-5' cannot be negative
+gradmax: 'inf' is not a finite number
+async: 'true' must be 1 or 0
+logistic is empty
+\end{verbatim}
+
+A syntax fault and a domain fault read differently on purpose.
+\texttt{strata\_bins=abc} once reported ``strata\_bins must be at least
+2'', which sends the reader looking for a value problem in a value that
+was never read; it now reports that the text is not a whole number,
+while \texttt{strata\_bins=1} still reports the domain.
+
+\subsection*{Refusal is atomic}
+Every handler reads all of its fields before it changes anything, so a
+request refused for its twentieth parameter has not applied its first.
+A refused \texttt{/api/train} carrying a new learning rate leaves the
+model training at the old one.
+
 \section{A complete minimal session}
 
 \begin{verbatim}

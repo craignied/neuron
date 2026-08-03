@@ -526,8 +526,17 @@ condition number of exactly 1 and was silently correct elsewhere only when the d
 happened not to be extremal. Fixed in its own commit, with no golden re-bless required. The leaked
 `gsl_vector` went with it. → HISTORY 2026-07-27.
 
-**Open work** is the one remaining ROADMAP 4 item under "What remains" below (B9, the
-GUI-wide strict-parsing pass). **D9's boundary-test debt is PAID** (2026-08-03): the
+**Open work: none.** ROADMAP 4 closed with B9 on 2026-08-03 (below); the refactor closed
+the same day; what is left is the unordered backlog, and nothing forces it.
+**The request boundary is strict** (B9): every GUI/HTTP field is read through
+`util::parseUnsigned` / `parseDouble` / `parseBool`, whitespace-trimmed and fully
+consumed, flags exactly `1`/`0` case-sensitively everywhere, non-finite doubles refused,
+unsigned overflow a range error rather than a wrap, and every refusal names the field and
+quotes the text. Absent and present-but-empty keep the current value, except that
+`/api/train`'s four stopping conditions treat empty as *disable* and an empty flag is
+refused. Handlers parse everything before applying anything, so a request refused for its
+last field has not applied its first. → `docs/b9_strict_parsing.md`.
+**D9's boundary-test debt is PAID** (2026-08-03): the
 worker boundary and the CLI boundary are both in `neuron_job`, and `check_asyncjob` pins
 their exception contracts with exact messages and exit statuses. One piece of that
 mechanism remains **inspected rather than guarded, and is recorded as such**: the catch
@@ -740,6 +749,38 @@ Re-proposing one is rework, not initiative. Full reasoning at the cited HISTORY 
   destination-taking `row`/`dotprod` plus hoisting the class-independent `S·x` — and is
   **5.1x / 3.4x with bit-identical predictions**. Recorded, not applied. Revisit only if
   multi-output DFA lands on a repeated path. → `refactor_audit.md` §14.
+- **GUI/HTTP booleans are `1` and `0`, case-sensitively, on every endpoint — do not
+  broaden them.** The page sends only those and the docs specify only those; widening the
+  set would silently change requests that are accepted today (`async=true` means false
+  before B9 and would start meaning true). `/api/cv`'s five procedure flags also took
+  lowercase `true` until 2026-08-03; that was the single undocumented exception and it was
+  narrowed deliberately, with Craig's approval, as the only currently-valid request B9
+  refuses. → HISTORY 2026-08-03; `docs/b9_strict_parsing.md`.
+- **`util` owns syntax; the handler owns the domain.** A field's text becomes a value in
+  exactly one place, and which minimum / interval / combination is legal stays at the call
+  site where a reader can see it beside the thing it constrains. Do NOT build a descriptor
+  table, a reflection layer, a callback framework or a flag-driven parser that knows about
+  fields — the pre-B9 code's three near-identical `uintParam`/`fracParam` lambdas are what
+  consolidation means here, not a validation engine. A syntax fault and a domain fault
+  must keep reading differently: `strata_bins=abc` reporting "must be at least 2" sent the
+  reader hunting for a value problem in a value that was never read. → HISTORY 2026-08-03.
+- **Non-finite doubles are refused on every field, and unsigned overflow is a range error,
+  never a wrap.** `gradmax=inf` is a stopping rule that cannot fire and `in_lower=-inf` is
+  not a bound; both were accepted. **Underflow is deliberately ACCEPTED** and yields the
+  closest representable value — the domain check one line later refuses a zero where zero
+  is illegal, and refusing `1e-400` as a syntax fault would reject a legitimately tiny
+  tolerance. → HISTORY 2026-08-03.
+- **A test that pins a defect must pin the DEFECT, not one platform's arithmetic.**
+  `atol` returns `long`, which is 64-bit on macOS/Linux and 32-bit on MSVC, so the same
+  out-of-range text truncates to zero on one and saturates to `LONG_MAX` on the other.
+  Pinning the macOS manifestation went red on Windows, and its companion case would have
+  asked Windows for two billion training iterations. Assert what is common to both.
+  → HISTORY 2026-08-03; [[portable-test-expectations]] in memory.
+- **Enum tokens that silently default are a recorded finding, NOT a B9 defect to fix in
+  passing.** `errfunc=xent` uses the default error function and `mode=trian` loads a
+  training set; both are `==` comparisons rather than conversions, and refusing them
+  changes currently-accepted requests on three endpoints. Decided 2026-08-03 to record and
+  leave alone; re-propose as its own unit, not as parsing cleanup. → HISTORY 2026-08-03.
 - **Palm/iPhone exporters stay dead**; the HTML calculator lives on as
   `tools/neuron2web.py`. Python tooling is **stdlib-only** — no pip, no venv, enforced by
   CI on all three OSes.
@@ -774,13 +815,13 @@ design were corrected mid-build and why.
 
 Items 1 and 2 — **group-aware / covariate-stratified CV folds** and **cluster-aware
 (non-IID) locked-test inference** — are **DONE and shipped** (2026-07-30). Their
-implementation record and settled decisions are in `docs/HISTORY.md`. One item remains:
+implementation record and settled decisions are in `docs/HISTORY.md`.
 
-1. **B9 — the GUI-wide strict-parsing pass.** Shared strict integer / floating-point /
-   boolean parsers with full-string consumption, range and overflow checks, and
-   field-specific errors, migrated across **every** handler (`atol`/`atof` today accept
-   `folds=5junk` → 5, and any non-`"1"`/`"true"` boolean → false). Do NOT broaden accepted
-   boolean spellings unless that becomes explicit API policy.
+**ROADMAP 4 IS COMPLETE.** B9 — the GUI-wide strict-parsing pass — shipped 2026-08-03, and with
+it ROADMAP 4 is complete. `util::parseUnsigned` / `parseDouble` / `parseBool` own the
+syntax; `gui.cpp`'s `readUnsigned` / `readDouble` / `readBool` own the request shape; every
+handler is migrated and `tools/check_strict_parsing.py` fails the build if a permissive
+conversion or a handler-local parser copy returns. → `docs/b9_strict_parsing.md`.
 
 ### Verification (end of every phase)
 Zero-warning Release build → `tests/golden/run_golden.sh` (byte-identical; the Phase-1

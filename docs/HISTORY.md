@@ -4038,3 +4038,91 @@ thread-destruction and uncaught-exception rules behind the failure boundaries. E
 public operation and major progress object has a direct index entry. The gate advances
 from 37 to 43 major objects and from 103 to 117 principal methods, so a later deletion of
 that navigation now fails rather than waiting for a reader to discover it.
+
+## 2026-08-03 — ROADMAP 4 B9: the GUI-wide strict-parsing pass
+
+The last open ROADMAP 4 item, and the last production task before the Manifest audit.
+`src/gui.cpp` read every numeric request field with `atol` or `atof`, which consume what
+they understand, stop, and report nothing. The inventory, the measurements and the settled
+contract are `docs/b9_strict_parsing.md`; what follows is what it found and what changed.
+
+**Measured against a running pre-B9 server, not read out of the source.** `fraction=abc`
+answered `ok:true` and loaded 189 training exemplars with **no test set at all** — a
+request for a train/test split that silently produced none. `maxiter=4294967297` trained
+for one iteration and then reported that it had hit the maximum iteration count.
+`gradmax=inf` installed a stopping rule that can never fire; `in_lower=-inf&in_upper=inf`
+were accepted as variate bounds. `discrete=false` declared a **discrete** outcome and
+`async=true` ran **blocking**, because the only token ever compared was `1`.
+`/api/regress threshold=nan` passed both of its guards — every comparison with NaN is
+false — and reached `RegressNet`. `hidden=3junk`, `folds=5junk`, `eta=0.5junk`,
+`test_n=20junk`, `inner_val=0.25junk` and `sample_every=2junk` were all accepted as their
+truncations. Two of these did not behave the way the source suggested at first reading
+(`fraction=1e` is 1.0, not 0; the regress guards are bypassed rather than false-positive),
+which is why the inventory was driven rather than derived.
+
+**Counted from this source rather than from the roadmap's remembered figure**, which was
+still right: 51 `atol`/`atof` calls, three numeric parser lambdas in two handlers, one
+boolean one, 18 string comparisons deciding a boolean, 55 numerically converted
+field-instances and 21 boolean ones. Zero `strto*`, `sto*` or stream extractions of a
+request field; the one stream extraction in the file reads a saved network's second line
+and is deliberately out of scope.
+
+**Two API-policy questions were reported before being decided**, because both would change
+currently-*valid* requests. Craig settled them: booleans are `1` and `0`, case-sensitively,
+everywhere — which narrows `/api/cv logistic=true`, undocumented but working, the only
+accepted request the pass refuses; and enum tokens that silently default (`errfunc=xent`
+uses the default error function, `mode=trian` loads a training set) are recorded as a
+finding and left alone, being `==` comparisons rather than conversions.
+
+**`util::` gained the syntax layer** — `ParseStatus` with seven values, `parseUnsigned`,
+`parseDouble`, `parseBool`, and one message builder per destination type. Each writes its
+destination **only** on `Ok`. Surrounding spaces and tabs are trimmed and the remainder
+must be consumed entirely, which is exactly what the C conversions already tolerated, so
+nothing that worked stops working. A negative is a sign fault distinct from a syntax
+fault; a magnitude above `UINT_MAX` is a range fault rather than a wrap; every spelling of
+`nan` and infinity is refused; **underflow is accepted** and yields the closest
+representable value, because a legitimately tiny tolerance must not be refused as a syntax
+error and every domain that excludes zero rejects it one line later.
+
+**`gui.cpp` kept its domains and gave up its conversions.** Five file-scope readers
+(`given`, `readUnsigned`, `readDouble`, `readBool`, plus `uintField`/`fracField` for the
+two domain shapes that were already written out twice each) replaced all 51 conversions,
+all four lambdas, and every hand-written boolean comparison. Which minimum, which interval,
+which combination is a conflict all stay at the call site. Three consequences beyond the
+parsing: `parseLayers` returns a message instead of an empty vector, so `hidden=3,junk`
+names the token; `/api/load` reads `strata_bins`, `val_n` and `val_fraction` **before it
+opens the file**; and five `handleTrain` setters stopped re-converting their text where
+they applied it, which had been two places for one field's meaning to live.
+
+**Three gates, and they are not redundant.** `check_parse` (ctest `strict_field_parsers`,
+185 checks) pins the parser contract; `tests/gui/strictparse.sh` (215 checks, ~1 s) proves
+the **handlers** use it; `tools/check_strict_parsing.py`, run by `tests/tools/run_tools.sh`
+and therefore by CI on all three platforms, fails if a permissive conversion, an inline
+boolean test on a `param()` result, or a handler-local parser copy returns — and also if
+a reader is deleted or left uncalled, because a forbidding gate can be satisfied by
+deleting the parsing altogether. A parser test passes while every handler still calls
+`atol`; an endpoint test passes while the gate is absent; the gate passes while the
+parsers are wrong.
+
+**The finding is M6.** Thirteen sabotages were run with the object file deleted and the
+build log required to show the recompile, on introduction *and* on restoration, plus an
+inert marker run first as a harness control (correctly NOT CAUGHT). Twelve were caught
+immediately. The thirteenth — moving one domain check below the first setter, i.e.
+breaking parse-before-apply — was **not caught**, because the partial-mutation case as
+first written sent a *syntax* fault in a later field, and a syntax fault is refused by the
+reader at the top of the handler whatever the ordering. The case that can see it sends a
+*domain* fault and then asks the engine's own run header which learning rate it is using.
+Its mirror image is M3: breaking `given()`'s present-but-empty distinction failed
+**seventeen PIN rows and not one malformed-input assertion**, which is what the positive
+controls are for — every malformed-input row can be satisfied by a parser that simply
+refuses more.
+
+**A Windows-only CI failure on the characterization commit belongs in the record**, being
+the fourth of its family this week. The first draft pinned `maxiter=4294967296` wrapping
+to zero. That is not the defect; it is one platform's arithmetic *manifestation* of the
+defect, because `atol` returns `long` — 64 bits here, 32 on MSVC — so the same text
+truncates to zero on one and saturates to `LONG_MAX` on the other. The companion case
+would have asked Windows for 2,147,483,647 iterations and returned only because a stopping
+condition left over from an earlier case happened to fire. The rule: **a test that pins a
+defect must pin the defect, not one platform's arithmetic**. Rewritten on `/api/cv folds`
+with a value that saturates on both widths, and asserting only what is common to both.

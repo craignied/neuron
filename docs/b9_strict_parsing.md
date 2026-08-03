@@ -267,3 +267,110 @@ build if a permissive conversion or a handler-local parser copy returns.
 - **The CLI menus are frozen.** `util::askI` / `askD` keep their own prompting
   loops; the new parsers are available to them but no CLI interaction is
   rewritten merely because they exist.
+
+---
+
+## 5. As landed
+
+`src/utility.{h,cpp}` gained `ParseStatus`, `parseUnsigned`, `parseDouble`,
+`parseBool`, `unsignedError`, `numberError`, `boolError` — 130 lines, in
+`neuron_core`, so the unit test links neither GSL nor the engine.
+
+`src/gui.cpp` gained five file-scope readers — `given`, `readUnsigned`,
+`readDouble`, `readBool`, plus `uintField` / `fracField` for the two domain
+shapes that were already written out twice each — and lost all 51 permissive
+conversions, the three parser lambdas, the `boolParam` lambda, and every
+hand-written boolean comparison against a literal. Every handler migrated:
+`/api/load`, `/api/model`, `/api/dfa`, `/api/randomize`, `/api/train`,
+`/api/obd`, `/api/cv`, `/api/regress`. Net: **+412 / −239**.
+
+Three deliberate consequences beyond the parsing itself:
+
+- **`parseLayers` returns a message instead of an empty vector.** A hidden-layer
+  spec that held an unreadable token used to collapse the whole vector and the
+  caller could only say "one or more positive integers"; `hidden=3,junk` now
+  names the token.
+- **`/api/load` reads `strata_bins`, `val_n` and `val_fraction` before it opens
+  the file**, so a malformed split control is refused without the cost of a load.
+- **The apply sites stopped re-converting their text.** Five of `handleTrain`'s
+  setters parsed the same field a second time where they applied it, which is
+  two places for one field's meaning to live.
+
+### The gates it added
+
+| gate | what it holds |
+|---|---|
+| `ctest` case `strict_field_parsers` | the parser contract itself — 185 checks |
+| `tests/gui/strictparse.sh` | that the **handlers** use it — 215 checks, ~1 s |
+| `tools/check_strict_parsing.py` | that neither comes back — run by `tests/tools/run_tools.sh`, so by CI on all three platforms |
+
+The three are not redundant. A parser test passes while every handler still
+calls `atol`; an endpoint test passes while the gate is absent and the next
+handler reintroduces one; the gate passes while the parsers are wrong.
+
+### Sabotage evidence
+
+Every case below was applied, the affected object file **deleted**, the build
+re-run while **requiring the compile line in the log**, the test run, then the
+source restored, the object deleted **again**, rebuilt with the same
+requirement, and the control re-run. An inert edit carrying only the marker was
+run first as a harness control and correctly reported NOT CAUGHT.
+
+Parsers (`check_parse`):
+
+| # | sabotage | result |
+|---|---|---|
+| S0 | inert marker (harness control) | not caught — correct |
+| S1 | full-consumption check removed | caught, 15 checks |
+| S2 | leading `-` allowed through to `strtoull` | caught, 5 |
+| S3 | `UINT_MAX` ceiling removed | caught, 7 |
+| S4 | `!isfinite` refusal removed | caught, 21 |
+| S5 | ERANGE treated as failure for any result | caught, 3 |
+| S6 | `parseBool` extended to accept `true` | caught, 4 |
+| S7 | destination written before the status was decided | caught, 12 |
+
+Handler migration (`strictparse.sh`) — none of these is visible to the parser
+test, which is the point:
+
+| # | sabotage | result |
+|---|---|---|
+| M1 | the unsigned reader stops reporting its status | caught, 48 checks |
+| M2 | the boolean reader returns to `text != "0"` | caught, 34 |
+| M3 | `given()` stops distinguishing present-but-empty | caught, **17 — all of them PIN rows** |
+| M4 | one handler left unmigrated (`/api/train` `maxiter`) | caught, 4 |
+| M5 | a non-finite value forwarded as a success | caught, 12 |
+| M6 | a domain check moved below the first setter | **NOT caught at first** |
+
+Repository gate (`check_strict_parsing.py`): a returning `atol`, an inline
+boolean test on a `param()` result, a handler-local parser lambda, a deleted
+reader and an unused reader were each introduced and each caught.
+
+**M6 is the finding.** The parse-before-apply case as first written sent a
+*syntax* fault in a later field, and a syntax fault is refused by the reader at
+the top of the handler whatever the ordering — so it could not see a domain
+check that had been moved below a setter. The case that can see it sends a
+*domain* fault (`eta=0.6&printcount=0`) and then asks the engine's own run
+header which learning rate it is using. Adding it turned M6 from NOT CAUGHT
+into caught. M3 is the mirror image and the reason the PIN rows exist: breaking
+the empty-field distinction failed seventeen positive controls and not one
+malformed-input assertion.
+
+### Behaviour intentionally changed for malformed requests
+
+Everything in §2's "pre-B9 misparse" column now refuses by name. Beyond that,
+three changes are worth stating plainly because they alter requests that were
+previously *accepted*:
+
+1. `/api/cv logistic=true` (and the other four procedure flags) — the approved
+   narrowing, §3.
+2. **A present-but-empty flag is refused** where it previously meant true for
+   `discrete`-style fields and false for `async`-style ones.
+3. **Non-finite doubles are refused everywhere**, including `gradmax=inf` and
+   `in_lower=-inf`, which were accepted.
+
+Two refusal *messages* changed without any change in what is refused: a negative
+`locked_n` and a negative `seed` on `/api/cv` were already refused by a domain
+comparison and now refuse as sign faults naming the field. And when a request
+carries two bad fields, `/api/obd` and `/api/cv` now report the **first**; they
+used to report the last, because each lambda overwrote the previous one's
+message.

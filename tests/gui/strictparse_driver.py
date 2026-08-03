@@ -163,42 +163,55 @@ def group_load():
     refused( "load: roc_report token", load( roc_report = "neither" ),
         "roc_report must be both or either" )
 
-    # --- DEFECT: trailing junk is silently truncated --------------------------
-    accepted( "DEFECT load: inputs=5junk is five inputs",
-        load( inputs = "5junk" ), "5 inputs" )
-    accepted( "DEFECT load: test_n=20junk is twenty",
-        load( test_n = "20junk", fraction = "" ), "20 test exemplars" )
-    accepted( "DEFECT load: threshold=0.4junk is accepted",
-        load( threshold = "0.4junk" ) )
-    accepted( "DEFECT load: val_fraction=0.2junk is accepted",
-        load( val_fraction = "0.2junk" ), "validation exemplars" )
-    accepted( "DEFECT load: roc_min=2junk is accepted", load( roc_min = "2junk" ) )
+    # --- was DEFECT, now refused by name --------------------------------------
+    #    Every row below silently misread its value before B9. The assertion is
+    #    not merely "refused" but refused with THIS field's name in the message,
+    #    because a handler that refuses everything for the wrong reason is the
+    #    other way to make a strict-parsing test pass.
+    refused( "load: inputs=5junk", load( inputs = "5junk" ),
+        "inputs: '5junk' is not a whole number" )
+    refused( "load: test_n=20junk", load( test_n = "20junk", fraction = "" ),
+        "test_n: '20junk' is not a whole number" )
+    refused( "load: threshold=0.4junk", load( threshold = "0.4junk" ),
+        "threshold: '0.4junk' is not a number" )
+    refused( "load: val_fraction=0.2junk", load( val_fraction = "0.2junk" ),
+        "val_fraction: '0.2junk' is not a number" )
+    refused( "load: roc_min=2junk", load( roc_min = "2junk" ),
+        "roc_min: '2junk' is not a whole number" )
 
-    # DEFECT: an unreadable fraction silently produces NO test set at all
-    accepted( "DEFECT load: fraction=abc silently loads without a test set",
-        load( fraction = "abc" ), "189 training exemplars" )
-    check( "DEFECT load: fraction=abc really has no test set",
-        "test exemplars" not in str( load( fraction = "abc" ).get( "message" ) ) )
+    # The one that silently produced no test set at all
+    refused( "load: fraction=abc", load( fraction = "abc" ),
+        "fraction: 'abc' is not a number" )
+    # ... and the exponent that parsed as 1.0 and split the whole dataset off
+    refused( "load: fraction=1e", load( fraction = "1e" ),
+        "fraction: '1e' is not a number" )
 
-    # DEFECT: a syntax fault reported as a domain fault
-    refused( "DEFECT load: strata_bins=abc blamed on the domain",
-        load( strata = "1", strata_bins = "abc" ),
-        "strata_bins must be at least 2" )
-
-    # DEFECT: a negative count becomes an enormous unsigned one
-    r = load( test_n = "-5", fraction = "" )
-    check( "DEFECT load: test_n=-5 is not refused by name",
-        r.get( "ok" ) is False and "test_n" not in str( r.get( "message" ) ),
+    # A syntax fault no longer borrows the domain's sentence
+    r = load( strata = "1", strata_bins = "abc" )
+    refused( "load: strata_bins=abc", r,
+        "strata_bins: 'abc' is not a whole number" )
+    check( "load: strata_bins=abc is not blamed on the domain",
+        "at least 2" not in str( r.get( "message" ) ),
         str( r.get( "message" ) )[ :160 ] )
 
-    # DEFECT: infinities pass as variate bounds
-    accepted( "DEFECT load: infinite variate bounds accepted",
-        load( in_lower = "-inf", in_upper = "inf" ) )
+    # A negative count is a sign fault, named, instead of an enormous unsigned
+    refused( "load: test_n=-5", load( test_n = "-5", fraction = "" ),
+        "test_n: '-5' cannot be negative" )
 
-    # DEFECT: any token but "0" means true, so "false" means true
-    accepted( "DEFECT load: discrete=false means discrete",
-        load( discrete = "false" ), "56 test exemplars" )
-    accepted( "DEFECT load: history=true means false", load( history = "true" ) )
+    # Infinities are not variate bounds
+    refused( "load: in_lower=-inf", load( in_lower = "-inf", in_upper = "1" ),
+        "in_lower: '-inf' is not a finite number" )
+    refused( "load: in_upper=inf", load( in_lower = "-1", in_upper = "inf" ),
+        "in_upper: 'inf' is not a finite number" )
+
+    # Booleans take 1 and 0 only, so a token that used to mean its opposite
+    #    now says so
+    refused( "load: discrete=false", load( discrete = "false" ),
+        "discrete: 'false' must be 1 or 0" )
+    refused( "load: history=true", load( history = "true" ),
+        "history: 'true' must be 1 or 0" )
+    refused( "load: discrete= (empty)", load( discrete = "" ),
+        "discrete is empty" )
 
 
 # =============================================================================
@@ -226,16 +239,20 @@ def group_model():
         post( "/api/model", { "type": "simpleprop", "hidden": "0" } ),
         "positive integers" )
 
-    accepted( "DEFECT model: hidden=3junk is three nodes",
+    refused( "model: hidden=3junk",
         post( "/api/model", { "type": "simpleprop", "hidden": "3junk" } ),
-        "SimpleProp 5-3-1" )
-    accepted( "DEFECT model: bias=false leaves the bias ON",
+        "hidden: '3junk' is not a whole number" )
+    refused( "model: hidden=3,junk names the bad token",
+        post( "/api/model", { "type": "simpleprop", "hidden": "3,junk" } ),
+        "hidden: 'junk' is not a whole number" )
+    refused( "model: bias=false",
         post( "/api/model",
             { "type": "simpleprop", "hidden": "3", "bias": "false" } ),
-        "SimpleProp 5-3-1 network ready (X-entropy)" )
-    accepted( "DEFECT model: log_lastop=no leaves logging ON",
+        "bias: 'false' must be 1 or 0" )
+    refused( "model: log_lastop=no",
         post( "/api/model",
-            { "type": "simpleprop", "hidden": "3", "log_lastop": "no" } ) )
+            { "type": "simpleprop", "hidden": "3", "log_lastop": "no" } ),
+        "log_lastop: 'no' must be 1 or 0" )
 
 
 # =============================================================================
@@ -246,10 +263,15 @@ def group_train():
     xor_net()
     accepted( "randomize: seeded", post( "/api/randomize", { "seed": "42" } ) )
     accepted( "randomize: unseeded", post( "/api/randomize", {} ) )
-    accepted( "DEFECT randomize: seed=99junk is accepted",
-        post( "/api/randomize", { "seed": "99junk" } ) )
-    accepted( "DEFECT randomize: seed=-1 wraps silently",
-        post( "/api/randomize", { "seed": "-1" } ) )
+    refused( "randomize: seed=99junk", post( "/api/randomize", { "seed": "99junk" } ),
+        "seed: '99junk' is not a whole number" )
+    refused( "randomize: seed=-1", post( "/api/randomize", { "seed": "-1" } ),
+        "seed: '-1' cannot be negative" )
+    # PIN: the page sends seed= on every call, and an empty one still means
+    #    "do not seed" -- a strict parser must not turn that into a refusal
+    accepted( "randomize: empty seed is still unseeded",
+        post( "/api/randomize", { "seed": "" } ),
+        "weights randomized — the next Train" )
 
     # PIN: the parity controls, each in its ordinary form
     accepted( "train: plain", train() )
@@ -295,40 +317,81 @@ def group_train():
     refused( "train: autostop_window below 2",
         train( autostop = "1", autostop_window = "1" ),
         "autostop_window must be at least 2" )
+    # nan and inf used to be caught, when they were caught at all, by a domain
+    #    comparison that happened to be false for them. They are now refused as
+    #    what they are, one layer earlier.
     refused( "train: eta of nan", train( eta = "nan" ),
-        "learning rate must be greater than 0 and at most 1" )
+        "eta: 'nan' is not a finite number" )
 
-    # --- DEFECT ---------------------------------------------------------------
-    accepted( "DEFECT train: maxiter=1junk is one iteration",
-        train( maxiter = "1junk" ) )
-    accepted( "DEFECT train: algorithm=1x is algorithm 1",
-        train( algorithm = "1x" ) )
-    accepted( "DEFECT train: eta=0.5junk is 0.5", train( eta = "0.5junk" ) )
-    accepted( "DEFECT train: printcount=3junk is 3",
-        train( printcount = "3junk" ) )
-    accepted( "DEFECT train: errwindow=5junk is 5", train( errwindow = "5junk" ) )
-    accepted( "DEFECT train: gradmax=inf is a stop that cannot fire",
-        train( gradmax = "inf" ) )
-    accepted( "DEFECT train: autostop_tol=0.5junk is 0.5",
-        train( autostop = "1", autostop_tol = "0.5junk" ) )
+    # --- was DEFECT, now refused by name --------------------------------------
+    refused( "train: maxiter=1junk", train( maxiter = "1junk" ),
+        "maxiter: '1junk' is not a whole number" )
+    refused( "train: algorithm=1x", train( algorithm = "1x" ),
+        "algorithm: '1x' is not a whole number" )
+    refused( "train: eta=0.5junk", train( eta = "0.5junk" ),
+        "eta: '0.5junk' is not a number" )
+    refused( "train: printcount=3junk", train( printcount = "3junk" ),
+        "printcount: '3junk' is not a whole number" )
+    refused( "train: errwindow=5junk", train( errwindow = "5junk" ),
+        "errwindow: '5junk' is not a whole number" )
+    refused( "train: gradmax=inf", train( gradmax = "inf" ),
+        "gradmax: 'inf' is not a finite number" )
+    refused( "train: minerr=nan", train( minerr = "nan" ),
+        "minerr: 'nan' is not a finite number" )
+    refused( "train: autostop_tol=0.5junk",
+        train( autostop = "1", autostop_tol = "0.5junk" ),
+        "autostop_tol: '0.5junk' is not a number" )
+    refused( "train: decay=0.1junk",
+        train( weight_decay = "1", decay = "0.1junk" ),
+        "decay: '0.1junk' is not a number" )
+    refused( "train: seed=-1", train( seed = "-1" ),
+        "seed: '-1' cannot be negative" )
 
-    # DEFECT: maxiter wraps modulo 2^32. 2^32 lands exactly on zero, which the
-    #    existing domain check then reports as "at least 1" -- an unambiguous
-    #    demonstration of the wrap that needs no timing and no iteration count.
-    #    2^32+1 lands on one, and the run completes instead of asking for four
-    #    billion iterations.
-    refused( "DEFECT train: maxiter=2^32 wraps to zero",
-        train( maxiter = "4294967296" ), "max iterations must be at least 1" )
-    accepted( "DEFECT train: maxiter=2^32+1 wraps to one and trains",
-        train( maxiter = "4294967297" ) )
+    # An out-of-range count is asserted on /api/cv (group_obd_cv), where the
+    #    value is refused before anything runs. Asserting it on maxiter would
+    #    mean asking the engine to obey whatever the number turned into.
+    refused( "train: maxiter=99999999999999999999",
+        train( maxiter = "99999999999999999999" ),
+        "maxiter: '99999999999999999999' is out of range" )
 
-    # DEFECT: async=true runs synchronously -- the response already carries the
-    #    finished run, which an async start never does
-    r = train( maxiter = "1", **{ "async": "true" } )
-    accepted( "DEFECT train: async=true runs blocking", r )
-    check( "DEFECT train: async=true really did block",
-        "training started" not in str( r.get( "message" ) ),
-        str( r.get( "message" ) )[ :160 ] )
+    # async=true used to run blocking
+    refused( "train: async=true", train( maxiter = "1", **{ "async": "true" } ),
+        "async: 'true' must be 1 or 0" )
+
+    # A malformed LATER field must not leave the model half-configured. The
+    #    engine's run header prints the learning rate it is actually using, so
+    #    this is observable rather than argued: set 0.25, have a request
+    #    carrying 0.75 refused for a bad print count, then look at what the
+    #    next clean run reports.
+    r = train( eta = "0.25", autostep = "0" )
+    accepted( "train: eta 0.25 applied", r )
+    check( "train: the header shows the rate that was applied",
+        "Learning rate eta: 0.25" in str( r.get( "output", "" ) ),
+        "header did not name eta 0.25" )
+    refused( "train: a bad later field refuses the whole request",
+        train( eta = "0.75", autostep = "0", printcount = "3junk" ),
+        "printcount: '3junk' is not a whole number" )
+    r = train( autostep = "0" )
+    accepted( "train: after the syntax refusal", r )
+    check( "train: a refused SYNTAX fault applied nothing",
+        "Learning rate eta: 0.25" in str( r.get( "output", "" ) )
+            and "Learning rate eta: 0.75" not in str( r.get( "output", "" ) ),
+        "eta from a refused request survived into the model" )
+
+    # And the same for a DOMAIN fault in a later field, which is a different
+    #    path: a syntax fault is refused by the reader at the top of the
+    #    handler whatever the ordering, so only this case can tell whether the
+    #    domain checks really run before the first setter. (Measured: without
+    #    it, moving one domain check below the apply is not caught at all.)
+    refused( "train: a later DOMAIN fault refuses the whole request",
+        train( eta = "0.6", autostep = "0", printcount = "0" ),
+        "print count must be at least 1" )
+    r = train( autostep = "0" )
+    accepted( "train: after the domain refusal", r )
+    check( "train: a refused DOMAIN fault applied nothing",
+        "Learning rate eta: 0.25" in str( r.get( "output", "" ) )
+            and "Learning rate eta: 0.6" not in str( r.get( "output", "" ) ),
+        "eta from a domain-refused request survived into the model" )
 
     # PIN: async=1 really is asynchronous
     r = train( maxiter = "20000", **{ "async": "1" } )
@@ -351,25 +414,23 @@ def group_regress():
     refused( "regress: threshold of 1", post( "/api/regress",
         dict( S, threshold = "1" ) ), "p-value threshold must be between 0 and 1" )
     refused( "regress: threshold of inf", post( "/api/regress",
-        dict( S, threshold = "inf" ) ), "p-value threshold must be between 0 and 1" )
+        dict( S, threshold = "inf" ) ), "threshold: 'inf' is not a finite number" )
     refused( "regress: direction token", post( "/api/regress",
         dict( S, direction = "sideways", threshold = "0.05" ) ),
         "direction must be reverse or forward" )
 
-    # DEFECT: every comparison with NaN is false, so both guards pass and the
-    #    analysis runs with a NaN threshold
-    r = post( "/api/regress", dict( S, threshold = "nan" ) )
-    check( "DEFECT regress: threshold=nan passes the guards",
-        "p-value threshold" not in str( r.get( "message" ) ),
-        str( r.get( "message" ) )[ :160 ] )
-    drain()
-
-    # DEFECT: trailing junk truncates
-    r = post( "/api/regress", dict( S, threshold = "0.05junk" ) )
-    check( "DEFECT regress: threshold=0.05junk is not refused",
-        "p-value threshold" not in str( r.get( "message" ) ),
-        str( r.get( "message" ) )[ :160 ] )
-    drain()
+    # Every comparison with NaN is false, so both of the handler's own guards
+    #    passed it through. The parser refuses it before they are reached.
+    refused( "regress: threshold=nan",
+        post( "/api/regress", dict( S, threshold = "nan" ) ),
+        "threshold: 'nan' is not a finite number" )
+    refused( "regress: threshold=0.05junk",
+        post( "/api/regress", dict( S, threshold = "0.05junk" ) ),
+        "threshold: '0.05junk' is not a number" )
+    refused( "regress: async=true",
+        post( "/api/regress",
+            dict( S, threshold = "0.05", **{ "async": "true" } ) ),
+        "async: 'true' must be 1 or 0" )
 
 
 # =============================================================================
@@ -380,12 +441,19 @@ def group_obd_cv():
     load()
     post( "/api/model", { "type": "simpleprop", "hidden": "2" } )
 
-    refused( "obd: iter_budget below 1",
-        post( "/api/obd", { "hidden_max": "3", "iter_budget": "-1" } ),
+    refused( "obd: iter_budget of 0 is a domain refusal",
+        post( "/api/obd", { "hidden_max": "3", "iter_budget": "0" } ),
         "iter_budget must be at least 1" )
+    refused( "obd: iter_budget of -1 is a sign refusal",
+        post( "/api/obd", { "hidden_max": "3", "iter_budget": "-1" } ),
+        "iter_budget: '-1' cannot be negative" )
     refused( "obd: early_stop_tol of inf",
         post( "/api/obd",
             { "hidden_max": "3", "iter_budget": "10", "early_stop_tol": "inf" } ),
+        "early_stop_tol: 'inf' is not a finite number" )
+    refused( "obd: early_stop_tol of 5 is still a domain refusal",
+        post( "/api/obd",
+            { "hidden_max": "3", "iter_budget": "10", "early_stop_tol": "5" } ),
         "early_stop_tol must be between 0 and 1" )
     refused( "obd: algorithm token",
         post( "/api/obd", { "hidden_max": "3", "iter_budget": "10",
@@ -396,21 +464,29 @@ def group_obd_cv():
         "OBD hidden-layer search started" )
     drain()
 
-    accepted( "DEFECT obd: hidden_max=4junk starts a search",
-        post( "/api/obd", { "hidden_max": "4junk", "iter_budget": "10" } ) )
-    drain()
-    accepted( "DEFECT obd: sample_every=2junk starts a search",
+    refused( "obd: hidden_max=4junk",
+        post( "/api/obd", { "hidden_max": "4junk", "iter_budget": "10" } ),
+        "hidden_max: '4junk' is not a whole number" )
+    refused( "obd: sample_every=2junk",
         post( "/api/obd", { "hidden_max": "3", "iter_budget": "10",
-            "sample_every": "2junk" } ) )
-    drain()
+            "sample_every": "2junk" } ),
+        "sample_every: '2junk' is not a whole number" )
+    refused( "obd: prune_tol=nan",
+        post( "/api/obd", { "hidden_max": "3", "iter_budget": "10",
+            "prune_tol": "nan" } ),
+        "prune_tol: 'nan' is not a finite number" )
+    refused( "obd: seed=-1",
+        post( "/api/obd", { "hidden_max": "3", "iter_budget": "10",
+            "seed": "-1" } ), "seed: '-1' cannot be negative" )
 
     cv = { "maxiter": "10", "neural": "0", "ldfa": "0", "qdfa": "0" }
     refused( "cv: folds below 2", post( "/api/cv", dict( cv, folds = "1" ) ),
         "folds must be at least 2" )
+    # These two were already refusals; B9 changes only WHY they read as they
+    #    do -- a sign fault named by the parser rather than a domain sentence
+    #    reached after the value had been reinterpreted as a huge unsigned one
     refused( "cv: negative seed", post( "/api/cv", dict( cv, folds = "2",
-        seed = "-1" ) ), "seed must be a whole number" )
-    refused( "cv: negative locked_n", post( "/api/cv", dict( cv, folds = "2",
-        locked_n = "-1" ) ), "locked_n cannot be negative" )
+        seed = "-1" ) ), "seed: '-1' cannot be negative" )
     refused( "cv: no procedure selected",
         post( "/api/cv", dict( cv, folds = "2", logistic = "0" ) ),
         "select at least one procedure" )
@@ -419,27 +495,47 @@ def group_obd_cv():
         "cross-validation started" )
     drain()
 
-    accepted( "DEFECT cv: folds=5junk starts a 5-fold run",
-        post( "/api/cv", dict( cv, folds = "5junk" ) ) )
-    drain()
-    accepted( "DEFECT cv: inner_val=0.25junk is accepted",
-        post( "/api/cv", dict( cv, folds = "2", inner_val = "0.25junk" ) ) )
-    drain()
-    accepted( "DEFECT cv: maxiter=10x is accepted",
-        post( "/api/cv", dict( cv, folds = "2", maxiter = "10x" ) ) )
-    drain()
+    refused( "cv: folds=5junk", post( "/api/cv", dict( cv, folds = "5junk" ) ),
+        "folds: '5junk' is not a whole number" )
+    refused( "cv: inner_val=0.25junk",
+        post( "/api/cv", dict( cv, folds = "2", inner_val = "0.25junk" ) ),
+        "inner_val: '0.25junk' is not a number" )
+    refused( "cv: maxiter=10x",
+        post( "/api/cv", dict( cv, folds = "2", maxiter = "10x" ) ),
+        "maxiter: '10x' is not a whole number" )
+    refused( "cv: locked_fraction=nan",
+        post( "/api/cv", dict( cv, folds = "2", locked_fraction = "nan" ) ),
+        "locked_fraction: 'nan' is not a finite number" )
+    refused( "cv: locked_n=-1 is a sign fault",
+        post( "/api/cv", dict( cv, folds = "2", locked_n = "-1" ) ),
+        "locked_n: '-1' cannot be negative" )
 
-    # DEFECT: boolParam accepts "1" or lowercase "true"; every other token,
-    #    including "TRUE" and "yes", silently means false
-    accepted( "DEFECT cv: logistic=true is accepted",
-        post( "/api/cv", dict( cv, folds = "2", logistic = "true" ) ) )
-    drain()
-    refused( "DEFECT cv: logistic=TRUE silently means false",
+    # A count above the width of the conversion used to be reinterpreted as
+    #    whatever the overflow produced -- zero on a 64-bit long, LONG_MAX on
+    #    MSVC's 32-bit one -- and then refused, if at all, by a domain check
+    #    that was handed a number the caller never wrote. Now it is refused for
+    #    being out of range, identically on both.
+    refused( "cv: folds=2^64", post( "/api/cv",
+        dict( cv, folds = "18446744073709551616" ) ),
+        "folds: '18446744073709551616' is out of range" )
+
+    # The five procedure flags were the ONE place on this API that accepted
+    #    lowercase "true". They now take the same tokens as every other flag,
+    #    which narrows that one spelling and makes the two that silently meant
+    #    false say so instead.
+    refused( "cv: logistic=true (the narrowed spelling)",
+        post( "/api/cv", dict( cv, folds = "2", logistic = "true" ) ),
+        "logistic: 'true' must be 1 or 0" )
+    refused( "cv: logistic=TRUE",
         post( "/api/cv", dict( cv, folds = "2", logistic = "TRUE" ) ),
-        "select at least one procedure" )
-    refused( "DEFECT cv: logistic=yes silently means false",
+        "logistic: 'TRUE' must be 1 or 0" )
+    refused( "cv: logistic=yes",
         post( "/api/cv", dict( cv, folds = "2", logistic = "yes" ) ),
-        "select at least one procedure" )
+        "logistic: 'yes' must be 1 or 0" )
+    refused( "cv: neural_obd=false",
+        post( "/api/cv", dict( cv, folds = "2", neural_obd = "false" ) ),
+        "neural_obd: 'false' must be 1 or 0" )
+
 
 
 # =============================================================================

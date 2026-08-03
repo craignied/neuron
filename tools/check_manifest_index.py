@@ -151,6 +151,13 @@ PRINCIPAL_METHODS = {
         "resetForNewRun", "pushSample", "MAX_POINTS",
     },
     "procguard": {"run"},
+    # The strict field parsers (ROADMAP 4 B9). Listed here and not merely as a
+    # namespace entry because a caller searching the index is looking for the
+    # operation by name -- "how do I read a flag" -- not for "util".
+    "util": {
+        "parseUnsigned", "parseDouble", "parseBool",
+        "unsignedError", "numberError", "boolError", "ParseStatus",
+    },
 }
 
 

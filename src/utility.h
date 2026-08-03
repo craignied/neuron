@@ -85,6 +85,67 @@ namespace util {
 	// Removes carriage return from end of string if exists, returns string
 	string& chopEndl( string& );
 
+	// --- Strict text-to-value parsing (ROADMAP 4 item B9) -----------------
+	//    A request field arrives as text and has to become a number, a count or
+	//    a flag. The C conversions this replaced -- atol and atof -- answer with
+	//    a value and no error: they consume as much of the text as they can
+	//    understand, stop, and return what they got. So "5junk" is five,
+	//    "abc" is zero, and a count above the width of the type wraps. Three
+	//    live consequences of that, measured on the pre-B9 server and written
+	//    up in docs/b9_strict_parsing.md: fraction=abc asked for a train/test
+	//    split and silently produced no test set, maxiter=4294967297 trained
+	//    for one iteration, and gradmax=inf installed a stopping rule that can
+	//    never fire.
+	//
+	//    These parsers answer with a STATUS and write the destination only when
+	//    that status is Ok, so a caller can neither miss a failure nor be left
+	//    holding half a conversion. They know nothing about HTTP, JSON or which
+	//    endpoint asked; the caller owns the field's name and its domain.
+
+	// Why a field could not be read as the type its contract names. Ordered
+	//    from "nothing was there" to "the text cannot be represented".
+	enum class ParseStatus
+	{
+		Ok,         // parsed, and the destination was written
+		Empty,      // nothing but surrounding whitespace
+		Syntax,     // not a number, or not a permitted token, at all
+		Trailing,   // a valid value followed by something else ("5junk")
+		Negative,   // a negative value where the contract has no negatives
+		Range,      // representable as text, not as the destination type
+		NotFinite   // a floating value of nan or +/-inf
+	};
+
+	// Leading and trailing spaces and tabs are trimmed, then the remainder must
+	//    be consumed entirely -- which is what atol/atof already accepted, so
+	//    no request that worked before stops working, while "5junk" and "5 junk"
+	//    are both refused. Interior whitespace is never permitted.
+	//
+	// parseUnsigned: refuses a negative as Negative rather than Syntax, so the
+	//    message can say what is actually wrong, and refuses anything above
+	//    UINT_MAX as Range rather than wrapping.
+	ParseStatus parseUnsigned( const string& text, unsigned& out );
+
+	// parseDouble: refuses nan and every spelling of infinity (NotFinite) --
+	//    no field's contract permits one. Overflow to HUGE_VAL is Range;
+	//    UNDERFLOW is accepted and yields the closest representable value,
+	//    which may be zero, because every field whose domain excludes zero
+	//    refuses it at the domain check one line later and a legitimately tiny
+	//    tolerance must not be rejected as a syntax fault.
+	ParseStatus parseDouble( const string& text, double& out );
+
+	// parseBool: exactly "1" and "0", case-sensitively. That is what the GUI
+	//    page sends and what AGENTS.md documents; anything else is Syntax, so a
+	//    misspelled flag can no longer silently mean false.
+	ParseStatus parseBool( const string& text, bool& out );
+
+	// The message for a failed parse of `field`, quoting the text it was given:
+	//    "folds: '5junk' is not a whole number". One per destination type
+	//    because the expectation differs; each names the field first, so a
+	//    caller composing a response never has to say which one failed.
+	string unsignedError( const string& field, const string& text, ParseStatus );
+	string numberError( const string& field, const string& text, ParseStatus );
+	string boolError( const string& field, const string& text, ParseStatus );
+
 	// SCOPED redirection of the engine's output stream. Construct one and every
 	//    util::screen() write in this thread goes to the supplied stream until it
 	//    goes out of scope; then the PREVIOUS stream is restored -- not cout.

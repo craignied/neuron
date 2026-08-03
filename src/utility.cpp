@@ -20,6 +20,9 @@
 #include <vector>
 #include <list>
 #include <cstdlib> // for atoi and atof
+#include <cctype>  // isdigit, for the strict field parsers
+#include <cerrno>  // ERANGE, likewise
+#include <climits> // UINT_MAX, likewise
 
 using namespace std;
 
@@ -416,6 +419,133 @@ string& util::chopEndl( string& stringArg )
 		stringArg.resize( stringArg.size() - 1 );
 
 	return stringArg;
+}
+
+// --- Strict text-to-value parsing (ROADMAP 4 item B9) ------------------------
+//    The contract, the whitespace rule, the boolean tokens and the overflow /
+//    underflow policy are stated in utility.h and argued in
+//    docs/b9_strict_parsing.md. What follows is only how they are enforced.
+
+namespace
+{
+	// The field's text with surrounding spaces and tabs removed. Everything
+	//    else -- including an interior space -- stays, so the full-consumption
+	//    check below still sees it and refuses.
+	string trimmedField( const string& text )
+	{
+		string::size_type a = text.find_first_not_of( " \t" );
+		if ( a == string::npos ) return string();
+		string::size_type b = text.find_last_not_of( " \t" );
+		return text.substr( a, b - a + 1 );
+	}
+}
+
+util::ParseStatus util::parseUnsigned( const string& text, unsigned& out )
+{
+	string s = trimmedField( text );
+	if ( s.empty() ) return ParseStatus::Empty;
+
+	// strtoull would fold a leading '-' into a wrap-around of its own, which is
+	//    the very behaviour this replaced -- so the sign is decided here, before
+	//    any conversion, and "-0" is a negative rather than a zero.
+	if ( s[ 0 ] == '-' ) return ParseStatus::Negative;
+	if ( s[ 0 ] != '+' && !isdigit( ( unsigned char ) s[ 0 ] ) )
+		return ParseStatus::Syntax;
+
+	errno = 0;
+	char* end = nullptr;
+	unsigned long long v = strtoull( s.c_str(), &end, 10 );
+	if ( end == s.c_str() ) return ParseStatus::Syntax;
+	if ( *end != '\0' ) return ParseStatus::Trailing;
+	if ( errno == ERANGE || v > ( unsigned long long ) UINT_MAX )
+		return ParseStatus::Range;
+
+	out = ( unsigned ) v;
+	return ParseStatus::Ok;
+}
+
+util::ParseStatus util::parseDouble( const string& text, double& out )
+{
+	string s = trimmedField( text );
+	if ( s.empty() ) return ParseStatus::Empty;
+
+	errno = 0;
+	char* end = nullptr;
+	double v = strtod( s.c_str(), &end );
+	if ( end == s.c_str() ) return ParseStatus::Syntax;
+	if ( *end != '\0' ) return ParseStatus::Trailing;
+
+	// Not finite is checked before ERANGE so that the text "inf" is reported as
+	//    what it is rather than as an overflow, and so that a value that
+	//    overflowed to HUGE_VAL is still reported as out of range.
+	if ( !isfinite( v ) )
+		return ( errno == ERANGE ) ? ParseStatus::Range : ParseStatus::NotFinite;
+	// ERANGE with a finite result is underflow: the closest representable
+	//    value, possibly zero, and accepted (utility.h says why).
+
+	out = v;
+	return ParseStatus::Ok;
+}
+
+util::ParseStatus util::parseBool( const string& text, bool& out )
+{
+	string s = trimmedField( text );
+	if ( s.empty() ) return ParseStatus::Empty;
+	if ( s == "1" ) { out = true; return ParseStatus::Ok; }
+	if ( s == "0" ) { out = false; return ParseStatus::Ok; }
+	return ParseStatus::Syntax;
+}
+
+namespace
+{
+	// "folds: '5junk' " -- the part every message starts with. The text is
+	//    quoted so that a value which is empty, or is nothing but spaces, is
+	//    still visible in the response.
+	string complaint( const string& field, const string& text )
+	{
+		return field + ": '" + text + "' ";
+	}
+}
+
+string util::unsignedError( const string& field, const string& text,
+	ParseStatus status )
+{
+	switch ( status )
+	{
+		case ParseStatus::Empty:    return field + " is empty";
+		case ParseStatus::Negative: return complaint( field, text )
+			+ "cannot be negative";
+		case ParseStatus::Trailing: return complaint( field, text )
+			+ "is not a whole number";
+		case ParseStatus::Range:    return complaint( field, text )
+			+ "is out of range";
+		default:                    return complaint( field, text )
+			+ "is not a whole number";
+	}
+}
+
+string util::numberError( const string& field, const string& text,
+	ParseStatus status )
+{
+	switch ( status )
+	{
+		case ParseStatus::Empty:     return field + " is empty";
+		case ParseStatus::NotFinite: return complaint( field, text )
+			+ "is not a finite number";
+		case ParseStatus::Trailing:  return complaint( field, text )
+			+ "is not a number";
+		case ParseStatus::Range:     return complaint( field, text )
+			+ "is out of range";
+		default:                     return complaint( field, text )
+			+ "is not a number";
+	}
+}
+
+string util::boolError( const string& field, const string& text,
+	ParseStatus status )
+{
+	if ( status == ParseStatus::Empty ) return field + " is empty";
+	return complaint( field, text ) + "must be 1 or 0";
 }
 
 // Method which parses a string to determine variable representation from nodes,

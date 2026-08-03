@@ -10,6 +10,19 @@ The CLI is the authoritative feature list because its menus are frozen; the GUI
 is the primary human interface and must be a superset. "API param" is the field
 `POST` accepts; "GUI control" is the page element that sends it.
 
+**How every API parameter below is read** is one contract, not per-row detail:
+whitespace-trimmed and fully consumed; whole numbers with no wrap and no
+silent truncation; numbers finite, so `nan` and `inf` are refused everywhere;
+flags exactly `1` or `0`, case-sensitively, on every endpoint; an absent field
+keeps the current value; a present-but-empty *number* does too, except that
+`/api/train`'s `minerr`, `change`, `errwindow` and `gradmax` disable their
+stopping condition and `printcount` is ignored; a present-but-empty *flag* is
+refused. Refusals name the field and quote the text. → `docs/b9_strict_parsing.md`
+and the Manifest's REST chapter. **A new parameter is read through
+`util::parseUnsigned` / `parseDouble` / `parseBool` via `gui.cpp`'s
+`readUnsigned` / `readDouble` / `readBool`; `tools/check_strict_parsing.py`
+fails the build if it is not.**
+
 Status: ✅ present · 🔲 gap (must be closed before the change lands) · — n/a.
 As of 2026-07-19 (second audit — the first missed the dataset characteristics,
 ROC-reporting, and DFA-guesses rows below, all closed the same day) there are

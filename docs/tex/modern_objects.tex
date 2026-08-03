@@ -1487,4 +1487,144 @@ A normally returning body keeps its own status.  A \texttt{std::exception}
 produces \texttt{<program>: fatal: <what>} and status~1; an exception of any
 other type produces \texttt{<program>: fatal: unrecognized error} and status~1.
 
+\section{Strict field parsing: util}\label{sec:util-strict-parsing}
+\index{util!parseUnsigned}
+\index{util!parseDouble}
+\index{util!parseBool}
+\index{util!unsignedError}
+\index{util!numberError}
+\index{util!boolError}
+\index{util!ParseStatus}
+\index{ParseStatus}
+\index{Strict field parsing}
+\index{Strict field parsing!whitespace rule}
+\index{Strict field parsing!boolean tokens}
+\index{Strict field parsing!overflow and underflow}
+
+\subsection{The problem these solve}
+
+A value that arrives as text --- from an HTTP request, a configuration line,
+a file --- has to become a number before anything can be computed with it,
+and the conversion can fail in ways the caller must be told about.  The C
+library functions this project used for twenty years,
+\texttt{atol} and \texttt{atof}, cannot tell anybody: each consumes as much of
+its argument as it understands, stops, and returns a value.  There is no error
+channel at all, so \texttt{"5junk"} is indistinguishable from \texttt{"5"},
+\texttt{"abc"} is indistinguishable from \texttt{"0"}, and a count wider than
+the destination type is converted to whatever the truncation produces.
+
+That is a documentation problem as much as a correctness one: a caller cannot
+be told which of twenty parameters was wrong if the program never learned that
+any of them was.  These six project-defined functions give the conversion an
+error channel and give the caller enough structure to name the offending field.
+They are in \texttt{util} because they are the lowest layer that both the HTTP
+boundary and any future caller already depend on, and they know nothing about
+HTTP, JSON, or which endpoint asked.
+
+\subsection{The status}
+
+\texttt{util::ParseStatus} is a scoped enumeration with seven values, ordered
+from ``nothing was there'' to ``the text cannot be represented'':
+\texttt{Ok}; \texttt{Empty}, nothing but surrounding whitespace;
+\texttt{Syntax}, not a value of that kind at all; \texttt{Trailing}, a valid
+value followed by something else; \texttt{Negative}, a negative value where the
+contract has none; \texttt{Range}, representable as text but not as the
+destination type; and \texttt{NotFinite}, a floating value of
+\texttt{nan} or $\pm\infty$.
+
+\texttt{Negative} is separated from \texttt{Syntax}, and \texttt{NotFinite}
+from \texttt{Range}, for one reason: the resulting message can say what is
+actually wrong.  ``\texttt{test\_n} cannot be negative'' and
+``\texttt{gradmax} is not a finite number'' are both more useful than a single
+``invalid value'', and the caller does not have to re-examine the text to
+produce them.
+
+\subsection{The parsers}
+
+\begin{itemize}
+\item \texttt{ParseStatus parseUnsigned(const string\& text,unsigned\& out)}
+\item \texttt{ParseStatus parseDouble(const string\& text,double\& out)}
+\item \texttt{ParseStatus parseBool(const string\& text,bool\& out)}
+\end{itemize}
+
+Each writes \texttt{out} \emph{only} when it returns \texttt{Ok}, so a caller
+that forgets to check the status still cannot be handed a half-converted
+value, and a caller that does check can leave its destination holding a
+default.
+
+Three rules govern all three, and each was settled against measured
+behaviour rather than chosen:
+
+\paragraph{Whitespace.}  Leading and trailing spaces and tabs are removed and
+the remainder must be consumed entirely.  This is exactly what the C
+conversions already tolerated --- they skip leading whitespace and stop at
+trailing whitespace --- so no input that worked before is refused, while
+\texttt{"5junk"} and \texttt{"5 5"} both become \texttt{Trailing}.  Interior
+whitespace is never permitted.
+
+\paragraph{Sign and width.}  \texttt{parseUnsigned} decides the sign before any
+conversion, because \texttt{strtoull} would otherwise fold a leading minus into
+a wrap-around of its own --- the behaviour being replaced.  A magnitude above
+\texttt{UINT\_MAX} is \texttt{Range}.
+
+\paragraph{Finiteness.}  \texttt{parseDouble} refuses every spelling of
+\texttt{nan} and infinity that \texttt{strtod} would otherwise accept.
+Overflow to \texttt{HUGE\_VAL} is \texttt{Range}; \emph{underflow} is accepted
+and yields the closest representable value, which may be zero, because a
+legitimately tiny tolerance must not be refused as a syntax fault and every
+domain that excludes zero rejects it one line later in the caller.
+
+\texttt{parseBool} accepts exactly \texttt{"1"} and \texttt{"0"},
+case-sensitively.  That token set is not a preference: it is what the graphical
+client sends and what the operational documentation specifies, and widening it
+would silently change the meaning of requests that are accepted today.
+
+\subsection{The messages}
+
+\begin{itemize}
+\item \texttt{string unsignedError(const string\& field,const string\& text,ParseStatus)}
+\item \texttt{string numberError(const string\& field,const string\& text,ParseStatus)}
+\item \texttt{string boolError(const string\& field,const string\& text,ParseStatus)}
+\end{itemize}
+
+Three functions rather than one because the expectation differs by
+destination: the same \texttt{Trailing} status means ``is not a whole number''
+for a count and ``is not a number'' for a quantity.  Each names the field first
+and quotes the text it was given, so a response never has to be assembled by
+its caller and a value that is empty, or is nothing but spaces, is still
+visible in the message.
+
+\subsubsection{Example}
+\begin{verbatim}
+unsigned folds = 5;                       // the endpoint's own default
+string text = param(request, "folds");
+util::ParseStatus st = util::parseUnsigned(text, folds);
+if (st != util::ParseStatus::Ok)
+    return refuse(util::unsignedError("folds", text, st));
+if (folds < 2)                            // the DOMAIN stays at the call site
+    return refuse("folds must be at least 2");
+\end{verbatim}
+
+\noindent produces, for \texttt{folds=5junk},
+\texttt{folds: '5junk' is not a whole number}, and leaves \texttt{folds}
+holding 5.
+
+\subsubsection{Notes}
+The division of labour is deliberate and is the reason these are not a
+validation framework.  \texttt{util} owns \emph{syntax}: what a whole number, a
+number and a flag look like, and what is wrong with the text when they do not.
+The caller owns the \emph{domain}: which minimum, which interval, which
+combination of fields is a conflict.  A syntax fault and a domain fault
+therefore read differently, which is the distinction the previous code lost
+when an unreadable bin count was reported as a bin count that was too small.
+
+These functions never call \texttt{setlocale}, and neither does any other part
+of the program, so \texttt{strtod}'s decimal separator is a period on every
+platform.  That is recorded rather than assumed: introducing a locale change
+elsewhere would alter how every field is read.
+
+The HTTP boundary's use of them, the omission and present-but-empty rules it
+adds, and the accepted tokens for every endpoint are in
+Section~\ref{sec:rest-field-parsing}.
+
 \endgroup

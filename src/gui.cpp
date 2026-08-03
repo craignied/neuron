@@ -396,13 +396,16 @@ string parseColumnList( const string& text, unsigned nInput, const char* what,
 	string tok;
 	while ( getline( ss, tok, ',' ) )
 	{
-		size_t a = tok.find_first_not_of( " \t" );
-		if ( a == string::npos ) continue; // skip a blank token
-		long v = atol( tok.c_str() + a );
-		if ( v < 1 || ( unsigned ) v > nInput )
+		if ( tok.find_first_not_of( " \t" ) == string::npos )
+			continue; // skip a blank token
+		unsigned v = 0;
+		util::ParseStatus st = util::parseUnsigned( tok, v );
+		if ( st != util::ParseStatus::Ok )
+			return util::unsignedError( string( what ) + " column", tok, st );
+		if ( v < 1 || v > nInput )
 			return string( what ) + " column out of range (1.."
 				+ to_string( nInput ) + ")";
-		out.push_back( ( unsigned ) ( v - 1 ) ); // 1-based -> input node
+		out.push_back( v - 1 ); // 1-based -> input node
 	}
 	return "";
 }
@@ -413,6 +416,94 @@ string parseColumnList( const string& text, unsigned nInput, const char* what,
 bool hasParam( const httplib::Request& req, const string& name )
 {
 	return req.has_param( name ) || req.has_file( name );
+}
+
+// --- Reading a request field (ROADMAP 4 item B9) ----------------------------
+//    util:: owns the syntax -- what a whole number, a number and a flag look
+//    like, and what is wrong with the text when they do not (utility.h). These
+//    own the request SHAPE: a field that did not arrive, or arrived empty,
+//    leaves its destination alone, because that is how every optional control
+//    on this API says "keep what is already there". A field that did arrive
+//    with text in it must be readable, and if it is not, the caller is handed
+//    a message naming the field.
+//
+//    The domain -- which minimum, which interval, which combination is a
+//    conflict -- stays at the call site, where a reader can see it beside the
+//    thing it constrains. Only the two domain shapes that were ALREADY written
+//    out twice each (a minimum, and the open unit interval) come along, as
+//    uintField and fracField.
+
+// Present with something other than whitespace in it
+static bool given( const httplib::Request& req, const char* name )
+{
+	string s = param( req, name );
+	return hasParam( req, name ) && s.find_first_not_of( " \t" ) != string::npos;
+}
+
+static string readUnsigned( const httplib::Request& req, const char* name,
+	unsigned& dst )
+{
+	if ( !given( req, name ) ) return "";
+	string text = param( req, name );
+	unsigned v = 0;
+	util::ParseStatus st = util::parseUnsigned( text, v );
+	if ( st != util::ParseStatus::Ok ) return util::unsignedError( name, text, st );
+	dst = v;
+	return "";
+}
+
+static string readDouble( const httplib::Request& req, const char* name,
+	double& dst )
+{
+	if ( !given( req, name ) ) return "";
+	string text = param( req, name );
+	double v = 0;
+	util::ParseStatus st = util::parseDouble( text, v );
+	if ( st != util::ParseStatus::Ok ) return util::numberError( name, text, st );
+	dst = v;
+	return "";
+}
+
+// A boolean is different: an empty one is refused rather than ignored. There is
+//    no field on this API where a blank checkbox means anything -- the page
+//    always sends 1 or 0 -- so an empty flag is a caller error, and silently
+//    keeping the default is how "async=true runs blocking" survived.
+static string readBool( const httplib::Request& req, const char* name,
+	bool& dst )
+{
+	if ( !hasParam( req, name ) ) return "";
+	string text = param( req, name );
+	bool v = false;
+	util::ParseStatus st = util::parseBool( text, v );
+	if ( st != util::ParseStatus::Ok ) return util::boolError( name, text, st );
+	dst = v;
+	return "";
+}
+
+// An optional count with a minimum, and an optional fraction of the open unit
+//    interval: the two shapes /api/obd and /api/cv each wrote out for
+//    themselves. `domainErr` is the caller's own sentence, so a value that
+//    parses but is out of range still reads exactly as it did before.
+static string uintField( const httplib::Request& req, const char* name,
+	unsigned& dst, unsigned lo, const char* domainErr )
+{
+	unsigned v = dst;
+	string bad = readUnsigned( req, name, v );
+	if ( !bad.empty() ) return bad;
+	if ( v < lo ) return domainErr;
+	dst = v;
+	return "";
+}
+
+static string fracField( const httplib::Request& req, const char* name,
+	double& dst, const char* domainErr )
+{
+	double v = dst;
+	string bad = readDouble( req, name, v );
+	if ( !bad.empty() ) return bad;
+	if ( !( v > 0 && v < 1 ) ) return domainErr;
+	dst = v;
+	return "";
 }
 
 // Just the final component of a picked file's name — no directory parts
@@ -501,10 +592,18 @@ void logAction( const httplib::Request& req, const string& action )
 string handleLoad( const httplib::Request& req )
 {
 	logAction( req, "load" );
-	string mode = param( req, "mode" ), savedTrain, savedTest, err;
-	unsigned nI = ( unsigned ) atol( param( req, "inputs" ).c_str() ),
-		nO = ( unsigned ) atol( param( req, "outputs" ).c_str() );
-	double fraction = atof( param( req, "fraction" ).c_str() );
+	string mode = param( req, "mode" ), savedTrain, savedTest, err, bad;
+	// Absent or empty leaves the zero that means "derive the input count from
+	//    the file's columns", "one output" and "no fraction" respectively --
+	//    the page sends `fraction` on every load whether or not it is filled in
+	unsigned nI = 0, nO = 0;
+	double fraction = 0;
+	if ( !( bad = readUnsigned( req, "inputs", nI ) ).empty() )
+		return jsonMsg( false, bad );
+	if ( !( bad = readUnsigned( req, "outputs", nO ) ).empty() )
+		return jsonMsg( false, bad );
+	if ( !( bad = readDouble( req, "fraction", fraction ) ).empty() )
+		return jsonMsg( false, bad );
 
 	// neuron is a 1-output system: the raw->train split and every ROC /
 	//    classification statistic refuse anything but a single output. So the
@@ -515,7 +614,9 @@ string handleLoad( const httplib::Request& req )
 	// discrete=0 declares a continuous outcome (regression): the engine then
 	//    trains with LMS error and skips the classification statistics. The
 	//    default matches the engine's own (discrete), which the page assumes.
-	bool discrete = ( param( req, "discrete" ) != "0" );
+	bool discrete = true;
+	if ( !( bad = readBool( req, "discrete", discrete ) ).empty() )
+		return jsonMsg( false, bad );
 
 	string path = resolveFile( req, "file", "path", savedTrain, err );
 	if ( !err.empty() )
@@ -553,10 +654,11 @@ string handleLoad( const httplib::Request& req )
 	//    scaling, and the threshold classifies every guess from then on. All
 	//    read through param() (multipart-safe); an empty field means "keep the
 	//    engine's default".
-	string thresholdStr = param( req, "threshold" );
-	if ( !thresholdStr.empty() )
+	if ( given( req, "threshold" ) )
 	{
-		double threshold = atof( thresholdStr.c_str() );
+		double threshold = 0;
+		if ( !( bad = readDouble( req, "threshold", threshold ) ).empty() )
+			return jsonMsg( false, bad );
 		if ( !discrete )
 			return jsonMsg( false, "a classification threshold applies only to "
 				"a discrete outcome" );
@@ -565,34 +667,44 @@ string handleLoad( const httplib::Request& req )
 		ds->setThreshold( threshold );
 	}
 
-	string inLoStr = param( req, "in_lower" ), inHiStr = param( req, "in_upper" );
-	if ( !inLoStr.empty() || !inHiStr.empty() )
+	if ( given( req, "in_lower" ) || given( req, "in_upper" ) )
 	{
-		double lo = inLoStr.empty() ? ds->getInLower() : atof( inLoStr.c_str() );
-		double hi = inHiStr.empty() ? ds->getInUpper() : atof( inHiStr.c_str() );
+		// Whichever end the caller did not send keeps the engine's own
+		double lo = ds->getInLower(), hi = ds->getInUpper();
+		if ( !( bad = readDouble( req, "in_lower", lo ) ).empty() )
+			return jsonMsg( false, bad );
+		if ( !( bad = readDouble( req, "in_upper", hi ) ).empty() )
+			return jsonMsg( false, bad );
 		if ( !( lo < hi ) )
 			return jsonMsg( false, "input variate bounds must have lower < upper" );
 		ds->setInLower( lo );
 		ds->setInUpper( hi );
 	}
 
-	string outLoStr = param( req, "out_lower" ), outHiStr = param( req, "out_upper" );
-	if ( !outLoStr.empty() || !outHiStr.empty() )
+	if ( given( req, "out_lower" ) || given( req, "out_upper" ) )
 	{
 		// The CLI refuses these while the output is discrete (fixed at 0/1)
 		if ( discrete )
 			return jsonMsg( false, "output variate bounds apply only to a "
 				"continuous outcome (discrete=0)" );
-		double lo = outLoStr.empty() ? ds->getOutLower() : atof( outLoStr.c_str() );
-		double hi = outHiStr.empty() ? ds->getOutUpper() : atof( outHiStr.c_str() );
+		double lo = ds->getOutLower(), hi = ds->getOutUpper();
+		if ( !( bad = readDouble( req, "out_lower", lo ) ).empty() )
+			return jsonMsg( false, bad );
+		if ( !( bad = readDouble( req, "out_upper", hi ) ).empty() )
+			return jsonMsg( false, bad );
 		if ( !( lo < hi ) )
 			return jsonMsg( false, "output variate bounds must have lower < upper" );
 		ds->setOutLower( lo );
 		ds->setOutUpper( hi );
 	}
 
-	if ( !param( req, "history" ).empty() ) // dataset-operations logging
-		ds->setHistory( param( req, "history" ) == "1" );
+	if ( hasParam( req, "history" ) ) // dataset-operations logging
+	{
+		bool history = true;
+		if ( !( bad = readBool( req, "history", history ) ).empty() )
+			return jsonMsg( false, bad );
+		ds->setHistory( history );
+	}
 
 	// --- ROC reporting settings (CLI dataset menu 13) ---------------------
 	//    Validated here, applied after the load (the TwoSets must exist);
@@ -600,9 +712,9 @@ string handleLoad( const httplib::Request& req )
 	//    collapses when everything loads in one request. (The trapezoidal ROC
 	//    area is now the exact AUC over every operating point -- there is no
 	//    threshold count to set, so that former option is gone.)
-	string rocReportStr = param( req, "roc_report" ),
-		rocMinStr = param( req, "roc_min" );
-	if ( !rocReportStr.empty() || !rocMinStr.empty() )
+	string rocReportStr = param( req, "roc_report" );
+	unsigned rocMin = 0; // read once here, applied after the load
+	if ( !rocReportStr.empty() || given( req, "roc_min" ) )
 	{
 		if ( !discrete || nO != 1 )
 			return jsonMsg( false, "ROC reporting settings need a discrete "
@@ -610,7 +722,9 @@ string handleLoad( const httplib::Request& req )
 		if ( !rocReportStr.empty() && rocReportStr != "both"
 			&& rocReportStr != "either" )
 			return jsonMsg( false, "roc_report must be both or either" );
-		if ( !rocMinStr.empty() && atol( rocMinStr.c_str() ) < 2 )
+		if ( !( bad = readUnsigned( req, "roc_min", rocMin ) ).empty() )
+			return jsonMsg( false, bad );
+		if ( given( req, "roc_min" ) && rocMin < 2 )
 			return jsonMsg( false, "roc_min must be at least 2" );
 	}
 
@@ -620,7 +734,23 @@ string handleLoad( const httplib::Request& req )
 	// test_n: the CLI's whole-number split form ("place exactly n exemplars
 	//    in the test set") -- fraction covers the decimal and n/d forms, but
 	//    randomizeD truncates ratio*N, so an exact count needs randomize(n)
-	string testNStr = param( req, "test_n" );
+	unsigned testN = 0;
+	if ( !( bad = readUnsigned( req, "test_n", testN ) ).empty() )
+		return jsonMsg( false, bad );
+	bool haveTestN = given( req, "test_n" );
+
+	// The rest of the split controls, read HERE rather than beside the split
+	//    they configure, so that an unreadable one is refused before the file
+	//    is opened. Their domains stay below, next to the combination rules
+	//    that decide which form of split is being asked for.
+	unsigned strataBins = 0, valN = 0;
+	double valFraction = 0;
+	if ( !( bad = readUnsigned( req, "strata_bins", strataBins ) ).empty() )
+		return jsonMsg( false, bad );
+	if ( !( bad = readUnsigned( req, "val_n", valN ) ).empty() )
+		return jsonMsg( false, bad );
+	if ( !( bad = readDouble( req, "val_fraction", valFraction ) ).empty() )
+		return jsonMsg( false, bad );
 
 	if ( mode == "raw" )
 	{
@@ -632,7 +762,7 @@ string handleLoad( const httplib::Request& req )
 			//    pre-split regression data loads through mode=train + testfile
 			if ( !discrete )
 			{
-				if ( fraction > 0 || !testNStr.empty() )
+				if ( fraction > 0 || haveTestN )
 					return jsonMsg( false, "a continuous outcome cannot be "
 						"stratified into a train/test split; load with "
 						"fraction=0, or pre-split the data and use mode=train "
@@ -649,17 +779,16 @@ string handleLoad( const httplib::Request& req )
 				if ( !strataStr.empty() )
 				{
 					vector< unsigned > cols;
-					string bad = parseColumnList( strataStr, ds->getInput(),
+					bad = parseColumnList( strataStr, ds->getInput(),
 						"strata", cols );
 					if ( !bad.empty() ) return jsonMsg( false, bad );
 					ds->setStrataColumns( cols );
 				}
-				string binsStr = param( req, "strata_bins" );
-				if ( !binsStr.empty() )
+				if ( given( req, "strata_bins" ) )
 				{
-					if ( atol( binsStr.c_str() ) < 2 )
+					if ( strataBins < 2 )
 						return jsonMsg( false, "strata_bins must be at least 2" );
-					ds->setStrataBins( ( unsigned ) atol( binsStr.c_str() ) );
+					ds->setStrataBins( strataBins );
 				}
 
 				// Phase 3: optional group-aware split. group = comma-separated
@@ -670,7 +799,7 @@ string handleLoad( const httplib::Request& req )
 				if ( !groupStr.empty() )
 				{
 					vector< unsigned > cols;
-					string bad = parseColumnList( groupStr, ds->getInput(),
+					bad = parseColumnList( groupStr, ds->getInput(),
 						"group", cols );
 					if ( !bad.empty() ) return jsonMsg( false, bad );
 					ds->setGroupColumns( cols );
@@ -681,9 +810,7 @@ string handleLoad( const httplib::Request& req )
 				//    selection (OBD) monitors the validation set and the test
 				//    set stays untouched. Does not compose with covariate strata
 				//    / grouping yet.
-				string valFracStr = param( req, "val_fraction" );
-				string valNStr = param( req, "val_n" );
-				if ( !valFracStr.empty() || !valNStr.empty() )
+				if ( given( req, "val_fraction" ) || given( req, "val_n" ) )
 				{
 					if ( !ds->getStrataColumns().empty()
 						|| !ds->getGroupColumns().empty() )
@@ -691,25 +818,23 @@ string handleLoad( const httplib::Request& req )
 							"outcome-stratified only; remove strata=/group= or the "
 							"validation fraction" );
 
-					if ( !valNStr.empty() ) // exact-count form (paired with test_n)
+					if ( given( req, "val_n" ) ) // exact-count form (with test_n)
 					{
-						if ( testNStr.empty() )
+						if ( !haveTestN )
 							return jsonMsg( false, "val_n needs test_n (the count form)" );
-						if ( atol( valNStr.c_str() ) < 1 )
+						if ( valN < 1 )
 							return jsonMsg( false, "val_n must be at least 1" );
-						ok = ds->randomize3( ( unsigned ) atol( testNStr.c_str() ),
-							( unsigned ) atol( valNStr.c_str() ) );
+						ok = ds->randomize3( testN, valN );
 					}
 					else // fraction form (paired with fraction)
 					{
-						double vf = atof( valFracStr.c_str() );
-						if ( !( vf > 0 && vf < 1 ) )
+						if ( !( valFraction > 0 && valFraction < 1 ) )
 							return jsonMsg( false, "val_fraction must be between 0 and 1" );
-						ok = ds->randomize3D( fraction, vf );
+						ok = ds->randomize3D( fraction, valFraction );
 					}
 				}
-				else if ( !testNStr.empty() )
-					ok = ds->randomize( ( unsigned ) atol( testNStr.c_str() ) );
+				else if ( haveTestN )
+					ok = ds->randomize( testN );
 				else
 					ok = ds->randomizeD( fraction );
 			}
@@ -759,12 +884,12 @@ string handleLoad( const httplib::Request& req )
 		if ( ds->testLoaded() )
 			ds->getTestTwoSet().setROCReportFlag( both );
 	}
-	if ( !rocMinStr.empty() )
+	if ( given( req, "roc_min" ) )
 	{
 		if ( ds->trainLoaded() )
-			ds->getTrainTwoSet().setROCthresh( ( unsigned ) atol( rocMinStr.c_str() ) );
+			ds->getTrainTwoSet().setROCthresh( rocMin );
 		if ( ds->testLoaded() )
-			ds->getTestTwoSet().setROCthresh( ( unsigned ) atol( rocMinStr.c_str() ) );
+			ds->getTestTwoSet().setROCthresh( rocMin );
 	}
 
 	ostringstream msg;
@@ -808,22 +933,32 @@ string handleLoad( const httplib::Request& req )
 }
 
 // Parse a hidden-layer spec: comma-separated positive integers ("5" or "5,3").
-//    Returns an empty vector if the spec is empty or holds any non-positive
-//    value, so the caller can reject it uniformly.
-static vector< unsigned > parseLayers( const string& spec )
+//    Returns "" on success, else the error to report -- a spec that holds an
+//    unreadable token now says which token, where before any non-positive or
+//    unreadable value collapsed the whole vector to empty and the caller could
+//    only say "one or more positive integers".
+static string parseLayers( const string& spec, vector< unsigned >& out )
 {
-	vector< unsigned > out;
+	out.clear();
 	stringstream ss( spec );
 	string tok;
 	while ( getline( ss, tok, ',' ) )
 	{
-		size_t a = tok.find_first_not_of( " \t" );
-		if ( a == string::npos ) continue; // skip a blank token
-		long v = atol( tok.c_str() + a );
-		if ( v < 1 ) return vector< unsigned >(); // any non-positive invalidates all
-		out.push_back( ( unsigned ) v );
+		if ( tok.find_first_not_of( " \t" ) == string::npos )
+			continue; // skip a blank token
+		unsigned v = 0;
+		util::ParseStatus st = util::parseUnsigned( tok, v );
+		if ( st != util::ParseStatus::Ok )
+			return util::unsignedError( "hidden", tok, st );
+		if ( v < 1 )
+			return "hidden nodes must be one or more positive integers "
+				"(e.g. 5 or 5,3)";
+		out.push_back( v );
 	}
-	return out;
+	if ( out.empty() )
+		return "hidden nodes must be one or more positive integers "
+			"(e.g. 5 or 5,3)";
+	return "";
 }
 
 string handleModel( const httplib::Request& req )
@@ -842,8 +977,12 @@ string handleModel( const httplib::Request& req )
 	//    so a request that omits them logs as before. hasParam, not
 	//    req.has_param: the page's load-network post is multipart, where these
 	//    arrive as parts and has_param alone would silently keep the default.
-	bool logLastop  = !( hasParam( req, "log_lastop" )  && param( req, "log_lastop" )  == "0" );
-	bool logHistory = !( hasParam( req, "log_history" ) && param( req, "log_history" ) == "0" );
+	bool logLastop = true, logHistory = true;
+	string bad;
+	if ( !( bad = readBool( req, "log_lastop", logLastop ) ).empty() )
+		return jsonMsg( false, bad );
+	if ( !( bad = readBool( req, "log_history", logHistory ) ).empty() )
+		return jsonMsg( false, bad );
 
 	// Output error function (CLI model menu 3), shared by the create and load
 	//    paths. Default follows the data; an explicit choice overrides, but
@@ -916,10 +1055,12 @@ string handleModel( const httplib::Request& req )
 	{
 		// hidden = comma-separated layer sizes; the factory (rule 6) turns the
 		//    spec into the right concrete type (SimpleProp / BareProp / BackProp).
-		vector< unsigned > layers = parseLayers( param( req, "hidden" ) );
-		if ( layers.empty() )
-			return jsonMsg( false, "hidden nodes must be one or more positive integers (e.g. 5 or 5,3)" );
-		bool bias = !( hasParam( req, "bias" ) && param( req, "bias" ) == "0" );
+		vector< unsigned > layers;
+		if ( !( bad = parseLayers( param( req, "hidden" ), layers ) ).empty() )
+			return jsonMsg( false, bad );
+		bool bias = true;
+		if ( !( bad = readBool( req, "bias", bias ) ).empty() )
+			return jsonMsg( false, bad );
 
 		modelfactory::Spec spec;
 		spec.bias = bias;
@@ -963,8 +1104,12 @@ string handleDFA( const httplib::Request& req )
 	if ( !dataPtr->getDiscrete() )
 		return jsonMsg( false, "discriminant analysis needs a discrete output" );
 
-	bool logLastop  = !( hasParam( req, "log_lastop" )  && param( req, "log_lastop" )  == "0" );
-	bool logHistory = !( hasParam( req, "log_history" ) && param( req, "log_history" ) == "0" );
+	bool logLastop = true, logHistory = true;
+	string bad;
+	if ( !( bad = readBool( req, "log_lastop", logLastop ) ).empty() )
+		return jsonMsg( false, bad );
+	if ( !( bad = readBool( req, "log_history", logHistory ) ).empty() )
+		return jsonMsg( false, bad );
 
 	unique_ptr< Model > dfa;
 	if ( type == "linear" ) dfa = make_unique< LDFA >();
@@ -1019,7 +1164,11 @@ string handleDFA( const httplib::Request& req )
 string handleRandomize( const httplib::Request& req )
 {
 	logAction( req, "randomize" );
-	string seed = param( req, "seed" );
+	unsigned seed = 0;
+	bool seeded = given( req, "seed" ); // the page sends seed= on every call
+	string bad;
+	if ( !( bad = readUnsigned( req, "seed", seed ) ).empty() )
+		return jsonMsg( false, bad );
 
 	if ( !modelPtr )
 		return jsonMsg( false, "create a model first" );
@@ -1027,12 +1176,12 @@ string handleRandomize( const httplib::Request& req )
 	if ( !net )
 		return jsonMsg( false, "this model type has no trainable weights" );
 
-	if ( !seed.empty() )
-		util::set_seed( ( unsigned ) atol( seed.c_str() ) );
+	if ( seeded )
+		util::set_seed( seed );
 	net->randomize();
 	lastTrainError = -1; // fresh weights invalidate any prior training
 
-	return jsonMsg( true, seed.empty()
+	return jsonMsg( true, !seeded
 		? "weights randomized \xe2\x80\x94 the next Train starts fresh"
 		: "weights randomized from the seed \xe2\x80\x94 the next Train starts fresh" );
 }
@@ -1197,15 +1346,30 @@ string runTrainJob( bool continued, bool autoSelect, unsigned maxIter,
 string handleTrain( const httplib::Request& req )
 {
 	logAction( req, "train" );
-	string algoStr = param( req, "algorithm" ), seed = param( req, "seed" );
-	unsigned maxIter = ( unsigned ) atol( param( req, "maxiter" ).c_str() );
-	bool async = ( param( req, "async" ) == "1" );
+	string algoStr = param( req, "algorithm" ), bad;
+
+	// Every field is read into a local BEFORE anything is applied to the model
+	//    (the applying starts at "Apply the parity controls" below). A request
+	//    that is refused for a malformed later field must leave the model
+	//    exactly as it was, not half-configured.
+	unsigned maxIter = 0, seed = 0;
+	bool seeded = given( req, "seed" ); // the page sends seed= on every train
+	if ( !( bad = readUnsigned( req, "maxiter", maxIter ) ).empty() )
+		return jsonMsg( false, bad );
+	if ( !( bad = readUnsigned( req, "seed", seed ) ).empty() )
+		return jsonMsg( false, bad );
+
+	bool async = false;
+	if ( !( bad = readBool( req, "async", async ) ).empty() )
+		return jsonMsg( false, bad );
 
 	// algorithm=auto probes all three optimizers from identical weights and
 	//    adopts the winner (autoalgo.h) before the real run
 	bool autoSelect = ( algoStr == "auto" );
-	unsigned algorithm = autoSelect ? 1
-		: ( unsigned ) atol( algoStr.c_str() );
+	unsigned algorithm = 0;
+	if ( !autoSelect && !( bad = readUnsigned( req, "algorithm", algorithm ) ).empty() )
+		return jsonMsg( false, bad );
+	if ( autoSelect ) algorithm = 1;
 
 	if ( !modelPtr )
 		return jsonMsg( false, "create a model first" );
@@ -1217,21 +1381,27 @@ string handleTrain( const httplib::Request& req )
 	// The CLI's hard constraint: logistic regression is batch/epoch by
 	//    definition (logistic.cpp sets it in the constructor and the menu
 	//    refuses to turn it off) -- so does the API
-	if ( req.has_param( "batch_epoch" ) && param( req, "batch_epoch" ) != "1"
+	bool batchEpoch = true;
+	if ( !( bad = readBool( req, "batch_epoch", batchEpoch ) ).empty() )
+		return jsonMsg( false, bad );
+	if ( req.has_param( "batch_epoch" ) && !batchEpoch
 		&& dynamic_cast< Logistic* >( modelPtr.get() ) )
 		return jsonMsg( false, "for logistic regression, batch/epoch must be on" );
 
 	// Plateau auto-stop (default off). tol/window fall back to the engine's
 	//    own defaults when the fields are absent; validated here rather than
 	//    let setAutoStop's asserts fire (asserts vanish in release builds).
-	bool autoStop = ( param( req, "autostop" ) == "1" );
+	bool autoStop = false;
+	if ( !( bad = readBool( req, "autostop", autoStop ) ).empty() )
+		return jsonMsg( false, bad );
 	double autoStopTol = 1e-4;
 	unsigned autoStopWin = 100;
 	if ( autoStop )
 	{
-		string t = param( req, "autostop_tol" ), w = param( req, "autostop_window" );
-		if ( !t.empty() ) autoStopTol = atof( t.c_str() );
-		if ( !w.empty() ) autoStopWin = ( unsigned ) atol( w.c_str() );
+		if ( !( bad = readDouble( req, "autostop_tol", autoStopTol ) ).empty() )
+			return jsonMsg( false, bad );
+		if ( !( bad = readUnsigned( req, "autostop_window", autoStopWin ) ).empty() )
+			return jsonMsg( false, bad );
 		if ( !( autoStopTol > 0 && autoStopTol < 1 ) )
 			return jsonMsg( false, "autostop_tol must be between 0 and 1" );
 		if ( autoStopWin < 2 )
@@ -1245,45 +1415,64 @@ string handleTrain( const httplib::Request& req )
 	//    new parameters" rely on that. Validate here; setter asserts vanish in
 	//    release builds. A present-but-empty stopping-condition field disables
 	//    that condition; a present value enables and sets it.
-	bool haveEta = req.has_param( "eta" ) && !param( req, "eta" ).empty();
-	double etaVal = haveEta ? atof( param( req, "eta" ).c_str() ) : 0;
+	bool haveEta = given( req, "eta" );
+	double etaVal = 0;
+	if ( !( bad = readDouble( req, "eta", etaVal ) ).empty() )
+		return jsonMsg( false, bad );
 	if ( haveEta && !( etaVal > 0 && etaVal <= 1 ) )
 		return jsonMsg( false, "learning rate must be greater than 0 and at most 1" );
 
-	bool wdOn = req.has_param( "weight_decay" ) && param( req, "weight_decay" ) == "1";
-	double decayVal = 0;
-	if ( wdOn )
-	{
-		// A blank lambda falls back to the engine's own default (Network ctor:
-		//    5e-5 -- a deliberately weak L2 prior; see the ctor for the sigma
-		//    relationship), so turning weight decay on never demands a value the
-		//    user may not have a feel for
-		string d = param( req, "decay" );
-		decayVal = d.empty() ? 5e-5 : atof( d.c_str() );
-		if ( !( decayVal >= 0 && decayVal <= 1 ) )
-			return jsonMsg( false, "weight decay lambda must be between 0 and 1" );
-	}
+	bool wdOn = false;
+	if ( !( bad = readBool( req, "weight_decay", wdOn ) ).empty() )
+		return jsonMsg( false, bad );
+	// A blank lambda falls back to the engine's own default (Network ctor:
+	//    5e-5 -- a deliberately weak L2 prior; see the ctor for the sigma
+	//    relationship), so turning weight decay on never demands a value the
+	//    user may not have a feel for
+	double decayVal = 5e-5;
+	if ( !( bad = readDouble( req, "decay", decayVal ) ).empty() )
+		return jsonMsg( false, bad );
+	if ( wdOn && !( decayVal >= 0 && decayVal <= 1 ) )
+		return jsonMsg( false, "weight decay lambda must be between 0 and 1" );
 
-	if ( req.has_param( "minerr" ) && !param( req, "minerr" ).empty()
-		&& !( atof( param( req, "minerr" ).c_str() ) > 0
-			&& atof( param( req, "minerr" ).c_str() ) < 1 ) )
+	// The four stopping conditions and the print counter. Each is read once,
+	//    here, and the value is reused where it is applied -- the apply sites
+	//    below used to convert the text a second time, which is two places for
+	//    one field's meaning to live.
+	bool haveAutostep = false;
+	if ( !( bad = readBool( req, "autostep", haveAutostep ) ).empty() )
+		return jsonMsg( false, bad );
+	bool logPrint = false;
+	if ( !( bad = readBool( req, "logprint", logPrint ) ).empty() )
+		return jsonMsg( false, bad );
+
+	double minErr = 0, changeVal = 0, gradMax = 0;
+	unsigned errWindow = 0, printCount = 0;
+	if ( !( bad = readDouble( req, "minerr", minErr ) ).empty() )
+		return jsonMsg( false, bad );
+	if ( !( bad = readDouble( req, "change", changeVal ) ).empty() )
+		return jsonMsg( false, bad );
+	if ( !( bad = readUnsigned( req, "errwindow", errWindow ) ).empty() )
+		return jsonMsg( false, bad );
+	if ( !( bad = readDouble( req, "gradmax", gradMax ) ).empty() )
+		return jsonMsg( false, bad );
+	if ( !( bad = readUnsigned( req, "printcount", printCount ) ).empty() )
+		return jsonMsg( false, bad );
+
+	if ( given( req, "minerr" ) && !( minErr > 0 && minErr < 1 ) )
 		return jsonMsg( false, "lower error limit must be between 0 and 1" );
-	if ( req.has_param( "change" ) && !param( req, "change" ).empty()
-		&& !( atof( param( req, "change" ).c_str() ) > 0
-			&& atof( param( req, "change" ).c_str() ) < 1 ) )
+	if ( given( req, "change" ) && !( changeVal > 0 && changeVal < 1 ) )
 		return jsonMsg( false, "change-in-error limit must be between 0 and 1" );
-	if ( req.has_param( "errwindow" ) && !param( req, "errwindow" ).empty()
-		&& atol( param( req, "errwindow" ).c_str() ) <= 1 )
+	if ( given( req, "errwindow" ) && errWindow <= 1 )
 		return jsonMsg( false, "error window must be greater than 1" );
-	if ( req.has_param( "gradmax" ) && !param( req, "gradmax" ).empty()
-		&& atof( param( req, "gradmax" ).c_str() ) <= 0 )
+	if ( given( req, "gradmax" ) && !( gradMax > 0 ) )
 		return jsonMsg( false, "maximum absolute gradient limit must be positive" );
-	if ( req.has_param( "printcount" ) && !param( req, "printcount" ).empty()
-		&& atol( param( req, "printcount" ).c_str() ) < 1 )
+	if ( given( req, "printcount" ) && printCount < 1 )
 		return jsonMsg( false, "print count must be at least 1" );
 
-	if ( !seed.empty() )
-		util::set_seed( ( unsigned ) atol( seed.c_str() ) );
+	// Nothing above this line has touched the model. Everything below applies.
+	if ( seeded )
+		util::set_seed( seed );
 
 	Network* net = dynamic_cast< Network* >( modelPtr.get() );
 	Iterative* iter = dynamic_cast< Iterative* >( modelPtr.get() );
@@ -1306,14 +1495,14 @@ string handleTrain( const httplib::Request& req )
 	//    works). These settings are carried into the autoalgo probe clones and
 	//    the adopted winner by Network::copy / Iterative::copy.
 	if ( req.has_param( "batch_epoch" ) )
-		net->setBatchEpoch( param( req, "batch_epoch" ) == "1" );
+		net->setBatchEpoch( batchEpoch );
 	if ( req.has_param( "autostep" ) )
 	{
-		bool a = ( param( req, "autostep" ) == "1" );
-		net->setAutoStepSize( a );
-		if ( a ) net->setBatchEpoch( true ); // auto step size requires batch/epoch
+		net->setAutoStepSize( haveAutostep );
+		// auto step size requires batch/epoch
+		if ( haveAutostep ) net->setBatchEpoch( true );
 	}
-	if ( haveEta && !( req.has_param( "autostep" ) && param( req, "autostep" ) == "1" ) )
+	if ( haveEta && !haveAutostep )
 		net->setEta( etaVal ); // manual rate only when not on automatic
 	if ( req.has_param( "weight_decay" ) )
 	{
@@ -1321,35 +1510,31 @@ string handleTrain( const httplib::Request& req )
 		net->setDecay( wdOn ? decayVal : 0 );
 	}
 	if ( req.has_param( "logprint" ) )
-		iter->setLogPrint( param( req, "logprint" ) == "1" );
+		iter->setLogPrint( logPrint );
 	// Applied whenever present (it only matters when the counter is linear),
 	//    so a curl caller can set it without also sending logprint
-	if ( req.has_param( "printcount" ) && !param( req, "printcount" ).empty() )
-		iter->setPrintCount( ( unsigned ) atol( param( req, "printcount" ).c_str() ) );
+	if ( given( req, "printcount" ) )
+		iter->setPrintCount( printCount );
 	// Stopping conditions: present+value enables & sets, present+empty disables.
 	if ( req.has_param( "minerr" ) )
 	{
-		string s = param( req, "minerr" );
-		if ( s.empty() ) iter->setMinStop( false );
-		else { iter->setMinStop( true ); iter->setMinError( atof( s.c_str() ) ); }
+		if ( !given( req, "minerr" ) ) iter->setMinStop( false );
+		else { iter->setMinStop( true ); iter->setMinError( minErr ); }
 	}
 	if ( req.has_param( "change" ) )
 	{
-		string s = param( req, "change" );
-		if ( s.empty() ) iter->setChangeStop( false );
-		else { iter->setChangeStop( true ); iter->setChange( atof( s.c_str() ) ); }
+		if ( !given( req, "change" ) ) iter->setChangeStop( false );
+		else { iter->setChangeStop( true ); iter->setChange( changeVal ); }
 	}
 	if ( req.has_param( "errwindow" ) )
 	{
-		string s = param( req, "errwindow" );
-		if ( s.empty() ) iter->setWindowStop( false );
-		else { iter->setWindowStop( true ); iter->setWindow( ( unsigned ) atol( s.c_str() ) ); }
+		if ( !given( req, "errwindow" ) ) iter->setWindowStop( false );
+		else { iter->setWindowStop( true ); iter->setWindow( errWindow ); }
 	}
 	if ( req.has_param( "gradmax" ) )
 	{
-		string s = param( req, "gradmax" );
-		if ( s.empty() ) iter->setGradStop( false );
-		else { iter->setGradStop( true ); iter->setGradMaxLimit( atof( s.c_str() ) ); }
+		if ( !given( req, "gradmax" ) ) iter->setGradStop( false );
+		else { iter->setGradStop( true ); iter->setGradMaxLimit( gradMax ); }
 	}
 
 	if ( !autoSelect ) // auto: each probe sets its own; the winner's sticks
@@ -1601,42 +1786,31 @@ string handleObd( const httplib::Request& req )
 	obd::Config cfg;
 
 	// Each field overrides its default only when present; validate here (the
-	//    engine's own asserts vanish in release builds)
-	auto uintParam = [ & ]( const char* name, unsigned& dst, unsigned lo,
-		const char* err, string& bad )
-	{
-		string s = param( req, name );
-		if ( s.empty() ) return;
-		long v = atol( s.c_str() );
-		if ( v < ( long ) lo ) { bad = err; return; }
-		dst = ( unsigned ) v;
-	};
-	auto fracParam = [ & ]( const char* name, double& dst, const char* err, string& bad )
-	{
-		string s = param( req, name );
-		if ( s.empty() ) return;
-		double v = atof( s.c_str() );
-		if ( !( v > 0 && v < 1 ) ) { bad = err; return; }
-		dst = v;
-	};
-
+	//    engine's own asserts vanish in release builds). The first failure --
+	//    a syntax fault from the shared reader or this handler's own domain
+	//    sentence -- is the one reported.
 	string bad;
-	uintParam( "hidden_start", cfg.hStart, 1, "hidden_start must be at least 1", bad );
-	uintParam( "hidden_max", cfg.hMax, 1, "hidden_max must be at least 1", bad );
-	uintParam( "iter_budget", cfg.iterBudget, 1, "iter_budget must be at least 1", bad );
-	uintParam( "sample_every", cfg.sampleEvery, 1, "sample_every must be at least 1", bad );
-	uintParam( "early_stop_patience", cfg.earlyStopPatience, 1,
-		"early_stop_patience must be at least 1", bad );
-	uintParam( "grow_patience", cfg.growPatience, 1,
-		"grow_patience must be at least 1", bad );
-	fracParam( "early_stop_tol", cfg.earlyStopTol,
-		"early_stop_tol must be between 0 and 1", bad );
-	fracParam( "prune_tol", cfg.pruneTol, "prune_tol must be between 0 and 1", bad );
+	if ( bad.empty() ) bad = uintField( req, "hidden_start", cfg.hStart, 1,
+		"hidden_start must be at least 1" );
+	if ( bad.empty() ) bad = uintField( req, "hidden_max", cfg.hMax, 1,
+		"hidden_max must be at least 1" );
+	if ( bad.empty() ) bad = uintField( req, "iter_budget", cfg.iterBudget, 1,
+		"iter_budget must be at least 1" );
+	if ( bad.empty() ) bad = uintField( req, "sample_every", cfg.sampleEvery, 1,
+		"sample_every must be at least 1" );
+	if ( bad.empty() ) bad = uintField( req, "early_stop_patience",
+		cfg.earlyStopPatience, 1, "early_stop_patience must be at least 1" );
+	if ( bad.empty() ) bad = uintField( req, "grow_patience", cfg.growPatience, 1,
+		"grow_patience must be at least 1" );
+	if ( bad.empty() ) bad = fracField( req, "early_stop_tol", cfg.earlyStopTol,
+		"early_stop_tol must be between 0 and 1" );
+	if ( bad.empty() ) bad = fracField( req, "prune_tol", cfg.pruneTol,
+		"prune_tol must be between 0 and 1" );
 	// The per-size train-plateau backstop, same names as /api/train's
-	fracParam( "autostop_tol", cfg.plateauTol,
-		"autostop_tol must be between 0 and 1", bad );
-	uintParam( "autostop_window", cfg.plateauWindow, 2,
-		"autostop_window must be at least 2", bad );
+	if ( bad.empty() ) bad = fracField( req, "autostop_tol", cfg.plateauTol,
+		"autostop_tol must be between 0 and 1" );
+	if ( bad.empty() ) bad = uintField( req, "autostop_window", cfg.plateauWindow, 2,
+		"autostop_window must be at least 2" );
 	if ( !bad.empty() )
 		return jsonMsg( false, bad );
 	if ( cfg.hMax < cfg.hStart )
@@ -1650,9 +1824,12 @@ string handleObd( const httplib::Request& req )
 	else if ( algoStr == "3" ) cfg.algorithm = 2;
 	else return jsonMsg( false, "algorithm must be 1, 2, 3 or auto" );
 
-	string seed = param( req, "seed" );
-	if ( !seed.empty() )
-		util::set_seed( ( unsigned ) atol( seed.c_str() ) );
+	unsigned seed = 0;
+	bool seeded = given( req, "seed" );
+	if ( !( bad = readUnsigned( req, "seed", seed ) ).empty() )
+		return jsonMsg( false, bad );
+	if ( seeded )
+		util::set_seed( seed );
 
 	// OBD is async-only (it is many training runs): hand it to the worker and
 	//    return at once, exactly like async training. The caller holds
@@ -2386,43 +2563,37 @@ string handleCv( const httplib::Request& req )
 
 	CvConfig c;
 	string bad;
-	auto uintParam = [ & ]( const char* name, unsigned& dst, unsigned lo, const char* err )
-	{
-		string s = param( req, name );
-		if ( s.empty() ) return;
-		long v = atol( s.c_str() );
-		if ( v < ( long ) lo ) { bad = err; return; }
-		dst = ( unsigned ) v;
-	};
-	uintParam( "folds", c.k, 2, "folds must be at least 2" );
-	uintParam( "seed", c.seed, 0, "seed must be a whole number" );
-	uintParam( "maxiter", c.maxIter, 1, "maxiter must be at least 1" );
-	uintParam( "neural_hidden", c.neuralHidden, 1, "neural_hidden must be at least 1" );
-	uintParam( "hidden_max", c.obd.hMax, 1, "hidden_max must be at least 1" );
-	uintParam( "iter_budget", c.obd.iterBudget, 1, "iter_budget must be at least 1" );
+	if ( bad.empty() ) bad = uintField( req, "folds", c.k, 2,
+		"folds must be at least 2" );
+	if ( bad.empty() ) bad = uintField( req, "seed", c.seed, 0,
+		"seed must be a whole number" );
+	if ( bad.empty() ) bad = uintField( req, "maxiter", c.maxIter, 1,
+		"maxiter must be at least 1" );
+	if ( bad.empty() ) bad = uintField( req, "neural_hidden", c.neuralHidden, 1,
+		"neural_hidden must be at least 1" );
+	if ( bad.empty() ) bad = uintField( req, "hidden_max", c.obd.hMax, 1,
+		"hidden_max must be at least 1" );
+	if ( bad.empty() ) bad = uintField( req, "iter_budget", c.obd.iterBudget, 1,
+		"iter_budget must be at least 1" );
+	if ( !bad.empty() ) return jsonMsg( false, bad );
+
 	// The plateau auto-stop, for the nested-OBD search AND (when asked for) the
 	//    plain logistic / fixed-architecture neural templates. Present = the
 	//    caller wants a reachable stopping rule on every procedure in this run.
+	if ( given( req, "autostop_tol" ) )
 	{
-		string t = param( req, "autostop_tol" ), w = param( req, "autostop_window" );
-		if ( !t.empty() )
-		{
-			double v = atof( t.c_str() );
-			if ( !( v > 0 && v < 1 ) )
-				return jsonMsg( false, "autostop_tol must be between 0 and 1" );
-			c.obd.plateauTol = v;
-			c.plainAutostop = true;
-		}
-		if ( !w.empty() )
-		{
-			long v = atol( w.c_str() );
-			if ( v < 2 )
-				return jsonMsg( false, "autostop_window must be at least 2" );
-			c.obd.plateauWindow = ( unsigned ) v;
-			c.plainAutostop = true;
-		}
+		bad = fracField( req, "autostop_tol", c.obd.plateauTol,
+			"autostop_tol must be between 0 and 1" );
+		if ( !bad.empty() ) return jsonMsg( false, bad );
+		c.plainAutostop = true;
 	}
-	if ( !bad.empty() ) return jsonMsg( false, bad );
+	if ( given( req, "autostop_window" ) )
+	{
+		bad = uintField( req, "autostop_window", c.obd.plateauWindow, 2,
+			"autostop_window must be at least 2" );
+		if ( !bad.empty() ) return jsonMsg( false, bad );
+		c.plainAutostop = true;
+	}
 	// The nested-OBD search grows from hStart (2); hidden_max below it is an empty
 	//    range that would refuse every fold, so reject it up front (bug B2)
 	if ( c.neural && c.neuralObd && c.obd.hMax < c.obd.hStart )
@@ -2439,27 +2610,21 @@ string handleCv( const httplib::Request& req )
 	else if ( cvAlgo == "3" ) c.obd.algorithm = 2;
 	else return jsonMsg( false, "algorithm must be 1, 2, 3 or auto" );
 
-	// Procedure selection: present = the field decides; absent = the default set.
-	auto boolParam = [ & ]( const char* name, bool& dst )
-	{
-		string s = param( req, name );
-		if ( !s.empty() ) dst = ( s == "1" || s == "true" );
-	};
-	boolParam( "logistic", c.logistic );
-	boolParam( "ldfa", c.ldfa );
-	boolParam( "qdfa", c.qdfa );
-	boolParam( "neural", c.neural );
-	boolParam( "neural_obd", c.neuralObd );
+	// Procedure selection: present = the field decides; absent = the default
+	//    set. These five accepted "true" as well as "1" before B9, alone on
+	//    this API; they now take the same two tokens as every other flag.
+	if ( bad.empty() ) bad = readBool( req, "logistic", c.logistic );
+	if ( bad.empty() ) bad = readBool( req, "ldfa", c.ldfa );
+	if ( bad.empty() ) bad = readBool( req, "qdfa", c.qdfa );
+	if ( bad.empty() ) bad = readBool( req, "neural", c.neural );
+	if ( bad.empty() ) bad = readBool( req, "neural_obd", c.neuralObd );
+	if ( !bad.empty() ) return jsonMsg( false, bad );
 
+	if ( given( req, "inner_val" ) )
 	{
-		string s = param( req, "inner_val" );
-		if ( !s.empty() )
-		{
-			double v = atof( s.c_str() );
-			if ( !( v > 0 && v < 1 ) )
-				return jsonMsg( false, "inner_val must be between 0 and 1" );
-			c.innerVal = v;
-		}
+		bad = fracField( req, "inner_val", c.innerVal,
+			"inner_val must be between 0 and 1" );
+		if ( !bad.empty() ) return jsonMsg( false, bad );
 	}
 
 	if ( c.k > dataPtr->getRawMatrix().rows() )
@@ -2479,21 +2644,20 @@ string handleCv( const httplib::Request& req )
 		string strataStr = param( req, "strata" );
 		if ( !strataStr.empty() )
 		{
-			string bad = parseColumnList( strataStr, dataPtr->getInput(), "strata",
+			bad = parseColumnList( strataStr, dataPtr->getInput(), "strata",
 				c.strataColumns );
 			if ( !bad.empty() ) return jsonMsg( false, bad );
-			string binsStr = param( req, "strata_bins" );
-			if ( !binsStr.empty() )
+			if ( given( req, "strata_bins" ) )
 			{
-				long b = atol( binsStr.c_str() );
-				if ( b < 2 ) return jsonMsg( false, "strata_bins must be at least 2" );
-				c.strataBins = ( unsigned ) b;
+				bad = uintField( req, "strata_bins", c.strataBins, 2,
+					"strata_bins must be at least 2" );
+				if ( !bad.empty() ) return jsonMsg( false, bad );
 			}
 		}
 		string groupStr = param( req, "group" );
 		if ( !groupStr.empty() )
 		{
-			string bad = parseColumnList( groupStr, dataPtr->getInput(), "group",
+			bad = parseColumnList( groupStr, dataPtr->getInput(), "group",
 				c.groupColumns );
 			if ( !bad.empty() ) return jsonMsg( false, bad );
 		}
@@ -2555,21 +2719,25 @@ string handleCv( const httplib::Request& req )
 
 	unsigned nRows = dataPtr->getRawMatrix().rows();
 	{
-		string frac = param( req, "locked_fraction" ), cnt = param( req, "locked_n" );
-		if ( !frac.empty() && !cnt.empty() )
+		bool haveFrac = given( req, "locked_fraction" ),
+			haveCnt = given( req, "locked_n" );
+		if ( haveFrac && haveCnt )
 			return jsonMsg( false, "specify locked_fraction OR locked_n, not both" );
-		if ( !frac.empty() )
+		if ( haveFrac )
 		{
-			double f = atof( frac.c_str() );
+			double f = 0;
+			if ( !( bad = readDouble( req, "locked_fraction", f ) ).empty() )
+				return jsonMsg( false, bad );
 			if ( f < 0 || f >= 1 )
 				return jsonMsg( false, "locked_fraction must be in [0, 1) (0 = none)" );
 			c.lockedN = ( unsigned )( f * nRows + 0.5 ); // 0 -> none
 		}
-		else if ( !cnt.empty() )
+		else if ( haveCnt )
 		{
-			long v = atol( cnt.c_str() );
-			if ( v < 0 ) return jsonMsg( false, "locked_n cannot be negative" );
-			c.lockedN = ( unsigned ) v;
+			// A negative count is now a sign fault named by field, where it
+			//    used to be a long that the handler compared against zero
+			if ( !( bad = readUnsigned( req, "locked_n", c.lockedN ) ).empty() )
+				return jsonMsg( false, bad );
 		}
 		// Clustered inference is computed ON the locked test, so it needs one.
 		//    Checked here, where the size is finally known.
@@ -2898,8 +3066,10 @@ string handleRegress( const httplib::Request& req )
 {
 	logAction( req, "regress" );
 	string structure = param( req, "structure" ),
-		direction = param( req, "direction" );
-	double threshold = atof( param( req, "threshold" ).c_str() );
+		direction = param( req, "direction" ), bad;
+	double threshold = 0;
+	if ( !( bad = readDouble( req, "threshold", threshold ) ).empty() )
+		return jsonMsg( false, bad );
 
 	Network* net = modelPtr ? dynamic_cast< Network* >( modelPtr.get() ) : nullptr;
 	if ( !net )
@@ -2948,7 +3118,10 @@ string handleRegress( const httplib::Request& req )
 	// Asynchronous mode: validation above has already happened synchronously,
 	//    so a bad request still fails fast and in the caller's own response.
 	//    Everything past this point is the run itself.
-	if ( param( req, "async" ) == "1" )
+	bool async = false;
+	if ( !( bad = readBool( req, "async", async ) ).empty() )
+		return jsonMsg( false, bad );
+	if ( async )
 	{
 		// `net` is a raw pointer into the current model, which the busy gate
 		//    keeps alive: no handler that could replace modelPtr runs while

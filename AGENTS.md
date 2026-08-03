@@ -720,6 +720,37 @@ the run does not change the neural net's numbers). See
   present-but-empty rules, domain refusals, and the malformed values each field
   must refuse by name). Third server-starting script, separate for the same
   reason as the second. The contract it pins is `docs/b9_strict_parsing.md`.
+
+### How a request field is read (since 2026-08-03)
+
+Every field on every endpoint goes through the same rules, so a malformed
+request is refused by name instead of being silently reinterpreted:
+
+- **Whitespace** around a value is trimmed, and the rest must be consumed
+  entirely. `fraction=0.3` and `fraction=" 0.3 "` are the same; `fraction=0.3junk`
+  is refused. There is no partial reading.
+- **Whole numbers**: optional `+`, then digits. A negative is a sign error, and
+  a value wider than the type is a range error, not a wrap.
+- **Numbers**: anything `strtod` accepts, consumed entirely, and **finite** —
+  `nan` and `inf` are refused on every field.
+- **Flags**: exactly `1` or `0`, case-sensitively, everywhere. `true`, `yes`
+  and `TRUE` are refused; before this they silently meant false.
+- **Omitted** keeps the current value. **Present-but-empty** does too for
+  numbers and counts — the page sends `fraction`, `seed` and `decay` on every
+  request whether or not they are filled in — with two exceptions: on
+  `/api/train` an empty `minerr`, `change`, `errwindow` or `gradmax` *disables*
+  that stopping condition, and an empty **flag** is refused.
+- **Refusals name the field**: `folds: '5junk' is not a whole number`,
+  `gradmax: 'inf' is not a finite number`, `async: 'true' must be 1 or 0`. A
+  syntax fault and a domain fault read differently on purpose.
+- **A refusal applies nothing.** Each handler reads all of its fields before it
+  changes anything, so a request refused for its last parameter has not applied
+  its first.
+
+Every curl recipe in this file already uses `=1`/`=0` and unambiguous numbers,
+so none of them changes. Writing a new endpoint or parameter means using
+`readUnsigned` / `readDouble` / `readBool` in `src/gui.cpp`;
+`tools/check_strict_parsing.py` fails the build otherwise.
 - The low-birth-weight dataset is a self-verifying reference: follow
   `docs/datasets/low-birth-weight/README.md` and the engine should report
   log likelihood −111.2865 on the committed betas.
