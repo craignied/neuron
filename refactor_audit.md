@@ -4279,7 +4279,7 @@ concurrent observers never reading torn JSON; and the blocking-stepwise latch
 clear.
 
 **The overlap control fired on Windows, and the fix was structural, not a bigger
-number** (`dfffde8` → `f4a90f2`). Two cases sized their fixture — a
+number** (`dfffde8` → `109265d`). Two cases sized their fixture — a
 3000-iteration XOR run, a 150-budget OBD search — and Windows finished both
 *inside the first HTTP round trip*, leaving a single terminal sample. The
 control did exactly its job: an absence assertion with no running sample behind
