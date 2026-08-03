@@ -4566,3 +4566,96 @@ changes. Blocking training and blocking stepwise do not pass through the
 launcher and keep behaving exactly as they do now. No detached threads. The
 publish-then-clear ordering is written explicitly, never left to incidental
 atomic behavior.
+
+### 20.9 Item 13 implemented (2026-08-03)
+
+`src/asyncjob.{h,cpp}` and `src/procguard.{h,cpp}`, in a new `neuron_job`
+static library that depends on the standard library and threads alone — no GSL,
+no engine — so a test can link the lifecycle without the numerical stack. The
+four launch sites each became one statement; `runOnWorker` and the seven-line
+prelude are gone from `gui.cpp`.
+
+**Behavior preserved.** `tests/gui/asyncjob.sh` — the 152 assertions written
+against the *unextracted* code — passes unchanged, as do the three goldens,
+`smoke.sh`, the oracle and the tools. No endpoint, parameter, JSON field,
+progress semantic, busy behavior or parity entry moved, so
+`docs/gui_cli_parity.md` needed no edit; it was re-read against the diff rather
+than assumed.
+
+**What the class owns and what it refused to learn.** How a failure message
+becomes a response body is *injected* (`FailureRenderer`), so the lifecycle
+speaks no wire format: the message — "the run failed: <what>" — is the
+boundary's own, and the JSON dressing stays in `gui.cpp` where every other
+endpoint's does. Cancellation results are handed through untouched; a cancelled
+training run, OBD search, cross-validation and stepwise analysis still publish
+four different shapes.
+
+**The two acceptance criteria, measured.**
+
+| invariant | through HTTP | in the linkable unit |
+|---|---|---|
+| publish before clearing `running` (S2) | **0 caught** of 3 with one observer and 3 with eight | **case 5 fails, 185-187 of 200 cycles** |
+| `running` marked before `start()` returns (S6) | **0 caught** of 3 | **case 4 fails, 200 of 200 starts**, three consecutive runs |
+
+Both became reachable for the same reason: there is no network in the middle.
+A reader can hold `progressMutex` a large fraction of the time, so the
+nanosecond window after an inverted clear is landed on rather than missed; and
+the check after `start()` returns happens nanoseconds after thread creation
+rather than after a round trip, so a worker that marks the job itself has
+reliably not run yet.
+
+**The full sabotage table**, each with the object file deleted and the build log
+required to show the translation unit recompiling **and** `check_asyncjob`
+relinking, on introduction and again on restoration:
+
+| # | sabotage | result |
+|---|---|---|
+| S2 | invert publish-then-clear in `finish()` | case 5 only, 185-187/200 cycles |
+| S6 | mark running inside the worker | case 4, 200/200 starts (+ collateral in 1, 2, 5, 7, 8, 9) |
+| S12 | `start()` stops reaping the finished worker | cases 2, 4, 5, 7 **terminate** (rc 134) |
+| S13 | drop `catch( const std::exception& )` | case 8 — the message becomes the generic one |
+| S14 | drop `catch( ... )` | case 9 **terminates**: "uncaught exception of type int" |
+| S15 | `resetForNewRun` stops clearing `result` | case 3 only |
+| S16 | `start()` stops clearing the stop latch | case 7 only |
+| S17 | `procguard` returns 0 instead of 1 | cases 12 and 13; 11 and 14 correctly unaffected |
+| S18 | the destructor stops joining | cases 1 and 2 **terminate**; case 10 unaffected |
+| S3' | `resetForNewRun` stops clearing `obdPhase` | 2 assertions in `asyncjob.sh` — the HTTP guard survived the move |
+| S5' | blocking stepwise stops clearing a stale Stop | 3 assertions in `asyncjob.sh`, unchanged from before the move |
+
+**F1, the thread-construction rollback, as Sol scoped it.** `start()` catches
+around the construction, publishes a failure and clears `running` through the
+**same** `finish()` every completed run uses, then returns false; each handler
+answers "could not start a worker thread". The rollback *logic* is therefore
+exercised by every job that ever runs, and `finish()`'s ordering is what S2 and
+S15 pin. **The wiring — that the catch calls it — is inspected, not guarded**:
+forcing `std::thread`'s constructor to fail needs resource exhaustion and is not
+portable, and no test-only method, thread factory or fault hook was added to
+manufacture it. Recorded here precisely because that distinction is easy to
+overstate.
+
+**A latent defect the extraction exposed.** `AsyncJob` had no destructor, and
+neither did `TrainJob`. A worker stays joinable after it finishes until
+something reaps it, and destroying a joinable `std::thread` calls
+`std::terminate` — so any instance that ran a job and was then destroyed would
+kill the process. The GUI's instance is a global the running server never
+destroys, which is why twenty years of this code never showed it; it is a
+property of the type, and the type is now something a caller can hold. The
+destructor cancels and joins (S18 proves it, twice). This is the first thing the
+extraction found, and it found it by being instantiable.
+
+**Item 14 of the proposal, the shutdown join**, is preserved and documented as
+unreachable rather than expanded into server-shutdown work: nothing calls
+`svr.stop()`, so `listen_after_bind()` never returns and the process ends by
+signal. `run_gui` now calls `job.joinForShutdown()`, one line where there were
+five.
+
+**Line count, measured rather than estimated** (item 12's estimate was 3-4x
+optimistic, so this one is a `git diff --stat`). `src/` loses **239 lines and
+gains 58** across `gui.cpp` and `neuron.cpp` — a net −181 at the call sites —
+and the two new units are **399 lines, of which 193 are code**: the balance is
+the header contract that states the ordering and lock-order rules a caller has
+to obey. So the extraction ADDS about 210 lines net, and roughly all of that is
+the contract being written down somewhere a reader can find it. It was never
+going to save lines: it buys one implementation of an ordering that was written
+four times and tested none (rule 7 — DRY means one authoritative mechanism at
+the correct layer, never minimum line count).

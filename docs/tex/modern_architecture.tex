@@ -306,8 +306,11 @@ an iteration boundary.
 \endhead
 \texttt{gui.*},
 \texttt{gui\_page.html} &
-Local server, REST handlers, asynchronous job state, and browser
-interface. \\ \hline
+Local server, REST handlers, and browser interface. \\ \hline
+\texttt{asyncjob.*},
+\texttt{procguard.*} &
+The asynchronous-job lifecycle every long operation shares, and the
+command-line program's top-level exception boundary. \\ \hline
 \texttt{split.*} &
 Stratified, group-aware, three-way, arbitrary-stratum k-fold, and
 whole-group k-fold index plans. \\ \hline

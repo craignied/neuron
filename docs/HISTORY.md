@@ -3895,3 +3895,63 @@ Three cancellation cases still need their job to be long enough to observe, and
 no restructuring removes that: Stop cannot reach a job that has already
 finished. The margins are two orders of magnitude, and the wait fails with a
 message naming the cause.
+
+## 2026-08-03 — Refactor item 13: the async launcher extracted, and the ordering finally testable
+
+`src/asyncjob.{h,cpp}` and `src/procguard.{h,cpp}`, in a new `neuron_job` static
+library that depends on the standard library and threads alone. The four launch sites
+each became one statement; `runOnWorker` and the seven-line prelude left `gui.cpp`.
+Full record: `refactor_audit.md` §20.9.
+
+- **The point of the exercise, measured.** The two ordering invariants that were
+  unreachable through HTTP are now deterministic. Inverting publish-then-clear went from
+  **0 caught** (3 runs with one observer, 3 with eight) to **case 5 failing on 185-187 of
+  200 cycles**; marking the job running inside the worker went from **0 caught** to **case
+  4 failing on 200 of 200 starts**, three consecutive runs. Both became reachable for the
+  same reason — there is no network in the middle. A reader can hold the progress mutex a
+  large fraction of the time, so the nanosecond window after an inverted clear is landed
+  on rather than missed, and the check after `start()` returns happens nanoseconds after
+  thread creation rather than after a round trip.
+- **Behavior preserved.** The 152 assertions written against the *unextracted* code pass
+  unchanged, along with the three goldens, `smoke.sh`, the oracle and the tools. No
+  endpoint, parameter, JSON field, progress semantic, busy behavior or parity entry moved,
+  so `docs/gui_cli_parity.md` needed no edit — re-read against the diff rather than
+  assumed.
+- **The class refused to learn JSON.** How a failure message becomes a response body is
+  injected, so the message — "the run failed: <what>" — is the boundary's own while the
+  dressing stays in `gui.cpp` with every other endpoint's. Cancellation results are handed
+  through untouched: a cancelled training run, OBD search, cross-validation and stepwise
+  analysis still publish four different shapes.
+- **A latent defect the extraction exposed, immediately.** `AsyncJob` had no destructor,
+  and neither had `TrainJob`. A worker stays joinable after it finishes until something
+  reaps it, and destroying a joinable `std::thread` calls `std::terminate` — so any
+  instance that ran a job and was then destroyed would kill the process. The GUI's
+  instance is a global the running server never destroys, which is why this was never
+  seen; it is a property of the TYPE, and the type is now something a caller can hold.
+  The first test that constructed one died on it. The destructor cancels and joins.
+- **Eleven sabotages**, each with the object file deleted and the build log required to
+  show the translation unit recompiling and the test relinking, on introduction and again
+  on restoration. Dropping `catch( ... )` terminates the test process with "uncaught
+  exception of type int"; dropping the reap terminates four cases; each of the other
+  seven fails a precise, distinct set. The two HTTP-level guards for mechanisms that
+  moved were re-proven against the extracted code and bite identically.
+- **F1, the thread-construction rollback, as Sol scoped it.** `start()` catches around the
+  construction and publishes a failure through the SAME `finish()` every completed run
+  uses, then returns false. The rollback *logic* is exercised by every job that ever runs;
+  the *wiring* — that the catch calls it — is **inspected, not guarded**, because forcing
+  `std::thread`'s constructor to fail needs resource exhaustion and is not portable. No
+  test-only method, thread factory or fault hook was added to manufacture it.
+- **`procguard` is deliberately not part of `AsyncJob`.** Both are boundaries around an
+  uncaught exception, but the command-line entry point has no worker, no cancellation and
+  no result to publish — it has an exit status and a diagnostic. `procguard::run( body,
+  err, program )` takes the body and the stream, which is what makes it testable: normal
+  return, `std::exception`, a `Matrix` contract failure and an unknown exception are all
+  pinned with their exact status and text, and the shipped binary gains no injectable
+  fault path. That closes the D9 CLI-boundary debt.
+- `run_gui`'s shutdown join is preserved and documented as unreachable — nothing calls
+  `svr.stop()`, so `listen_after_bind()` never returns and the process ends by signal.
+  One line now where there were five.
+- **Line count, measured** (item 12's estimate was 3-4x optimistic): `src/` loses 239
+  lines and gains 58, and the two new units are 399 lines of which 193 are code. The
+  extraction ADDS about 210 lines net, nearly all of it the ordering and lock-order
+  contract written down where a caller can find it. It was never going to save lines.

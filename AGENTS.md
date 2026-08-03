@@ -712,6 +712,10 @@ the run does not change the neural net's numbers). See
   keeps one job's progress out of the next one's status). Both start a real
   server on an OS-assigned port; the second is separate so that a hang or a
   terminated server there cannot take the endpoint coverage with it.
+  The same lifecycle's *ordering* rules — a result is published before the job
+  reports itself idle, and the job is marked running before `start()` returns —
+  are pinned in-process by the `asyncjob_lifecycle` ctest case, because neither
+  is observable through HTTP (`refactor_audit.md` §20.4).
 - The low-birth-weight dataset is a self-verifying reference: follow
   `docs/datasets/low-birth-weight/README.md` and the engine should report
   log likelihood −111.2865 on the committed betas.

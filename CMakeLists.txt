@@ -82,13 +82,23 @@ add_library(neuron_eval STATIC
     src/crossval.cpp src/cvadapters.cpp src/cvreport.cpp)
 target_link_libraries(neuron_eval PUBLIC neuron_engine neuron_infer)
 
+# The two process boundaries: the asynchronous-job lifecycle the GUI's four
+# long operations share, and the top-level exception guard the CLI enters
+# through. Neither knows anything about the engine -- this library depends on
+# the standard library and threads alone, which is what makes both of them
+# linkable by a test without dragging GSL in. They are separate source and
+# header pairs on purpose (see procguard.h).
+add_library(neuron_job STATIC src/asyncjob.cpp src/procguard.cpp)
+target_include_directories(neuron_job PUBLIC src)
+target_link_libraries(neuron_job PUBLIC Threads::Threads)
+
 # The driver and the embedded GUI. gui.cpp is the only translation unit that
 # needs the generated page header and the vendored httplib, so those include
 # directories stay PRIVATE to this target rather than leaking into a library.
 add_executable(neuron src/neuron.cpp src/gui.cpp)
 target_include_directories(neuron PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}/generated third_party)
-target_link_libraries(neuron PRIVATE neuron_eval Threads::Threads)
+target_link_libraries(neuron PRIVATE neuron_eval neuron_job Threads::Threads)
 if(WIN32)
     target_link_libraries(neuron PRIVATE ws2_32)
 endif()
@@ -448,6 +458,15 @@ add_test(NAME dfa_characterization COMMAND check_dfa)
 add_executable(check_regressnet tests/regressnet/check_regressnet.cpp)
 target_link_libraries(check_regressnet PRIVATE neuron_engine)
 add_test(NAME regressnet_characterization COMMAND check_regressnet)
+
+# The asynchronous-job lifecycle and the CLI process boundary. Links only
+# neuron_job (plus neuron_core, for the Matrix contract exception the CLI
+# boundary was built to report) -- no GSL, no engine, so it runs in a second.
+# It exists because the two ordering invariants below are unreachable through
+# HTTP; see refactor_audit.md section 20.4 for the measurement.
+add_executable(check_asyncjob tests/asyncjob/check_asyncjob.cpp)
+target_link_libraries(check_asyncjob PRIVATE neuron_job neuron_core)
+add_test(NAME asyncjob_lifecycle COMMAND check_asyncjob)
 
 add_executable(check_matrix_bounds tests/matrix/check_matrix_bounds.cpp)
 target_link_libraries(check_matrix_bounds PRIVATE neuron_core)

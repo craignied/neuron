@@ -28,6 +28,7 @@
 #include <thread>
 
 #include "gui.h"
+#include "asyncjob.h"
 #include "autoalgo.h"
 #include "obd.h"
 #include "dataset.h"
@@ -70,116 +71,23 @@ string lastReport;
 //    (RegressNet's Wilks GLRT); -1 until a model has been trained
 double lastTrainError = -1;
 
-// --- The async training job (ROADMAP 2 Phase 1b) --------------------------
+// --- The async job (ROADMAP 2 Phase 1b; extracted to AsyncJob 2026-08-03) --
 //
-// One job at a time. While it runs, job.running gates every handler that
+// One job at a time. While it runs, job.isRunning() gates every handler that
 // would touch the engine (HTTP 409, no queueing); only /api/train/status and
 // /api/train/stop go through. The worker thread owns the engine for the
 // duration and does NOT hold engineMutex while training -- the gate is what
 // keeps everyone else out. The worker captures engine output through its own
 // thread_local screen (see utility.cpp).
-const unsigned JOB_MAX_POINTS = 2000;
+//
+// The lifecycle -- reap, reset, arm, mark running, start, and the boundary that
+// publishes before it clears -- lives in src/asyncjob.{h,cpp}, where it can be
+// tested. What stays here is what the GUI owns: which fields a status response
+// renders, and how a message becomes JSON.
+string jsonMsg( bool ok, const string& message ); // defined below
 
-struct TrainJob
-{
-	thread worker;
-	atomic< bool > running{ false }; // toggled under engineMutex
-	atomic< bool > cancel{ false };  // the Stop button; observer returns false
-
-	// Everything below is guarded by progressMutex. The error-vs-iteration
-	//    series is decimated: capped at MAX_POINTS, halving (and doubling the
-	//    keep-every-nth stride) when full, so a million-iteration run still
-	//    ships a bounded, evenly thinned curve.
-	mutex progressMutex;
-	vector< unsigned > iters;
-	vector< double > trainErr, testErr; // testErr < 0 = not sampled
-	unsigned keepEvery = 1, sampleCounter = 0;
-	string result; // the finished run's response JSON, "" while running
-
-	// OBD progress for the status poll (empty phase = not an OBD run)
-	string obdPhase;
-	unsigned obdHidden = 0;
-
-	// Stepwise-regression progress as a ready-made JSON object body (empty =
-	//    not a stepwise run). Kept as its OWN field rather than reusing the obd
-	//    object: a caller must never have to read "hidden" and guess it means a
-	//    candidate variable.
-	string stepwise;
-
-	// Cross-validation progress -- its own field for the same reason (2026-07-29).
-	//    A four-procedure, five-fold nested-OBD run is the most expensive thing the
-	//    GUI does and used to show one unchanging phase word for its whole
-	//    duration. The engine fields below are set from crossval::Progress and,
-	//    for the inner architecture search, from obd::ProgressFn; handleTrainStatus
-	//    renders them. Guarded by progressMutex like everything else here.
-	string cvStage;       // "cross-validation" | "locked-test evaluation"; "" = not a CV run
-	string cvProcedure;   // the procedure now fitting
-	unsigned cvProcIndex = 0, cvProcCount = 0, cvProcDone = 0;
-	unsigned cvFold = 0, cvK = 0, cvFoldsDone = 0;
-	// The nested OBD search inside the CURRENT fold. Cleared whenever the fold or
-	//    procedure changes, so a finished fold's last trial can never be displayed
-	//    as the next fold's progress.
-	string cvInnerPhase;
-	unsigned cvInnerHidden = 0;
-
-	// Reset every CV progress field. One place, so a new field cannot be added
-	//    and then left stale by a path that clears the others (the reason
-	//    "not copied" is written out rather than omitted -- HISTORY 2026-07-27).
-	void clearCvProgress()
-	{
-		cvStage.clear(); cvProcedure.clear();
-		cvProcIndex = cvProcCount = cvProcDone = 0;
-		cvFold = cvK = cvFoldsDone = 0;
-		cvInnerPhase.clear(); cvInnerHidden = 0;
-	}
-
-	// Clear every per-run field before a new job starts, so nothing from the last
-	//    run can be read as this one's. Train, OBD, CV and stepwise each used to
-	//    do this by hand, which meant a new progress field had to be remembered in
-	//    four places -- and the one that forgot would publish stale progress rather
-	//    than none. Callers must hold progressMutex (they already did).
-	void resetForNewRun()
-	{
-		iters.clear();
-		trainErr.clear();
-		testErr.clear();
-		keepEvery = 1;
-		sampleCounter = 0;
-		result.clear();
-		obdPhase.clear();
-		obdHidden = 0;
-		stepwise.clear();
-		clearCvProgress();
-	}
-
-	// Append one decimated (iteration, train, test) sample. Guards its own
-	//    mutex, so callers must NOT already hold progressMutex.
-	void pushSample( unsigned iteration, double trainError, double testError )
-	{
-		lock_guard< mutex > lock( progressMutex );
-		if ( ++sampleCounter % keepEvery == 0 )
-		{
-			iters.push_back( iteration );
-			trainErr.push_back( trainError );
-			testErr.push_back( testError );
-			if ( iters.size() >= JOB_MAX_POINTS )
-			{
-				// Halve the series, double the stride for future samples
-				for ( unsigned i = 0, j = 0; j < iters.size(); i++, j += 2 )
-				{
-					iters[ i ] = iters[ j ];
-					trainErr[ i ] = trainErr[ j ];
-					testErr[ i ] = testErr[ j ];
-				}
-				iters.resize( iters.size() / 2 );
-				trainErr.resize( trainErr.size() / 2 );
-				testErr.resize( testErr.size() / 2 );
-				keepEvery *= 2;
-			}
-		}
-	}
-};
-TrainJob job;
+AsyncJob job( []( const string& message )
+	{ return jsonMsg( false, message ); } );
 
 // The worker-side observer: samples the error curve on a wall-clock schedule
 //    (>= 250 ms apart, so observing costs nothing measurable) and carries the
@@ -209,7 +117,7 @@ struct GuiObserver : Iterative::Observer
 			double testError = net ? net->sampleTestError( testStride ) : -1;
 			job.pushSample( iteration, setError, testError );
 		}
-		return !job.cancel.load();
+		return !job.isStopRequested();
 	}
 };
 
@@ -223,7 +131,7 @@ struct GuiObserver : Iterative::Observer
 //    through the same door an unfinished fit does.
 struct StepwiseCancelObserver : Iterative::Observer
 {
-	bool onIteration( unsigned, double ) override { return !job.cancel.load(); }
+	bool onIteration( unsigned, double ) override { return !job.isStopRequested(); }
 };
 
 // The engine's stop reason as a JSON-friendly name. These tokens are the
@@ -1132,7 +1040,8 @@ string handleRandomize( const httplib::Request& req )
 // Run modelPtr->train() on the CALLING thread and build the full response
 //    JSON (captured report, ROC curves, stats, stop reason). The caller must
 //    own the engine: either it holds engineMutex (blocking /api/train) or it
-//    is the async worker, with job.running gating every other handler out.
+//    is the async worker, with the job's running flag gating every other
+//    handler out.
 //    autoJson (may be empty) is the auto-selection block to embed in the
 //    result; preamble (may be empty) is report text captured before this
 //    call -- the probe decision summary -- prepended to the report; autoNote
@@ -1236,50 +1145,6 @@ string jsonAutoAlgo( const autoalgo::Result& r )
 	return out.str();
 }
 
-// THE WORKER BOUNDARY -- one implementation, four callers (D9).
-//
-// Every long job runs on a std::thread, and an exception that escapes a
-//    thread's function calls std::terminate: the server dies while the page is
-//    still polling /api/train/status. That was reachable -- Network::
-//    computeCondNum throws Matrix< double >::BoundsViolation on a non-square
-//    argument, and until D9 the Matrix exceptions did not derive from
-//    std::exception, so runTrainingAndBuildResult's catch( const exception& )
-//    could not see one. They derive from it now, so the inner handlers report
-//    properly; this is the LAST RESORT, and it exists so that the answer to
-//    "what if something else throws" is never "the process".
-//
-// It also owns the publish-then-clear ordering the status endpoint depends on:
-//    job.result under the mutex FIRST, job.running cleared afterward, on every
-//    path including the throwing ones. That ordering was maintained in four
-//    places; now it is maintained in one.
-//
-// std::function is right here: this is called once per JOB, not once per
-//    exemplar. The hot path is inside body.
-void runOnWorker( const function< string() >& body )
-{
-	string result;
-
-	try
-	{
-		result = body();
-	}
-	catch ( const exception& e )
-	{
-		// jsonMsg escapes its own message -- do not escape it twice
-		result = jsonMsg( false, string( "the run failed: " ) + e.what() );
-	}
-	catch ( ... )
-	{
-		result = jsonMsg( false, "the run failed with an unrecognized error" );
-	}
-
-	{
-		lock_guard< mutex > lock( job.progressMutex );
-		job.result = result; // publish BEFORE running goes false
-	}
-	job.running = false;
-}
-
 // The whole training job: optional auto algorithm selection (probe all
 //    three from identical weights, adopt the winner -- which REPLACES
 //    modelPtr, so every pointer is re-derived after it), then the real
@@ -1297,7 +1162,7 @@ string runTrainJob( bool continued, bool autoSelect, unsigned maxIter,
 		// The probe summary is captured separately so it can lead the report
 		Capture probeCap;
 		autoalgo::Result r = autoalgo::pick( *net, 750,
-			observed ? &job.cancel : nullptr );
+			observed ? job.cancelLatch() : nullptr );
 		preamble = probeCap.text.str();
 
 		autoJson = jsonAutoAlgo( r );
@@ -1494,27 +1359,17 @@ string handleTrain( const httplib::Request& req )
 		return runTrainJob( continued, autoSelect, maxIter, false );
 
 	// Async: hand the engine to a worker thread and return at once. The
-	//    caller holds engineMutex here; job.running (set before the worker
-	//    exists) is what keeps every other handler out from now on.
-	if ( job.worker.joinable() )
-		job.worker.join(); // reap the previous, finished run's thread
-
-	{
-		lock_guard< mutex > lock( job.progressMutex );
-		job.resetForNewRun(); // a plain train reports no OBD/CV/stepwise progress
-	}
-	job.cancel = false;
-	job.running = true;
-
+	//    caller holds engineMutex here; the job marks itself running before
+	//    start() returns, and that is what keeps every other handler out from
+	//    now on.
+	//
 	// The worker re-derives every engine pointer itself: auto selection may
 	//    REPLACE modelPtr with the winning clone, so nothing dereferencable
 	//    is captured here. Its screen starts at cout (thread_local); the
 	//    Captures inside runTrainJob redirect it for the run.
-	job.worker = thread( [ continued, autoSelect, maxIter ]
-	{
-		runOnWorker( [ continued, autoSelect, maxIter ]
-			{ return runTrainJob( continued, autoSelect, maxIter, true ); } );
-	} );
+	if ( !job.start( [ continued, autoSelect, maxIter ]
+		{ return runTrainJob( continued, autoSelect, maxIter, true ); } ) )
+		return jsonMsg( false, "could not start a worker thread" );
 
 	return jsonMsg( true, autoSelect
 		? "probing algorithms, then training" : "training started" );
@@ -1529,7 +1384,7 @@ string handleTrainStatus()
 
 	ostringstream out;
 	out.precision( 6 );
-	out << "{\"ok\":true,\"running\":" << ( job.running ? "true" : "false" )
+	out << "{\"ok\":true,\"running\":" << ( job.isRunning() ? "true" : "false" )
 		<< ",\"series\":{\"iter\":[";
 	for ( unsigned i = 0; i < job.iters.size(); i++ )
 		out << ( i ? "," : "" ) << job.iters[ i ];
@@ -1579,9 +1434,8 @@ string handleTrainStatus()
 string handleTrainStop()
 {
 	logActionLine( "stop" );
-	if ( !job.running )
+	if ( !job.requestStop() )
 		return jsonMsg( false, "no training in progress" );
-	job.cancel = true;
 	return jsonMsg( true, "stopping at the end of this iteration" );
 }
 
@@ -1657,7 +1511,7 @@ string runObdJob( const obd::Config& cfg )
 		job.pushSample( iterOffset + iteration, trainErr, testErr );
 	};
 
-	obd::Result r = obd::run( *dataPtr, cfg, progress, &job.cancel );
+	obd::Result r = obd::run( *dataPtr, cfg, progress, job.cancelLatch() );
 
 	// Every trial's stop reason and eligibility, machine-readable -- present on
 	//    a refusal too, which is when a caller most needs to see WHY nothing was
@@ -1802,19 +1656,9 @@ string handleObd( const httplib::Request& req )
 
 	// OBD is async-only (it is many training runs): hand it to the worker and
 	//    return at once, exactly like async training. The caller holds
-	//    engineMutex here; job.running (set before the worker) gates everyone else.
-	if ( job.worker.joinable() )
-		job.worker.join(); // reap the previous, finished run's thread
-
-	{
-		lock_guard< mutex > lock( job.progressMutex );
-		job.resetForNewRun();
-	}
-	job.cancel = false;
-	job.running = true;
-
-	job.worker = thread( [ cfg ]
-		{ runOnWorker( [ cfg ] { return runObdJob( cfg ); } ); } );
+	//    engineMutex here; the job gates everyone else from start() onward.
+	if ( !job.start( [ cfg ] { return runObdJob( cfg ); } ) )
+		return jsonMsg( false, "could not start a worker thread" );
 
 	return jsonMsg( true, "OBD hidden-layer search started" );
 }
@@ -2413,7 +2257,7 @@ string runCvJob( CvConfig c )
 	//    (the network observer, obd::run) so a long CV cancels promptly (bug B1).
 	//    Deterministic per-(procedure,fold) substreams (bug B11): a procedure's CV
 	//    result is invariant to which other procedures are compared and their order.
-	crossval::Comparison cmp = crossval::compare( *cvData, foldId, procs, &job.cancel,
+	crossval::Comparison cmp = crossval::compare( *cvData, foldId, procs, job.cancelLatch(),
 		true /* substreams */, c.seed, cvProgress );
 	if ( cmp.cancelled )
 		return string( "{\"ok\":false,\"cancelled\":true,\"message\":\"" )
@@ -2441,7 +2285,7 @@ string runCvJob( CvConfig c )
 		vector< crossval::ProcedureSpec > lprocs = assemble( &lockedArchSink, rowGroup );
 		util::set_seed( c.seed );
 		crossval::LockedResult lr = crossval::evaluateOnce( data, devRows, lockedRows,
-			lprocs, &job.cancel, true /* substreams */, c.seed, cvProgress );
+			lprocs, job.cancelLatch(), true /* substreams */, c.seed, cvProgress );
 		if ( lr.cancelled )
 			return string( "{\"ok\":false,\"cancelled\":true,\"message\":\"" )
 				+ jsonEscape( lr.message.empty() ? "cancelled" : lr.message ) + "\"}";
@@ -2892,17 +2736,8 @@ string handleCv( const httplib::Request& req )
 	}
 
 	// Async-only, like OBD: many training runs on the worker thread.
-	if ( job.worker.joinable() )
-		job.worker.join();
-	{
-		lock_guard< mutex > lock( job.progressMutex );
-		job.resetForNewRun();
-	}
-	job.cancel = false;
-	job.running = true;
-
-	job.worker = thread( [ c ]
-		{ runOnWorker( [ c ] { return runCvJob( c ); } ); } );
+	if ( !job.start( [ c ] { return runCvJob( c ); } ) )
+		return jsonMsg( false, "could not start a worker thread" );
 
 	return jsonMsg( true, "cross-validation started" );
 }
@@ -2987,7 +2822,7 @@ string runRegressJob( Network* net, const vector< vector< unsigned > >& defs,
 	//    the user asked for it. The candidate that was training ended as
 	//    STOP_CANCELLED, which is not convergence, so the analysis stopped
 	//    there and no variable was selected from the incomplete pass.
-	bool cancelled = job.cancel.load();
+	bool cancelled = job.isStopRequested();
 
 	ostringstream out;
 	out << "{\"ok\":" << ( ok ? "true" : "false" )
@@ -3115,33 +2950,24 @@ string handleRegress( const httplib::Request& req )
 	//    Everything past this point is the run itself.
 	if ( param( req, "async" ) == "1" )
 	{
-		if ( job.worker.joinable() )
-			job.worker.join(); // reap the previous, finished run's thread
-
-		{
-			lock_guard< mutex > lock( job.progressMutex );
-			job.resetForNewRun();
-		}
-		job.cancel = false;
-		job.running = true;
-
-		job.worker = thread( [ net, variable_defs, direction, threshold ]
-		{
-			runOnWorker( [ net, variable_defs, direction, threshold ]
-				{ return runRegressJob( net, variable_defs, direction,
-					threshold ); } );
-		} );
+		// `net` is a raw pointer into the current model, which the busy gate
+		//    keeps alive: no handler that could replace modelPtr runs while
+		//    this job owns the engine.
+		if ( !job.start( [ net, variable_defs, direction, threshold ]
+			{ return runRegressJob( net, variable_defs, direction,
+				threshold ); } ) )
+			return jsonMsg( false, "could not start a worker thread" );
 
 		return jsonMsg( true, direction + " stepwise regression started" );
 	}
 
 	// Blocking mode still installs the cancel observer (runRegressJob is ONE
-	//    implementation for both modes), and job.cancel is a process-global
+	//    implementation for both modes), and the stop latch is a process-global
 	//    latch that only an async START clears. So a Stop from an earlier async
 	//    run would still be set here and cancel this run's very first candidate
 	//    before it trained an iteration. Clear it: nothing can be cancelling a
 	//    run that has not begun.
-	job.cancel = false;
+	job.clearStopRequest();
 	return runRegressJob( net, variable_defs, direction, threshold );
 }
 
@@ -3224,10 +3050,10 @@ bool saveArtifact( const string& what, string& name, string& err )
 
 // While an async run owns the engine, every other engine-touching request is
 //    refused outright with 409 -- no queueing. Returns true if it refused.
-//    (Callers hold engineMutex; job.running was set under it too.)
+//    (Callers hold engineMutex; the job was marked running under it too.)
 bool busyGate( httplib::Response& res )
 {
-	if ( !job.running )
+	if ( !job.isRunning() )
 		return false;
 	res.status = 409;
 	res.set_content(
@@ -3410,12 +3236,12 @@ int run_gui( bool openBrowser )
 
 	svr.listen_after_bind();
 
-	// If the server ever exits normally, don't destroy a joinable worker
-	if ( job.worker.joinable() )
-	{
-		job.cancel = true;
-		job.worker.join();
-	}
+	// If the server ever exits normally, don't destroy a joinable worker.
+	//    UNREACHABLE TODAY, and kept anyway: nothing calls svr.stop(), so
+	//    listen_after_bind() never returns and the process ends by signal.
+	//    A correct guard for an exit path that does not yet exist costs one
+	//    line; the failure it prevents is std::terminate on the way out.
+	job.joinForShutdown();
 
 	return 0;
 }

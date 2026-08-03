@@ -396,15 +396,17 @@ owning the once-per-run bookkeeping while each model keeps its whole fit in
 (legacy bugs #13 and #14, above) before its extraction was allowed to start.
 `RegressNet` now shares `beginAnalysis` / `fitCandidate` / `reportComparison` /
 `endAnalysis` — four mechanisms, **none of which knows which direction is running** — while
-both selection loops stay whole. **13, the GUI async launcher, is in progress: its
-characterization and proposal are landed (§20), the extraction awaits review.**
-`tests/gui/asyncjob.sh` is a new gate — 150 assertions against a live server, eleven
-sabotages, and **two came back NOT caught**: inverting publish-then-clear and setting
-`job.running` inside the worker are both invisible from outside the process (0/6 and
-0/3, measured), because a status request holds `progressMutex` for microseconds out of
-a round trip of hundreds. The ordering the launcher exists to maintain therefore has no
-effective test while it lives in `gui.cpp` — the measured form of the debt D9 recorded.
-Then 14, the measured `gramRows()` / CGD-Shanno allocation work.
+both selection loops stay whole. **13, the GUI async launcher, is DONE (§20):**
+`AsyncJob` (`src/asyncjob.{h,cpp}`) owns reap / reset / arm / mark-running / start, the
+worker exception boundary and the publish-then-clear ordering; `procguard`
+(`src/procguard.{h,cpp}`) is the CLI's top-level guard, a separate unit because a
+command-line entry point has an exit status and a diagnostic, not a worker and a result.
+Both live in `neuron_job`, which depends on the standard library and threads alone. **The
+two ordering invariants that were unreachable through HTTP are now deterministic** —
+inverting publish-then-clear went from 0 caught to 185-187 of 200 cycles, and marking the
+job running inside the worker from 0 caught to 200 of 200 starts — because in-process
+there is no round trip between the reader and the window. **Next: 14**, the measured
+`gramRows()` / CGD-Shanno allocation work, only if a measurement justifies it.
 
 **Interfaces.** The CLI menus are **frozen** but fully working — they remain the
 authoritative feature list rule 5 measures the GUI against. `neuron --gui` (embedded
@@ -515,15 +517,14 @@ happened not to be extremal. Fixed in its own commit, with no golden re-bless re
 `gsl_vector` went with it. → HISTORY 2026-07-27.
 
 **Open work** is the one remaining ROADMAP 4 item under "What remains" below (B9, the
-GUI-wide strict-parsing pass), plus one gap D9 left behind: **the GUI worker boundary and
-the CLI `main` boundary have no automated test.** `runOnWorker` lives in `gui.cpp`, which
-is not in a library, and no endpoint can be made to fail a `Matrix` contract on purpose,
-so neither a unit test nor `smoke.sh` can reach them; the evidence is a recorded manual
-fault injection (`refactor_audit.md` §12.10). **Sol's disposition (2026-08-01): this does
-not block DFA — close it during the planned GUI async-launcher consolidation, where
-`runOnWorker` moves into a linkable unit and gets concurrency tests with it. It must be
-resolved before the refactor is declared complete.** **That consolidation is refactor
-item 13, and it is the next piece of work.** **No GUI click-through is outstanding: Craig ran the live
+GUI-wide strict-parsing pass). **D9's boundary-test debt is PAID** (2026-08-03): the
+worker boundary and the CLI boundary are both in `neuron_job`, and `check_asyncjob` pins
+their exception contracts with exact messages and exit statuses. One piece of that
+mechanism remains **inspected rather than guarded, and is recorded as such**: the catch
+around `std::thread`'s construction calls the same `finish()` every completed run uses,
+but forcing that constructor to fail needs resource exhaustion and is not portable, so no
+test drives the wiring. Do NOT add a fault hook, thread factory or test-only method to
+manufacture it. **No GUI click-through is outstanding: Craig ran the live
 GUI on the group-aware CV batch and approved it (2026-07-31).** The CV panel's three new
 controls — fold stratification columns/bins, group columns, and the clustered sampling
 unit — are visible, selectable and submitted by the page, after the 2026-07-30 help-text

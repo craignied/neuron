@@ -33,6 +33,7 @@
 #include "utility.h"    // utility methods
 #include "regressnet.h" // network stepwise regression class
 #include "gui.h"        // the embedded web GUI (neuron --gui)
+#include "procguard.h"  // the top-level exception boundary main() enters through
 
 using namespace std;
 
@@ -1503,20 +1504,12 @@ void save_guesses( Model* modelPtr )
 //    -- shapes or indices a caller cannot have meant -- terminated the program
 //    opaquely, with no message and no useful status. The menus are untouched;
 //    this only decides what happens when something reaches the top.
+//
+// The handler itself lives in procguard, which takes the body and the stream
+//    so that it can be tested without the shipped binary gaining any way to
+//    inject a fault (see procguard.h).
 int main( int argc, char* argv[] )
 {
-	try
-	{
-		return neuronMain( argc, argv );
-	}
-	catch ( const exception& e )
-	{
-		cerr << "neuron: fatal: " << e.what() << endl;
-		return 1;
-	}
-	catch ( ... )
-	{
-		cerr << "neuron: fatal: unrecognized error" << endl;
-		return 1;
-	}
+	return procguard::run( [ argc, argv ] { return neuronMain( argc, argv ); },
+		cerr, "neuron" );
 }

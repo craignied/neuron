@@ -1305,4 +1305,73 @@ are validated before artifacts are written so development and locked prediction
 files remain joinable.  Tier 1 is the conclusion, Tier 2 is descriptive detail,
 and Tier 3 is the machine-readable audit substrate.
 
+\subsection{AsyncJob}
+\index{AsyncJob}
+\index{AsyncJob!publish-then-clear ordering}
+\index{AsyncJob!worker boundary}
+\index{asynchronous jobs!lifecycle}
+
+\texttt{AsyncJob} owns the lifecycle every long GUI operation shares: training,
+hidden-layer sizing, cross-validation and stepwise regression.  It answers one
+question --- how a request hands work to a background thread and how the result
+comes back --- and it answers it once.  Before it existed the same launch
+sequence appeared at four call sites, character for character, differing only in
+the payload each thread carried.
+
+\begin{itemize}
+\item \texttt{bool start(function<string()> body)}: reaps the previous worker,
+      clears every per-run progress field, clears the stop latch, marks the job
+      running, and starts \texttt{body} on a thread.  Returns false only when no
+      worker could be started, having first published a failure and released the
+      job, so a failed launch cannot leave the engine owned forever.
+\item \texttt{bool requestStop()}: sets the cancellation latch, or returns false
+      when nothing is running.  Cancellation is cooperative: the engine polls
+      the latch and finishes the current iteration.
+\item \texttt{void clearStopRequest()}: clears the latch without starting
+      anything, for a blocking operation that shares its implementation with the
+      asynchronous form and would otherwise inherit an earlier run's Stop.
+\item \texttt{void joinForShutdown()}: cancels and joins a worker that outlived
+      the server loop.
+\end{itemize}
+
+\subsubsection{The ordering contract}
+The worker stores its result under the progress mutex and clears the running
+flag only after releasing it.  A reader must therefore hold that mutex across
+\emph{both} reads.  Its critical section then totally orders against the
+worker's publication: either entirely before it, and the job still reads as
+running, or entirely after it, and the result is visible.  Reading one of the
+two outside the lock allows a finished run to be reported as an idle one with
+nothing to show.  The constraint binds the caller, which is why it is stated on
+the class rather than in the status handler that happens to satisfy it.
+
+The lock order is the other half.  The mutex is never held across a join, a
+thread construction, or an engine call.  The join in particular precedes taking
+it: a departing worker's last act is to take that same mutex to publish, so
+joining while holding it would deadlock.
+
+\subsubsection{The worker boundary}
+An exception escaping a thread's function calls \texttt{std::terminate}, which
+would end the server while the page was still polling for status.  Every escape
+becomes a published failure instead --- a \texttt{std::exception} carrying its
+own message, anything else a generic one --- and the publish-then-clear order
+holds on the throwing paths too.  How a failure message becomes a response body
+is supplied by the caller, so the class speaks no wire format.
+
+\subsection{procguard}
+\index{procguard}
+\index{procguard!fatal diagnostic}
+
+\texttt{procguard::run(body, err, program)} is the command-line program's
+top-level exception boundary: it runs the body and returns its exit status, and
+converts anything that reaches the top into a named diagnostic and status~1.
+Before it existed a contract failure ended the program with no message at all.
+
+It is a separate unit from \texttt{AsyncJob} deliberately.  Both are boundaries
+around an uncaught exception, but the command-line entry point has no worker, no
+cancellation and no result to publish --- it has an exit status and a
+diagnostic, and filing that under asynchronous-job behaviour would misdescribe
+it.  Taking the body and the stream as arguments is what makes it testable: a
+test supplies a throwing body and an in-memory stream, and the shipped program
+gains no way to inject a fault.
+
 \endgroup
