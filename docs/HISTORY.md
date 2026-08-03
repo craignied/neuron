@@ -3754,3 +3754,18 @@ and found more than the extraction it was written for.
 - Gates on every commit: zero-warning clean Release build, three goldens byte-identical
   (`regress_seed42` never moved), `ctest` 30/30, `smoke.sh`, oracle numerically identical,
   tools, `git diff --check`, and 3/3 CI on the exact SHA.
+
+## 2026-08-02 — Manifest index coverage
+
+- The index had improved locally around new services but still omitted foundational
+  objects with full defining sections, including `Matrix` and `Population`. The cause was
+  procedural: LaTeX's `makeindex` faithfully sorted explicit `\index` marks but had no
+  way to detect a mark that was never written.
+- The foundational class sections now index their class names and principal operations;
+  the current-object chapter also indexes its public result, configuration and progress
+  objects consistently under their owning service.
+- `tools/check_manifest_index.py` turns the maintenance rule into a gate. It derives all
+  top-level classes and namespaces from `src/*.h`, checks a curated inventory of major
+  public objects and principal methods, and runs from `tests/tools/run_tools.sh`. Adding a
+  source class without a Manifest index entry now fails instead of becoming another
+  reader-discovered omission.

@@ -1160,7 +1160,7 @@ Code reachable from data, GUI, or API input must additionally reject
 invalid dimensions through ordinary control flow or an unconditional
 exception.
 
-\chapter{vector and Matrix}\label{matrix_chapter}
+\chapter{vector and Matrix}\label{matrix_chapter}\index{nvec}
 
 Establishment of numerical vector and 2-dimensional matrix objects in
 neUROn2++ serves as the basis by which clear, concise, efficient
@@ -1763,13 +1763,13 @@ partitioned with large last bin =
 0 1 2  3 4 5  6 7 8 9
 \end{verbatim}
 
-\section{matrix.h and the Matrix class}
+\section{matrix.h and the Matrix class}\index{Matrix}\index{Matrix!includerows}\index{Matrix!BadSize}\index{Matrix!BoundsViolation}\index{Matrix!DimensionMismatch}\index{Matrix!Singular}
 
 Including the header file matrix.h allows implementation of the Matrix
 class, and allows simplified numerical operations on 2 dimensional
 arrays.
 
-\subsection{Constructors}
+\subsection{Constructors}\index{Matrix!constructors}
 
 The following constructors are implemented in the Matrix class:
 \begin{itemize}
@@ -1824,7 +1824,7 @@ Matrix< double > E( v1, v2 );
 A Matrix constructed by {\em Matrix( $r$, $c$ )} is {\bf not}
 initially populated.  Consider it to be filled with garbage.
 
-\subsection{Accessors}
+\subsection{Accessors}\index{Matrix!operator()}
 
 Given a Matrix object $M$, the following accessors are implemented in
 the Matrix class:
@@ -1853,7 +1853,7 @@ cout << A.cols() << " columns." << endl;
 
 \end{verbatim}
 
-\subsection{Submatrix accessors}
+\subsection{Submatrix accessors}\index{Matrix!submatrix}
 
 The following accessors return a submatrix from a Matrix:
 
@@ -1889,7 +1889,7 @@ matrix.  If a matrix is passed as an argument, its number of columns
 must equal} $row_N$ - $row_1$ + 1.  A passed matrix to be populated is
 more efficient than constructing a new matrix for the result.
 
-\subsection{Row and column accessors}
+\subsection{Row and column accessors}\index{Matrix!row}\index{Matrix!col}
 
 The following accessors return a vector from a row or column of a
 Matrix:
@@ -1935,7 +1935,7 @@ the number of Matrix rows for $M$.col( $c$, $v$ ).  The methods which
 take passed vectors as arguments are more efficient than the methods
 which construct vectors.
 
-\subsection{Methods which append vectors to Matrices}
+\subsection{Methods which append vectors to Matrices}\index{Matrix!addrow}\index{Matrix!addcol}
 
 The following methods append a vector to a Matrix:
 
@@ -1983,7 +1983,7 @@ $M$.addcol is computationally expensive, and its use should be
 minimized.
 
 \subsection{Methods which replace a row or column of a Matrix with a
-vector}
+vector}\index{Matrix!replacerow}\index{Matrix!replacecol}
 
 The following methods replace a row or column of a Matrix with a
 vector:
@@ -2014,7 +2014,7 @@ elements of vector $v$ for $M$.replacerow, and the number of rows in
 $M$ {\em must} be the same as the number of elements of vector $v$ for
 $M$.replacecol.
 
-\subsection{Column inclusion and exclusion}
+\subsection{Column inclusion and exclusion}\index{Matrix!includecols}\index{Matrix!excludecols}
 
 The following operators include or exclude those columns indicated by
 the passed vector, which includes the (unsigned) column values:
@@ -2245,7 +2245,7 @@ As a new matrix object must be constructed, unary operations are
 preferred for efficiency.  {\em \bf Known bug: the scalar must
 be on the right side of the Matrix for all operators.}
 
-\subsection{Transpose}
+\subsection{Transpose}\index{Matrix!t}
 
 The following operators transpose a Matrix:
 
@@ -2321,7 +2321,7 @@ cout << "Enter Matrix A: ";
 cin >> A;
 \end{verbatim}
 
-\subsection{Dot product}
+\subsection{Dot product}\index{Matrix!dotprod}
 
 Given a matrix object $M$, and vectors $\vec{v}$ and $\vec{o}$, where
 $ M \cdot \vec{v} = \vec{o} $, e.g.
@@ -2435,7 +2435,7 @@ object, these methods are less efficient than $M$. dotprod( $v_{in}$,
 $v_{out}$ ), $M$.dotprodt( $v_{in}$, $v_{out}$ ) and $M$.dotprod( $N$,
 $O$ ).
 
-\subsubsection{dotprod\_row}
+\subsubsection{dotprod\_row}\index{Matrix!dotprod\_row}
 
 The {\em dotprod\_row} method takes a single row from a Matrix, and
 transposes it to be used as the right hand side argument for a dot
@@ -2526,7 +2526,7 @@ matrices have columns.  Because $M$.dotprod\_row( $D$, $r$ ) must
 construct a new vector object, it is less efficient than
 $M$.dotprod\_row( $D$, $r$, $v$ ).
 
-\subsection{Outer product}\label{outprod}
+\subsection{Outer product}\label{outprod}\index{Matrix!outprod}
 
 The {\em outprod} method is available in the Matrix class to populate
 a Matrix with the outer product of 2 vectors.  For example, given 2
@@ -2587,7 +2587,7 @@ The number of elements in the first vector argument {\em must equal}
 the number of Matrix rows, and the number of elements in the second
 vector argument {\em must equal} the number of Matrix columns.
 
-\subsection{Function passing}
+\subsection{Function passing}\index{Matrix!func}
 
 The following methods allow functions to be applied to a Matrix
 element by element:
@@ -2653,7 +2653,7 @@ number of rows and columns as the input Matrix.  As func( Matrix\&
 $M$, function $f$ ) must construct a new vector, it is less efficient
 than func( Matrix\& $M_{in}$, function $f$, Matrix\& $M_{out}$ ).
 
-\subsection{Randomization}
+\subsection{Randomization}\index{Matrix!random}
 
 The method $M$.random( double $n$ ) populates a double precision
 Matrix $M$ with double precision random numbers between $-n$ and $+n$.
@@ -2671,7 +2671,7 @@ cout << "The random matrix is " << Z.random( 0.5 );
 This method is only coded for Matrices of type double, e.g. Matrix$<$
 double $>$.
 
-\subsection{Loading a Matrix from a file}
+\subsection{Loading a Matrix from a file}\index{Matrix!loadfile}
 
 The following methods will load a matrix from a file:
 \begin{itemize}
@@ -2714,7 +2714,7 @@ cin >> filename;
 B.loadfile( true, filename ); // a report will be printed
 \end{verbatim}
 
-\subsection{Saving a Matrix to a file}
+\subsection{Saving a Matrix to a file}\index{Matrix!savefile}
 
 The following method will save a matrix to a file:
 \begin{itemize}
@@ -2730,7 +2730,7 @@ Matrix< double > A( 5, 4, 3.14159 ); // fill a 5 x 4 Matrix with pi
 A.savefile( "pi.txt" ); // and save it to a file named pi.txt
 \end{verbatim}
 
-\subsection{Resizing a Matrix}
+\subsection{Resizing a Matrix}\index{Matrix!resize}
 
 The method $M$.resize( unsigned $r$, unsigned $c$ ) resizes Matrix $M$
 to $r$ rows and $c$ columns.
@@ -2743,7 +2743,7 @@ A.resize( 5, 4 ); // resize Matrix A to 5 rows and 4 columns
 \subsubsection{Notes}
 The following Matrix so resized is filled with {\em \bf garbage}.
 
-\subsection{Clearing a Matrix}
+\subsection{Clearing a Matrix}\index{Matrix!clear}
 
 The method $M$.clear() clears Matrix $M$, setting its dimensions and
 data to zero.
@@ -2753,7 +2753,7 @@ data to zero.
 A.clear(); // clear Matrix A
 \end{verbatim}
 
-\subsection{Populating a Matrix with a value}
+\subsection{Populating a Matrix with a value}\index{Matrix!fill}
 
 The method $M$.fill( $v$ ) populates Matrix $M$ with value $v$ of its
 type.
@@ -2766,7 +2766,7 @@ Matrix< double > A( 3, 2 ); // Make a Matrix of type double with
 A.fill( 3.14159 ); // and fill it with pi
 \end{verbatim}
 
-\subsection{Calculating the sums of columns of a Matrix}
+\subsection{Calculating the sums of columns of a Matrix}\index{Matrix!colsums}
 
 The method $M$.colsums() returns a new vector with each element the
 sum of the respective column in $M$.  The method $M$.colsums( vector\&
@@ -2793,7 +2793,7 @@ cout << "Sum of columns = " << v << endl;
 If the vector to be returned is passed as an argument, its size {\em
 must} be the same as the number of columns in the Matrix.
 
-\subsection{Calculating the sum of squares of a Matrix elements}
+\subsection{Calculating the sum of squares of a Matrix elements}\index{Matrix!squared}
 
 The method $M$.squared() returns a the value of the sum of squares
 of Matrix elements.
@@ -2805,7 +2805,7 @@ double sum;
 sum = M.squared();
 \end{verbatim}
 
-\subsection{Calculating the maximum absolute value of Matrix elements}
+\subsection{Calculating the maximum absolute value of Matrix elements}\index{Matrix!maxabs}
 
 The method $M$.maxabs() returns the maximum absolute value of Matrix
 elements.
@@ -2817,7 +2817,7 @@ double max;
 max = M.maxabs();
 \end{verbatim}
 
-\subsection{Finding the row elements with value 1 in a Matrix}
+\subsection{Finding the row elements with value 1 in a Matrix}\index{Matrix!rowindex}
 
 The method (bool) $M$.rowindex( vector$<$ unsigned $>$\& $v$ )
 populates a passed (unsigned) vector $v$ with each vector element
@@ -2879,7 +2879,7 @@ would all return false.
 The size of the vector {\em must} be the same as the number of rows in
 the Matrix.
 
-\subsection{Converting a Matrix to a vector, and a vector to a Matrix}
+\subsection{Converting a Matrix to a vector, and a vector to a Matrix}\index{Matrix!toVector}\index{Matrix!toMatrix}
 
 A Matrix may be coverted row by row to a vector, e.g. Matrix
 
@@ -2945,7 +2945,7 @@ which is also passed.  If a Matrix is not passed as an argument to
 toMatrix, the product of the $2^{nd}$ and $3^{rd}$ arguments {\em must
 be} the same as the size of the passed vector.
 
-\subsection{First order covariance of a Matrix}
+\subsection{First order covariance of a Matrix}\index{Matrix!covariance}
 
 The method $M$.covariance() returns a new Matrix with the first-order
 covariance Matrix of $M$.  The method $M$.covariance( Matrix$<$ double
@@ -2975,7 +2975,7 @@ $>$.  If the Matrix to be populated with the result is passed as an
 argument, it's dimensions must be $Col \times Col$, where $Col$ is the
 number of columns in the data Matrix.
 
-\subsection{Matrix inverse and determinant}
+\subsection{Matrix inverse and determinant}\index{Matrix!inverse}\index{Matrix!determinant}
 
 The following methods calculate the inverse and determinant of a
 Matrix:\footnote{Adapted from W. H. Press et. al, Numerical
@@ -3085,7 +3085,7 @@ Col$, where $Col$ is the number of columns in the Matrix. If the
 Matrix to be populated with the result is passed as an argument, it's
 dimensions must be the same as the Matrix object.
 
-\subsection{Eigenvalues}
+\subsection{Eigenvalues}\index{Matrix!eigenvalues}
 
 The calculation of the eigenvalues of a symmetric matrix is the only
 current instance of using pre-existing code and libraries, as these
@@ -3355,7 +3355,7 @@ int main()
 }
 \end{verbatim}
 
-\chapter{Utility methods}
+\chapter{Utility methods}\index{util}
 
 The following are contained in the header file ``utility.h'', and
 contain global utility methods.  These methods throw exception
@@ -3391,7 +3391,7 @@ and +0.5
 y = util::d_random( 1.0, 10.0 ); // Between 1.0 and 10.0
 \end{verbatim}
 
-\section{Timestamp}
+\section{Timestamp}\index{timestamp}
 
 The timestamp( unsigned $x$ ) utility inserts a timestamp of the form
 HHHH:MM:SS (where H is hour, M is minute, S is second) into the output
@@ -3721,7 +3721,7 @@ cout << "Here is the original: " << parse_numbers << endl;
 cout << "Here is the result: " << parse_new2 << endl;
 \end{verbatim}
 
-\chapter{Statistical methods}
+\chapter{Statistical methods}\index{stats}
 
 The following are contained in the header file ``stats.h'', and
 implemented in ``stats.cpp'', and contain global statistical methods.
@@ -4167,7 +4167,7 @@ try {
 }
 \end{verbatim}
 
-\section{Population metrics}
+\section{Population metrics}\index{Population}\index{Population!mean}\index{Population!var}\index{Population!std}\index{Population!skew}\index{Population!kurtosis}
 
 The {\em Population} class provides statistical metrics such as mean,
 variance, standard deviation, skew and kurtosis.  It's constructor
@@ -4389,7 +4389,7 @@ cin >> alam;
 cout << "Q_KS " << alam << " = " << stats::probks( alam ) << endl;
 \end{verbatim}
 
-\section{Functions}
+\section{Functions}\index{Funct}
 
 The {\em Funct} class provides functional manipulation such as root
 finding, etc.  The {\em Funct} constructor takes as its arguments an
@@ -4413,7 +4413,7 @@ Note that {\em Funct} is a template class, and takes as its template
 argument the name of the class containing the member function.  Errors
 are caught by {\em functErr} (see below for examples).
 
-\subsection{Bracketing}
+\subsection{Bracketing}\index{Funct!mnbrak}
 
 The following methods bracket a function:\footnote{Adapted from W. H.
 Press et.\ al, Numerical Recipes in C, 2nd edition, Cambridge
@@ -4474,7 +4474,7 @@ int main()
 }
 \end{verbatim}
 
-\subsection{Find Minimum}
+\subsection{Find Minimum}\index{Funct!brent}
 
 The following methods isolate the minimum of function $F$ using
 Brent's method:\footnote{Adapted from W. H. Press et.\ al, Numerical
@@ -4528,7 +4528,7 @@ int main()
 }
 \end{verbatim}
 
-\subsection{Find Roots}
+\subsection{Find Roots}\index{Funct!zbrent}
 
 The following method finds roots of function $F$ using Brent's
 method:\footnote{Adapted from W. H. Press et.\ al, Numerical Recipes
@@ -4577,7 +4577,7 @@ int main()
 }
 \end{verbatim}
 
-\section{Linear Regression}
+\section{Linear Regression}\index{XY}\index{XY!a}\index{XY!b}\index{XY!x0}\index{XY!siga}\index{XY!sigb}\index{XY!chi2}\index{XY!q}\index{XY!r}
 
 The {\em XY} class performs least squares linear regression. The {\em
 XY} constructors takes as their arguments vector$<$ double $>$s
@@ -4747,7 +4747,7 @@ objects; their arrows show use and data flow rather than inheritance.
 
 \input{modern_objects}
 
-\section{Function definitions}
+\section{Function definitions}\index{sigmoidal}\index{d\_sigmoidal}\index{logarithm}\index{threshold}\index{absval}
 
 For clarity and ease of use, function definitions are placed in the
 file ``function\_defs.h''. The implementation of function definitions
@@ -4789,7 +4789,7 @@ class sigmoidal : public unary_function< double, double >
 };
 \end{verbatim}
 
-\subsection{The errorFunction object}\label{errFunc}
+\subsection{The errorFunction object}\label{errFunc}\index{errorFunction}
 
 A very important object defined in {\bf function\_defs.h} is {\em
 errorFunction}, which handles the calculation of model error.  As
@@ -5003,7 +5003,7 @@ order for the method metricsReport, which reports accuracy metrics of
 a one-output {\em Model}, to be called.  These methods are also shown
 in \beginred red \endcolor in the {\em DataSet} specification.
 
-\section{DataSet}
+\section{DataSet}\index{DataSet}\index{DataSet!loadRaw}\index{DataSet!loadTrain}\index{DataSet!loadTest}\index{DataSet!randomize}
 
 {\em DataSet} is a standalone object that contains and manipulates the
 dataset that {\em Model} will access.  All {\em DataSets} have raw,
@@ -5279,7 +5279,7 @@ and $max$ is the maximum value of $x$ in the dataset.
 
 \end{itemize}
 
-\section{TwoSet}
+\section{TwoSet}\index{TwoSet}\index{TwoSet!metricsReport}
 
 {\em TwoSet} is a specialized standalone object that is designed to
 calculate outcome metrics such as sensitivity, specificity, predictive
@@ -5895,7 +5895,7 @@ examples, as most methods use addHistory.
 
 See section \ref{copy_fx} for details.
 
-\section{Model}
+\section{Model}\index{Model}\index{Model!setDataSet}\index{Model!train}\index{Model!reportAccuracy}\index{Model!outputHeader}
 
 In the following specification, methods and members that pertain
 directly to coding a concrete derived {\em Model} implementation are
@@ -6149,7 +6149,7 @@ thrown.
 Use the protected member bool $gradMaxFlag$ to determine if a gradient
 is to be constructed in your derived object.
 
-\section{Iterative}
+\section{Iterative}\index{Iterative}\index{Iterative!train}\index{Iterative!trainSet}\index{Iterative!classAccuracy}\index{Iterative!getGradMax}
 
 {\bf Iterative} extends {\em Model}.  Neural computational algorithms
 are iterative, and thus use {\em Iterative} as a base.  {\em
@@ -6942,7 +6942,7 @@ See {\em Logistic} for example code, and see {\em SimpleProp} for
 comments which indicate where code would be placed in a neural network
 style implemented {\em Network} object.
 
-\section{Network}
+\section{Network}\index{Network}\index{Network!forward}\index{Network!classAccuracy}\index{Network!searchStepSize}\index{Network!computeCondNum}
 
 In the following specification, methods and members that pertain
 directly to coding a concrete derived {\em Network} implementation are
@@ -7180,7 +7180,7 @@ which
 
 \end{itemize}
 
-\section{BareProp}\index{Backpropagation|(}
+\section{BareProp}\index{BareProp}\index{Backpropagation|(}
 
 The {\bf BareProp} class is a {\em Network} object that serves to
 illustrate neural network design in neUROn2++.  {\em BareProp} is a
@@ -7280,7 +7280,7 @@ architecture will be invoked for all {\em Network} objects.
 
 \end{itemize}
 
-\section{SimpleProp}
+\section{SimpleProp}\index{SimpleProp}
 
 The {\bf SimpleProp} class is a {\em Network} object that serves to
 illustrate neural network design in neUROn2++.  {\em SimpleProp} is a
@@ -7384,7 +7384,7 @@ architecture will be invoked for all {\em Network} objects.
 
 \end{itemize}
 
-\section{BackProp}
+\section{BackProp}\index{BackProp}
 
 The {\bf BackProp} class is a {\em Network} object that allows
 multiple output nodes and multiple hidden layers in a neural network,
@@ -7510,7 +7510,7 @@ for all {\em Network} objects.
 \end{itemize}
 \index{Backpropagation|)}
 
-\section{Logistic}\index{Logistic regression}
+\section{Logistic}\index{Logistic}\index{Logistic regression}
 
 The {\bf Logistic} class is a {\em Network} object that implements
 logistic regression. This form of data modeling is mathematically
@@ -7631,7 +7631,7 @@ Network} objects.
 
 \end{itemize}
 
-\section{DFA}
+\section{DFA}\index{DFA}
 
 The {\bf DFA} class is a {\em Model} object that encodes discriminant
 function analysis.  It is an abstract class, whose derived concrete
@@ -7703,7 +7703,7 @@ pp. 24-32}
 
 \end{itemize}
 
-\section{LDFA}
+\section{LDFA}\index{LDFA}
 
 The {\bf LDFA} class is a {\em DFA} object that encodes linear
 discriminant function analysis.
@@ -7742,7 +7742,7 @@ discriminant function analysis.
 
 \end{itemize}
 
-\section{QDFA}
+\section{QDFA}\index{QDFA}
 
 The {\bf QDFA} class is a {\em DFA} object that encodes quadratic
 discriminant function analysis.
@@ -7879,7 +7879,7 @@ demonstrates stepwise forward regression.
 \caption{Stepwise forward regression}\label{forfig}
 \end{figure}
 
-\section{The RegressNet class}\label{regressnet}
+\section{The RegressNet class}\label{regressnet}\index{RegressNet}
 
 {\bf RegressNet} is a compound class based on the {\em Network} object
 that implements stepwise regression analysis on neural computational
@@ -9709,13 +9709,6 @@ extraction definitions encoded in the header file were:
 \printindex
 
 \end{document}
-
-
-
-
-
-
-
 
 
 

@@ -11,6 +11,8 @@ PY=$(command -v python3 || command -v python)
 BLESS=0
 [ "$1" = "--bless" ] && BLESS=1
 
+"$PY" ../../tools/check_manifest_index.py
+
 mkdir -p runs && cd runs
 
 "$PY" ../../../tools/mkdataset.py --key key.txt --inputs inputs.txt -o data.txt \

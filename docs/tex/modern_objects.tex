@@ -25,6 +25,7 @@ outer coordinator reimplements a lower layer's rule.
 \index{DataSet!makeFold}
 \index{DataSet!randomize3}
 \index{DataSet!monitorSet}
+\index{DataSet!MonitorSet}
 \index{DataSet!validation set}
 \index{DataSet!covariate stratification}
 \index{DataSet!group columns}
@@ -499,6 +500,11 @@ The following functions are available:
       of \texttt{stratifiedKFold}.
 \end{itemize}
 \index{nsplit!stratifiedGroupKFold}
+\index{nsplit!Holdout}
+\index{nsplit!StratHoldout}
+\index{nsplit!GroupHoldout}
+\index{nsplit!FoldPlan}
+\index{nsplit!GroupFoldPlan}
 \index{nsplit!partitionError}
 \index{nsplit!stratifiedHoldout}
 \index{nsplit!holdoutByStrata}
@@ -530,6 +536,7 @@ reported rather than hidden.  Fewer than \texttt{k} groups is a refusal.
 \index{Sampling unit}
 \index{AUC inference policy}
 \index{evaldesign!Partition}
+\index{evaldesign!InferenceChoice}
 \index{evaldesign!SamplingUnit}
 \index{evaldesign!PartitionMethod}
 \index{evaldesign!chooseInference}
@@ -622,6 +629,9 @@ silently substitute for the other.
 \index{ROC area!placements}
 \index{Mann--Whitney area}
 \index{auccov!midranks}
+\index{auccov!Placements}
+\index{auccov!Interval}
+\index{auccov!Contrast}
 \index{auccov!compute}
 \index{auccov!interval}
 \index{auccov!contrast}
@@ -684,11 +694,13 @@ with \texttt{p=0}.  A materially negative difference variance is refused.
 \index{DeLong covariance}
 \index{delong}
 \index{delong!analyze}
+\index{delong!Result}
 \index{delong!interval}
 \index{delong!contrast}
 \index{Obuchowski covariance}
 \index{clustered auc@\texttt{clustered\_auc}}
 \index{clustered auc@\texttt{clustered\_auc}!analyze}
+\index{clustered auc@\texttt{clustered\_auc}!Result}
 \index{clustered auc@\texttt{clustered\_auc}!interval}
 \index{clustered auc@\texttt{clustered\_auc}!contrast}
 \index{Clustered ROC data}
@@ -779,6 +791,7 @@ following methods are available:
 \index{autoalgo}
 \index{Optimizer!automatic selection}
 \index{autoalgo!Probe}
+\index{autoalgo!Result}
 \index{autoalgo!pick}
 \index{Optimizer!probe budget}
 \texttt{autoalgo::Probe} contains:
@@ -813,6 +826,7 @@ following methods are available:
 \index{modelfactory}
 \index{cloneNetwork}
 \index{modelfactory!build}
+\index{modelfactory!Spec}
 \index{modelfactory!createByTypeName}
 \index{Network!cloning}
 \texttt{modelfactory::Spec} contains \texttt{logistic}, \texttt{bias}, hidden
@@ -852,6 +866,7 @@ behavior of the concrete model.
 \index{obd!Config}
 \index{obd!SizeTrial}
 \index{obd!Eligibility}
+\index{obd!Result}
 \index{obd!run}
 \index{Iteration ceiling!OBD refusal}
 
@@ -912,8 +927,14 @@ whole search, including optimizer choice, is repeated inside each fold.
 \index{Cross-validation!objects}
 \index{crossval}
 \index{crossval!Metrics}
+\index{crossval!FoldResult}
 \index{crossval!RunResult}
+\index{crossval!ProcResult}
+\index{crossval!Progress}
+\index{crossval!FoldSelection}
+\index{crossval!ProcedureSpec}
 \index{crossval!Comparison}
+\index{crossval!LockedEntry}
 \index{crossval!LockedResult}
 \index{crossval!run}
 \index{crossval!compare}
@@ -994,6 +1015,7 @@ The following functions are available:
 \subsection{cvadapters}
 \index{cvadapters}
 \index{cvadapters!trainProcedure}
+\index{cvadapters!InnerSplit}
 \index{cvadapters!dfaProcedure}
 \index{cvadapters!nestedObdProcedure}
 \index{cvadapters!innerValidationSplit}
@@ -1043,6 +1065,9 @@ grouped design; infeasibility is a failure, never a row-wise fallback.
 \index{cvreport!render}
 \index{cvreport!PlanInfo}
 \index{cvreport!LockedInfo}
+\index{cvreport!LockedColumn}
+\index{cvreport!LockedContrast}
+\index{cvreport!ArtifactResult}
 \index{Raw-row identity}
 
 \texttt{PlanInfo} contains the dataset label and whole-dataset totals, typed fold

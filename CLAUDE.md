@@ -297,6 +297,26 @@ Legacy documentation copied from `../distro/doc/` (2026-07-11):
    legibility constraints existed in Craig's head and in code comments, not in this file.
    → `refactor_audit.md`, and Sol's review of it.
 
+8. **Manifest index coverage is part of every public-interface change.** Whenever public
+   code adds, renames, moves or removes a class, namespace, public result/configuration/
+   progress object, or principal method, update its defining Manifest discussion and put
+   the corresponding `\index{...}` entry there. Add significant nested objects and methods
+   to `MAJOR_OBJECTS` or `PRINCIPAL_METHODS` in
+   `tools/check_manifest_index.py`; a module-level entry is not enough when callers search
+   for a named operation. Run `python3 tools/check_manifest_index.py` and
+   `tests/tools/run_tools.sh`, rebuild `docs/manifest.pdf`, and visually inspect the
+   affected index pages. **A work item is not complete while any of those steps is
+   outstanding.** The checker derives top-level classes and namespaces from `src/*.h`, so
+   adding one without a Manifest entry fails automatically; the curated inventories make
+   the required human judgment about which nested objects and methods are principal
+   permanent and CI-enforced.
+
+   *Why this is a rule and not advice:* the index was requested and improved three times,
+   yet complete defining sections for foundational objects such as `Matrix` and
+   `Population` still had no entries. `makeindex` can sort only marks an author supplied;
+   it cannot report a semantic term that was never marked. The source-aware coverage gate
+   closes that omission path.
+
 ## Housekeeping
 
 - **GitHub:** https://github.com/craignied/neuron (HTTPS remote per the locker's

@@ -221,6 +221,21 @@ Run the normal `latexmk` build through `makeindex`, then inspect both the
 generated index pages and representative links/page numbers in the PDF. Merely
 seeing an `.idx` file is not verification.
 
+`makeindex` sorts and typesets only the entries it is given; it cannot discover
+that a documented source object was never marked. Run the coverage guard before
+building:
+
+```sh
+python3 tools/check_manifest_index.py
+```
+
+The guard derives every top-level class and namespace from `src/*.h`, then
+requires the curated public result/configuration objects and principal methods
+listed in the script. Add a new public root automatically by documenting and
+indexing it. When a genuinely principal object or operation is added, extend the
+curated inventory in the same change. The guard is also part of
+`tests/tools/run_tools.sh`, so CI refuses an incomplete index.
+
 Index for how programmers search, not merely for source-file names. Include the
 object or namespace, each principal public method, public result/configuration
 types, important algorithms and estimators, statistical assumptions, failure
@@ -510,6 +525,8 @@ Text extraction is not a substitute for visual inspection.
 - [ ] Update the CLI chapter and `docs/gui_cli_parity.md` if parity is involved.
 - [ ] Update the tooling chapter for a new or changed user-facing helper.
 - [ ] Include reproducibility, mutation, failure, and artifact behavior.
+- [ ] Run `python3 tools/check_manifest_index.py`; extend its principal-object
+      and method inventory when the public vocabulary grows.
 - [ ] Build the PDF from a clean LaTeX state.
 - [ ] Extract and search its text.
 - [ ] Render and inspect all changed pages.
