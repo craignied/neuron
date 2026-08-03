@@ -491,9 +491,11 @@ Release build → `tests/golden/run_golden.sh` byte-identical (3 transcripts: `x
 `ctest -N`, never a remembered number) → `tests/gui/smoke.sh` →
 **`tests/gui/asyncjob.sh`** (the async-job lifecycle; separate from smoke so a hang or a
 terminated server cannot take the endpoint coverage with it) →
+**`tests/gui/strictparse.sh`** (the request boundary: omission and present-but-empty
+rules, domain refusals, and the malformed values each field refuses by name) →
 `tests/oracle/verify_oracle.sh` numerically identical → **`tests/tools/run_tools.sh`** →
 `git diff --check` → live `neuron --gui` click-through for anything that adds a control.
-CI runs the build, goldens, ctest, smoke, asyncjob, and the Python tools on
+CI runs the build, goldens, ctest, smoke, asyncjob, strictparse, and the Python tools on
 macOS/Linux/Windows, and
 **a commit is not finished until CI is green on its exact SHA** on all three.
 The automated gates are currently green, and **no GUI click-through is outstanding** —

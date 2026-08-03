@@ -83,3 +83,9 @@ jobs:
       - name: GUI async-job lifecycle test
         shell: bash
         run: ./tests/gui/asyncjob.sh
+
+      # The request boundary: omission rules, present-but-empty rules, domain
+      # refusals, and every malformed value a handler must refuse by name.
+      - name: GUI request-field parsing test
+        shell: bash
+        run: ./tests/gui/strictparse.sh

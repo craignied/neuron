@@ -716,6 +716,10 @@ the run does not change the neural net's numbers). See
   reports itself idle, and the job is marked running before `start()` returns —
   are pinned in-process by the `asyncjob_lifecycle` ctest case, because neither
   is observable through HTTP (`refactor_audit.md` §20.4).
+- Request fields: `./tests/gui/strictparse.sh` (every handler's omission rules,
+  present-but-empty rules, domain refusals, and the malformed values each field
+  must refuse by name). Third server-starting script, separate for the same
+  reason as the second. The contract it pins is `docs/b9_strict_parsing.md`.
 - The low-birth-weight dataset is a self-verifying reference: follow
   `docs/datasets/low-birth-weight/README.md` and the engine should report
   log likelihood −111.2865 on the committed betas.
