@@ -5,10 +5,11 @@
 \index{Object design!current services}
 
 Figure~\ref{hierarchy} includes both the inheritance hierarchy and the modern
-services that compose experiments around it.  A component-shaped box is not a
-new base class: it is a namespace service or helper object with one explicit
-responsibility.  The arrows describe use or ownership, not inheritance unless
-the label says ``base of.''
+services that compose experiments around it.  Panel A is only inheritance, with
+open arrows from base to derived classes.  Panel B is only dependencies: an
+arrow means that the source calls or uses the target, and an ``API'' suffix says
+explicitly that the target is a class-layer interface rather than another
+orchestration service.  The panels deliberately use one uncomplicated box shape.
 
 The important division is between mechanisms and coordination.  \texttt{DataSet}
 owns data and materializes row partitions; \texttt{nsplit} chooses indices;

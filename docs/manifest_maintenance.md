@@ -182,6 +182,31 @@ object or service is added, removed, renamed, or changes dependency direction:
    printable width; do not shrink it back into the Chapter 12 opening text;
 5. check that the prose and arrows agree with the actual includes and calls.
 
+Preserve the figure's visual grammar:
+
+- **Panel A is inheritance only.** Use an open arrow from the base class to the
+  derived class. Do not put ownership, construction, callbacks, or ordinary
+  calls in this panel.
+- **Panel B is direct call/use dependency only.** An ordinary arrow means the
+  source directly calls or uses the target. Do not draw an ``eventually affects,''
+  broad conceptual influence, or merely possible data-flow relationship.
+- When a service crosses into the class layer, end the arrow at a plainly named
+  `API` box (for example, `Network API`) rather than running a long line into the
+  inheritance panel. The API box is a reference to that class interface, not a
+  second class.
+- Use the same plain rounded box for every node. Do not encode meaning with
+  Graphviz component tabs, UML decorations, ownership glyphs, unexplained
+  colors, or other shape details. Meaning belongs in the panel title, node text,
+  arrow direction, and edge label.
+- Keep the short legend inside the editable graph and the matching explanation
+  in the Chapter 12 prose. If the visual grammar changes, update both together.
+- Prefer two short, independently readable paths over a crossing line. Reorder
+  or regroup nodes before adding an edge, and split a panel or add a separate
+  explanatory figure before the principal map becomes tangled.
+- Verify every inheritance edge against class declarations and every service
+  edge against current headers and call sites. A plausible architectural story
+  is not evidence that a direct dependency exists.
+
 Render Figure 12.1 by itself after every change and inspect it at normal page
 scale. Every node label and edge label must be readable without zooming. If the
 graph becomes too crowded, improve its layout or divide responsibilities into a
@@ -527,8 +552,10 @@ Text extraction is not a substitute for visual inspection.
       implementation decisions needing explanation are commented in the code.
 - [ ] Apply the vertical-list test and caller test; reject compressed inventories.
 - [ ] Update the architecture narrative and source map if ownership changed.
-- [ ] Update Figure 12.1 for a high-level object or dependency change, retain its
-      full-page landscape layout, and inspect every label at normal page scale.
+- [ ] Update Figure 12.1 for a high-level object or dependency change; preserve
+      its two-panel visual grammar and explicit API crossings, verify every edge
+      against source, retain the full-page landscape layout, and inspect every
+      label at normal page scale.
 - [ ] Update the REST chapter if routes or parameters changed.
 - [ ] Update the CLI chapter and `docs/gui_cli_parity.md` if parity is involved.
 - [ ] Update the tooling chapter for a new or changed user-facing helper.

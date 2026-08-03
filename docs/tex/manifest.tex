@@ -4618,16 +4618,19 @@ matrix and vector operations, as described in Chapter
 
 \hyperref[hierarchy]{Figure~\ref{obj_chap}.\arabic{figcount}}
 demonstrates the current inheritance hierarchy and the services which compose
-experiments around it.  Rounded boxes are objects in the inheritance or
-ownership hierarchy.  Component-shaped boxes are namespace services or helper
-objects; their arrows show use and data flow rather than inheritance.
+experiments around it.  It is split into two panels so inheritance is never
+confused with a call dependency.  In panel A an open arrow runs from a base class
+to a derived class.  In panel B every arrow means that the source calls or uses
+the target; boxes ending in ``API'' are the class-layer interfaces used by those
+services.  All boxes use the same plain shape; no decorative mark carries a
+second meaning.
 
 \clearpage
 \begin{landscape}
 \begin{figure}[p] \addtocounter{figcount}{1}
 \centering
 \includegraphics[width=9in,height=4.35in,keepaspectratio]{objects.pdf}
-\caption{Object design}\label{hierarchy}
+\caption{Current class inheritance and service dependencies}\label{hierarchy}
 \end{figure}
 \end{landscape}
 \clearpage
@@ -8032,7 +8035,6 @@ Wilks comparison.
 \printindex
 
 \end{document}
-
 
 
 

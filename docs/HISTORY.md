@@ -4158,3 +4158,19 @@ Manifest.  `docs/README.md` routes current versus historical authorities;
 `docs/optimizer_research.md` is the lazy-loaded protocol for the next research
 phase.  Completed plans and the refactor audit are explicitly marked historical,
 while this file remains the searchable forensic archive.
+
+## 2026-08-03 — Figure 12.1 re-audited and simplified
+
+The first post-refactor figure used Graphviz's component shape, whose two small
+left-hand tabs looked like an unexplained neuron-specific symbol.  A second
+source-level audit also found that several arrows mixed direct calls with broad
+eventual data flow, making the drawing harder to verify than its prose.
+
+Figure 12.1 is now two explicit panels.  Panel A contains only the actual class
+inheritance tree and uses open base-to-derived arrows.  Panel B contains only
+call/use dependencies and labels every crossing into the class layer as an API.
+All objects use one plain rounded box; there are no decorative component tabs,
+ownership glyphs, or implicit shape meanings.  The CLI boundary is stated in its
+real order (`main` calls `procguard`, which invokes `neuronMain`), and the GUI
+boundary distinguishes `AsyncJob` from the job body it safely invokes.  Every
+remaining service arrow was checked against the current headers and call sites.

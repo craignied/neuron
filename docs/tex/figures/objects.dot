@@ -1,65 +1,108 @@
 digraph neuron_objects {
-  graph [rankdir=TB, bgcolor="transparent", margin=0.03, nodesep=0.16,
-         ranksep=0.24, fontname="Helvetica", ratio="compress"];
-  node [shape=box, style="rounded", fontname="Helvetica", fontsize=10,
-        margin="0.08,0.05"];
-  edge [fontname="Helvetica", fontsize=8, arrowsize=0.55];
+  graph [rankdir=TB, bgcolor="transparent", margin=0.03, nodesep=0.20,
+         ranksep=0.27, fontname="Helvetica", fontsize=10,
+         label="Inheritance panel: open arrow means base class to derived class.     Service panel: arrow means calls or uses.",
+         labelloc=b, labeljust=c];
+  node [shape=box, style="rounded", color="#303030", fontname="Helvetica",
+        fontsize=10, margin="0.09,0.05"];
+  edge [color="#303030", fontname="Helvetica", fontsize=8, arrowsize=0.60];
 
-  DataSet [label="DataSet"];
-  TwoSet [label="TwoSet"];
-  Model [label="Model"];
-  Iterative [label="Iterative"];
-  Network [label="Network"];
-  OneHidden [label="OneHiddenNet"];
-  Simple [label="BareProp | SimpleProp"];
-  OtherNet [label="BackProp | Logistic"];
-  DFA [label="DFA"];
-  ConcreteDFA [label="LDFA | QDFA"];
-  RegressNet [label="RegressNet"];
+  subgraph cluster_classes {
+    label="A. Class inheritance";
+    color="#808080";
+    style="rounded";
 
-  Split [label="nsplit\npartition planners", shape=component];
-  Eval [label="evaldesign\ndesign + inference policy", shape=component];
-  OBD [label="obd\narchitecture selection", shape=component];
-  Adapters [label="cvadapters\nmodel -> procedure", shape=component];
-  CV [label="crossval\nrepetition + pairing", shape=component];
-  Report [label="cvreport\nthree-tier reporting", shape=component];
-  Cov [label="auccov\nshared AUC algebra", shape=component];
-  Est [label="delong | clustered_auc\ncovariance estimators", shape=component];
-  Factory [label="modelfactory | netclone\nconstruction + cloning", shape=component];
-  Auto [label="autoalgo\noptimizer probes", shape=component];
-  Plateau [label="PlateauDetector", shape=component];
-  Async [label="AsyncJob\nGUI worker lifecycle", shape=component];
-  Parse [label="util strict parsers\nrequest syntax", shape=component];
-  Guard [label="procguard\nCLI exception boundary", shape=component];
+    Model [label="Model"];
+    Iterative [label="Iterative"];
+    Network [label="Network"];
+    OneHidden [label="OneHiddenNet"];
+    Bare [label="BareProp"];
+    Simple [label="SimpleProp"];
+    Back [label="BackProp"];
+    Logistic [label="Logistic"];
+    DFA [label="DFA"];
+    LDFA [label="LDFA"];
+    QDFA [label="QDFA"];
 
-  DataSet -> TwoSet [label="owns"];
-  Model -> Iterative [label="base of", dir=back];
-  Iterative -> Network [label="base of", dir=back];
-  Network -> OneHidden [label="base of", dir=back];
-  OneHidden -> Simple [label="base of", dir=back];
-  Network -> OtherNet [label="base of", dir=back];
-  Model -> DFA [label="base of", dir=back];
-  DFA -> ConcreteDFA [label="base of", dir=back];
-  RegressNet -> Network [label="clones + refits"];
+    Model -> Iterative [arrowhead=empty, color="#305b8c"];
+    Iterative -> Network [arrowhead=empty, color="#305b8c"];
+    Network -> OneHidden [arrowhead=empty, color="#305b8c"];
+    OneHidden -> Bare [arrowhead=empty, color="#305b8c"];
+    OneHidden -> Simple [arrowhead=empty, color="#305b8c"];
+    Network -> Back [arrowhead=empty, color="#305b8c"];
+    Network -> Logistic [arrowhead=empty, color="#305b8c"];
+    Model -> DFA [arrowhead=empty, color="#305b8c"];
+    DFA -> LDFA [arrowhead=empty, color="#305b8c"];
+    DFA -> QDFA [arrowhead=empty, color="#305b8c"];
+  }
 
-  Split -> DataSet [label="indices"];
-  DataSet -> CV [label="materializes folds"];
-  Factory -> Network [label="creates/clones"];
-  Plateau -> Iterative [label="stop signal"];
-  Auto -> Network [label="probes clones"];
-  OBD -> Network [label="selects"];
-  Adapters -> Network [label="fits"];
-  Adapters -> DFA [label="fits"];
-  Adapters -> OBD [label="nests"];
-  CV -> Adapters [label="calls procedure"];
-  Eval -> Split [label="describes"];
-  CV -> Report [label="results"];
-  Eval -> Report [label="policy"];
-  Cov -> Est [label="combined by"];
-  Est -> Report [label="inference"];
-  Parse -> Async [label="validated request"];
-  Async -> CV [label="runs long job"];
-  Async -> OBD [label="runs long job"];
-  Async -> RegressNet [label="runs long job"];
-  Guard -> Model [label="CLI boundary"];
+  subgraph cluster_services {
+    label="B. Service dependencies";
+    color="#808080";
+    style="rounded";
+
+    Gui [label="GUI handlers"];
+    Main [label="process main"];
+    Cli [label="neuronMain\nCLI driver"];
+    Parse [label="util strict parsers"];
+    Async [label="AsyncJob"];
+    JobBody [label="GUI job body"];
+    Guard [label="procguard"];
+
+    CvCoord [label="CV coordinator"];
+    Split [label="nsplit"];
+    CV [label="crossval"];
+    Adapters [label="cvadapters"];
+    Eval [label="evaldesign"];
+    Est [label="delong / clustered_auc"];
+    Cov [label="auccov"];
+    Report [label="cvreport"];
+
+    OBD [label="obd"];
+    RegressNet [label="RegressNet"];
+    Factory [label="modelfactory"];
+    Clone [label="netclone"];
+    Auto [label="autoalgo"];
+    Plateau [label="PlateauDetector"];
+
+    ModelApi [label="Model API"];
+    IterativeApi [label="Iterative API"];
+    NetworkApi [label="Network API"];
+    SimpleApi [label="SimpleProp API"];
+    DfaApi [label="DFA API"];
+    DataApi [label="DataSet API"];
+    TwoSetApi [label="TwoSet API"];
+
+    Gui -> Parse [label="validates fields"];
+    Gui -> Async [label="launches long jobs"];
+    Main -> Guard [label="calls"];
+    Guard -> Cli [label="invokes body"];
+    Cli -> ModelApi [label="drives"];
+
+    Async -> JobBody [label="invokes safely"];
+    JobBody -> NetworkApi [label="training"];
+    JobBody -> OBD [label="sizing"];
+    JobBody -> RegressNet [label="stepwise"];
+    JobBody -> CvCoord [label="evaluation"];
+
+    CvCoord -> Split [label="plans partitions"];
+    CvCoord -> CV [label="runs procedures"];
+    CvCoord -> Eval [label="chooses inference"];
+    CvCoord -> Est [label="estimates AUC covariance"];
+    CvCoord -> Report [label="renders results"];
+    CV -> DataApi [label="materializes folds"];
+    CV -> Adapters [label="invokes adapter-created Procedure"];
+    Adapters -> NetworkApi [label="fits"];
+    Adapters -> DfaApi [label="fits"];
+    Adapters -> OBD [label="nested selection"];
+    Est -> Cov [label="uses shared algebra"];
+
+    DataApi -> TwoSetApi [label="owns metrics objects"];
+    IterativeApi -> Plateau [label="uses"];
+    OBD -> SimpleApi [label="grows and prunes"];
+    RegressNet -> NetworkApi [label="clones and refits"];
+    Factory -> NetworkApi [label="constructs"];
+    Clone -> NetworkApi [label="clones"];
+    Auto -> NetworkApi [label="probes clones"];
+  }
 }
