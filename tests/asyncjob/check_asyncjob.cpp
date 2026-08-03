@@ -268,31 +268,46 @@ static int casePublishBeforeClear()
 		shared_future< void > gate = release.get_future().share();
 		job.start( [ gate ] { gate.wait(); return string( "published" ); } );
 
-		// Started only once the job is running, so the reader can never see
-		//    the legitimate idle window inside start() (reset happens before
-		//    the job is marked running) and report it as a violation.
-		atomic< bool > readerDone( false );
-		thread reader( [ &job, &violations, &sawRunning, &readerDone ]
+		// The reader starts only once the job is running, so it can never see
+		//    the legitimate idle window inside start() -- the reset happens
+		//    before the job is marked running -- and report it as a violation.
+		//
+		// AND THE GATE IS NOT RELEASED UNTIL THE READER HAS ACTUALLY READ.
+		//    Constructing the thread does not mean it has been scheduled: on
+		//    Windows this case failed its own control because the body ran to
+		//    completion first, so the reader's first read found the job already
+		//    finished and it exited having overlapped nothing. Waiting for the
+		//    reader's first observation makes the overlap structural instead of
+		//    a race the fast platforms happened to win. It cannot deadlock: the
+		//    body is blocked on `gate`, which only the line after this wait
+		//    releases, so the job cannot finish before the reader observes it.
+		promise< void > observed;
+		shared_future< void > firstRead = observed.get_future().share();
+		atomic< bool > announced( false );
+		thread reader( [ &job, &violations, &sawRunning, &observed, &announced ]
 		{
 			for ( ;; )
 			{
 				bool running = false, hasResult = false;
 				readTogether( job, running, hasResult );
 				if ( running )
+				{
 					sawRunning++;
+					if ( !announced.exchange( true ) )
+						observed.set_value();
+				}
 				else
 				{
 					if ( !hasResult )
 						violations++;
-					readerDone = true;
 					return;
 				}
 			}
 		} );
 
+		firstRead.wait();
 		release.set_value();
 		reader.join();
-		( void ) readerDone;
 	}
 	check( waitIdle( job ), "the last cycle must finish" );
 

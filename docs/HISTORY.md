@@ -3993,3 +3993,32 @@ than a plan: read a section for why something is the way it is, not as work outs
 The engine refactor that began with standing rule 7 and the `OneHiddenNet` characterization
 ends here. Two of its fourteen items ended in a measured decision to change nothing, which
 is the outcome rule 7 was written to make possible.
+
+## 2026-08-03 — the concurrency test's own overlap was assumed, and Windows caught it
+
+`82cfe91` — a documentation-only commit — went red on Windows in `ctest`, on
+`asyncjob_lifecycle` case 5's **control**: "the reader must have observed the job running
+at least once". Not a docs failure and not an engine failure: a defect in the test that
+had shipped two commits earlier and passed Windows CI once by luck.
+
+Case 5 constructs an observer thread and then releases the gate that unblocks the job's
+body. **Constructing a thread is not scheduling it.** On Windows the body ran to
+completion first, so the reader's first read found the job already finished, and it exited
+having overlapped nothing. The invariant it exists to check would then have passed
+vacuously — the control is what refused to let that happen, and it is the same control
+whose absence would have made the whole case worthless.
+
+The fix makes the overlap structural rather than a race the fast platforms win: the reader
+announces its first observation through a promise, and the gate is not released until that
+arrives. It cannot deadlock, because the body is blocked on the very gate the wait
+precedes. The case is now *stronger* — the publish-then-clear inversion sabotage fails
+**184-196 of 200 cycles**, against 185-187 before — and the control holds by construction
+everywhere.
+
+**Three instances in one session of the same mistake**: two sized fixtures in
+`asyncjob.sh` that Windows finished inside an HTTP round trip, and now an observer thread
+assumed to have started. The rule, stated so it is not learned a fourth time: *an observer
+that must witness a concurrent operation has to prove it started before that operation can
+end.* Case 5 was the only place in the file involving a test-created thread; every other
+handshake is a promise set by the job's own body and waited on before the dependent
+action, which is safe by construction.

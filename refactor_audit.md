@@ -4643,6 +4643,29 @@ portable, and no test-only method, thread factory or fault hook was added to
 manufacture it. Recorded here precisely because that distinction is easy to
 overstate.
 
+**The concurrency test's own overlap was assumed, and Windows caught it
+(`82cfe91` → `bc0`).** Case 5 constructs an observer thread and then releases the
+gate that unblocks the body. Constructing a thread is not scheduling it: on
+Windows the body ran to completion first, so the reader's first read found the
+job already finished and it exited having overlapped nothing. **Its own control
+failed** — `sawRunning == 0` — rather than the invariant passing vacuously, which
+is the entire reason that control is there.
+
+The fix makes the overlap structural: the reader announces its first observation
+through a promise, and the gate is not released until that arrives. It cannot
+deadlock, because the body is blocked on the very gate the wait precedes. The
+case got *stronger* — the inversion sabotage now fails 184-196 of 200 cycles,
+against 185-187 before — and the control now holds by construction on every
+platform.
+
+**This is the third instance in one session of overlap assumed rather than
+constructed** (the other two are §20.2's Windows fixtures), and it is worth
+stating as a rule: *an observer that must witness a concurrent operation has to
+prove it started before the operation can end.* Case 5 was the only place in the
+file where a test-created thread was involved; every other handshake is a promise
+set by the job's own body and waited on before the dependent action, which is
+safe by construction.
+
 **A latent defect the extraction exposed.** `AsyncJob` had no destructor, and
 neither did `TrainJob`. A worker stays joinable after it finishes until
 something reaps it, and destroying a joinable `std::thread` calls
