@@ -4022,3 +4022,19 @@ that must witness a concurrent operation has to prove it started before that ope
 end.* Case 5 was the only place in the file involving a test-created thread; every other
 handshake is a promise set by the job's own body and waited on before the dependent
 action, which is safe by construction.
+
+## 2026-08-03 — AsyncJob Manifest contract completed
+
+The Item 13 Manifest entry explained the launcher's purpose and ordering well but
+documented only four public methods. It omitted the constructor/renderer contract, the
+destructor's joinable-thread obligation, six access and progress methods, the bounded
+series constant, and every operation-specific progress object. Its index likewise led
+only to the class and two concepts; the source-aware gate knew the two new top-level roots
+but had not added their major objects or principal methods to its curated inventory.
+
+The entry now specifies the complete public surface and synchronized state, gives usable
+examples for both boundaries, identifies both as project-defined, and cites the ISO C++
+thread-destruction and uncaught-exception rules behind the failure boundaries. Every
+public operation and major progress object has a direct index entry. The gate advances
+from 37 to 43 major objects and from 103 to 117 principal methods, so a later deletion of
+that navigation now fails rather than waiting for a reader to discover it.

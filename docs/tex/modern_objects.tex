@@ -1307,16 +1307,50 @@ and Tier 3 is the machine-readable audit substrate.
 
 \subsection{AsyncJob}
 \index{AsyncJob}
+\index{AsyncJob!constructor}
+\index{AsyncJob!destructor}
+\index{AsyncJob!FailureRenderer}
+\index{AsyncJob!start}
+\index{AsyncJob!requestStop}
+\index{AsyncJob!clearStopRequest}
+\index{AsyncJob!joinForShutdown}
+\index{AsyncJob!isRunning}
+\index{AsyncJob!isStopRequested}
+\index{AsyncJob!cancelLatch}
+\index{AsyncJob!clearCvProgress}
+\index{AsyncJob!resetForNewRun}
+\index{AsyncJob!pushSample}
+\index{AsyncJob!MAX\_POINTS}
+\index{AsyncJob!error series}
+\index{AsyncJob!result}
+\index{AsyncJob!OBD progress}
+\index{AsyncJob!stepwise progress}
+\index{AsyncJob!cross-validation progress}
 \index{AsyncJob!publish-then-clear ordering}
 \index{AsyncJob!worker boundary}
 \index{asynchronous jobs!lifecycle}
 
-\texttt{AsyncJob} owns the lifecycle every long GUI operation shares: training,
+\texttt{AsyncJob} is neuron's project-defined owner of the lifecycle every long
+GUI operation shares: training,
 hidden-layer sizing, cross-validation and stepwise regression.  It answers one
 question --- how a request hands work to a background thread and how the result
 comes back --- and it answers it once.  Before it existed the same launch
 sequence appeared at four call sites, character for character, differing only in
 the payload each thread carried.
+
+\subsubsection{Construction, destruction and lifecycle}
+\texttt{FailureRenderer} is the public callable type
+\texttt{function<string(const string\&)>}.  The explicit constructor takes one
+such renderer, which dresses a boundary failure in the caller's wire format;
+the job therefore owns the failure fact and wording without learning JSON.
+
+The destructor calls \texttt{joinForShutdown()}.  A finished
+\texttt{std::thread} remains joinable until it is joined, and destroying a
+joinable thread invokes \texttt{std::terminate}; this is required by the C++
+thread contract.\footnote{ISO C++ working draft, ``Destructor
+[thread.thread.destr],'' \url{https://eel.is/c++draft/thread.thread.destr}.}
+Thus destruction requests cancellation and waits rather than making the
+containing object's lifetime a process-ending event.
 
 \begin{itemize}
 \item \texttt{bool start(function<string()> body)}: reaps the previous worker,
@@ -1332,6 +1366,53 @@ the payload each thread carried.
       asynchronous form and would otherwise inherit an earlier run's Stop.
 \item \texttt{void joinForShutdown()}: cancels and joins a worker that outlived
       the server loop.
+\item \texttt{bool isRunning() const}: reports whether the job currently owns
+      the engine.  The flag is atomic so the busy gate can read it without the
+      progress mutex.
+\item \texttt{bool isStopRequested() const}: reports the cooperative
+      cancellation latch's current value.
+\item \texttt{atomic<bool>* cancelLatch()}: returns the address of the one
+      authoritative latch for an engine routine that polls it directly.  The
+      pointer is valid only while its owning \texttt{AsyncJob} is alive.
+\item \texttt{void clearCvProgress()}: clears every cross-validation and nested
+      search progress field.  Its caller must hold \texttt{progressMutex}.
+\item \texttt{void resetForNewRun()}: clears the error series, result and all
+      operation-specific progress before a new launch.  Its caller must hold
+      \texttt{progressMutex}; \texttt{start()} supplies that lock.
+\item \texttt{void pushSample(unsigned iteration,double trainError,double
+      testError)}: appends one training-progress point and performs bounded
+      decimation.  It takes \texttt{progressMutex} itself, so a caller must not
+      already hold that mutex.
+\end{itemize}
+
+\subsubsection{Public progress state}
+All fields below are public because the GUI status renderer reads or fills the
+typed state directly; \texttt{AsyncJob} deliberately does not render an HTTP
+response.  Except for the two atomic latches accessed through methods, readers
+and writers hold \texttt{progressMutex} across every group of fields that must
+describe one instant.
+
+\begin{itemize}
+\item \texttt{static const unsigned MAX\_POINTS = 2000}: maximum retained chart
+      points before decimation halves the stored series and doubles the future
+      sampling stride.
+\item \texttt{iters}, \texttt{trainErr}, \texttt{testErr},
+      \texttt{keepEvery}, and \texttt{sampleCounter}: the aligned,
+      bounded error series and its decimation state.  A negative test error
+      means the held-out error was not sampled at that iteration.
+\item \texttt{string result}: the completed operation's response body; empty
+      while the current operation is running.  It is published before the
+      running flag is cleared.
+\item \texttt{obdPhase} and \texttt{obdHidden}: hidden-layer search phase and
+      current hidden-unit count; an empty phase means the job is not OBD.
+\item \texttt{stepwise}: the current stepwise-progress object body; empty means
+      the job is not stepwise.  It is separate from OBD state so a client never
+      has to reinterpret a hidden-unit field as a candidate variable.
+\item \texttt{cvStage}, \texttt{cvProcedure}, procedure and fold counters, plus
+      \texttt{cvInnerPhase} and \texttt{cvInnerHidden}: outer
+      cross-validation/locked-test progress and the nested architecture search
+      within the current fold.  The inner fields are cleared when the outer
+      fold changes so one fold's last trial cannot appear under the next.
 \end{itemize}
 
 \subsubsection{The ordering contract}
@@ -1355,13 +1436,34 @@ would end the server while the page was still polling for status.  Every escape
 becomes a published failure instead --- a \texttt{std::exception} carrying its
 own message, anything else a generic one --- and the publish-then-clear order
 holds on the throwing paths too.  How a failure message becomes a response body
-is supplied by the caller, so the class speaks no wire format.
+is supplied by the caller, so the class speaks no wire format.  The language
+rule is general: when no matching exception handler is found,
+\texttt{std::terminate} is invoked.\footnote{ISO C++ working draft, ``Handling
+an exception [except.handle],'' \url{https://eel.is/c++draft/except.handle}.}
+
+\subsubsection{Example}
+\begin{verbatim}
+AsyncJob job([](const string& message) {
+    return jsonMsg(false, message);
+});
+if (!job.start([] { return runObdJob(config); }))
+    return jsonMsg(false, "could not start a worker thread");
+\end{verbatim}
+
+\subsubsection{Notes}
+Bodies capture request values, not request objects.  A raw pointer may be
+captured only when the GUI busy gate guarantees its pointee cannot be replaced
+for the run's duration.  No engine operation, join or thread construction occurs
+while \texttt{progressMutex} is held.
 
 \subsection{procguard}
 \index{procguard}
+\index{procguard!run}
 \index{procguard!fatal diagnostic}
 
-\texttt{procguard::run(body, err, program)} is the command-line program's
+\texttt{procguard} is neuron's project-defined process boundary.
+\texttt{int procguard::run(const function<int()>\& body,ostream\& err,const
+char* program)} is the command-line program's
 top-level exception boundary: it runs the body and returns its exit status, and
 converts anything that reaches the top into a named diagnostic and status~1.
 Before it existed a contract failure ended the program with no message at all.
@@ -1373,5 +1475,16 @@ diagnostic, and filing that under asynchronous-job behaviour would misdescribe
 it.  Taking the body and the stream as arguments is what makes it testable: a
 test supplies a throwing body and an in-memory stream, and the shipped program
 gains no way to inject a fault.
+
+\subsubsection{Example}
+\begin{verbatim}
+return procguard::run(
+    [argc, argv] { return neuronMain(argc, argv); }, cerr, "neuron");
+\end{verbatim}
+
+\subsubsection{Notes}
+A normally returning body keeps its own status.  A \texttt{std::exception}
+produces \texttt{<program>: fatal: <what>} and status~1; an exception of any
+other type produces \texttt{<program>: fatal: unrecognized error} and status~1.
 
 \endgroup

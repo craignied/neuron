@@ -104,6 +104,12 @@ MAJOR_OBJECTS = {
     "cvreport!LockedContrast",
     "cvreport!LockedInfo",
     "cvreport!ArtifactResult",
+    "AsyncJob!FailureRenderer",
+    "AsyncJob!error series",
+    "AsyncJob!result",
+    "AsyncJob!OBD progress",
+    "AsyncJob!stepwise progress",
+    "AsyncJob!cross-validation progress",
 }
 
 
@@ -138,6 +144,13 @@ PRINCIPAL_METHODS = {
     "crossval": {"run", "compare", "evaluateOnce"},
     "cvadapters": {"trainProcedure", "dfaProcedure", "nestedObdProcedure", "innerValidationSplit"},
     "cvreport": {"writeArtifacts", "tier1", "tier2", "render"},
+    "AsyncJob": {
+        "constructor", "destructor", "start", "requestStop",
+        "clearStopRequest", "joinForShutdown", "isRunning",
+        "isStopRequested", "cancelLatch", "clearCvProgress",
+        "resetForNewRun", "pushSample", "MAX_POINTS",
+    },
+    "procguard": {"run"},
 }
 
 
