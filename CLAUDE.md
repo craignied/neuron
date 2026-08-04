@@ -31,9 +31,12 @@ The Manifest and source are authoritative after implementation.
 - The behavior-preserving engine refactor and ROADMAP 4 are complete.
 - Release builds and tests are the normal gate.  Current test count is discovered
   from CTest; never copy a remembered count into a status report.
-- The next research direction is novel gradient-descent/learning algorithms.
-  No candidate has been selected and no published formula may be altered merely
-  to share code.  Follow `docs/optimizer_research.md`.
+- Current optimizer research and implementation follows
+  `docs/learning_research/optimizer_implementation_plan.md`.  Resume at the
+  first incomplete phase (initially Phase 0 characterization/harness), and do
+  not expose a candidate publicly before its matched-endpoint acceptance gate.
+  `docs/optimizer_research.md` remains the governing research protocol; no
+  published formula may be altered merely to share code.
 - The Design Manifest is normative and must stay synchronized with every public
   class, major object, principal method, algorithm, failure contract, and index entry.
 
