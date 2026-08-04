@@ -7360,6 +7360,41 @@ for all {\em Network} objects.
       object
 \end{itemize}
 
+\item {\em Protected} methods
+
+\begin{itemize}
+\item const vector$<$ Matrix$<$ double $>$ $>$\& weightMatrices() const:
+      returns the {\em authoritative} weight
+      Matrices\index{BackProp!weightMatrices} of this network by constant
+      reference, for {\em observation only}.
+
+      {\bf Why it exists.} Every other {\em Network} already lets a derived
+      class read its fitted parameters: {\em OneHiddenNet} keeps $hW$ and
+      $oW$ protected, and {\em Logistic} publishes $W$ through getBetas().
+      {\em BackProp} was the sole exception, and a subclass that cannot read
+      a model's parameters cannot compute a parameter-state identity for it.
+      That identity is what allows two training runs to be shown to have
+      begun from the {\em same} weights, which is a precondition for
+      comparing their speed at all: the optimizer benchmark
+      (\texttt{tests/optimizer/}) refuses to certify a comparison whose arms
+      cannot be proven to share a starting state.
+
+      {\bf What it deliberately does not expose.} Only $Weights$. The
+      companion containers $WeightsUp$, $WeightsAccumulate$, $Gradient$ and
+      $vpack$ are training {\em workspace} rather than parameters and remain
+      private. Widening the whole private section would have promised every
+      future subclass mutable access to all of them, which is a far larger
+      commitment than observation requires.
+
+      {\bf Cost and contract.} Constant, non-virtual, inline; it allocates
+      nothing, copies nothing, and adds no dispatch. No production code path
+      calls it, so it cannot appear in a per-exemplar or per-element loop.
+      Because the reference is to a member of this object, it remains valid
+      only while the object does, and it must not be retained across a call
+      to setHidden() or removeInputs(), both of which resize the Matrices it
+      refers to.
+\end{itemize}
+
 \item {\em Private} members
 
 \begin{itemize}

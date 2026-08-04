@@ -482,3 +482,129 @@ add_executable(check_matrix_bounds tests/matrix/check_matrix_bounds.cpp)
 target_link_libraries(check_matrix_bounds PRIVATE neuron_core)
 target_compile_definitions(check_matrix_bounds PRIVATE NDEBUG)
 add_test(NAME matrix_bounds COMMAND check_matrix_bounds)
+
+# --- the optimizer benchmark harness (optimizer research, Phase 0) ----------
+#
+# Two targets over one shared header, tests/optimizer/harness.h, because the
+# binary that MEASURES and the binary that proves the measurement trustworthy
+# must run the same code or the proof is about something else.
+#
+# BINARY IDENTITY. A benchmark row must identify the code that produced it, and
+# a revision alone cannot: the harness is developed uncommitted, so every row
+# would claim a commit whose tree does not contain the binary's own source.
+#
+#   OPTBENCH_SOURCE_ID  THE AUTHORITY: a hash over every source input capable of
+#                       changing what is measured -- the harness AND the engine
+#                       the harness links AND this build file. An earlier version
+#                       hashed only the three harness files, which meant a dirty
+#                       edit to src/network.cpp or src/backprop.cpp could change
+#                       the measured optimizer while the id stood still. An
+#                       identity that cannot see the thing being benchmarked is
+#                       not an identity of the benchmark.
+#   OPTBENCH_REV        the committed revision, for orientation.
+#   OPTBENCH_GIT_DIRTY  whether the tree differed from that revision AT CONFIGURE
+#                       TIME. It is a hint, not the authority -- see below.
+#
+# EVERY hashed file is also a CMAKE_CONFIGURE_DEPENDS, so editing any of them
+# re-runs cmake, refreshes the id, and rebuilds the targets together. Without
+# that the id would be a snapshot and a rebuilt binary could keep advertising
+# source it no longer contains.
+#
+# .git/HEAD and .git/index join the dependency list so that COMMITTING -- which
+# changes rev and clears dirty without touching a single source file -- also
+# refreshes them. That closes the staleness Sol identified. What remains, and is
+# documented rather than overclaimed: editing a file OUTSIDE this list (a doc,
+# say) can leave `dirty` reading 0 until the next configure. That cannot change
+# what is measured, which is exactly why source_id and not dirty is the
+# authority.
+file(GLOB OPTBENCH_ENGINE_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/*.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
+set(OPTBENCH_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/optimizer/harness.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/optimizer/optimizer_probe.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/optimizer/check_optimizer_harness.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
+    ${OPTBENCH_ENGINE_SOURCES})
+list(SORT OPTBENCH_SOURCES)     # deterministic order, so the id is reproducible
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${OPTBENCH_SOURCES})
+foreach(_gitfile HEAD index)
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/.git/${_gitfile})
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+            ${CMAKE_CURRENT_SOURCE_DIR}/.git/${_gitfile})
+    endif()
+endforeach()
+
+set(OPTBENCH_SOURCE_BLOB "")
+foreach(f ${OPTBENCH_SOURCES})
+    if(EXISTS ${f})
+        file(SHA256 ${f} _h)
+        # The PATH is hashed with the content, so moving a file between names
+        # changes the id even when the bytes do not.
+        file(RELATIVE_PATH _rel ${CMAKE_CURRENT_SOURCE_DIR} ${f})
+        string(APPEND OPTBENCH_SOURCE_BLOB "${_rel}:${_h}\n")
+    endif()
+endforeach()
+string(SHA256 OPTBENCH_SOURCE_FULL "${OPTBENCH_SOURCE_BLOB}")
+string(SUBSTRING ${OPTBENCH_SOURCE_FULL} 0 16 OPTBENCH_SOURCE_ID)
+list(LENGTH OPTBENCH_SOURCES OPTBENCH_SOURCE_COUNT)
+
+execute_process(COMMAND git rev-parse --short HEAD
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    OUTPUT_VARIABLE OPTBENCH_REV
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+if(NOT OPTBENCH_REV)
+    set(OPTBENCH_REV "unknown")
+endif()
+
+execute_process(COMMAND git status --porcelain
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    OUTPUT_VARIABLE OPTBENCH_STATUS
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+if(OPTBENCH_STATUS STREQUAL "")
+    set(OPTBENCH_DIRTY 0)
+else()
+    set(OPTBENCH_DIRTY 1)   # also the safe default when git is unavailable
+endif()
+message(STATUS "optimizer benchmark identity: rev=${OPTBENCH_REV} dirty=${OPTBENCH_DIRTY} "
+    "source_id=${OPTBENCH_SOURCE_ID} over ${OPTBENCH_SOURCE_COUNT} source files")
+
+# The MEASURING end. Built so it cannot rot; deliberately NOT registered with
+# add_test, because wall time is machine-dependent and a timing assertion in the
+# suite is a flake generator (the scale_probe precedent). Run it deliberately:
+#   ./build/optimizer_probe --all
+add_executable(optimizer_probe tests/optimizer/optimizer_probe.cpp)
+target_link_libraries(optimizer_probe PRIVATE neuron_engine)
+target_include_directories(optimizer_probe PRIVATE tests/optimizer)
+target_compile_definitions(optimizer_probe PRIVATE
+    OPTBENCH_GIT_REV="${OPTBENCH_REV}"
+    OPTBENCH_GIT_DIRTY=${OPTBENCH_DIRTY}
+    OPTBENCH_SOURCE_ID="${OPTBENCH_SOURCE_ID}"
+    OPTBENCH_SOURCE_COUNT=${OPTBENCH_SOURCE_COUNT}
+    OPTBENCH_BUILD_TYPE="${CMAKE_BUILD_TYPE}")
+
+# The MECHANICS, asserted deterministically and with no timing assertion at all:
+# identical starts, the non-vacuity of that identity, split identity, the
+# ceiling-is-not-convergence contract, the matched-target verdict, the full-pass
+# counter seeing the step-size search, the row schema, refusal by name, and
+# leaving no artifacts. This one IS a ctest case, so the harness cannot rot
+# silently while the probe still compiles.
+add_executable(check_optimizer_harness tests/optimizer/check_optimizer_harness.cpp)
+target_link_libraries(check_optimizer_harness PRIVATE neuron_engine)
+target_include_directories(check_optimizer_harness PRIVATE tests/optimizer)
+target_compile_definitions(check_optimizer_harness PRIVATE
+    OPTBENCH_GIT_REV="${OPTBENCH_REV}"
+    OPTBENCH_GIT_DIRTY=${OPTBENCH_DIRTY}
+    OPTBENCH_SOURCE_ID="${OPTBENCH_SOURCE_ID}"
+    OPTBENCH_SOURCE_COUNT=${OPTBENCH_SOURCE_COUNT}
+    OPTBENCH_BUILD_TYPE="${CMAKE_BUILD_TYPE}")
+add_test(NAME optimizer_harness COMMAND check_optimizer_harness)
+
+# The ORCHESTRATION layer is part of the evidence system, so it is tested too:
+# run_probe.py --self-test feeds synthetic rows through the same validation the
+# real campaign uses and requires each malformed, inconsistent or unfair set to
+# be REFUSED. Deterministic, no timing, no subprocess, no network.
+add_test(NAME optimizer_runner_selftest
+    COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tests/optimizer/run_probe.py --self-test)

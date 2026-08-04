@@ -55,6 +55,29 @@ public:
 	// Remove input nodes from this network
 	virtual void removeInputs( const vector< unsigned >& );
 
+protected:
+	// READ-ONLY OBSERVATION OF THE FITTED PARAMETERS, and nothing else.
+	//
+	//    Every other Network exposes its weights to a subclass already:
+	//    OneHiddenNet keeps hW and oW protected, and Logistic publishes W
+	//    through getBetas(). BackProp was the one model whose parameters no
+	//    derived class could read, so a benchmark subclass could not compute a
+	//    parameter-state identity for it -- and a comparison whose arms cannot
+	//    be shown to start from the same weights is not a comparison
+	//    (tests/optimizer/README.md).
+	//
+	//    DELIBERATELY NARROW. It returns the AUTHORITATIVE weights by const
+	//    reference and reaches nothing else: WeightsUp, WeightsAccumulate,
+	//    Gradient and vpack are training workspace, not parameters, and stay
+	//    private. Widening the whole private section instead would have exposed
+	//    all four as mutable state to every future subclass, which is a larger
+	//    promise than anything here needs.
+	//
+	//    Costs nothing and changes nothing: const, non-virtual, inline, no
+	//    allocation, no copy, and no production caller. It cannot appear in a
+	//    hot loop because nothing in src/ calls it (rule 7).
+	const vector< Matrix< double > >& weightMatrices() const { return Weights; }
+
 private:
 	vector< unsigned > nLayer; // number of nodes on each hidden layer
 		
