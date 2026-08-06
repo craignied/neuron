@@ -64,6 +64,8 @@ digraph neuron_objects {
     Clone [label="netclone"];
     Auto [label="autoalgo"];
     Plateau [label="PlateauDetector"];
+    LBFGS [label="LBFGS"];
+    LBFGSObjective [label="LBFGSObjective"];
 
     ModelApi [label="Model API"];
     IterativeApi [label="Iterative API"];
@@ -104,5 +106,7 @@ digraph neuron_objects {
     Factory -> NetworkApi [label="constructs"];
     Clone -> NetworkApi [label="clones"];
     Auto -> NetworkApi [label="probes clones"];
+    NetworkApi -> LBFGS [label="composes"];
+    LBFGS -> LBFGSObjective [label="evaluates through"];
   }
 }

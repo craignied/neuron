@@ -1,14 +1,16 @@
-# GUI / CLI parity matrix
+# GUI / REST contract and legacy CLI coverage
 
-**This file is a contract, not a report.** Standing rule 5 (CLAUDE.md): every
-capability in the CLI menu interface MUST have a GUI equivalent — a page control
-*and* an HTTP API parameter. A CLI menu option with no GUI equivalent is a bug.
-Any change to the menus (`src/neuron.cpp`) or the GUI (`src/gui.cpp`,
-`src/gui_page.html`) updates the matching row here in the same commit.
+**This file is a contract, not a new-work checklist for the CLI.** Standing rule
+5 freezes the legacy interactive menus permanently: do not add menu entries,
+prompts, options, or equivalents for new features. The menu remains only for
+compatibility, scripted operational use, oracle comparison, and regression
+testing.
 
-The CLI is the authoritative feature list because its menus are frozen; the GUI
-is the primary human interface and must be a superset. "API param" is the field
-`POST` accepts; "GUI control" is the page element that sends it.
+The REST API is authoritative for every new interactive capability. The GUI is
+its primary human client and receives a visible control when one is appropriate.
+A GUI/REST surface change updates this file in the same commit. The tables below
+retain the completed menu-to-GUI mapping as historical compatibility evidence;
+they do not authorize or require further work in `src/neuron.cpp`.
 
 **How every API parameter below is read** is one contract, not per-row detail:
 whitespace-trimmed and fully consumed; whole numbers with no wrap and no
@@ -26,8 +28,8 @@ fails the build if it is not.**
 Status: ✅ present · 🔲 gap (must be closed before the change lands) · — n/a.
 As of 2026-07-19 (second audit — the first missed the dataset characteristics,
 ROC-reporting, and DFA-guesses rows below, all closed the same day) there are
-**no gaps**. A new 🔲 row appears only when a menu/GUI change opens a gap, and
-must be closed (turned ✅) in the same change.
+**no legacy-coverage gaps**. New capabilities belong in the REST/GUI section and
+have no CLI equivalent by design.
 
 ## Main menu
 
@@ -126,15 +128,16 @@ when it is about to be displayed is the same bug.
 | 3+4 Logging toggles | Model panel's log toggles (sent along) | `POST /api/dfa` `log_lastop=`,`log_history=` | ✅ |
 | (after run) Save the DFA's guesses | DFA train/test guesses buttons | `GET /api/save/{dfa_train_guesses,dfa_test_guesses}` | ✅ |
 
-## GUI-beyond-CLI features
+## REST/GUI features added after the CLI freeze
 
-The contract is GUI ⊇ CLI: the GUI must cover every CLI menu option, but it may
-also do MORE. The CLI menus are frozen (no new features, 2026-07-14), so these
-have **no CLI equivalent by design** — that is not a parity gap.
+The CLI menus are frozen permanently. These capabilities are REST-first and have
+**no CLI equivalent by design**. All future interactive capabilities go here,
+with a GUI control where a human-facing control is appropriate.
 
 | Feature | GUI control | API | CLI |
 |---|---|---|---|
 | Automatic training-algorithm selection | Algorithm → "Auto" | `POST /api/train` `algorithm=auto` | — n/a (menus frozen) |
+| Direct L-BFGS training (GUI selection deferred until the researched optimizer set is complete) | — deferred | `POST /api/train` `algorithm=4`, optional `lbfgs_memory=`; neural, batch-only, `autostep=0` | — n/a (menus retired) |
 | Plateau auto-stop | "Auto-stop on plateau" + tol/window | `POST /api/train` `autostop=` | — n/a (menus frozen) |
 | Realtime error-vs-iteration chart | Training-error chart | `GET /api/train/status` series | — n/a (menus frozen) |
 | DFA graded ROC AUC | DFA ROC/stats panels | `POST /api/dfa` (ROC in the response) | — n/a (menus frozen) |

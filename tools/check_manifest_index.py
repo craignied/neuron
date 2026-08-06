@@ -159,6 +159,8 @@ PRINCIPAL_METHODS = {
     "Network": {
         "forward", "classAccuracy", "searchStepSize", "computeCondNum",
         "sampleTestError", "getCondNum", "getCondMaxEig", "getCondMinEig",
+        "packedSize", "packWeights", "unpackWeights", "batchObjectiveGradient",
+        "setLBFGSMemory", "getLBFGSMemory",
     },
     "OneHiddenNet": {"setHidden", "randomize", "save", "load", "pack", "innerTrainSet", "propagate"},
     "SimpleProp": {"growHidden", "removeHidden", "hiddenSaliency"},
@@ -180,6 +182,14 @@ PRINCIPAL_METHODS = {
     "delong": {"analyze", "interval", "contrast"},
     "clustered_auc": {"analyze", "interval", "contrast"},
     "autoalgo": {"pick"},
+    "LBFGSObjective": {"currentPoint", "install", "evaluate", "cancelled"},
+    "LBFGS": {
+        "constructor", "setMemory", "getMemory", "reset", "started", "iterate", "gradMax",
+        "objectiveEvaluations", "gradientEvaluations", "lineSearchFailures",
+        "historyResets", "curvatureRejections", "cancellations", "pairs",
+        "applyInverseHessian", "scaling", "pushPair", "resetHistory",
+        "copyConfigurationFrom",
+    },
     "modelfactory": {"build", "createByTypeName"},
     "obd": {"classify", "stopToken", "run"},
     "crossval": {"metricsFor", "run", "compare", "evaluateOnce"},

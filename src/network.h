@@ -17,10 +17,9 @@ class Network : public Iterative {
 public:
 	// TRAINING TYPES. 0, 1 and 2 are the frozen menu tokens -- canonical
 	//    backpropagation, conjugate gradient descent, Shanno -- and are not
-	//    changed here. TRAIN_LBFGS is RESEARCH ONLY: no menu produces it, no
-	//    GUI control or HTTP field selects it, automatic selection never probes
-	//    it, and no saved network records it. It exists so the optimizer
-	//    benchmark and tests/network/check_lbfgs.cpp can reach the prototype.
+	//    changed here. TRAIN_LBFGS is REST-selectable as algorithm=4, but no
+	//    retired menu token or GUI control is added yet. Automatic selection does
+	//    not probe it, and no saved network records it.
 	static const unsigned TRAIN_LBFGS = 3;
 	Network(); // default constructor
 	virtual ~Network(); // destructor
@@ -55,6 +54,11 @@ public:
 	// Set training type
 	void setTrainingType( unsigned typeValue ) { trainingType = typeValue; }
 	unsigned getTrainingType() { return trainingType; }
+
+	// Persistent L-BFGS configuration. Working history is reset for every
+	//    train() run; only this memory length survives copies and continuations.
+	void setLBFGSMemory( const unsigned m ) { lbfgs.setMemory( m ); }
+	unsigned getLBFGSMemory() const { return lbfgs.getMemory(); }
 
 	// Sets/gets if automatic stepsize selection is used in network
 	void setAutoStepSize( const bool flag ) { automaticStepSizeFlag = flag; }
@@ -225,7 +229,7 @@ protected:
 	//    exemplar loop it runs.
 	virtual double batchObjectiveGradient( vector< double >& packedRawGradient );
 
-	// --- The L-BFGS prototype (research only; see lbfgs.h) ----------------
+	// --- The L-BFGS optimizer (REST-selectable; see lbfgs.h) ---------------
 	//
 	//    Network COMPOSES the optimizer and supplies model evaluation through
 	//    the boundary above; LBFGS owns the algorithm and all of its state;

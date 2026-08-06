@@ -301,12 +301,19 @@ def group_train():
     accepted( "train: change", train( change = "0.001" ) )
     accepted( "train: errwindow", train( errwindow = "5" ) )
     accepted( "train: gradmax", train( gradmax = "0.01" ) )
+    accepted( "train: L-BFGS with explicit memory", train( algorithm = "4",
+        lbfgs_memory = "10", batch_epoch = "1", autostep = "0" ) )
 
     # PIN: the domain refusals that already exist
     refused( "train: maxiter below 1", train( maxiter = "0" ),
         "max iterations must be at least 1" )
-    refused( "train: algorithm out of range", train( algorithm = "4" ),
-        "algorithm must be 1, 2, 3 or auto" )
+    refused( "train: algorithm out of range", train( algorithm = "5" ),
+        "algorithm must be 1, 2, 3, 4 or auto" )
+    refused( "train: L-BFGS memory below 1", train( algorithm = "4",
+        lbfgs_memory = "0", batch_epoch = "1", autostep = "0" ),
+        "lbfgs_memory must be at least 1" )
+    refused( "train: L-BFGS memory on another algorithm", train( algorithm = "1",
+        lbfgs_memory = "10" ), "lbfgs_memory is only valid with algorithm=4" )
     refused( "train: eta above 1", train( eta = "2" ),
         "learning rate must be greater than 0 and at most 1" )
     refused( "train: errwindow of 1", train( errwindow = "1" ),
@@ -328,6 +335,9 @@ def group_train():
         "maxiter: '1junk' is not a whole number" )
     refused( "train: algorithm=1x", train( algorithm = "1x" ),
         "algorithm: '1x' is not a whole number" )
+    refused( "train: lbfgs_memory=10x", train( algorithm = "4",
+        lbfgs_memory = "10x", batch_epoch = "1", autostep = "0" ),
+        "lbfgs_memory: '10x' is not a whole number" )
     refused( "train: eta=0.5junk", train( eta = "0.5junk" ),
         "eta: '0.5junk' is not a number" )
     refused( "train: printcount=3junk", train( printcount = "3junk" ),

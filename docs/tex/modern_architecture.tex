@@ -106,8 +106,10 @@ ownership half.
 
 \subsection{Command line}
 
-The interactive menus remain the authoritative feature inventory and
-are intentionally frozen.  Reproducible command-line runs feed a
+The retired interactive menus remain available for compatibility, scripted
+legacy operation, and regression testing, but receive no further feature work.
+The REST API is authoritative for new interactive capabilities. Reproducible
+command-line runs feed a
 complete answer file to the engine and always provide a seed:
 
 \begin{verbatim}
@@ -130,12 +132,11 @@ analysis, report, and save workflow.  It includes realtime training
 progress and ROC plots.  The server is loopback-only: it is a local
 application, not a network service.
 
-GUI and CLI parity is a contract.  Every CLI capability must have both
-a page control and an HTTP parameter.  The maintained option-by-option
-map is \texttt{docs/gui\_cli\_parity.md}.  Features added beyond the
-frozen CLI, including automatic optimizer selection, OBD sizing, and
-cross-validation, are available through both the GUI and the HTTP
-interface.
+The REST contract is the implementation surface for new work, with a GUI
+control added when a capability needs a human-facing control. The maintained
+map is \texttt{docs/gui\_cli\_parity.md}; it preserves the completed legacy
+coverage audit and records newer REST/GUI capabilities. No new feature receives
+a menu equivalent.
 
 \subsection{Python tools}
 

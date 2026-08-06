@@ -12,8 +12,10 @@ the work is active.
 
 Determine, by implementation-quality prototypes and reproducible wall-clock evidence,
 which new learning algorithms materially reduce neuron's training time while reaching a
-comparable numerical endpoint. Integrate only measured winners. Preserve existing
-statistical results, stopping semantics, goldens, oracle behavior, CLI/GUI parity, and the
+comparable numerical endpoint. Integrate every correct, stable, eligible retained
+algorithm; use measurements to set recommendations and defaults, not to hide valid
+choices. Preserve existing
+statistical results, stopping semantics, goldens, oracle behavior, REST/GUI contracts, and the
 project's numerical vocabulary.
 
 The execution order is:
@@ -25,8 +27,9 @@ The execution order is:
 5. Use safeguarded BB as a low-cost additional candidate/control when it advances the
    neural decision; investigate other neural candidates when evidence justifies them.
 6. Decide retain/reject per candidate from matched-endpoint and held-out evidence.
-7. Integrate measured winners into the public CLI, GUI, API, automatic selection,
-   Manifest, and tests.
+7. Integrate every correct, stable, eligible retained implementation into the
+   REST API and GUI, with benchmarks guiding defaults and bounded automatic
+   selection rather than hiding algorithms. Do not extend the legacy CLI menus.
 8. Consider LM, Adam/AMSGrad/Nesterov, or SVRG when scaled neural evidence identifies an
    workload that justifies them.
 
@@ -948,7 +951,7 @@ Preserve existing meanings:
 
 Append new stable tokens only for retained algorithms. Do not renumber existing choices.
 Centralize cold-path token/name/eligibility mapping in the lowest appropriate service so
-CLI, GUI, auto-selection, OBD, CV, and reports cannot drift, while keeping hot optimizer
+REST, GUI, auto-selection, OBD, CV, and reports cannot drift, while keeping hot optimizer
 dispatch direct and visible.
 
 ### Family eligibility
@@ -982,11 +985,11 @@ machine-readable. Test identical starts, clean per-run state, equal declared bud
 cancellation, divergence, tie policy, and the fact that auto is a selection procedure—not
 an optimizer.
 
-### CLI, GUI, and API parity
+### REST and GUI contract
 
 In the same commit as each public option:
 
-- update the CLI algorithm menu and bounds;
+- do not change or extend the legacy CLI menus;
 - update the GUI visible algorithm selector and disable/refuse incompatible controls;
 - update `/api/train` strict parsing and field-specific refusal messages;
 - update optimizer names in JSON, progress, reports, OBD, CV, and locked refit artifacts;
@@ -1119,8 +1122,8 @@ A candidate may become public only if all are true:
 7. Raw-gradient stopping semantics remain correct.
 8. Cancellation, ceiling, quiet mode, cloning/config copy, per-run reset, reports, OBD,
    CV, stepwise, and auto-selection remain defined.
-9. The public benefit justifies permanent parity, documentation, and test burden.
-10. Manifest, index, GUI/CLI parity, and operational docs are synchronized.
+9. The public benefit justifies permanent REST/GUI, documentation, and test burden.
+10. Manifest, index, REST/GUI contract, and operational docs are synchronized.
 11. New guards have fail-proven sabotage and fresh recompilation evidence.
 12. Relevant full gates pass in Release.
 

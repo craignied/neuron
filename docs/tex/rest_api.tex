@@ -268,8 +268,13 @@ implicitly.
 
 \begin{description}
 \item[\texttt{algorithm}] \texttt{1} for canonical gradient descent,
-\texttt{2} for conjugate gradient, \texttt{3} for Shanno, or
-\texttt{auto} to probe and choose.
+\texttt{2} for conjugate gradient, \texttt{3} for Shanno, \texttt{4} for
+L-BFGS, or \texttt{auto} to probe canonical, conjugate gradient, and Shanno.
+L-BFGS is neural-only, requires \texttt{batch\_epoch=1} and
+\texttt{autostep=0}, and is not yet part of \texttt{auto}.
+\item[\texttt{lbfgs\_memory}] Optional positive L-BFGS history length $m$;
+accepted only with \texttt{algorithm=4}. Omission retains the current
+configuration (five on a new model). Working history resets at each run.
 \item[\texttt{maxiter}] Required positive iteration ceiling.
 \item[\texttt{seed}] Seed used by training and automatic selection.
 \item[\texttt{async}] \texttt{1} returns immediately and publishes
@@ -295,7 +300,8 @@ statistics.  An asynchronous call returns acceptance immediately; the
 same complete result later appears in status.  The response separates
 operation success from fit validity with fields including
 \texttt{converged}, \texttt{ceilingExhausted}, and
-\texttt{stopReason}.
+\texttt{stopReason}. It also returns the one-based \texttt{algorithm}, stable
+\texttt{algorithmName}, and, for L-BFGS, \texttt{lbfgsMemory}.
 
 \section{Long-job control}
 

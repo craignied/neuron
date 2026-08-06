@@ -493,6 +493,10 @@ void Network::runHeader( ostream& outputStream )
 		case 2:
 			outputStream << "Training algorithm is Shanno" << endl;
 			break;
+		case TRAIN_LBFGS:
+			outputStream << "Training algorithm is L-BFGS (memory "
+				<< lbfgs.getMemory() << ")" << endl;
+			break;
 	}
 
 	if ( batchEpochFlag ) // batch/epoch learning

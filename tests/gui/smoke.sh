@@ -1064,6 +1064,32 @@ curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=100&seed=42" \
 curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
 curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=50&batch_epoch=0" \
     | grep -q '"ok":false' || fail "batch_epoch=0 on logistic must be refused"
+curl -s -X POST "$URL/api/train" -d "algorithm=4&maxiter=1&batch_epoch=1&autostep=0" \
+    | grep -q 'neural models only' || fail "L-BFGS on logistic must be refused by eligibility"
+
+# L-BFGS is a REST-first neural capability. It has no retired-menu or GUI
+# selector yet, but algorithm=4 must run the real optimizer, report its stable
+# name/configuration, and refuse the two incompatible training modes up front.
+curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=2" > /dev/null
+curl -s -X POST "$URL/api/randomize" -d "seed=42" > /dev/null
+curl -s -X POST "$URL/api/train" \
+    -d "algorithm=4&lbfgs_memory=10&maxiter=2&batch_epoch=1&autostep=0" \
+    > lbfgs_rest.json
+$PY - <<'PY' || fail "REST L-BFGS selection/result contract"
+import json
+d = json.load(open("lbfgs_rest.json"))
+assert d["ok"] is True, d
+assert d["algorithm"] == 4, d
+assert d["algorithmName"] == "L-BFGS", d
+assert d["lbfgsMemory"] == 10, d
+assert "Training algorithm is L-BFGS (memory 10)" in d["output"], d["output"][:300]
+PY
+curl -s -X POST "$URL/api/train" \
+    -d "algorithm=4&maxiter=1&batch_epoch=0&autostep=0" \
+    | grep -q 'requires batch_epoch=1' || fail "L-BFGS online mode must be refused"
+curl -s -X POST "$URL/api/train" \
+    -d "algorithm=4&maxiter=1&batch_epoch=1&autostep=1" \
+    | grep -q 'requires autostep=0' || fail "L-BFGS autostep must be refused"
 
 # --- Discriminant function analysis (GUI/CLI parity, main menu 4) ----------
 # Linear and quadratic DFA on the loaded discrete dataset -> report + ROC +

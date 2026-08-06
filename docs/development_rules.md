@@ -51,11 +51,19 @@ size, and `Singular` for numerical non-invertibility. Preserve two deliberate
 contracts: `dotprod(input, output)` permits a shorter destination prefix, and
 both empty column selections are legal.
 
-## 5. Preserve interface parity
+## 5. Develop REST and GUI only; freeze the legacy menus
 
-The legacy menu surface is frozen and authoritative. Every capability needs a
-GUI control and API parameter. New GUI-only evaluation features must be labeled
-as extensions. The parity matrix is the enforcement document.
+Do no further feature work on the legacy CLI menu interface. It remains frozen
+for compatibility, scripted operational use, oracle comparison, and regression
+testing; it is not the design target for new capabilities. Do not add menu
+entries, prompts, options, or menu-only configuration.
+
+Every new interactive capability is designed and implemented through the REST
+API first. Add a visible GUI control when the capability needs a human-facing
+control, and keep that control and its REST contract synchronized. The historical
+menu-to-GUI matrix remains evidence that the retired menu surface is covered,
+while its forward-looking section records REST/GUI capabilities that intentionally
+have no menu equivalent.
 
 ## 6. Give each mechanism one owner
 

@@ -1228,6 +1228,11 @@ string runTrainingAndBuildResult( bool continued, const string& autoJson,
 	//    falls through to its normal epilogue on an observer stop)
 	Iterative* iter = dynamic_cast< Iterative* >( modelPtr.get() );
 	string stopReason = iter ? stopReasonName( iter->getStopReason() ) : "none";
+	Network* trainedNet = dynamic_cast< Network* >( modelPtr.get() );
+	unsigned trainedType = trainedNet ? trainedNet->getTrainingType() : 0;
+	const char* trainedName = trainedType == 0 ? "Canonical"
+		: trainedType == 1 ? "CGD" : trainedType == 2 ? "Shanno"
+		: trainedType == Network::TRAIN_LBFGS ? "L-BFGS" : "unknown";
 
 	ostringstream msg;
 	msg.precision( 6 );
@@ -1264,7 +1269,11 @@ string runTrainingAndBuildResult( bool continued, const string& autoJson,
 	string autoField = autoJson.empty() ? "" : ( ",\"autoAlgo\":" + autoJson );
 
 	return string( "{\"ok\":true,\"message\":\"" ) + jsonEscape( msg.str() )
-		+ "\",\"stopReason\":\"" + stopReason + "\"" + fitFields
+		+ "\",\"algorithm\":" + to_string( trainedType + 1 )
+		+ ",\"algorithmName\":\"" + trainedName + "\""
+		+ ( trainedType == Network::TRAIN_LBFGS
+			? ",\"lbfgsMemory\":" + to_string( trainedNet->getLBFGSMemory() ) : "" )
+		+ ",\"stopReason\":\"" + stopReason + "\"" + fitFields
 		// The held-out set the live error chart sampled, named by the engine rule
 		//    (DataSet::monitorSet) so the legend matches what was watched.
 		+ ",\"monitor\":\"" + dataPtr->monitorSetName() + "\""
@@ -1363,7 +1372,7 @@ string handleTrain( const httplib::Request& req )
 	if ( !( bad = readBool( req, "async", async ) ).empty() )
 		return jsonMsg( false, bad );
 
-	// algorithm=auto probes all three optimizers from identical weights and
+	// algorithm=auto probes the established automatic set from identical weights and
 	//    adopts the winner (autoalgo.h) before the real run
 	bool autoSelect = ( algoStr == "auto" );
 	unsigned algorithm = 0;
@@ -1373,10 +1382,19 @@ string handleTrain( const httplib::Request& req )
 
 	if ( !modelPtr )
 		return jsonMsg( false, "create a model first" );
-	if ( algorithm < 1 || algorithm > 3 )
-		return jsonMsg( false, "algorithm must be 1, 2, 3 or auto" );
+	if ( algorithm < 1 || algorithm > 4 )
+		return jsonMsg( false, "algorithm must be 1, 2, 3, 4 or auto" );
 	if ( maxIter < 1 )
 		return jsonMsg( false, "max iterations must be at least 1" );
+
+	bool haveLbfgsMemory = given( req, "lbfgs_memory" );
+	unsigned lbfgsMemory = 0;
+	if ( !( bad = readUnsigned( req, "lbfgs_memory", lbfgsMemory ) ).empty() )
+		return jsonMsg( false, bad );
+	if ( haveLbfgsMemory && lbfgsMemory < 1 )
+		return jsonMsg( false, "lbfgs_memory must be at least 1" );
+	if ( haveLbfgsMemory && algorithm != 4 )
+		return jsonMsg( false, "lbfgs_memory is only valid with algorithm=4" );
 
 	// The CLI's hard constraint: logistic regression is batch/epoch by
 	//    definition (logistic.cpp sets it in the constructor and the menu
@@ -1470,11 +1488,31 @@ string handleTrain( const httplib::Request& req )
 	if ( given( req, "printcount" ) && printCount < 1 )
 		return jsonMsg( false, "print count must be at least 1" );
 
+	// L-BFGS is a smooth full-batch neural optimizer. Refuse incompatible
+	//    configuration before applying any field, rather than starting a run
+	//    that throws only after randomization or another partial mutation.
+	Network* net = dynamic_cast< Network* >( modelPtr.get() );
+	if ( algorithm == 4 )
+	{
+		if ( dynamic_cast< Logistic* >( modelPtr.get() ) )
+			return jsonMsg( false,
+				"algorithm=4 (L-BFGS) is available for neural models only" );
+		bool effectiveBatch = req.has_param( "batch_epoch" )
+			? batchEpoch : net->getBatchEpoch();
+		bool effectiveAutostep = req.has_param( "autostep" )
+			? haveAutostep : net->getAutoStepSize();
+		if ( !effectiveBatch )
+			return jsonMsg( false,
+				"algorithm=4 (L-BFGS) requires batch_epoch=1" );
+		if ( effectiveAutostep )
+			return jsonMsg( false,
+				"algorithm=4 (L-BFGS) requires autostep=0" );
+	}
+
 	// Nothing above this line has touched the model. Everything below applies.
 	if ( seeded )
 		util::set_seed( seed );
 
-	Network* net = dynamic_cast< Network* >( modelPtr.get() );
 	Iterative* iter = dynamic_cast< Iterative* >( modelPtr.get() );
 
 	// Training does NOT re-randomize: a second Train continues from the
@@ -1536,6 +1574,8 @@ string handleTrain( const httplib::Request& req )
 		if ( !given( req, "gradmax" ) ) iter->setGradStop( false );
 		else { iter->setGradStop( true ); iter->setGradMaxLimit( gradMax ); }
 	}
+	if ( haveLbfgsMemory )
+		net->setLBFGSMemory( lbfgsMemory );
 
 	if ( !autoSelect ) // auto: each probe sets its own; the winner's sticks
 		net->setTrainingType( algorithm - 1 );

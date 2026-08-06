@@ -11,12 +11,13 @@ user what the numbers mean, not just what they are.
 
 Ground rules:
 
-- **GUI/CLI parity is a hard contract (standing rule 5).** Every capability in
-  the CLI menu interface must have a GUI equivalent — a page control *and* an
-  HTTP API parameter. The GUI is the primary human interface; the CLI menus are
-  frozen but authoritative. A CLI option with no GUI equivalent is a bug. If you
-  touch the menus or the GUI, update **`docs/gui_cli_parity.md`** (the menu ↔
-  control ↔ API matrix) in the same commit.
+- **No further CLI-menu development (standing rule 5).** The legacy interactive
+  menus are frozen for compatibility, scripted operational use, and regression
+  testing only. Do not add menu entries, prompts, options, or equivalents for
+  new features. Build every new interactive capability REST-first, add a GUI
+  control where appropriate, and keep the GUI and REST contract synchronized.
+  Update **`docs/gui_cli_parity.md`** in the same commit as a GUI or REST surface
+  change; its legacy matrix is historical coverage, not a new-work checklist.
 - **If you are about to write engine code, read standing rules 4, 6 and 7 in
   `CLAUDE.md` first.** In short: the class layer (`Matrix`, `vector_ops`,
   `Population`) is the numerical vocabulary and code must read against the
@@ -246,13 +247,14 @@ OS-assigned port.
 ## 3b. The GUI and loopback API (`neuron --gui`)
 
 `./build/neuron --gui` starts the browser interface on loopback; use
-`--no-browser` for scripted smoke work. The GUI exposes the frozen CLI surface
-through page controls and HTTP fields, plus documented evaluation extensions.
+`--no-browser` for scripted smoke work. The REST API is the authoritative surface
+for new interactive capabilities, and the GUI is its primary human client. The
+retired menu remains available only for compatibility and scripted legacy runs.
 
 Do not load the entire API contract for an unrelated training task. For GUI or
 HTTP work, read these focused authorities:
 
-- `docs/gui_cli_parity.md`: menu ↔ page control ↔ API field contract.
+- `docs/gui_cli_parity.md`: legacy coverage plus the current GUI ↔ REST contract.
 - Manifest REST chapter: endpoint fields, defaults, strict parsing, response and
   busy/error behavior.
 - `docs/cross_validation.md` and `docs/evaluation_report_spec.md`: CV, nested
@@ -277,8 +279,9 @@ Operational invariants that belong in every GUI session:
 - The GUI and API use one-based input-column numbers; C++ engine methods use
   zero-based positions.
 - GUI actions are appended to `neuron_actions.log` in the run directory.
-- If a menu or GUI/API capability changes, update `docs/gui_cli_parity.md` in the
-  same commit and exercise both blocking and asynchronous forms where applicable.
+- Do not extend the menus. If a GUI or REST capability changes, update
+  `docs/gui_cli_parity.md` in the same commit and exercise both blocking and
+  asynchronous forms where applicable.
 
 For agents, prefer the scripted CLI sessions in §2 unless the task specifically
 concerns GUI/API behavior. The verified end-to-end API gate is

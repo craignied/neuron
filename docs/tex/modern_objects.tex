@@ -342,12 +342,21 @@ specification later in this chapter:
 \index{Network!batchObjectiveGradient}
 \index{Network!packedSize}
 \index{Network!NoPackedBoundary}
+\index{Network!NoPackedBoundary!what}
+\index{Network!Evaluator}
+\index{Network!Evaluator!currentPoint}
+\index{Network!Evaluator!install}
+\index{Network!Evaluator!evaluate}
+\index{Network!Evaluator!cancelled}
+\index{Network!setLBFGSMemory}
+\index{Network!getLBFGSMemory}
 \index{Packed parameter boundary}
 These four \texttt{protected} contracts exist because a genuine Wolfe line
 search must evaluate the objective at \emph{trial} points, and
 \texttt{innerTrainSet()} cannot serve as that evaluator: it updates the weights.
-They are not a public capability and have no menu, GUI or API surface; the sole
-consumer is \texttt{Network::Evaluator}, which serves \texttt{LBFGS}.
+They are protected implementation contracts rather than REST fields; their sole
+consumer is \texttt{Network::Evaluator}, which serves \texttt{LBFGS}. The
+optimizer using them is publicly selectable through REST.
 
 \begin{itemize}
 \item \texttt{virtual unsigned packedSize() const}: the number of doubles a
@@ -379,7 +388,17 @@ The default implementations refuse: \texttt{packedSize()} returns zero and the
 other three throw \texttt{Network::NoPackedBoundary}.  Refusal is the point --- an
 empty parameter vector is a value a caller would act on, and a packed optimizer
 handed one would report that it had converged.  \texttt{Logistic} deliberately
-does not implement the boundary.
+does not implement the boundary. The exception's public
+\texttt{const char* what() const} returns a stable explanation of the missing
+boundary.
+
+\texttt{Network::Evaluator} is the non-owning adapter between one
+\texttt{Network} and \texttt{LBFGSObjective}. Its public constructor
+\texttt{explicit Evaluator(Network\& n)} stores that reference;
+\texttt{currentPoint(w)}, \texttt{install(w)}, and \texttt{evaluate(g)} forward
+to the three protected boundary methods above, while \texttt{cancelled()}
+consults the network's observer. It owns no algorithm state and is created once
+per outer L-BFGS iteration.
 
 The batch separate-gradient path of \texttt{OneHiddenNet::innerTrainSet()} and
 \texttt{BackProp::innerTrainSet()} consumes the same authoritative evaluation,
@@ -1136,26 +1155,47 @@ claim that the selected optimizer is globally best.
 \index{LBFGSObjective}
 \index{Optimizer!limited-memory BFGS}
 \index{LBFGS!iterate}
+\index{LBFGS!constructor}
+\index{LBFGS!published constants}
 \index{LBFGS!setMemory}
+\index{LBFGS!getMemory}
 \index{LBFGS!reset}
+\index{LBFGS!started}
 \index{LBFGS!applyInverseHessian}
+\index{LBFGS!scaling}
 \index{LBFGS!pushPair}
+\index{LBFGS!resetHistory}
+\index{LBFGS!copyConfigurationFrom}
+\index{LBFGS!gradMax}
+\index{LBFGS!objectiveEvaluations}
+\index{LBFGS!gradientEvaluations}
+\index{LBFGS!lineSearchFailures}
+\index{LBFGS!historyResets}
+\index{LBFGS!curvatureRejections}
+\index{LBFGS!cancellations}
+\index{LBFGS!pairs}
 \index{LBFGS!Ineligible}
+\index{LBFGS!Ineligible!what}
+\index{LBFGSObjective!currentPoint}
+\index{LBFGSObjective!install}
+\index{LBFGSObjective!evaluate}
+\index{LBFGSObjective!cancelled}
 \index{Wolfe conditions}
 \index{Line search!strong Wolfe}
 \index{Two-loop recursion}
-\texttt{LBFGS} is a \emph{research-only} limited-memory BFGS optimizer.  It is
-not selectable from the training menu, the GUI, the HTTP API or automatic
-selection, it is never written to a saved network, and it is not a public
-capability of the engine.  It is reachable only through
-\texttt{Network::setTrainingType(Network::TRAIN\_LBFGS)}, a training type no
-menu produces, so that the optimizer benchmark and
-\texttt{tests/network/check\_lbfgs.cpp} can measure it.  This section documents
-what exists in the source; it does not announce a user-visible feature.
+\texttt{LBFGS} is neuron's retained limited-memory BFGS optimizer for smooth,
+full-batch neural objectives. It is selectable through
+\texttt{POST /api/train} with \texttt{algorithm=4}; the optional
+\texttt{lbfgs\_memory} field selects $m$. The retired menus are unchanged, the
+GUI and automatic selector do not include it yet, and saved networks contain
+weights and architecture rather than optimizer history. Direct C++ callers use
+\texttt{Network::setTrainingType(Network::TRAIN\_LBFGS)}.
 
 \paragraph{Published derivation.}  The limited-memory update is Nocedal
-(1980), \emph{Mathematics of Computation} \textbf{35}(151):773--782, and Liu and
-Nocedal (1989), \emph{Mathematical Programming} \textbf{45}:503--528.  The
+(1980), \emph{Mathematics of Computation} \textbf{35}(151):773--782,
+\url{https://doi.org/10.1090/S0025-5718-1980-0572855-7}, and Liu and
+Nocedal (1989), \emph{Mathematical Programming} \textbf{45}:503--528,
+\url{https://doi.org/10.1007/BF01589116}.  The
 two-loop recursion is Nocedal and Wright, \emph{Numerical Optimization}, 2nd
 ed.\ (Springer, 2006), Algorithm 7.4, p.~178; the initial inverse-Hessian
 scaling $\gamma_k = ({\bf s}_{k-1}^T{\bf y}_{k-1}) /
@@ -1163,7 +1203,8 @@ scaling $\gamma_k = ({\bf s}_{k-1}^T{\bf y}_{k-1}) /
 loop is Algorithm 7.5, p.~179.  The line search is a \emph{complete strong-Wolfe
 search}: Algorithm 3.5 (bracketing, p.~60) with Algorithm 3.6 (\texttt{zoom},
 p.~61), enforcing sufficient decrease (3.6a) and the two-sided curvature bound
-(3.7b) of Wolfe (1969), \emph{SIAM Review} \textbf{11}(2):226--235.  Armijo
+(3.7b) of Wolfe (1969), \emph{SIAM Review} \textbf{11}(2):226--235,
+\url{https://doi.org/10.1137/1011036}.  Armijo
 backtracking is deliberately not implemented: it never tests curvature and
 therefore cannot guarantee ${\bf s}^T{\bf y} > 0$.
 
@@ -1202,6 +1243,8 @@ that forwards to the protected packed boundary of section
 \ref{current_established_objects}.  It is not a general callback framework:
 
 \begin{itemize}
+\item \texttt{virtual \string~LBFGSObjective()}: permits destruction through
+      the interface and owns no resource itself.
 \item \texttt{virtual void currentPoint(vector<double>\& w) const}: the
       currently installed parameters, packed.
 \item \texttt{virtual void install(const vector<double>\& w)}: installs packed
@@ -1216,6 +1259,16 @@ that forwards to the protected packed boundary of section
 \texttt{LBFGS} provides:
 
 \begin{itemize}
+\item \texttt{LBFGS()}: constructs empty working history with memory length
+      five and zero evaluation/failure counters.
+\item \texttt{static const double C1, C2}: strong-Wolfe sufficient-decrease and
+      curvature constants, $10^{-4}$ and $0.9$.
+\item \texttt{static const double ALPHA\_MAX, EXPAND}: line-search bracketing
+      ceiling $10^{10}$ and expansion factor $2$.
+\item \texttt{static const double CURV\_EPS}: relative curvature-pair floor
+      $10^{-10}$.
+\item \texttt{static const unsigned MAX\_EVALS}: twenty trial evaluations per
+      line search.
 \item \texttt{void setMemory(unsigned m)}: sets the history length and resets
       the working state.  Throws \texttt{LBFGS::Ineligible} when $m$ is zero.
 \item \texttt{unsigned getMemory() const}: the configured history length.
@@ -1254,6 +1307,17 @@ that forwards to the protected packed boundary of section
       working history.
 \end{itemize}
 
+The nested exception provides
+\texttt{explicit Ineligible(const char* why)}, which stores the static reason
+text, and \texttt{const char* what() const}, which returns it. It is used only
+for configuration refusals described below.
+
+\texttt{Network} additionally exposes
+\texttt{void setLBFGSMemory(unsigned m)} and
+\texttt{unsigned getLBFGSMemory() const}. The setter applies the same nonzero
+validation as \texttt{LBFGS::setMemory}; the getter returns persistent
+configuration, not the number of currently stored pairs.
+
 \paragraph{Failure contract.}  \texttt{LBFGS::Ineligible} is raised, rather than
 the method silently becoming a different one, for on-line training (a
 per-exemplar update has no deterministic objective to line search), the
@@ -1271,6 +1335,23 @@ between $8.8\times$ and $13.0\times$ faster than Shanno --- the incumbent --- at
 full training-set traversals against Shanno's $123$ to $210$.  The measurements,
 their spread and their limitations are in
 \texttt{docs/learning\_research/lbfgs\_screen\_results.md}.
+
+\subsubsection{Example}
+\begin{verbatim}
+Network& net = fittedNeuralTemplate;
+net.setTrainingType(Network::TRAIN_LBFGS);
+net.setLBFGSMemory(10);
+net.setBatchEpoch(true);
+net.setAutoStepSize(false);
+double objective = net.train();
+if (!Iterative::converged(net.getStopReason())) rejectFit(objective);
+\end{verbatim}
+
+The equivalent REST request is:
+\begin{verbatim}
+POST /api/train
+algorithm=4&lbfgs_memory=10&batch_epoch=1&autostep=0&maxiter=2000
+\end{verbatim}
 
 \subsection{modelfactory and netclone}
 \index{modelfactory}

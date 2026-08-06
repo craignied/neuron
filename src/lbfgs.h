@@ -1,10 +1,9 @@
 // Header for LBFGS, the limited-memory BFGS optimizer.
 //
-// RESEARCH ONLY. Phase 3 of docs/learning_research/optimizer_implementation_plan.md.
-// It is not selectable from the CLI, the GUI, the HTTP API or automatic
-// selection, it is not written to a saved network, and it appears in no
-// Manifest capability. It is reachable through Network::setTrainingType with
-// Network::TRAIN_LBFGS, which the menus never produce.
+// Retained after Phase 3 of docs/learning_research/optimizer_implementation_plan.md.
+// It is selectable through POST /api/train as algorithm=4. The retired CLI
+// menus are unchanged, the GUI selector and automatic selection do not yet
+// include it, and it is not written to a saved network.
 //
 // SOURCES, fixed before any of this was written and recorded in full in
 // docs/learning_research/lbfgs_source_decision.md:
