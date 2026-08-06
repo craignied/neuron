@@ -28,6 +28,7 @@
 #include <chrono>
 #include <cmath>
 #include <exception>
+#include <filesystem>
 #include <iomanip>
 #include <limits>
 #include <sstream>
@@ -741,8 +742,10 @@ static inline string dataPath( const string& file )
 	//    tiny fixture to a temporary file and names it absolutely, so proving
 	//    the split mechanics does not require the prepared Civic Choice data to
 	//    exist -- a ctest case that depends on a generated directory is a ctest
-	//    case that fails on a fresh clone.
-	if ( !file.empty() && file[ 0 ] == '/' )
+	//    case that fails on a fresh clone. Use path::is_absolute so a Windows
+	//    drive-letter path (C:\...) is not rewritten under OPTBENCH_DATA_DIR;
+	//    a leading-'/' check alone is Unix-only and broke the Windows CI gate.
+	if ( std::filesystem::path( file ).is_absolute() )
 		return file;
 	return string( OPTBENCH_DATA_DIR ) + "/" + file;
 }

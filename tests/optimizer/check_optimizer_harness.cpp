@@ -35,6 +35,7 @@
 //  11. No artifacts left behind.
 
 #include <cstdio>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <sys/stat.h>
@@ -799,7 +800,12 @@ static void test_no_artifacts()
 
 static string writeSplitFixture()
 {
-	string path = "/tmp/optbench_split_fixture.txt";
+	// /tmp is not a temporary directory on Windows; the hardcoded path made
+	//    fopen fail on windows-latest CI and emptied the fixture path for the
+	//    three split-unit checks. Use the platform temp root, as
+	//    check_writelastop.cpp already does for the same reason.
+	string path = ( std::filesystem::temp_directory_path()
+		/ "optbench_split_fixture.txt" ).string();
 	FILE* f = fopen( path.c_str(), "w" );
 	if ( !f ) return "";
 	// Three inputs and a 0/1 outcome, deterministic, balanced enough for a
