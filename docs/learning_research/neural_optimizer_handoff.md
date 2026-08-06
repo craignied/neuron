@@ -28,11 +28,15 @@ Read `docs/learning_research/lbfgs_screen_results.md` for the evidence and
 `lbfgs_source_decision.md` for the algorithm, its sources and every constant.
 
 On the committed practical endpoint, from identical starting weights, the
-research-only L-BFGS prototype beat Shanno by **8.8x to 13.0x** at 6,000,
+L-BFGS implementation beat Shanno by **8.8x to 13.0x** at 6,000,
 25,000 and 100,000 rows and across four weight seeds, taking **14-20 full
 training-set traversals against Shanno's 123-210**. Every trial evaluation the
 line search makes is counted. Decision: **RETAIN** — the measurements justify
-the next phase. **No public integration was performed and none may be assumed.**
+the next phase. Its public REST integration is also complete: `POST /api/train`
+selects it with `algorithm=4`, with optional positive `lbfgs_memory`. It is
+neural, batch-only, and requires `autostep=0`. The retired CLI menus deliberately
+have no L-BFGS entry. GUI selection and automatic selection remain deferred until
+the researched optimizer set is complete.
 
 So the bar is now L-BFGS, not Shanno: roughly 15 full passes on a 4,500-row
 problem. The next candidate is **iRPROP+**, screened the same way — cheap
@@ -75,36 +79,27 @@ and do not tune it after seeing candidate results.
 - Step 0A was committed as `91ef241 Add optimizer benchmark harness`.
 - Step 0B was committed as `a9525b0 Characterize neural optimizer baseline`. It is
   deliberately partial and CLOSED; its retained result is the incumbent above.
-- Phase 3 landed as two commits: the behavior-preserving packed-boundary
-  extraction, then the research-only L-BFGS prototype, then its measurements.
+- Phase 3 landed as the behavior-preserving packed-boundary extraction, the
+  L-BFGS implementation, its measurements and retain decision, and its public
+  REST integration. The relevant commits are `6bc343b`, `4ced9c2`, `b132922`,
+  and `71b9b34`.
 - `CLAUDE.md` and the implementation plan contain the corrected neural-only scope.
 - Re-run the focused gates before committing rather than relying on this handoff;
   never copy a remembered CTest count into a status report.
 
 ## Exact next research step
 
-Prototype **L-BFGS** as a research-only neural optimizer and compare it directly with
-Shanno. Do not begin with another baseline campaign.
-
-Use staged gates:
-
-1. Implement the minimum correct packed-weight and pure objective/raw-gradient boundary
-   required by the real L-BFGS consumer; do not create a universal callback framework.
-2. Prove packing order, round-trip state, analytic/raw-gradient correctness, trial-point
-   nonmutation, line-search acceptance/failure, history reset, and the published L-BFGS
-   recurrence with deterministic tests and focused sabotage.
-3. Screen L-BFGS versus Shanno on Civic Choice 6K/h4 from identical starts to a
-   predeclared practical endpoint, with three interleaved repetitions.
-4. Reject an obvious loser immediately and record why. Do not compensate with extensive
-   tuning after seeing the comparison.
-5. If competitive, compare a small predeclared set of defensible memory/line-search
-   configurations, then scale only L-BFGS and Shanno to 25K and 100K.
-6. Only after it survives scaled timing, test a small predeclared set of weight seeds and
-   a late-stage incumbent endpoint. Then decide retain/reject.
+Prototype **iRPROP+** as a research-only neural optimizer and compare it directly with
+the retained L-BFGS implementation. Do not reopen the completed L-BFGS phase or begin
+another baseline campaign. Follow Phase 4 of the implementation plan: pin the published
+absolute-step contract before coding, prove the sign-product and rollback branches with
+deterministic tests and focused sabotage, then screen on the cheap representative
+workload before scaling a survivor.
 
 No public REST, GUI, Manifest capability, or automatic-selection change belongs in the
-research prototype, and the retired CLI menus are never extended. Public integration
-occurs only after the research acceptance gate.
+iRPROP+ research prototype. The retired CLI menus are never extended. Public REST
+integration occurs only after the research acceptance gate; GUI and automatic selection
+remain deferred until the researched optimizer set is complete.
 
 ## Subsequent candidate order
 

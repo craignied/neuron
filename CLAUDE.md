@@ -35,11 +35,15 @@ The Manifest and source are authoritative after implementation.
   `docs/learning_research/optimizer_implementation_plan.md`.  Resume at the
   first incomplete phase, and do not expose a candidate publicly before its
   matched-endpoint acceptance gate.  **Phase 0 and Phase 3 are complete:
-  Shanno was the incumbent, and the research-only L-BFGS prototype
+  Shanno was the incumbent, and the retained L-BFGS implementation
   (`src/lbfgs.*`) now beats it 8.8x-13.0x to the committed practical endpoint
-  across three row counts and four weight seeds.  It is RETAINED, and NOT
-  publicly integrated.  The next candidate is iRPROP+, screened against
-  L-BFGS.  Read `docs/learning_research/neural_optimizer_handoff.md` first.**
+  across three row counts and four weight seeds.  Its research gate and public
+  REST integration are complete: `/api/train` selects it with `algorithm=4`
+  and optionally configures `lbfgs_memory`.  The retired CLI menus are not
+  extended; GUI and automatic-selection integration remain deferred until the
+  researched optimizer set is complete.  The next candidate is iRPROP+,
+  screened against L-BFGS.  Read
+  `docs/learning_research/neural_optimizer_handoff.md` first.**
   Apply the plan's **large-workload speed scope governor** to every optimizer
   instruction: prioritize implementing and comparing plausible high-impact
   algorithms on representative scaled workloads. Existing methods establish
