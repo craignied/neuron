@@ -375,6 +375,36 @@ T dotprod( const vector< T >& v1, const vector< T >& v2 )
 		static_cast< T >( 0 ) );
 }
 
+// The scaled vector accumulation $\vec y \leftarrow \vec y + a\vec x$, written
+//    into the DESTINATION rather than through a temporary.
+// Example: axpy( -alpha, y_i, q );
+//
+//    It exists because the compound operators cannot express it without one:
+//    `y += ( x * a )` materializes a whole vector to add it away again, and the
+//    L-BFGS two-loop recursion (Nocedal & Wright Algorithm 7.4) performs this
+//    operation 2m times per outer iteration, once for every stored curvature
+//    pair. Standing rule 7 puts the elementwise loop here, in the numerical
+//    layer, rather than open-coded at the call site -- and standing rule 4 says
+//    to extend this layer when the primitive a published equation needs is
+//    missing, which this one was.
+//
+//    EQUALITY of sizes, not the prefix rule the compound operators take: an
+//    accumulation over a prefix would leave the tail silently stale, and a
+//    quasi-Newton direction with a stale tail is not a direction.
+template< class T >
+vector< T >& axpy( const T a, const vector< T >& x, vector< T >& y )
+{
+	if ( x.size() != y.size() )
+		throw nvec::SizeMismatch();
+
+	typename vector< T >::const_iterator px = x.begin();
+	typename vector< T >::iterator py = y.begin();
+	for ( ; py != y.end(); px++, py++ )
+		*py += a * *px;
+
+	return y;
+}
+
 // Method for passing a function to a vector, returning another passed vector
 // Example: func( v_in, sigmoidal(), v_out );
 template < class F, class T >

@@ -184,8 +184,147 @@ bool OneHiddenNet::load( string& filename )
 //    architecture does decide happens elsewhere: forward() pins the bias slot,
 //    setHidden() and setDataSet() size the structures, and this method reads
 //    whatever sizes it was given.
+// THE PER-EXEMPLAR PROLOGUE, shared by every training path in this class and by
+//    the trial-point evaluation the packed boundary provides. See the
+//    declaration in onehidden.h for why setError is accumulated in place rather
+//    than returned.
+void OneHiddenNet::exemplarErrorTerms( const unsigned example, double& setError )
+{
+	// Begin by forward propagating the exemplar
+	forward( Train, example );
+
+	// Calculate error for single output and add to set error
+	errorFunction E( y[ example ], o, x, errorType );
+	setError += E.value();
+
+	if ( E.boundsErr() ) // check for out of bounds error in log(o)
+		boundsErrorFlag = true;
+
+	// Regularization term for error, Manifest Methodology equation 2.1
+	//    $\frac{1}{2\sigma_w^2} \sum_{i=1}^m |{\bf y}|^2$ in
+	//    $E_k({\bf y}) = e(t^k, {\bf a}^{(m)}_k) + \frac{1}{2\sigma_w^2} \sum_{i=1}^m |{\bf y}|^2$
+	if ( weightDecayFlag )
+		setError += regularizer * ( hW.squared() + squared( oW ) );
+
+	// Calculate the error term for the output unit
+	// (Freeman & Skapura p. 102, #6)
+	// $\delta^o_{pk} = (y_{pk} - o_{pk}){f^o_k}'(net^o_{pk})$ for mean squared error
+	// Note sign is changed ( o - y ) instead of ( y - o ) to conform to Methodology
+	// Methodology equation 2.8 ($t=y$, $a=o$)
+	// $\delta^{(m)}_k = -({\bf t}_k - {\bf a}^{(m)})$ for mean squared error,
+	// or equation 2.9
+	// $\delta^{(m)}_k = -({\bf t}_k - {\bf a}^{(m)}) ./ [{\bf a}^{(m)} .* ({\bf 1} - {\bf a}^{(m)}]$
+	//    for x-entropy error,
+	// multiplied by the ${\bf Df}^{(j)}_k$ term in equation 2.7
+	// Note that if the error is x-entropy, then dE/do = (y-o)/(o(1-o))
+	//    and the o(1-o) in the denominator cancels d_sigmoidal
+	//   ($={f^o_k}'$, $={\bf Df}^{(j)}_k$) = o(1-o)
+	//    hence splitting this code into 2 lines with an if:
+	o_err = o - y[ example ];
+	if ( errorType == 0 ) // error is LMS
+		o_err *= d_sigmoidal()( o );
+
+	// If automatic stepsize selection, accumulate average error
+	if ( batchEpochFlag && automaticStepSizeFlag )
+		o_errAccumulate += o_err;
+
+	// Calculate the error terms for the hidden units
+	// (Freeman & Skapura p. 102, #7)
+	// $\delta^h_{pj} = {f^h_j}'(net^h_{pj}) \sum_k \delta^o_{pk} w^o_{kj}$
+	// Methodology equation 2.7
+	// $\delta^{(j-1)}_k =  [{\bf W}^{(j)}]^T {\bf Df}^{(j)}_k \delta^{(j)}_k$
+	// Note that using func which takes the output vector as the
+	// last argument, and *= instead of *, is the most efficient way.
+	// THE RANGE IS THE WHOLE HIDDEN LAYER, stated as a domain: elements
+	//    0 .. nHidden - 1 are the hidden units. A biased model's hO carries
+	//    one more element, the pinned bias slot, which is an input to the
+	//    output unit and has no error term of its own; an unbiased model's
+	//    hO ends at nHidden - 1, so the same range is its entire vector.
+	//    One expression, two architectures -- not a flag.
+	// The trailing *= oW relies on vector_ops' PREFIX RULE: h_err has
+	//    nHidden elements and oW has one more in the biased model, and the
+	//    surplus tail -- the output unit's own bias weight -- is ignored.
+	( func( hO, d_sigmoidal(), h_err, 0, nHidden - 1 ) *= o_err ) *= oW;
+}
+
+// THE AUTHORITATIVE BATCH OBJECTIVE AND RAW GRADIENT. One traversal, at the
+//    currently installed weights: returns the mean objective and leaves hG and
+//    oG holding the raw mean gradient, Methodology equation 2.14
+//    ${\bf g} = (1/N) \sum_{k=1}^N {\bf g}_k$.
+//
+//    This IS the batch separate-gradient half of innerTrainSet(), moved
+//    verbatim so that the legacy optimizers and a trial-point evaluation read
+//    the same numbers from the same statements. Nothing is reordered: the
+//    accumulation order, the placement of the decay term and the final division
+//    are those of the code it came from, because a behavior-preserving
+//    extraction that reassociates floating-point arithmetic is not one.
+double OneHiddenNet::batchGradient()
+{
+	unsigned nTrain = theData.getNumTrain(); // examples in training set
+
+	double setError = 0; // initialize the set error
+
+	// Zero'd accumulator containers for hidden and output weights -- expensive,
+	//    but *outside* the main loop
+	Matrix< double > hWaccumulate( hW.rows(), hW.cols(), 0 );
+	vector< double > oWaccumulate( oW.size(), 0 );
+
+	// Reset average output error accumulator for automatic stepsize selection
+	o_errAccumulate = 0.0;
+
+	// Loop through all exemplars in the set
+	for ( unsigned example = 0; example < nTrain; example++ )
+	{
+		exemplarErrorTerms( example, setError );
+
+		// Calculate the output and hidden gradients, Methodology equation 2.10
+		// ${\bf g}_k = \delta^{(j)}_k{\bf Df}^{(j)}_k[{\bf f}^{(j-1)}_k]^T$
+		oG = ( hO *= o_err );
+		hG.outprod( h_err, I );
+
+		// Weight decay, Manifest Methodology section 2.2.1
+		// right hand term $(1/\sigma_w^2)[{\bf W} \;,\; {\bf b}]$
+		if ( weightDecayFlag )
+		{
+			oG += ( oW * decay );
+			hG += ( hW * decay );
+		}
+
+		// Update the accumulators
+		oWaccumulate += oG;
+		hWaccumulate += hG;
+	}
+
+	// Set the gradients to the accumulators so that pack() & unpack() work
+	// $1/N$ in Methodology equation 2.14
+	oG = oWaccumulate / ( double ) nTrain;
+	hG = hWaccumulate / ( double ) nTrain;
+
+	return setError / nTrain; // return the calculated set error
+}
+
 double OneHiddenNet::innerTrainSet()
 {
+	// THE BATCH SEPARATE-GRADIENT PATH is one authoritative evaluation, then
+	//    the selected optimizer's direction, then the epoch's single update.
+	//    Written as an early return rather than as a branch inside the exemplar
+	//    loop below, because that is what makes the evaluation reusable at a
+	//    trial point: an evaluation that has an update after it is not one.
+	if ( batchEpochFlag && !( ( trainingType == 0 ) && !gradMaxFlag ) )
+	{
+		double setError = batchGradient();
+
+		// Whatever additional algorithm is chosen
+		engine( trainingType, iteration );
+
+		// Update the output and hidden weights
+		// Methodology equation 2.13: ${\bf y}_{t+1} = {\bf y}_t - \eta {\bf g}({\bf y}_t)$
+		oW -= ( oG * eta );
+		hW -= ( hG * eta );
+
+		return setError;
+	}
+
 	// Easier on the eyes
 	unsigned nTrain = theData.getNumTrain(), // examples in training set
 		example; // example counter
@@ -204,61 +343,7 @@ double OneHiddenNet::innerTrainSet()
 	// Loop through all exemplars in the set
 	for ( example = 0; example < nTrain; example++ )
 	{
-		// Begin by forward propagating the exemplar
-		forward( Train, example );
-
-		// Calculate error for single output and add to set error
-		errorFunction E( y[ example ], o, x, errorType );
-		setError += E.value();
-
-		if ( E.boundsErr() ) // check for out of bounds error in log(o)
-			boundsErrorFlag = true;
-
-		// Regularization term for error, Manifest Methodology equation 2.1
-		//    $\frac{1}{2\sigma_w^2} \sum_{i=1}^m |{\bf y}|^2$ in
-		//    $E_k({\bf y}) = e(t^k, {\bf a}^{(m)}_k) + \frac{1}{2\sigma_w^2} \sum_{i=1}^m |{\bf y}|^2$
-		if ( weightDecayFlag )
-			setError += regularizer * ( hW.squared() + squared( oW ) );
-
-		// Calculate the error term for the output unit
-		// (Freeman & Skapura p. 102, #6)
-		// $\delta^o_{pk} = (y_{pk} - o_{pk}){f^o_k}'(net^o_{pk})$ for mean squared error
-		// Note sign is changed ( o - y ) instead of ( y - o ) to conform to Methodology
-		// Methodology equation 2.8 ($t=y$, $a=o$)
-		// $\delta^{(m)}_k = -({\bf t}_k - {\bf a}^{(m)})$ for mean squared error,
-		// or equation 2.9
-		// $\delta^{(m)}_k = -({\bf t}_k - {\bf a}^{(m)}) ./ [{\bf a}^{(m)} .* ({\bf 1} - {\bf a}^{(m)}]$
-		//    for x-entropy error,
-		// multiplied by the ${\bf Df}^{(j)}_k$ term in equation 2.7
-		// Note that if the error is x-entropy, then dE/do = (y-o)/(o(1-o))
-		//    and the o(1-o) in the denominator cancels d_sigmoidal
-		//   ($={f^o_k}'$, $={\bf Df}^{(j)}_k$) = o(1-o)
-		//    hence splitting this code into 2 lines with an if:
-		o_err = o - y[ example ];
-		if ( errorType == 0 ) // error is LMS
-			o_err *= d_sigmoidal()( o );
-
-		// If automatic stepsize selection, accumulate average error
-		if ( batchEpochFlag && automaticStepSizeFlag )
-			o_errAccumulate += o_err;
-
-		// Calculate the error terms for the hidden units
-		// (Freeman & Skapura p. 102, #7)
-		// $\delta^h_{pj} = {f^h_j}'(net^h_{pj}) \sum_k \delta^o_{pk} w^o_{kj}$
-		// Methodology equation 2.7
-		// $\delta^{(j-1)}_k =  [{\bf W}^{(j)}]^T {\bf Df}^{(j)}_k \delta^{(j)}_k$
-		// Note that using func which takes the output vector as the
-		// last argument, and *= instead of *, is the most efficient way.
-		// THE RANGE IS THE WHOLE HIDDEN LAYER, stated as a domain: elements
-		//    0 .. nHidden - 1 are the hidden units. A biased model's hO carries
-		//    one more element, the pinned bias slot, which is an input to the
-		//    output unit and has no error term of its own; an unbiased model's
-		//    hO ends at nHidden - 1, so the same range is its entire vector.
-		//    One expression, two architectures -- not a flag.
-		// The trailing *= oW relies on vector_ops' PREFIX RULE: h_err has
-		//    nHidden elements and oW has one more in the biased model, and the
-		//    surplus tail -- the output unit's own bias weight -- is ignored.
-		( func( hO, d_sigmoidal(), h_err, 0, nHidden - 1 ) *= o_err ) *= oW;
+		exemplarErrorTerms( example, setError );
 
 		if ( !batchEpochFlag ) // classic on-line backpropagation
 		{
@@ -321,72 +406,29 @@ double OneHiddenNet::innerTrainSet()
 			}
 		}
 
-		else // off-line or batch/epoch learning
+		else // off-line or batch/epoch learning, canonical, gradient not separated
 		{
-			// Where gradient doesn't need to be separated
-			if ( ( trainingType == 0 ) && !gradMaxFlag )
-			{
-				// Accumulate output weight update, see above note
-				oWaccumulate += ( hO *= o_err );
-				// Accumulate hidden weight update, see above note
-				hWaccumulate += hWup.outprod( h_err, I );
-			}
-
-			else // calculate the gradient as a separate structure
-			{
-				// Calculate the output and hidden gradients, see above note
-				oG = ( hO *= o_err );
-				hG.outprod( h_err, I );
-
-				// See above note in on-line block
-				if ( weightDecayFlag )
-				{
-					oG += ( oW * decay );
-					hG += ( hW * decay );
-				}
-
-				// Update the accumulators
-				// Methodology equation 2.14: ${\bf g} = (1/N) \sum_{k=1}^N {\bf g}_k$
-				oWaccumulate += oG;
-				hWaccumulate += hG;
-			}
+			// The separate-gradient case returned above, through batchGradient().
+			// Accumulate output weight update, see above note
+			oWaccumulate += ( hO *= o_err );
+			// Accumulate hidden weight update, see above note
+			hWaccumulate += hWup.outprod( h_err, I );
 		}
 	} // end of loop for exemplars in training set
 
 	if ( batchEpochFlag ) // off-line or batch/epoch learning
 	{
-		// Canonical backprop without separate gradient calculation
-		if ( ( trainingType == 0 ) && !gradMaxFlag )
+		// Batch/epoch updates weights at the end, *now* multiply by eta
+		// Methodology equation 2.13: ${\bf y}_{t+1} = {\bf y}_t - \eta {\bf g}({\bf y}_t)$
+		// and $1/N$ in Methodology equation 2.14: ${\bf g} = (1/N) \sum_{k=1}^N {\bf g}_k$
+		if ( weightDecayFlag ) // once, for THIS epoch's single update
 		{
-			// Batch/epoch updates weights at the end, *now* multiply by eta
-			// Methodology equation 2.13: ${\bf y}_{t+1} = {\bf y}_t - \eta {\bf g}({\bf y}_t)$
-			// and $1/N$ in Methodology equation 2.14: ${\bf g} = (1/N) \sum_{k=1}^N {\bf g}_k$
-			if ( weightDecayFlag ) // once, for THIS epoch's single update
-			{
-				oW *= decayTerm;
-				hW *= decayTerm;
-			}
-
-			oW -= ( ( oWaccumulate *= eta ) / ( double ) nTrain ); // *=, /= for efficiency
-			hW -= ( ( hWaccumulate *= eta ) / ( double ) nTrain );
-
+			oW *= decayTerm;
+			hW *= decayTerm;
 		}
 
-		else // routines where gradient is calculated separately
-		{
-			// Set the gradients to the accumulators so that pack() & unpack() work
-			// $1/N$ in Methodology equation 2.14: ${\bf g} = (1/N) \sum_{k=1}^N {\bf g}_k$
-			oG = oWaccumulate / ( double ) nTrain;
-			hG = hWaccumulate / ( double ) nTrain;
-
-			// Whatever additional algorithm is chosen
-			engine( trainingType, iteration );
-
-			// Update the output and hidden weights
-			// Methodology equation 2.13: ${\bf y}_{t+1} = {\bf y}_t - \eta {\bf g}({\bf y}_t)$
-			oW -= ( oG * eta );
-			hW -= ( hG * eta );
-		}
+		oW -= ( ( oWaccumulate *= eta ) / ( double ) nTrain ); // *=, /= for efficiency
+		hW -= ( ( hWaccumulate *= eta ) / ( double ) nTrain );
 	}
 
 	return setError / nTrain; // return the calculated set error
@@ -422,12 +464,65 @@ void OneHiddenNet::propagate()
 	o = sigmoidal()( x );
 }
 
+// THE ONE LAYOUT: a hidden Matrix flattened row by row, then an output vector
+//    appended. Weights and gradients both use it, which is what makes a step
+//    computed in one applicable to the other. It lives in one function so the
+//    two cannot drift apart -- if this changes, both change.
+static void packPair( const Matrix< double >& m, const vector< double >& v,
+	vector< double >& destination )
+{
+	// Sized first: Matrix::toVector( v ) populates a destination that ALREADY
+	//    has the matrix's element count and refuses any other, so the size is
+	//    established here rather than by assigning a fresh vector. On the
+	//    repeated trial evaluations a line search makes, the destination is
+	//    already the right length and this reallocates nothing.
+	destination.resize( m.rows() * m.cols() );
+	m.toVector( destination );
+	destination.insert( destination.end(), v.begin(), v.end() );
+}
+
 // Convert weight gradient structure to single vector stackG
 void OneHiddenNet::pack()
 {
-	// Start by converting hidden gradients Matrix to stackG
-	stackG = hG.toVector();
+	packPair( hG, oG, stackG );
+}
 
-	// Then append output gradients vector to stackG
-	std::copy( oG.begin(), oG.end(), back_inserter( stackG ) );
+// --- The packed parameter boundary (see network.h) --------------------------
+
+unsigned OneHiddenNet::packedSize() const
+{
+	return ( hW.rows() * hW.cols() ) + ( unsigned ) oW.size();
+}
+
+void OneHiddenNet::packWeights( vector< double >& destination ) const
+{
+	packPair( hW, oW, destination );
+}
+
+void OneHiddenNet::unpackWeights( const vector< double >& source )
+{
+	// Validated ONCE, at entry. Release builds strip asserts, so this is a
+	//    throw: installing a mis-sized parameter vector would reshape the model
+	//    silently, and every number after it would describe a model nobody
+	//    asked for.
+	unsigned hidden = hW.rows() * hW.cols();
+	if ( source.size() != hidden + oW.size() )
+		throw nvec::SizeMismatch();
+
+	// Every width comes from hW's own dimensions, so the bias column needs no
+	//    flag here: setHidden() already fixed it from the concrete type.
+	vector< double > head( source.begin(), source.begin() + hidden );
+	toMatrix( hW, head );
+	oW.assign( source.begin() + hidden, source.end() );
+
+	weightsSetFlag = true;
+}
+
+double OneHiddenNet::batchObjectiveGradient( vector< double >& packedRawGradient )
+{
+	// The SAME evaluation the legacy batch path runs -- not a second copy of
+	//    the model equations -- followed by the packing only this caller needs.
+	double setError = batchGradient();
+	packPair( hG, oG, packedRawGradient );
+	return setError;
 }

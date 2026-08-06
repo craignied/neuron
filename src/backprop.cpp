@@ -337,8 +337,166 @@ double BackProp::trainSet()
 
 // Inner training set algorithm called for automatic stepsize selection
 //    calculates the gradient descent, and returns set error
+// THE PER-EXEMPLAR PROLOGUE, shared by every training path in this class and by
+//    the trial-point evaluation the packed boundary provides. See the
+//    declaration in backprop.h for why setError is accumulated in place.
+void BackProp::exemplarErrorTerms( const unsigned example, double& setError )
+{
+	// Get known single exemplar outputs vector y from known outputs Matrix
+	TrainOutput.row( example, y );
+
+	// Begin by forward propagating the exemplar
+	forward( Train, example );
+
+	// Calculate error for single output and add to set error
+	errorFunction E( y, output, xs, errorType );
+	setError += E.value();
+
+	if ( E.boundsErr() ) // check for out of bounds error in log(o)
+		boundsErrorFlag = true;
+
+	// Regularization term for error, Manifest Methodology equation 2.1
+	//    $\frac{1}{2\sigma_w^2} \sum_{i=1}^m |{\bf y}|^2$ in
+	//    $E_k({\bf y}) = e(t^k, {\bf a}^{(m)}_k) + \frac{1}{2\sigma_w^2} \sum_{i=1}^m |{\bf y}|^2$
+	if ( weightDecayFlag )
+	{
+		for ( unsigned l = 0; l < nLayers + 1; l++ )//adding for all hidden layers and output layer
+			setError += regularizer * Weights[ l ].squared();
+	}
+
+	// Calculate the error terms for the output units
+	// (Freeman & Skapura p. 102, #6)
+	// Note that using func which takes the output vector as the
+	// last argument, and *= instead of *, is the most efficient way
+	// Calculation of o_err is still the same because we still have o_err
+	// and for all hidden layers we have HErrors
+	// Note also that if the error is x-entropy, then dE/do = (y-o)/(o(1-o))
+	// and the o(1-o) in the denominator cancels d_sigmoidal = o(1-o)
+	// hence splitting this code into 2 lines with an if:
+	// Note that sign changed from y - output to output - y to conform to methodology section.
+	o_err =  output - y;
+	if ( errorType == 0 ) // error is LMS
+		o_err *= func( output, d_sigmoidal() );
+
+	unsigned nOutput = theData.getOutput(); // get number of output nodes
+
+	// If automatic stepsize selection, accumulate average error
+	if ( batchEpochFlag && automaticStepSizeFlag )
+		for( unsigned y = 0; y < nOutput; y++ )
+			o_errAccumulate += o_err[ y ];
+
+	// Calculate the error terms for the hidden units
+	// (Freeman & Skapura p. 102, #7)
+	// Note the necessity of transposing the output weight matrix Weights[]
+	// prior to performing the dot product by using dotprodt, and also
+	// in the case of bias, where size HErrors[] < Weights[] cols, that the result
+	// of dotprodt will truncate to HErrors[] size, and that the result of
+	// func, also > size HErrors[], will truncate to size of HErrors[] because
+	// *= results in the size of LHS
+	// Special case of the last hidden layer
+	Weights[ nLayers ].dotprodt( o_err, HErrors[ nLayers - 1 ] )
+		*= func( HOutputs[ nLayers - 1 ], d_sigmoidal() );
+	// For all the hidden layers execept the last layer
+	for ( int i = nLayers - 2; i > - 1; i-- )
+		Weights[ i + 1 ].dotprodt( HErrors[ i + 1 ], HErrors[ i ] )
+			*= func( HOutputs[ i ], d_sigmoidal() );
+}
+
+// THE AUTHORITATIVE BATCH OBJECTIVE AND RAW GRADIENT for this model. One
+//    traversal at the currently installed weights: returns the mean objective
+//    and leaves Gradient holding the raw mean gradient. Moved verbatim out of
+//    innerTrainSet()'s batch separate-gradient half, with nothing reordered --
+//    an extraction that reassociates floating-point arithmetic is not
+//    behavior-preserving.
+double BackProp::batchGradient()
+{
+	unsigned nTrain = theData.getNumTrain(); // examples in training set
+
+	double setError = 0; // initialize the set error
+
+	// Accumulator containers, zeroed *outside* the main loop
+	for ( unsigned k = 0; k < WeightsAccumulate.size(); k++ )
+		WeightsAccumulate[ k ].fill( 0.0 );
+
+	// Reset average output error accumulator for automatic stepsize selection
+	o_errAccumulate = 0.0;
+
+	// Loop through all exemplars in the set
+	for ( unsigned example = 0; example < nTrain; example++ )
+	{
+		exemplarErrorTerms( example, setError );
+
+		// Calculate the output and hidden gradients
+		Gradient[ nLayers ] = ( WeightsUp[ nLayers ].outprod(
+			o_err, HOutputs[ nLayers - 1 ] ) );
+		for ( unsigned j = nLayers - 1; j > 0; j-- )
+			Gradient[ j ] = ( WeightsUp[ j ].outprod(
+			HErrors[ j ], HOutputs[ j - 1 ] ) );
+		Gradient[ 0 ] = ( WeightsUp[ 0 ].outprod( HErrors[ 0 ], I ) );
+
+		// Weight decay, Manifest Methodology section 2.2.1
+		// right hand term $(1/\sigma_w^2)[{\bf W} \;,\; {\bf b}]$
+		if( weightDecayFlag )
+		{
+			Gradient[ nLayers ] += Weights[ nLayers ] * decay;
+			for ( unsigned l = nLayers - 1; l > 0; l-- )
+				Gradient[ l ] += Weights[ l ] * decay;
+			Gradient[ 0 ] += Weights[ 0 ] * decay;
+		}
+
+		// Update the accumulators
+		WeightsAccumulate[ nLayers ] += Gradient[ nLayers ];
+		for ( unsigned k = nLayers - 1; k > 0; k-- )
+		WeightsAccumulate[ k ] += Gradient[ k ];
+		WeightsAccumulate[ 0 ] += Gradient[ 0 ];
+	}
+
+	// THE THREE STRUCTURES, AND WHICH ONE THE UPDATE MUST CONSUME.
+	//
+	//    WeightsAccumulate holds the per-exemplar sum built over the epoch
+	//       above; dividing by nTrain makes it the averaged RAW batch gradient,
+	//       Methodology equation 2.14 ${\bf g} = (1/N)\sum_{k=1}^N {\bf g}_k$.
+	//    Gradient receives that average -- a Matrix copy, so the two are
+	//       distinct objects from here on.
+	//    engine(), in the CALLER, then transforms Gradient into the selected
+	//       optimizer's SEARCH DIRECTION, and the caller's update must
+	//       therefore consume GRADIENT.
+	//
+	//    It consumed WeightsAccumulate until 2026-08-01, which threw the search
+	//    direction away and made batch BackProp under CGD or Shanno plain
+	//    gradient descent -- announcing itself as something else in its own run
+	//    header. Legacy bug #12; the same lines are in
+	//    ../distro/src/backprop.cpp:630-634. Guarded by
+	//    tests/backprop/check_bpoptimizer.cpp.
+	for ( unsigned l = 0; l < Gradient.size(); l++ )
+		Gradient[ l ] = WeightsAccumulate[ l ] /= ( double ) nTrain;
+
+	return setError / nTrain; // return the calculated set error
+}
+
 double BackProp::innerTrainSet()
 {
+	// THE BATCH SEPARATE-GRADIENT PATH is one authoritative evaluation, then
+	//    the optimizer's direction, then the epoch's single update. An early
+	//    return, because an evaluation with an update after it cannot be reused
+	//    at a trial point.
+	if ( batchEpochFlag && !( ( trainingType == 0 ) && !gradMaxFlag ) )
+	{
+		double setError = batchGradient();
+
+		// Whatever additional algorithm is chosen
+		engine( trainingType, iteration );
+
+		// Update the output and hidden weights, from the direction engine()
+		//    just wrote. Multiplied by value, NOT with *=: Gradient is read
+		//    again by getGradMax() and by the next iteration's optimizer
+		//    state, and must not be scaled by eta here.
+		for ( unsigned m = 0; m < Gradient.size(); m++ )
+			Weights[ m ] -= ( Gradient[ m ] * eta );
+
+		return setError;
+	}
+
 	// Easier on the eyes
 	unsigned nTrain = theData.getNumTrain(); // examples in training set
 
@@ -356,64 +514,7 @@ double BackProp::innerTrainSet()
 	// Loop through all exemplars in the set
 	for ( unsigned example = 0; example < nTrain; example++ )
 	{
-		// Get known single exemplar outputs vector y from known outputs Matrix
-		TrainOutput.row( example, y );
-		
-		// Begin by forward propagating the exemplar
-		forward( Train, example );
-
-		// Calculate error for single output and add to set error
-		errorFunction E( y, output, xs, errorType );
-		setError += E.value();
-
-		if ( E.boundsErr() ) // check for out of bounds error in log(o)
-			boundsErrorFlag = true;
-
-		// Regularization term for error, Manifest Methodology equation 2.1
-		//    $\frac{1}{2\sigma_w^2} \sum_{i=1}^m |{\bf y}|^2$ in
-		//    $E_k({\bf y}) = e(t^k, {\bf a}^{(m)}_k) + \frac{1}{2\sigma_w^2} \sum_{i=1}^m |{\bf y}|^2$
-		if ( weightDecayFlag )
-		{
-			for ( unsigned l = 0; l < nLayers + 1; l++ )//adding for all hidden layers and output layer
-				setError += regularizer * Weights[ l ].squared();	
-		}
-		
-		// Calculate the error terms for the output units
-		// (Freeman & Skapura p. 102, #6)
-		// Note that using func which takes the output vector as the
-		// last argument, and *= instead of *, is the most efficient way
-		// Calculation of o_err is still the same because we still have o_err
-		// and for all hidden layers we have HErrors
-		// Note also that if the error is x-entropy, then dE/do = (y-o)/(o(1-o))
-		// and the o(1-o) in the denominator cancels d_sigmoidal = o(1-o)
-		// hence splitting this code into 2 lines with an if:
-		// Note that sign changed from y - output to output - y to conform to methodology section.
-		o_err =  output - y;
-		if ( errorType == 0 ) // error is LMS
-			o_err *= func( output, d_sigmoidal() );
-
-		unsigned nOutput = theData.getOutput(); // get number of output nodes
-
-		// If automatic stepsize selection, accumulate average error
-		if ( batchEpochFlag && automaticStepSizeFlag )
-			for( unsigned y = 0; y < nOutput; y++ )
-				o_errAccumulate += o_err[ y ];
-
-		// Calculate the error terms for the hidden units
-		// (Freeman & Skapura p. 102, #7)
-		// Note the necessity of transposing the output weight matrix Weights[]
-		// prior to performing the dot product by using dotprodt, and also
-		// in the case of bias, where size HErrors[] < Weights[] cols, that the result
-		// of dotprodt will truncate to HErrors[] size, and that the result of
-		// func, also > size HErrors[], will truncate to size of HErrors[] because 
-		// *= results in the size of LHS
-		// Special case of the last hidden layer
-		Weights[ nLayers ].dotprodt( o_err, HErrors[ nLayers - 1 ] )
-			*= func( HOutputs[ nLayers - 1 ], d_sigmoidal() );
-		// For all the hidden layers execept the last layer
-		for ( int i = nLayers - 2; i > - 1; i-- )
-			Weights[ i + 1 ].dotprodt( HErrors[ i + 1 ], HErrors[ i ] )
-				*= func( HOutputs[ i ], d_sigmoidal() );
+		exemplarErrorTerms( example, setError );
 
 		if ( !batchEpochFlag ) // classic on-line backpropagation
 		{
@@ -476,100 +577,31 @@ double BackProp::innerTrainSet()
 			}
 		} // end of if ( !batchEpochFlag )
 
-		else // off-line or batch/epoch learning
+		else // off-line canonical backprop, gradient not separated
 		{
-			if ( ( trainingType == 0 ) && !gradMaxFlag ) // canonical backprop
-			{
-				// Note that eta has been factored out for the batch update at the end
-				WeightsAccumulate[ nLayers ] += ( WeightsUp[ nLayers ].outprod(
-					o_err, HOutputs[ nLayers - 1 ] ) );
+			// The separate-gradient case returned above, through batchGradient().
+			// Note that eta has been factored out for the batch update at the end
+			WeightsAccumulate[ nLayers ] += ( WeightsUp[ nLayers ].outprod(
+				o_err, HOutputs[ nLayers - 1 ] ) );
 
-				for ( unsigned j = nLayers - 1; j > 0; j-- )
-					WeightsAccumulate[ j ] += ( WeightsUp[ j ].outprod(
-					HErrors[ j ], HOutputs[ j - 1 ] ) );
+			for ( unsigned j = nLayers - 1; j > 0; j-- )
+				WeightsAccumulate[ j ] += ( WeightsUp[ j ].outprod(
+				HErrors[ j ], HOutputs[ j - 1 ] ) );
 
-				WeightsAccumulate[ 0 ] += ( WeightsUp[ 0 ].outprod( HErrors[ 0 ], I ) );
-			}
-			else // calculate the gradient as a separate structure
-			{
-				// Calculate the output and hidden gradients
-				Gradient[ nLayers ] = ( WeightsUp[ nLayers ].outprod(
-					o_err, HOutputs[ nLayers - 1 ] ) );
-				for ( unsigned j = nLayers - 1; j > 0; j-- )
-					Gradient[ j ] = ( WeightsUp[ j ].outprod(
-					HErrors[ j ], HOutputs[ j - 1 ] ) );
-				Gradient[ 0 ] = ( WeightsUp[ 0 ].outprod( HErrors[ 0 ], I ) );
-
-				// See above note in on-line block
-				if( weightDecayFlag )
-				{
-					Gradient[ nLayers ] += Weights[ nLayers ] * decay;
-					for ( unsigned l = nLayers - 1; l > 0; l-- )
-						Gradient[ l ] += Weights[ l ] * decay;
-					Gradient[ 0 ] += Weights[ 0 ] * decay;
-				}
-
-				// Update the accumulators	
-				WeightsAccumulate[ nLayers ] += Gradient[ nLayers ];
-				for ( unsigned k = nLayers - 1; k > 0; k-- )
-				WeightsAccumulate[ k ] += Gradient[ k ];	
-				WeightsAccumulate[ 0 ] += Gradient[ 0 ];
-			}
+			WeightsAccumulate[ 0 ] += ( WeightsUp[ 0 ].outprod( HErrors[ 0 ], I ) );
 		} // end of offline else
 	} // end of for loop for examplars in training set
 
 	if ( batchEpochFlag ) // off-line or batch/epoch learning
 	{
-		// Canonical backprop without separate gradient calculation
-		if ( ( trainingType == 0 ) && !gradMaxFlag )
-		{
-			// Weight decay, once for THIS epoch's single update
-			if ( weightDecayFlag )
-				for ( unsigned m = 0; m < Weights.size(); m++ )
-					Weights[ m ] *= decayTerm;
+		// Weight decay, once for THIS epoch's single update
+		if ( weightDecayFlag )
+			for ( unsigned m = 0; m < Weights.size(); m++ )
+				Weights[ m ] *= decayTerm;
 
-			// Batch/epoch updates weights at the end, *now* multiply by eta
-			for ( unsigned l = 0; l < WeightsAccumulate.size(); l++ )
-				Weights[ l ] -= ( ( WeightsAccumulate[ l ] *= eta ) /= ( double ) nTrain );
-		}
-		else // routines where gradient is calculated separately
-		{
-			// THE THREE STRUCTURES, AND WHICH ONE THE UPDATE MUST CONSUME.
-			//
-			//    WeightsAccumulate holds the per-exemplar sum built over the
-			//       epoch above; dividing by nTrain makes it the averaged RAW
-			//       batch gradient, Methodology equation 2.14
-			//       ${\bf g} = (1/N)\sum_{k=1}^N {\bf g}_k$.
-			//    Gradient receives that average -- a Matrix copy, so the two
-			//       are distinct objects from here on.
-			//    engine() transforms Gradient into the SELECTED OPTIMIZER'S
-			//       SEARCH DIRECTION: CGD and shanno pack() from Gradient,
-			//       compute $\vec f(t)$, and unpack() back into Gradient.
-			//       WeightsAccumulate is not part of that and never changes.
-			//    The weight update must therefore consume GRADIENT.
-			//
-			//    It consumed WeightsAccumulate until 2026-08-01, which threw
-			//    the search direction away and made batch BackProp under CGD or
-			//    Shanno plain gradient descent -- announcing itself as
-			//    something else in its own run header. Legacy bug #12; the same
-			//    lines are in ../distro/src/backprop.cpp:630-634. SimpleProp
-			//    (simpleprop.cpp) and BareProp (bareprop.cpp) update from
-			//    oG/hG after engine() and never had it, and the on-line branch
-			//    above already updates from Gradient.
-			//    Guarded by tests/backprop/check_bpoptimizer.cpp.
-			for ( unsigned l = 0; l < Gradient.size(); l++ )
-				Gradient[ l ] = WeightsAccumulate[ l ] /= ( double ) nTrain;
-
-			// Whatever additional algorithm is chosen
-			engine( trainingType, iteration );
-
-			// Update the output and hidden weights, from the direction engine()
-			//    just wrote. Multiplied by value, NOT with *=: Gradient is read
-			//    again by getGradMax() and by the next iteration's optimizer
-			//    state, and must not be scaled by eta here.
-			for ( unsigned m = 0; m < Gradient.size(); m++ )
-				Weights[ m ] -= ( Gradient[ m ] * eta );
-		}
+		// Batch/epoch updates weights at the end, *now* multiply by eta
+		for ( unsigned l = 0; l < WeightsAccumulate.size(); l++ )
+			Weights[ l ] -= ( ( WeightsAccumulate[ l ] *= eta ) /= ( double ) nTrain );
 	}
 
 	return setError / nTrain; // return the calculated set error
@@ -861,15 +893,69 @@ bool BackProp::load( string& filename )
 	return success; // return flag to indicate if file successfully loaded
 }
 
+// THE ONE LAYOUT for this model: every Matrix in the container flattened row by
+//    row, in container order. Weights and gradient share it, which is what
+//    makes a step computed in one applicable to the other; it lives in one
+//    function so the two cannot drift apart.
+static void packLayers( const vector< Matrix< double > >& layers,
+	vector< double >& destination )
+{
+	destination.clear();
+	for( unsigned i = 0; i < layers.size(); i++ )
+		std::copy( layers[ i ].begin(), layers[ i ].end(),
+			back_inserter( destination ) );
+}
+
 // Convert weight gradient structure to single vector stackG
 void BackProp::pack()
 {
-	// Starts by converting first Gradient matrix to stackG
-	stackG = Gradient[ 0 ].toVector();
+	packLayers( Gradient, stackG );
+}
 
-	// Then append all the remaining hidden Gradient matrix and output matrix to stackG
-	for( unsigned i = 1; i < nLayers + 1; i++ )
-		std::copy( Gradient[ i ].begin(), Gradient[ i ].end(), back_inserter( stackG ) );
+// --- The packed parameter boundary (see network.h) --------------------------
+
+unsigned BackProp::packedSize() const
+{
+	unsigned n = 0;
+	for ( unsigned i = 0; i < Weights.size(); i++ )
+		n += Weights[ i ].rows() * Weights[ i ].cols();
+	return n;
+}
+
+void BackProp::packWeights( vector< double >& destination ) const
+{
+	packLayers( Weights, destination );
+}
+
+void BackProp::unpackWeights( const vector< double >& source )
+{
+	// Validated ONCE, at entry, and as a throw rather than an assert: Release
+	//    strips asserts, and a mis-sized parameter vector installed silently
+	//    would reshape the model.
+	if ( source.size() != packedSize() )
+		throw nvec::SizeMismatch();
+
+	vector< double >::const_iterator start = source.begin(), end;
+	for( unsigned i = 0; i < Weights.size(); i++ )
+	{
+		end = start + ( Weights[ i ].rows() * Weights[ i ].cols() );
+		// vpack is this model's existing (un)packing scratch, sized in
+		//    setHidden(); it is workspace, not state a caller carries.
+		vpack[ i ].assign( start, end );
+		toMatrix( Weights[ i ], vpack[ i ] );
+		start = end;
+	}
+
+	weightsSetFlag = true;
+}
+
+double BackProp::batchObjectiveGradient( vector< double >& packedRawGradient )
+{
+	// The SAME evaluation the legacy batch path runs, then the packing only
+	//    this caller needs.
+	double setError = batchGradient();
+	packLayers( Gradient, packedRawGradient );
+	return setError;
 }
 
 // Convert single vector stackG back to weight gradient structure

@@ -78,6 +78,27 @@ protected:
 	//    hot loop because nothing in src/ calls it (rule 7).
 	const vector< Matrix< double > >& weightMatrices() const { return Weights; }
 
+	// --- The packed parameter boundary (see network.h) --------------------
+	//
+	//    This model's layout is its vector-of-Matrix: Weights[0] flattened row
+	//    by row, then Weights[1], and so on through the output layer -- the
+	//    same order pack() uses for Gradient, so weights and gradient are one
+	//    layout.
+	virtual unsigned packedSize() const;
+	virtual void packWeights( vector< double >& destination ) const;
+	virtual void unpackWeights( const vector< double >& source );
+	virtual double batchObjectiveGradient( vector< double >& packedRawGradient );
+
+	// THE AUTHORITATIVE BATCH PASS: one traversal at the currently installed
+	//    weights, returning the mean objective and leaving Gradient holding the
+	//    RAW mean gradient. Non-virtual, so the legacy path pays no indirect
+	//    call and no packing (rule 7). See onehidden.cpp for the shape.
+	double batchGradient();
+
+	// The per-exemplar prologue shared by every path here. setError is added to
+	//    in place so the arithmetic is not reassociated -- see onehidden.h.
+	void exemplarErrorTerms( const unsigned example, double& setError );
+
 private:
 	vector< unsigned > nLayer; // number of nodes on each hidden layer
 		

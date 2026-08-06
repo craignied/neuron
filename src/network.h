@@ -162,6 +162,61 @@ protected:
 	// Convert single vector back to weight gradient structure
 	virtual void unpack() = 0; // pure virtual
 
+	// --- THE PACKED PARAMETER BOUNDARY -----------------------------------
+	//
+	//    The minimum a packed-vector optimizer needs from a model, and nothing
+	//    more. It exists because a genuine Wolfe line search must evaluate the
+	//    objective at TRIAL points, and innerTrainSet() cannot serve as that
+	//    evaluator: it updates the weights (plan architecture decision 4). So
+	//    the model must be able to say what its parameters are, be given a
+	//    different set, and be asked what the objective and gradient are there
+	//    -- without training.
+	//
+	//    THIS IS NOT A UNIVERSAL CALLBACK FRAMEWORK. There is one consumer,
+	//    src/lbfgs.*, and the three methods below are what it needs. There is
+	//    no descriptor, no std::function, and no registration.
+	//
+	//    NOT EVERY MODEL IMPLEMENTS IT. packedSize() returns 0 for a model that
+	//    does not, and a caller must ask before it packs; the other three then
+	//    refuse rather than returning something plausible. Logistic keeps its
+	//    own IRLS-shaped future and is deliberately left unimplemented here:
+	//    the neural program has no use for it, and an unused implementation is
+	//    an untested one.
+	class NoPackedBoundary : public std::exception {
+	public:
+		virtual const char* what() const throw()
+		{ return "this model does not implement the packed parameter boundary"; }
+	};
+
+	// How many doubles a packed parameter vector holds. 0 MEANS THE BOUNDARY
+	//    IS UNAVAILABLE -- it is the eligibility question, asked before a run.
+	virtual unsigned packedSize() const { return 0; }
+
+	// The current weights, in ONE layout that packWeights, unpackWeights and
+	//    batchObjectiveGradient all share. Same layout as the gradient the
+	//    third writes, element for element: a step taken in one and applied to
+	//    the other must land where the algebra says.
+	virtual void packWeights( vector< double >& destination ) const;
+
+	// Install packed weights. The size is validated ONCE, here, at entry.
+	virtual void unpackWeights( const vector< double >& source );
+
+	// EVALUATE, do not train. Returns the mean batch objective at the
+	//    CURRENTLY INSTALLED weights, including the current weight-decay
+	//    policy, and writes the RAW mean gradient of that same objective --
+	//    raw meaning the gradient itself, never a search direction.
+	//
+	//    It does not update weights, does not touch lastG/lastF or any other
+	//    optimizer history, does not advance the iteration, does not report,
+	//    does not write a TwoSet cache, and does not read the test or
+	//    validation sets. It does write the model's per-pass SCRATCH -- the
+	//    forward outputs and the gradient structures -- exactly as forward()
+	//    writes o: that is what a pass is, not state a caller carries.
+	//
+	//    One virtual call per full evaluation. There is none inside the
+	//    exemplar loop it runs.
+	virtual double batchObjectiveGradient( vector< double >& packedRawGradient );
+
 	// Returns maximum gradient of a Network object
 	virtual double getGradMax();
 

@@ -188,6 +188,33 @@ add_executable(check_props
 target_link_libraries(check_props PRIVATE neuron_engine)
 add_test(NAME prop_characterization COMMAND check_props)
 
+# CHARACTERIZATION test: the batch objective and the RAW batch gradient, pinned
+# TOGETHER before the Phase 3 extraction moves them into one authoritative
+# evaluation that L-BFGS can also call at a trial point. Nothing pinned the
+# relation between them: every gradient component of SimpleProp and BareProp is
+# checked against a central finite difference of the objective the engine
+# itself reports, over LMS/cross-entropy and decay on/off; BackProp's gradient
+# is recovered from the update it performs and checked the two ways its private
+# weights allow. No captured literals -- every assertion is a same-process
+# relation, so it holds on any platform with correctly rounded exp/log.
+add_executable(check_batchgradient
+    tests/network/check_batchgradient.cpp)
+target_link_libraries(check_batchgradient PRIVATE neuron_engine)
+add_test(NAME network_batch_gradient COMMAND check_batchgradient)
+
+# Unit test: the packed parameter boundary the Phase 3 L-BFGS work needs -- the
+# weights out and back in one layout, and f/raw g at the installed weights
+# without training. Asserts the round trip through a PERTURBED vector (an
+# implementation ignoring its argument survives an identity round trip), that
+# the boundary's objective is BIT-IDENTICAL to the legacy training pass at the
+# same weights, that an evaluation moves no weight and no optimizer state,
+# element-by-element finite differences for all three neural models, and that a
+# model without the boundary refuses rather than returning a plausible value.
+add_executable(check_packedboundary
+    tests/network/check_packedboundary.cpp)
+target_link_libraries(check_packedboundary PRIVATE neuron_engine)
+add_test(NAME network_packed_boundary COMMAND check_packedboundary)
+
 # Unit test: DeLong's test for correlated ROC areas (ROADMAP 4 Phase 4, the
 # locked-test inference layer). AUC == the engine's exact Mann-Whitney area, a
 # 2-classifier fixture pinned to an independent Python DeLong, and structural

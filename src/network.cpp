@@ -496,6 +496,30 @@ void Network::runHeader( ostream& outputStream )
 		outputStream << "Weight decay is off" << endl;
 }
 
+// --- The packed parameter boundary, default (unimplemented) behavior --------
+//
+//    A model that does not implement the boundary reports packedSize() == 0 and
+//    REFUSES the other three. Refusing is the point: the alternative -- an empty
+//    vector, or a zero objective -- is a value a caller would act on, and a
+//    packed optimizer handed a zero-length parameter vector would report that it
+//    had converged. That is exactly the false-convergence shape maxabs() was
+//    changed to refuse (see vector_ops.h).
+
+void Network::packWeights( vector< double >& ) const
+{
+	throw NoPackedBoundary();
+}
+
+void Network::unpackWeights( const vector< double >& )
+{
+	throw NoPackedBoundary();
+}
+
+double Network::batchObjectiveGradient( vector< double >& )
+{
+	throw NoPackedBoundary();
+}
+
 // Returns maximum gradient of this Network object
 double Network::getGradMax()
 {

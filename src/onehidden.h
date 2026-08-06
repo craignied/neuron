@@ -117,6 +117,47 @@ protected:
 
 	// Convert weight gradient structure to single vector
 	virtual void pack();
+
+	// --- The packed parameter boundary (see network.h) --------------------
+	//
+	//    ONE layout, hW row by row then oW, used by the weights, by the
+	//    gradient, and by pack() above -- they share the layout code, so the
+	//    "a step in one applies to the other" property is structural rather
+	//    than a coincidence two functions have to keep.
+	//
+	//    Shared by both architectures with no flag: every width comes from
+	//    hW's own dimensions, which setHidden() already fixed from the bias
+	//    architecture. Nothing here reads biasFlag (see the note at the top).
+	virtual unsigned packedSize() const;
+	virtual void packWeights( vector< double >& destination ) const;
+	virtual void unpackWeights( const vector< double >& source );
+	virtual double batchObjectiveGradient( vector< double >& packedRawGradient );
+
+	// THE AUTHORITATIVE BATCH PASS. One traversal of the training set at the
+	//    currently installed weights: returns the mean objective and leaves hG
+	//    and oG holding the RAW mean gradient of it. Every batch
+	//    separate-gradient path in this class consumes this -- legacy training
+	//    through innerTrainSet() below, and a trial-point evaluation through
+	//    batchObjectiveGradient() above -- so the model equations exist once.
+	//
+	//    Non-virtual and called directly by innerTrainSet(): the legacy path
+	//    must not acquire an indirect call, and must not acquire the packing
+	//    that only the boundary's caller needs (rule 7).
+	double batchGradient();
+
+	// The per-exemplar prologue every training path shares: forward
+	//    propagate, ADD this exemplar's objective contribution to the running
+	//    total, and leave o_err and h_err set. Non-virtual and inline-able:
+	//    this is a per-exemplar path and may not acquire an indirect call
+	//    (rule 7). forward() below is virtual, as it always was.
+	//
+	//    setError is taken BY REFERENCE and added to in place, rather than
+	//    returning a contribution the caller adds. That is not a style
+	//    preference: the error and the decay penalty are two separate
+	//    additions to the running sum, and folding them into one addend would
+	//    reassociate the arithmetic and change the last bits of every reported
+	//    error in the engine.
+	void exemplarErrorTerms( const unsigned example, double& setError );
 };
 
 #endif
