@@ -353,42 +353,242 @@ figures from workloads spanning a 12x range in pass count**, so it did not merel
 detect the overhead, it attributed it to the per-pass mechanism. The injected
 code is not retained and no timing assertion was created.
 
-## Step 0B
+## Step 0B: what is measured, and what is not
 
-**`docs/datasets/civic-choice` is the primary application benchmark.** Its role
-is to answer whether an optimizer accelerates a representative *complete
-analysis*, not to be a mathematical correctness fixture. Groom and load it
-through the maintained dataset recipe, preserve one committed split/seed and one
-serialized initial weight state per model arm, and benchmark at least:
+Step 0B answers one question: **does an optimizer neuron already ships make the
+intended large-data workload tractable?**  Canonical training stays the
+numerical reference that defines the endpoints; it is not assumed to be the
+operational speed baseline.
 
-- one Logistic fit;
-- forward and reverse `RegressNet` procedures;
-- repeated cross-validation and the locked refit;
-- one eligible neural fit where its architecture and objective make the
-  comparison meaningful.
+`docs/datasets/civic-choice` is the primary application benchmark, groomed and
+loaded through the maintained recipe (`tools/mkdataset.py --onehot --refcat`),
+not through a second encoder written here.  `prepare_data.py` materializes the
+row-count series and **refuses** unless every size grooms to a byte-identical
+column key — otherwise the "same problem at several sizes" claim would be false
+and a scaling comparison would be comparing two design matrices.
 
-Report the single-fit result and the complete stepwise/CV elapsed-time
-multiplier separately. Optimizer-only timing continues to exclude the final
-statistical reports and the ROC bootstrap.
+| what | why it is here |
+|---|---|
+| Civic Choice logistic, 6k–400k rows | the application benchmark, and cheap enough to run whole |
+| Civic Choice neural at the walkthrough's own 4 hidden units, 6k–100k | the architecture a reader of the walkthrough would actually fit |
+| hidden = 2 / 4 / 8 / 16 at 25,000 rows | parameter-count scaling over sizes relevant to intended use |
+| repeated 5-fold CV x2 plus the locked refit | the operation the intended workflow spends its time in |
 
-Other reference roles, unchanged from the plan: **low-birth-weight** is the
-logistic endpoint reference including its known log likelihood; **XOR and the
-existing goldens** are the neural correctness references; **small analytic
-quadratics** test optimizer formulas exactly; **deterministically generated
-fixtures** cover scaling, correlation, separation, non-finite behavior, row
-sweeps and parameter sweeps.
+**Deliberately absent**: correlated, separated, poorly scaled and non-finite
+fixtures.  Those are candidate-specific *correctness* questions and belong to
+the phase that has a candidate to discriminate.  Building the taxonomy now would
+be work no pending decision depends on -- and the plan's scope governor is
+explicit that timing minutiae must not displace candidate investigation.  Step
+0A's failure and refusal fixtures are retained.
 
-## Limitations carried into Step 0B
+**A baseline is not a verdict.**  Step 0B establishes what the shipped methods
+cost so a candidate has something honest to beat.  It does not decide that a
+candidate is unnecessary: the governor states that neither a fast pilot nor
+merely tractable training ends the search for material 10x-100x gains, so
+`optimizer_baseline_results.md` reports the best speedup observed, which
+operation dominates what remains, and **which credible candidates are still
+untested**.
 
-1. Two fixtures only (`linear2`, `xor2`), generated in the probe. The correlated,
-   separated, poorly scaled, row-sweep and parameter-sweep fixtures are 0B's.
-3. No holdout split yet, so `split` equals the fixture identity and no real data
-   seed exists.
-4. Pilot targets are pilot values, not a committed table.
+### Model configuration is each model's own defaults
+
+A benchmark of a configuration nobody runs answers a question nobody asked, so
+the Civic Choice arms use what a user gets from the constructor, written down
+explicitly so the row reports it and the group invariant checks it:
+
+| | eta | loss | decay | step-size search |
+|---|---|---|---|---|
+| `Network` (`network.cpp:20-46`, `model.cpp:9`) | 0.05 | LMS | on, 5e-5 | off |
+| `Logistic` (`logistic.cpp:8-18`) | 0.05 | cross-entropy | off | **on** |
+
+The step-size search being Logistic's default is itself worth knowing, and it is
+why `canonical` and `canonical-autostep` are counted as two **methods** rather
+than one setting: the search costs `maxLoops` extra full passes per iteration.
+
+## The two predeclared endpoints
+
+Both are training-objective values, both come from a **canonical** control run,
+and neither may be tuned for a candidate.  They answer different questions and
+live in different comparison groups, so no arm can be timed against the other's
+target.
+
+| endpoint | definition | what it detects |
+|---|---|---|
+| `practical` | the training objective canonical had reached when the **held-out** error stopped improving | when the usable model arrives — the tractability question |
+| `strict` | the training objective canonical reached when it **converged** | late-stage optimizer failure |
+
+### Neither definition was chosen by this harness
+
+`strict` uses **the engine's own convergence rule**: `Iterative` constructs with
+`gradMaxFlag` on and `gradMaxLimit` 1e-6 (`iterative.cpp:33-35`), so "converged"
+already had a shipped meaning and the strict endpoint uses it.  `practical` uses
+**the engine's own plateau detector**, `PlateauDetector` (`src/plateau.h`) at its
+own default window, tolerance and patience — the same detector `setAutoStop`
+uses.  A second definition of "has this stopped improving" would be a second
+implementation of a decision the project already made (rule 6).
+
+### The practical endpoint must not move when you watch longer
+
+The first version of this rule took the **best** held-out error over the whole
+characterization and asked when the series first came within 1% of it.  That
+makes the endpoint a function of how long you looked: a longer run finds a
+better best, moves the band, and moves the endpoint.  Measured on the Civic
+Choice neural workload, the identical configuration reported its practical
+endpoint at **iteration 11,299 under a 20,000 ceiling and 78,764 under a 100,000
+one**.  The plateau detector is local — it fires where the series flattens and
+cannot see what follows — and the same workload now reports **15,984 under
+both**.
+
+`practicalEndpoint()` is a free function over two vectors precisely so this is
+testable: `optimizer_harness` hands it one synthetic trace truncated at two
+horizons ten-fold apart, and **carries its own control** — the discarded
+global-best rule is computed on the same trace and must be shown to move on it.
+Without that control the test could pass on a trace no rule could have moved.
+
+### A ceiling is not a floor, and a missing endpoint is a result
+
+A characterization that exhausts its iteration ceiling **did not converge**, so
+the objective it stopped on is where an unfinished fit happened to be.  No
+strict endpoint is published from it.  In the committed table a strict value of
+0 therefore means *this workload has no strict endpoint*, `addMethods()` declares
+no strict arms for it, and `optimizer_harness` refuses a case whose target is 0
+so nothing can run against an uncharacterized endpoint by neglect.
+
+**This is not hypothetical.**  Canonical gradient descent does not converge on
+the Civic Choice neural workload at the engine's own criterion: its maximum
+gradient settles around 5e-4 and does not approach 1e-6 — 4.5e-4 at 20,000
+iterations, and 6.2e-4 at 100,000, having *risen* in between.  The neural
+workloads therefore carry a practical endpoint only, and that absence is one of
+Step 0B's findings rather than a gap in it.  See
+`docs/learning_research/optimizer_baseline_results.md`.
+
+### Watching the held-out set must not change the fit
+
+Characterization samples the held-out set every iteration, which calls
+`forward()` on held-out rows and writes the network's scratch output.  That is
+legacy bug #10's exact shape — a *reporting* action choosing the model.  So
+every characterization runs the same short window twice, watched and unwatched,
+and **refuses** unless the two objective trajectories are bit-identical.  What is
+not claimed: that they were compared out to the strict endpoint.  The guard is
+short on purpose — a mechanism that perturbed the fit would perturb it on the
+first iteration, not the hundred-thousandth.
+
+## Two identities, because they answer two questions
+
+Step 0A established `source_id`: a hash over everything that can change what is
+measured — the harness, **all** of `src/`, and the build file.  That is the right
+authority for an **arm row**.
+
+It is the wrong one for a **target**.  The committed endpoint table lives in
+`harness.h`, so writing a measured target into it changes `source_id` by
+construction — "the targets and the arms share a source identity" is a condition
+that can never hold, and demanding it would mean re-characterizing forever.
+What a target actually depends on is `src/`.
+
+| field | covers | moves when |
+|---|---|---|
+| `source_id` | harness + `src/` + `CMakeLists.txt` | anything that can change a measurement |
+| `engine_id` | `src/` alone | the engine changes — **not** when the target table is rewritten |
+
+Every characterization record carries `engine_id`, `fill_targets.py` **refuses**
+to merge characterizations from two different engines into one table, and the
+table's generated header records the engine it describes.  An edit to
+`src/network.cpp` invalidates the table loudly; an edit to this README does not.
+
+## Two scopes, never one table
+
+| scope | the clock covers |
+|---|---|
+| `optimizer` | exactly `train()` on one model, epilogue suppressed |
+| `workflow` | every fold's fit **and** its scoring epilogue, plus the locked refit |
+
+A whole-workflow number is the one the user actually waits for, and it is not an
+optimizer timing.  `timing_scope` is a **group invariant**, a summary heading and
+a column, and `validate()` refuses a cv arm that claims optimizer scope outright
+— a cv clock necessarily covers each fold's scoring epilogue, because that is
+where a fold's held-out predictions come from.
+
+The repeated-fit arm runs the **maintained** policy, not a benchmark invention:
+a stratified locked holdout (`nsplit::stratifiedHoldout`), cross-validation over
+the development rows only, `nsplit::kFold`, and `crossval::evaluateOnce` for the
+locked refit — the sequence `/api/cv` performs.  It inherits the convergence
+contract rather than restating it: `cvadapters::trainProcedure` already fails any
+fold whose fit ended at its ceiling, so an unreachable endpoint makes the arm
+**fail** instead of returning a fast time for models nobody would use.
+
+A cv row carries **no** iteration or pass count.  It ran `k*repeats+1` fits and
+has no single one; a summed count would invite a per-pass ratio describing no
+training run that happened.
+
+## Repetitions are scaled to run cost, and the reason is recorded
+
+Fifteen interleaved repetitions is right for a millisecond cell and wasteful for
+a four-minute one.  Each case's count comes from its **own warm-up duration** — a
+number the campaign already pays for and discarded:
+
+| warm-up | repetitions |
+|---|---:|
+| under 1 s | 15 |
+| under 2 min | 5 |
+| over 2 min | 3 |
+
+The count, its reason, and the observed warm-up time all go into the campaign
+record and the summary.  A campaign that ran one arm three times and another
+fifteen looks identical from the counts alone; what separates a legitimate one
+from an illegitimate one is whether a declared policy chose from an observation,
+so that is what is recorded.  Where the reduced count leaves a group's two
+fastest arms with overlapping p10–p90 intervals, the summary says **ORDERING NOT
+ESTABLISHED** rather than printing a decisive-looking table.
+
+## Reproducing Step 0B
+
+```bash
+python3 tests/optimizer/prepare_data.py        # groom 6k/25k/100k/400k
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+ctest --test-dir build -R optimizer --output-on-failure
+
+./build/optimizer_probe --characterize --case <a canonical reference>
+./tests/optimizer/run_probe.py --step0b --timeout 3600 --out step0b.jsonl
+```
+
+The runner narrows to one half of the table with `--step0b` (the workload
+matrix) or `--pilot` (the Step 0A mechanics, at 3 repetitions — plumbing, not
+evidence). Membership is the probe’s to decide: the runner asks it rather than
+matching a name prefix, so a renamed case cannot silently fall out of a subset.
+
+`tests/optimizer/data/` is generated and not committed; a row identifies its data
+by content (`data_id`), so provenance does not depend on that directory
+surviving.
+
+## Results
+
+`docs/learning_research/optimizer_baseline_results.md`.  The short version:
+**Shanno reaches the neural endpoint 81x faster than canonical** on real data
+from an identical start, with a better held-out error -- and **the same method
+cannot fit Logistic at all**, at any size tested.  CGD is 2x slower than
+canonical.  Optimizer advantage is model-family-specific.
+
+## Limitations carried out of Step 0B
+
+0. **The campaign is partial.** The neural row and parameter series and the
+   repeated-fit consumer are declared, tested and characterized, but not timed.
+   The Logistic arms consumed the budget: a method that cannot reach the endpoint
+   burns its whole ceiling every run, and re-establishing that failure at the
+   larger sizes cost hours on the model family this program is not aimed at.
+1. **The 400,000-row neural workload is projected, not measured.**
+   Characterizing it alone costs hours before a single arm is timed. The
+   logistic series runs the whole way because its canonical reference converges
+   in ~17,000 iterations at every size.
+2. **The neural workloads have no strict endpoint**, because canonical does not
+   converge on them (above). Late-stage failure on those workloads is therefore
+   not tested by a matched strict target.
+3. **`simpleprop-25000-2` has no practical endpoint either**: its held-out error
+   had not plateaued at the characterization ceiling, so the smallest point of
+   the parameter sweep is absent rather than estimated.
+4. Correlated, separated, poorly scaled and non-finite fixtures are not built.
 5. `peak_rss_kb` is process-cumulative and Unix-only.
-6. `logistic-shanno` does not reach the shared `logistic-opt` target within its
-   ceiling. Left visible rather than tuned away: choosing a target that flatters
-   an arm is exactly what the canonical-control rule forbids.
-6. Four pilot cases are deliberately unusable (`passcount-nosearch`,
-   `passcount-search`, `impossible-target`, and currently `logistic-shanno`);
-   the runner refuses to average them.
+6. Step 0A's `logistic-shanno` still does not reach the shared `logistic-opt`
+   target within its ceiling. Left visible rather than tuned away.
+7. Four pilot cases are deliberately unusable (`passcount-nosearch`,
+   `passcount-search`, `impossible-target`, `logistic-shanno`); the runner
+   refuses to average them.

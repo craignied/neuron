@@ -34,17 +34,25 @@ using namespace optbench;
 static void usage()
 {
 	fprintf( stderr,
-		"usage: optimizer_probe [--list] [--identity] [--all] [--case NAME]\n"
-		"                       [--rep N] [--rev REV] [--characterize]\n"
-		"  --list          print the pilot case names and their groups\n"
+		"usage: optimizer_probe [--list] [--identity] [--all|--pilot|--step0b]\n"
+		"                       [--case NAME] [--rep N] [--rev REV]\n"
+		"                       [--characterize [--ceiling N]]\n"
+		"  --list          print every case name, its group and its axis\n"
 		"  --identity      print this binary's revision/source identity and exit\n"
-		"  --all           run every pilot case once\n"
+		"  --all           run every case once (pilot mechanics + Step 0B workloads)\n"
+		"  --pilot         run only the Step 0A mechanics pilot\n"
+		"  --step0b        run only the Step 0B workload matrix\n"
 		"  --case NAME     run one named case (repeatable)\n"
+		"  --workload KEY  characterize a WORKLOAD's canonical control by its\n"
+		"                  endpoint-table key, whether or not it currently has\n"
+		"                  declared arms (repeatable; needs --characterize)\n"
 		"  --rep N         run each selected case N times (default 1)\n"
 		"  --rev REV       revision string recorded in every row\n"
-		"  --characterize  run a CANONICAL REFERENCE case with an unreachable\n"
-		"                  target, to obtain the objective a matched target is\n"
-		"                  then chosen from. Refused on any other case.\n" );
+		"  --characterize  run a CANONICAL REFERENCE case out to its ceiling and\n"
+		"                  report BOTH predeclared endpoints -- the strict floor and\n"
+		"                  the practical plateau -- plus the proof that watching the\n"
+		"                  held-out set did not change the fit. Refused on any\n"
+		"                  non-canonical arm.\n" );
 }
 
 int main( int argc, char** argv )
@@ -55,17 +63,22 @@ int main( int argc, char** argv )
 	//    compiled in and are emitted regardless.
 	string rev = OPTBENCH_GIT_REV;
 	unsigned reps = 1;
-	bool all = false, list = false, identity = false, characterize = false;
-	vector< string > names;
+	bool all = false, pilot = false, step0b = false;
+	bool list = false, identity = false, wantCharacterize = false;
+	unsigned ceiling = 0;   // 0 = the engine's own default (STRICT_CEILING)
+	vector< string > names, workloads;
 
 	for ( int i = 1; i < argc; i++ )
 	{
 		string a = argv[ i ];
 		if ( a == "--list" ) list = true;
 		else if ( a == "--identity" ) identity = true;
-		else if ( a == "--characterize" ) characterize = true;
+		else if ( a == "--characterize" ) wantCharacterize = true;
 		else if ( a == "--all" ) all = true;
+		else if ( a == "--pilot" ) pilot = true;
+		else if ( a == "--step0b" ) step0b = true;
 		else if ( a == "--case" && i + 1 < argc ) names.push_back( argv[ ++i ] );
+		else if ( a == "--workload" && i + 1 < argc ) workloads.push_back( argv[ ++i ] );
 		else if ( a == "--rep" && i + 1 < argc )
 		{
 			// Refused by name. atoi would accept "abc" as 0 and run nothing
@@ -82,6 +95,23 @@ int main( int argc, char** argv )
 			}
 			reps = ( unsigned ) n;
 		}
+		else if ( a == "--ceiling" && i + 1 < argc )
+		{
+			// CHARACTERIZATION ONLY, and it can only LOWER the safety limit --
+			//    a shortened characterization that hits the limit reports "did
+			//    not converge", which is exactly what should happen. It cannot
+			//    change any arm's ceiling, which comes from the committed table.
+			string v = argv[ ++i ];
+			char* end = 0;
+			long n = strtol( v.c_str(), &end, 10 );
+			if ( end == v.c_str() || *end != '\0' || n < 1 || n > 100000000 )
+			{
+				fprintf( stderr, "refused -- ceiling: '%s' is not an integer in "
+					"[1,100000000]\n", v.c_str() );
+				return 2;
+			}
+			ceiling = ( unsigned ) n;
+		}
 		else if ( a == "--rev" && i + 1 < argc ) rev = argv[ ++i ];
 		else
 		{
@@ -94,27 +124,60 @@ int main( int argc, char** argv )
 	if ( identity )
 	{
 		printf( "{\"schema\":%u,\"rev\":\"%s\",\"dirty\":%s,\"source_id\":\"%s\","
-			"\"source_files\":%u,\"build\":\"%s\"}\n",
+			"\"source_files\":%u,\"engine_id\":\"%s\",\"engine_files\":%u,"
+			"\"build\":\"%s\"}\n",
 			SCHEMA_VERSION, OPTBENCH_GIT_REV,
 			OPTBENCH_GIT_DIRTY ? "true" : "false",
 			OPTBENCH_SOURCE_ID, ( unsigned ) OPTBENCH_SOURCE_COUNT,
+			OPTBENCH_ENGINE_ID, ( unsigned ) OPTBENCH_ENGINE_COUNT,
 			buildIdentity().c_str() );
 		return 0;
 	}
 
-	vector< Case > table = pilotCases();
+	vector< Case > table = allCases();
 
 	if ( list )
 	{
-		for ( size_t i = 0; i < table.size(); i++ )
-			printf( "%-34s group=%-18s axis=%s\n", table[ i ].name.c_str(),
-				table[ i ].group.c_str(), table[ i ].groupAxis.c_str() );
+		// --pilot / --step0b NARROW the listing, so a caller that wants one
+		//    half of the table gets exactly those names and does not have to
+		//    re-derive the membership rule from a name prefix.
+		vector< Case > shown = table;
+		if ( pilot ) shown = pilotCases();
+		else if ( step0b ) shown = step0bCases();
+		for ( size_t i = 0; i < shown.size(); i++ )
+			printf( "%-56s group=%-44s axis=%-16s scope=%-9s endpoint=%s\n",
+				shown[ i ].name.c_str(), shown[ i ].group.c_str(),
+				shown[ i ].groupAxis.c_str(), shown[ i ].timingScope.c_str(),
+				shown[ i ].endpoint.c_str() );
 		return 0;
 	}
 
+	// --workload NAMES A WORKLOAD, not an arm, and builds that workload's
+	//    canonical reference directly. It is how a workload whose endpoint could
+	//    not be established gets re-characterized at a larger budget: its arms
+	//    are undeclared, so no --case can name it.
 	vector< Case > selected;
-	if ( all )
-		selected = table;
+	for ( size_t i = 0; i < workloads.size(); i++ )
+	{
+		Case c;
+		if ( !referenceCaseFor( workloads[ i ], c ) )
+		{
+			fprintf( stderr, "refused -- workload: '%s' is not a key in the "
+				"committed endpoint table\n", workloads[ i ].c_str() );
+			return 2;
+		}
+		selected.push_back( c );
+	}
+	if ( !workloads.empty() && !wantCharacterize )
+	{
+		fprintf( stderr, "refused -- workload: --workload builds a canonical "
+			"CONTROL, which is only meaningful with --characterize. Use --case "
+			"to run a declared arm.\n" );
+		return 2;
+	}
+	if ( all ) selected = table;
+	else if ( pilot ) selected = pilotCases();
+	else if ( step0b ) selected = step0bCases();
 	else
 		for ( size_t i = 0; i < names.size(); i++ )
 		{
@@ -130,7 +193,8 @@ int main( int argc, char** argv )
 
 	if ( selected.empty() )
 	{
-		fprintf( stderr, "refused -- nothing selected: pass --all or --case NAME\n" );
+		fprintf( stderr, "refused -- nothing selected: pass --all, --pilot, "
+			"--step0b or --case NAME\n" );
 		usage();
 		return 2;
 	}
@@ -147,7 +211,7 @@ int main( int argc, char** argv )
 	//    case: the caller asked for a specific arm, and quietly running a
 	//    different one is how a result comes to describe a run nobody requested.
 	//    The message names the case that SHOULD be characterized instead.
-	if ( characterize )
+	if ( wantCharacterize )
 	{
 		for ( size_t i = 0; i < selected.size(); i++ )
 			if ( !isCanonicalReference( selected[ i ] ) )
@@ -168,11 +232,24 @@ int main( int argc, char** argv )
 				return 2;
 			}
 
+		// A characterization is not a timed arm and does not pretend to be one:
+		//    it emits its OWN record type, so nothing downstream can mistake the
+		//    control run for a measurement of the arm it derives targets for.
+		//    The declared target and ceiling are overridden inside characterize()
+		//    -- the whole point is to run past whatever endpoint is currently
+		//    committed and see the floor.
+		int rc = 0;
 		for ( size_t i = 0; i < selected.size(); i++ )
 		{
-			selected[ i ].target = 1e-30;   // unreachable: run the whole ceiling
-			selected[ i ].name += "-characterize";
+			Case c = selected[ i ];
+			c.target = 0.5;      // any valid value; characterize() replaces it
+			if ( c.ceiling < 2 ) c.ceiling = STRICT_CEILING;
+			Characterization ch = characterize( c, ceiling ? ceiling : STRICT_CEILING );
+			printf( "%s\n", toJsonLine( ch ).c_str() );
+			fflush( stdout );
+			if ( !ch.ok ) rc = 3;
 		}
+		return rc;
 	}
 
 	for ( unsigned rep = 0; rep < reps; rep++ )

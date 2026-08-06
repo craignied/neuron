@@ -35,6 +35,16 @@ The Manifest and source are authoritative after implementation.
   `docs/learning_research/optimizer_implementation_plan.md`.  Resume at the
   first incomplete phase (initially Phase 0 characterization/harness), and do
   not expose a candidate publicly before its matched-endpoint acceptance gate.
+  Apply the plan's **large-workload speed scope governor** to every optimizer
+  instruction: prioritize implementing and comparing plausible high-impact
+  algorithms on representative scaled workloads. Existing methods establish
+  honest baselines and canonical defines matched endpoints, but neither a fast
+  pilot nor merely tractable training ends the search for material 10x--100x
+  gains. The active program is neural computation: do not spend its budget on
+  Logistic, DFA, or exhaustive baseline/workflow timing. Shanno is the incumbent
+  neural speed baseline; move to novel neural candidate prototypes and use only
+  the measurements needed to accept, reject, or scale them. Do not let timing
+  minutiae displace candidate investigation.
   `docs/optimizer_research.md` remains the governing research protocol; no
   published formula may be altered merely to share code.
 - The Design Manifest is normative and must stay synchronized with every public

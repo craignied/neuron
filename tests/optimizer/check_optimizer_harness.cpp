@@ -606,18 +606,30 @@ static void test_row_schema()
 		"\"iteration_index\":", "\"iterations_completed\":", "\"full_passes\":",
 		"\"elapsed_ns\":", "\"peak_rss_kb\":", "\"stop_reason\":",
 		"\"converged\":", "\"target_reached\":", "\"finite\":", "\"usable\":",
-		"\"failure_stage\":", "\"error\":", 0
+		"\"failure_stage\":", "\"error\":",
+		// Schema 3 (Step 0B)
+		"\"data_id\":", "\"data_seed\":", "\"test_fraction\":",
+		"\"endpoint\":", "\"timing_scope\":", "\"workload\":",
+		"\"cv_folds\":", "\"cv_repeats\":", "\"rows_total\":",
+		"\"rows_test\":", "\"method\":", "\"heldout_error\":",
+		"\"cv_auc\":", "\"locked_auc\":", "\"cv_folds_ok\":",
+		"\"cv_folds_total\":", "\"engine_id\":", "\"engine_files\":", 0
 	};
 	for ( unsigned i = 0; required[ i ]; i++ )
 		expect( line.find( required[ i ] ) != string::npos,
 			string( "the row contains " ) + required[ i ] );
 
-	expect( line.find( "\"data_seed\"" ) == string::npos,
-		"data_seed is GONE: it had no effect on the fixture" );
+	// data_seed RETURNED in schema 3, and it now selects something. In schema 2
+	//    it was removed as false provenance because fixtureMatrix() ignored it;
+	//    a Step 0B arm's holdout is chosen by it, which is why test_real_split
+	//    can show two seeds producing two different splits.
+	expect( line.find( "\"data_seed\"" ) != string::npos,
+		"data_seed is BACK, because it now chooses the split" );
 	expect( line.find( "nan" ) == string::npos && line.find( "inf" ) == string::npos,
 		"no bare nan/inf token: a non-finite number is emitted as null" );
-	expect( line.find( "\"schema\":2" ) != string::npos,
-		"the schema version is 2 (field meanings changed)" );
+	expect( line.find( "\"schema\":3" ) != string::npos,
+		"the schema version is 3 (rows is now a training count, and a row "
+		"declares its endpoint and its timing scope)" );
 }
 
 static void test_refusals()
@@ -772,6 +784,448 @@ static void test_no_artifacts()
 	expect( hadLog || !exists( "neuron.log" ), "no neuron.log is created" );
 }
 
+
+// --- 12. STEP 0B: a REAL split, with a seed that selects it -----------------
+//
+// Step 0A trained on the whole fixture, so `split` was the fixture identity and
+// the schema's data seed selected nothing -- which is why it was removed as
+// false provenance. These pin the replacement: the seed genuinely chooses which
+// rows train, the SAME seed reproduces that choice, and the observations are a
+// separate fact from the partition of them.
+//
+// The fixture is written HERE, to a temporary file, rather than read from the
+// prepared Civic Choice directory: a ctest case that depends on generated data
+// fails on a fresh clone, and these mechanics do not need real data to be true.
+
+static string writeSplitFixture()
+{
+	string path = "/tmp/optbench_split_fixture.txt";
+	FILE* f = fopen( path.c_str(), "w" );
+	if ( !f ) return "";
+	// Three inputs and a 0/1 outcome, deterministic, balanced enough for a
+	//    stratified holdout to have both classes on both sides.
+	//
+	//    DELIBERATELY NOISY. A separable problem never plateaus: its loss keeps
+	//    falling and its held-out error keeps creeping down as the weights grow,
+	//    so the horizon-independence test below had nothing to detect and failed
+	//    at every ceiling tried. Flipping a fixed one row in seven gives the
+	//    held-out error a floor to reach -- which is what a real dataset has and
+	//    what a practical endpoint is defined against.
+	for ( unsigned i = 0; i < 400; i++ )
+	{
+		double x0 = ( double ) ( ( i * 37 ) % 100 ) / 99.0;
+		double x1 = ( double ) ( ( i * 53 ) % 100 ) / 99.0;
+		double x2 = ( double ) ( ( i * 17 ) % 100 ) / 99.0;
+		unsigned y = ( x0 + x1 > 1.0 ) ? 1u : 0u;
+		if ( ( i * 13 ) % 7 == 0 ) y = 1u - y;   // deterministic label noise
+		fprintf( f, "%.6f, %.6f, %.6f, %u\n", x0, x1, x2, y );
+	}
+	fclose( f );
+	return path;
+}
+
+static Case splitCase( const string& name, unsigned dataSeed, const string& path )
+{
+	Case c = baseCase();
+	c.name = name;
+	c.group = "split-unit";
+	c.groupAxis = "method";
+	c.model = "logistic";
+	c.dataFile = path;
+	c.inputs = 3;
+	c.dataSeed = dataSeed;
+	c.testFraction = 0.25;
+	c.rows = 0;
+	c.ceiling = 2;
+	c.target = 0.999;   // reachable or not; these tests are about the SPLIT
+	c.endpoint = ENDPOINT_PRACTICAL;
+	return c;
+}
+
+static void test_real_split()
+{
+	cout << "-- Step 0B: a real holdout split, chosen by a real seed --" << endl;
+
+	string path = writeSplitFixture();
+	expect( !path.empty(), "the split fixture was written" );
+	if ( path.empty() ) return;
+
+	Row a = runCase( splitCase( "sp-a", 101, path ), REV );
+	Row again = runCase( splitCase( "sp-again", 101, path ), REV );
+	Row b = runCase( splitCase( "sp-b", 202, path ), REV );
+
+	expect( a.failureStage == "none", "the file-backed case ran" );
+	if ( a.failureStage != "none" ) cout << "         " << a.error << endl;
+
+	expectEq( a.rowsTotal, 400, "every row of the file was loaded" );
+	expectEq( a.rowsTest, 100, "a 0.25 holdout took a quarter of them" );
+	expectEq( a.rows, 300, "the rest are the training rows" );
+	expectEq( ( long long ) a.rows + ( long long ) a.rowsTest,
+		( long long ) a.rowsTotal, "the partition accounts for every row" );
+
+	// THE TWO IDENTITIES ANSWER TWO QUESTIONS. Same observations, different
+	//    partition of them: dataId must hold still while splitId moves. If one
+	//    hash served both, a reseeded campaign would look like the same run.
+	expect( a.dataId == b.dataId,
+		"a different split seed does NOT change the data identity" );
+	expect( a.splitId != b.splitId,
+		"a different split seed DOES change the split identity" );
+	expect( a.splitId == again.splitId,
+		"the same split seed reproduces the same split identity" );
+	expect( a.dataId != a.splitId,
+		"the data identity and the split identity are different hashes" );
+
+	// The split seed is now REPORTED, and reports the value that was used.
+	expectEq( a.dataSeed, 101, "the row carries the seed that chose its split" );
+	expectEq( b.dataSeed, 202, "and a different arm carries its own" );
+
+	remove( path.c_str() );
+}
+
+// --- 13. STEP 0B: arms of one group start from ONE parameter state ----------
+//
+// The whole comparison rests on it. Step 0A proved it on generated fixtures;
+// this proves it survives a real file-backed split, where the DataSet is built
+// by a different path and the weight count comes from a real design matrix.
+
+static void test_split_arms_share_a_start()
+{
+	cout << "-- Step 0B: every method starts from one parameter state --" << endl;
+
+	string path = writeSplitFixture();
+	if ( path.empty() ) { expect( false, "fixture" ); return; }
+
+	Case base = splitCase( "start-canonical", 101, path );
+	Case cgd = base; cgd.name = "start-cgd"; cgd.optimizer = 1;
+	Case shanno = base; shanno.name = "start-shanno"; shanno.optimizer = 2;
+	Case autostep = base; autostep.name = "start-auto"; autostep.autoStep = true;
+
+	Row a = runCase( base, REV );
+	Row b = runCase( cgd, REV );
+	Row c = runCase( shanno, REV );
+	Row d = runCase( autostep, REV );
+
+	expect( a.weightIdAvailable && !a.weightStartId.empty(),
+		"the file-backed arm carries a parameter-state identity" );
+	expect( a.weightStartId == b.weightStartId
+		&& a.weightStartId == c.weightStartId
+		&& a.weightStartId == d.weightStartId,
+		"all four methods start from the identical weight state" );
+	expect( a.weightElements == a.params && a.params > 0,
+		"the hash covered exactly the model's parameters" );
+
+	// AND THE METHOD NAMES ARE DISTINCT, because two of these four share a
+	//    trainingType. A comparison that called both "canonical" would report
+	//    two different jobs under one name.
+	expect( a.method == "canonical" && d.method == "canonical-autostep",
+		"the step-size search is a different METHOD, not a different setting" );
+	expect( b.method == "cgd" && c.method == "shanno",
+		"the other two methods name themselves" );
+
+	remove( path.c_str() );
+}
+
+// --- 14. STEP 0B: the endpoint and the scope are part of the configuration --
+//
+// Two fields whose whole job is to stop a number being read as something it is
+// not. Both are refused by NAME when they are impossible, in the C++ layer, so
+// a bad configuration never produces a row at all.
+
+static void test_endpoint_and_scope_refusals()
+{
+	cout << "-- Step 0B: endpoint, scope and workload refusals --" << endl;
+
+	Case c = shortCase( "e-1", "logistic" );
+	c.endpoint = "eventually";
+	Row r = runCase( c, REV );
+	expect( r.failureStage == "refused"
+		&& r.error.find( "endpoint:" ) != string::npos,
+		"an unknown endpoint is refused BY NAME" );
+
+	c = shortCase( "e-2", "logistic" );
+	c.timingScope = "wall";
+	r = runCase( c, REV );
+	expect( r.failureStage == "refused"
+		&& r.error.find( "timing_scope:" ) != string::npos,
+		"an unknown timing scope is refused by name" );
+
+	c = shortCase( "e-3", "logistic" );
+	c.workload = "stepwise";
+	r = runCase( c, REV );
+	expect( r.failureStage == "refused"
+		&& r.error.find( "workload:" ) != string::npos,
+		"an unknown workload is refused by name" );
+
+	// THE MISLABELLING REFUSAL. A cv arm's clock necessarily covers each fold's
+	//    scoring epilogue, so it cannot be an optimizer-only timing -- and the
+	//    engine layer refuses the combination rather than leaving it to a
+	//    reader to notice.
+	c = shortCase( "e-4", "logistic" );
+	c.workload = "cv";
+	c.timingScope = SCOPE_OPTIMIZER;
+	c.cvFolds = 5; c.cvRepeats = 2; c.testFraction = 0.25;
+	r = runCase( c, REV );
+	expect( r.failureStage == "refused"
+		&& r.error.find( "timing_scope: a cv workload" ) != string::npos,
+		"a cv workload claiming optimizer scope is REFUSED, not annotated" );
+
+	c = shortCase( "e-5", "logistic" );
+	c.cvFolds = 5;
+	r = runCase( c, REV );
+	expect( r.failureStage == "refused"
+		&& r.error.find( "cv_folds/cv_repeats" ) != string::npos,
+		"a non-cv case setting fold counts is refused by name" );
+
+	c = shortCase( "e-6", "logistic" );
+	c.workload = "cv"; c.timingScope = SCOPE_WORKFLOW;
+	c.cvFolds = 5; c.cvRepeats = 2; c.testFraction = 0.0;
+	r = runCase( c, REV );
+	expect( r.failureStage == "refused"
+		&& r.error.find( "locked test set" ) != string::npos,
+		"a cv workload with nothing locked away is refused by name" );
+
+	c = shortCase( "e-7", "logistic" );
+	c.testFraction = 1.5;
+	r = runCase( c, REV );
+	expect( r.failureStage == "refused"
+		&& r.error.find( "test_fraction:" ) != string::npos,
+		"an impossible holdout fraction is refused by name" );
+}
+
+// --- 15. STEP 0B: an UNCHARACTERIZED workload cannot run --------------------
+//
+// The committed target table is a table of MEASUREMENTS, and 0 means "not yet
+// measured". A case referring to an unmeasured workload must not quietly run
+// against a meaningless endpoint -- which is the same failure as a target
+// chosen to flatter an arm, arrived at by neglect instead of intent.
+
+static void test_uncharacterized_target_refused()
+{
+	cout << "-- Step 0B: an uncharacterized workload is refused --" << endl;
+
+	Case c = civicCase( "logistic", 999999, 0, ENDPOINT_PRACTICAL, 0, false );
+	expectEq( ( long long ) ( c.target * 1e9 ), 0,
+		"a workload absent from the committed table gets no target" );
+	Row r = runCase( c, REV );
+	expect( r.failureStage == "refused"
+		&& r.error.find( "target:" ) != string::npos,
+		"and it is refused by name rather than run" );
+
+	// The endpoint table is a lookup, not a guess: a key it does not hold
+	//    returns nothing at all.
+	expect( endpointsFor( "no-such-workload" ) == 0,
+		"an unknown endpoint key resolves to nothing" );
+	expect( endpointsFor( "logistic-6000-linear" ) != 0,
+		"a known one resolves" );
+}
+
+// --- 16. STEP 0B: every declared case is well formed -------------------------
+//
+// The Step 0B table is generated by helper functions rather than written out by
+// hand, so a mistake in a helper would produce dozens of malformed cases at
+// once. validate() is the same gate the probe applies; running it over the
+// whole table here means the campaign cannot begin with a case that would be
+// refused halfway through it.
+
+static void test_step0b_table_is_well_formed()
+{
+	cout << "-- Step 0B: the declared workload matrix --" << endl;
+
+	vector< Case > all = step0bCases();
+	expect( all.size() > 20, "the Step 0B table is populated" );
+
+	unsigned bad = 0, cvArms = 0, practical = 0, strict = 0;
+	for ( size_t i = 0; i < all.size(); i++ )
+	{
+		string why = validate( all[ i ] );
+		if ( !why.empty() )
+		{
+			if ( bad < 3 )
+				cout << "         " << all[ i ].name << ": " << why << endl;
+			bad++;
+		}
+		if ( all[ i ].workload == "cv" ) cvArms++;
+		if ( all[ i ].endpoint == ENDPOINT_PRACTICAL ) practical++;
+		if ( all[ i ].endpoint == ENDPOINT_STRICT ) strict++;
+	}
+	expectEq( bad, 0, "every declared Step 0B case passes validate()" );
+	expect( cvArms >= 2, "the repeated-fit consumer is represented" );
+	expect( practical > 0 && strict > 0, "both endpoints are represented" );
+
+	// NAMES ARE UNIQUE. --case resolves by name, so a duplicate would silently
+	//    make one of two different configurations unreachable.
+	vector< Case > every = allCases();
+	unsigned dupes = 0;
+	for ( size_t i = 0; i < every.size(); i++ )
+		for ( size_t j = i + 1; j < every.size(); j++ )
+			if ( every[ i ].name == every[ j ].name ) dupes++;
+	expectEq( dupes, 0, "every case name in the whole table is unique" );
+
+	// EVERY GROUP HAS A CANONICAL REFERENCE to characterize from, except the
+	//    ones that deliberately have none. A group whose target could not have
+	//    come from a canonical control is a group with no matched endpoint.
+	unsigned groupless = 0;
+	for ( size_t i = 0; i < all.size(); i++ )
+		if ( canonicalReferenceFor( all[ i ].group ).empty() ) groupless++;
+	expectEq( groupless, 0,
+		"every Step 0B group declares a canonical reference case" );
+}
+
+
+// --- 17. STEP 0B: the practical endpoint does not move when you watch longer -
+//
+// THE DEFECT THIS PINS WAS REAL AND WAS SHIPPED IN AN EARLIER DRAFT OF THIS
+// FILE'S SIBLING. The first practical-endpoint rule took the BEST held-out
+// error over the whole characterization and asked when the series first came
+// within 1% of it. That makes the endpoint a function of how long you looked: a
+// longer run finds a better best, moves the band, and moves the endpoint.
+// Measured on the Civic Choice neural workload, the same configuration put its
+// practical endpoint at iteration 11,299 under a 20,000 ceiling and 78,764
+// under a 100,000 one -- two different endpoints for one workload.
+//
+// The replacement is PlateauDetector, the engine's own local detector, which
+// fires where the series flattens and cannot see what happens afterwards.
+//
+// The test needs a workload whose CEILING ACTUALLY BINDS. On a run that
+// converges before either ceiling, both characterizations are the same run and
+// the comparison proves nothing -- which is exactly what a first attempt at this
+// test did, passing under the sabotage.
+
+// A held-out trace with a KNOWN shape: a fast improvement that has flattened by
+// a few hundred iterations, and then keeps creeping down by a hair forever. The
+// creep is the whole point -- it is what a global-best rule chases and a local
+// plateau rule ignores.
+static vector< double > heldoutTrace( unsigned n )
+{
+	vector< double > v( n );
+	for ( unsigned i = 0; i < n; i++ )
+		v[ i ] = 0.40 + 0.20 * exp( -( double ) i / 60.0 ) - 1e-7 * i;
+	return v;
+}
+
+static vector< double > objectiveTrace( unsigned n )
+{
+	vector< double > v( n );
+	for ( unsigned i = 0; i < n; i++ )
+		v[ i ] = 0.30 + 0.30 * exp( -( double ) i / 60.0 );
+	return v;
+}
+
+// The rule the FIRST version of this used, kept here as the test's own control.
+// It is not called by anything else and is not a fallback: its only job is to
+// show that the horizon really does move an endpoint under a global rule, so
+// that the plateau rule holding still is a result and not an artifact of a
+// trace nothing could have moved.
+static unsigned globalBestEndpoint( const vector< double >& heldout )
+{
+	double best = heldout[ 0 ];
+	for ( size_t i = 1; i < heldout.size(); i++ )
+		if ( heldout[ i ] < best ) best = heldout[ i ];
+	double threshold = best * 1.01;
+	for ( size_t i = 0; i < heldout.size(); i++ )
+		if ( heldout[ i ] <= threshold ) return ( unsigned ) i;
+	return ( unsigned ) heldout.size() - 1;
+}
+
+static void test_practical_endpoint_is_horizon_independent()
+{
+	cout << "-- Step 0B: the practical endpoint is horizon-independent --" << endl;
+
+	PracticalPoint shortRun = practicalEndpoint( objectiveTrace( 3000 ),
+		heldoutTrace( 3000 ) );
+	PracticalPoint longRun = practicalEndpoint( objectiveTrace( 30000 ),
+		heldoutTrace( 30000 ) );
+
+	expect( shortRun.fired && longRun.fired,
+		"the series plateaus under both horizons" );
+	expectEq( shortRun.iteration, longRun.iteration,
+		"a TEN-FOLD longer horizon does not move the practical endpoint" );
+	expect( shortRun.objective == longRun.objective,
+		"and the objective it names is bit-identical" );
+
+	// THE CONTROL. Without it this test could pass on a trace no rule could
+	//    have moved, and would be asserting nothing. The rule this replaced --
+	//    "within 1% of the best held-out error the whole run achieved" -- must
+	//    demonstrably move on the same trace.
+	unsigned gShort = globalBestEndpoint( heldoutTrace( 3000 ) );
+	unsigned gLong = globalBestEndpoint( heldoutTrace( 30000 ) );
+	expect( gShort != gLong,
+		"the discarded global-best rule DOES move on this same trace, so the "
+		"horizon is genuinely capable of moving an endpoint here" );
+	if ( gShort != gLong )
+		cout << "         (global-best would say " << gShort << " then "
+			<< gLong << "; the plateau says " << shortRun.iteration
+			<< " both times)" << endl;
+
+	// The same defect, as it was actually measured on the real workload before
+	//    the rule changed: Civic Choice neural, 4 hidden units, put its
+	//    practical endpoint at iteration 11,299 under a 20,000 ceiling and
+	//    78,764 under a 100,000 one. Recorded in
+	//    docs/learning_research/optimizer_baseline_results.md.
+}
+
+// --- 18. STEP 0B: watching the held-out set must not change the fit ---------
+//
+// Legacy bug #10's exact shape, in a new place: the gradient used to be
+// recalculated only inside the print block, so the REPORTING CADENCE chose the
+// model. Characterization samples the held-out set every iteration, which calls
+// forward() on held-out rows and writes the network's scratch output. If that
+// perturbed training, every endpoint derived from the watched run would
+// describe a different fit from the one the arms perform.
+//
+// characterize() proves it per run and REFUSES on a mismatch. This asserts the
+// guard exists, ran, and passed -- an unverified guard is a comment.
+
+static void test_heldout_sampling_does_not_change_the_fit()
+{
+	cout << "-- Step 0B: sampling the held-out set does not move the fit --" << endl;
+
+	string path = writeSplitFixture();
+	if ( path.empty() ) { expect( false, "fixture" ); return; }
+
+	Case c = splitCase( "guard", 101, path );
+	Characterization ch = characterize( c, 1500 );
+
+	expect( ch.samplingWasFree,
+		"the watched and unwatched objective trajectories are identical" );
+	expect( ch.guardIterations > 1,
+		"the guard actually ran iterations to compare" );
+	// The ceiling leaves the loop at maxIterations+1 -- the same two-meanings
+	//    accessor Step 0A pinned -- so the guard runs the whole window and one
+	//    more. Asserted as "at least", because the point is that it ran the
+	//    window, not which side of the off-by-one the engine lands on.
+	expect( ch.guardIterations >= GUARD_ITERATIONS,
+		"over the whole declared guard window" );
+
+	remove( path.c_str() );
+}
+
+// --- 19. STEP 0B: characterization is still a canonical control -------------
+
+static void test_characterize_rejects_a_workflow_arm()
+{
+	cout << "-- Step 0B: characterization refuses what it cannot characterize --"
+		<< endl;
+
+	Case c = shortCase( "chz-cv", "logistic" );
+	c.workload = "cv";
+	c.timingScope = SCOPE_WORKFLOW;
+	c.cvFolds = 5; c.cvRepeats = 1; c.testFraction = 0.25;
+	c.target = 0.5;
+	Characterization ch = characterize( c, 100 );
+	expect( !ch.ok && ch.error.find( "only a fit workload" ) != string::npos,
+		"a cv arm has no training-objective trajectory and is refused by name" );
+
+	// A workload with no held-out set has no practical endpoint to derive, and
+	//    says so rather than inventing one from the training objective alone.
+	Case d = shortCase( "chz-nosplit", "logistic" );
+	d.target = 0.5;
+	d.testFraction = 0.0;
+	Characterization dh = characterize( d, 600 );
+	expect( !dh.ok && dh.error.find( "no held-out set" ) != string::npos,
+		"a workload with no holdout yields no practical endpoint, by name" );
+}
+
 int main()
 {
 	test_weight_identity();
@@ -788,6 +1242,14 @@ int main()
 	test_row_schema();
 	test_refusals();
 	test_pilot_groups_are_fair();
+	test_real_split();
+	test_split_arms_share_a_start();
+	test_endpoint_and_scope_refusals();
+	test_uncharacterized_target_refused();
+	test_step0b_table_is_well_formed();
+	test_practical_endpoint_is_horizon_independent();
+	test_heldout_sampling_does_not_change_the_fit();
+	test_characterize_rejects_a_workflow_arm();
 	test_no_artifacts();
 
 	cout << endl << ( failures ? "FAILURES: " : "all passed (" ) << failures

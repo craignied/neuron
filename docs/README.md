@@ -10,6 +10,12 @@ records by default.
 - `manifest_maintenance.md`: how to change and verify the Manifest.
 - `development_rules.md`: engine-development constitution.
 - `optimizer_research.md`: protocol for proposed learning algorithms.
+- `learning_research/optimizer_implementation_plan.md`: the phased program,
+  and the tractability-first scope governor every brief inherits.
+- `learning_research/optimizer_baseline_results.md`: what the optimizers
+  neuron already ships actually cost on real workloads -- the measured
+  baseline a new candidate must beat. Its harness is
+  `tests/optimizer/README.md`.
 - `gui_cli_parity.md`: menu, page-control, and API parity.
 - `cross_validation.md`: user-facing evaluation and nested-selection guidance.
 - `evaluation_report_spec.md`: report tiers and artifact contract.

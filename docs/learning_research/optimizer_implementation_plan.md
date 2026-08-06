@@ -18,19 +18,89 @@ project's numerical vocabulary.
 
 The execution order is:
 
-1. Characterize the existing optimizers and build a deterministic benchmark harness.
-2. Validate the harness with a research-only Barzilai-Borwein prototype.
-3. Prototype corrected IRLS for `Logistic` and measure full stepwise/CV workloads.
-4. Add the first real packed-parameter/objective-gradient boundary for L-BFGS, then use
-   it for an iRPROP+ prototype.
-5. Decide retain/reject per candidate from matched-endpoint evidence.
-6. Integrate measured winners into the public CLI, GUI, API, automatic selection,
+1. Characterize existing neural optimizers only far enough to establish the incumbent.
+2. Prototype L-BFGS against that incumbent on a cheap representative neural workload.
+3. Reject it early or scale the winner/incumbent pair; do not scale every historical arm.
+4. Prototype iRPROP+ and apply the same staged gate.
+5. Use safeguarded BB as a low-cost additional candidate/control when it advances the
+   neural decision; investigate other neural candidates when evidence justifies them.
+6. Decide retain/reject per candidate from matched-endpoint and held-out evidence.
+7. Integrate measured winners into the public CLI, GUI, API, automatic selection,
    Manifest, and tests.
-7. Consider LM, Adam/AMSGrad/Nesterov, or SVRG only if profiling identifies an uncovered
+8. Consider LM, Adam/AMSGrad/Nesterov, or SVRG when scaled neural evidence identifies an
    workload that justifies them.
 
 This is an implementation-and-research program, not authorization to ship every named
 algorithm.
+
+## Large-workload speed scope governor
+
+This section governs every phase and every implementation brief derived from this plan.
+Its purpose is to keep the program aimed at the user's real requirement: making
+hours-scale training on large datasets dramatically faster. Tractability is a minimum
+bar, not a reason to stop investigating a credible additional 10x or 100x improvement.
+It overrides a mechanically exhaustive reading of later measurement lists when those
+details do not help choose, validate, or reject an algorithm.
+
+**Current program boundary.** This effort is specifically about novel training
+algorithms for neuron's neural models and engines. Logistic regression, IRLS, DFA, and
+general statistical-model timing are out of scope unless a neural candidate directly
+depends on a shared primitive whose correctness must be isolated there. Cross-validation,
+stepwise selection, and complete-workflow timing are secondary multipliers, not research
+targets: measure them only after a neural optimizer wins the single-fit gate and only when
+needed to quantify the user's actual end-to-end saving.
+
+1. **Measure the best existing method first.** Canonical training may define an initial
+   practical endpoint, but it is not automatically the operational or strict numerical
+   reference. The fastest reliable existing optimizer that reaches the predeclared useful
+   endpoint becomes the incumbent a new candidate must beat; late-stage comparisons may
+   use a separately predeclared best-known incumbent endpoint when canonical stalls.
+2. **The incumbent is established.** Step 0A found Shanno roughly ten times faster across
+   small neural fixtures; Step 0B measured it 81 times faster than canonical on Civic
+   Choice at the same practical objective. Shanno is now the neural incumbent. Missing
+   scale points move into candidate experiments and do not block prototype work.
+3. **Investigate algorithms, not timing minutiae.** Prioritize implementation-quality
+   prototypes of credible high-impact candidates and compare them on Civic Choice,
+   representative large-data scaling, and the repeated-fit consumers that dominate
+   intended use. Add timing decomposition or broader synthetic matrices only when they
+   help choose, validate, diagnose, or reject a candidate. Do not spend the research
+   budget exhaustively characterizing small baseline effects while major candidates
+   remain untested.
+4. **Use two predeclared endpoints when useful.** A practical endpoint represents a
+   model whose further training no longer materially improves its intended use; a strict
+   or late-stage endpoint tests continued numerical progress. Derive both independently
+   before comparing arms, never tune either for a candidate, and report time and
+   reliability separately. If canonical stalls, do not declare strict comparison
+   impossible by definition: characterize a best-known incumbent endpoint explicitly.
+5. **Scale repetition effort to the decision.** Retain at least 15 randomized/interleaved
+   repetitions for short cells. For genuinely long cells, at least five repetitions may
+   be used for seconds-to-minutes runs and at least three for sufficiently expensive runs,
+   with the reason recorded and more runs required when spread leaves the ordering
+   ambiguous. Prefer testing another credible algorithm or scale point over refining the
+   last decimal of an already decisive timing ratio.
+6. **Keep high-upside neural candidates in scope.** An existing method making a workload
+   tractable does not by itself justify stopping: a credible further 10x or 100x gain
+   remains valuable. L-BFGS and iRPROP+ should be investigated unless staged evidence or
+   an implementation-quality prototype rejects their applicability. BB remains a low-cost
+   harness/control experiment and a possible useful method, not a mandatory production
+   feature. Candidate priority may change when measurements expose a larger opportunity.
+7. **Prefer measured time or bounded scaling evidence to toy speedups.** Millisecond
+   microbenchmarks validate mechanics and isolate overhead, but they do not by themselves
+   justify production work intended to save hours. When a full-scale characterization
+   would itself be wasteful, use a smaller scaling series and label any extrapolation
+   explicitly.
+8. **Stop a candidate when its decision is made, not the whole search prematurely.** Every
+   phase report must state whether the workload is tractable, the best speedup observed,
+   which operation dominates remaining time, which credible candidates remain untested,
+   and the resulting candidate order. Reject or defer candidates on evidence, but do not
+   equate “good enough” with “no worthwhile improvement remains.”
+9. **Benchmark inside the candidate loop.** Phase 0 establishes only enough baseline to
+   name a trustworthy incumbent. Do not finish every row sweep, parameter sweep, CV cell,
+   or timing decomposition before implementing candidates. First compare a candidate with
+   the incumbent on a cheap representative neural workload; reject obvious losers early,
+   then spend large-dataset time only on survivors. Use three interleaved repetitions for
+   a decisive first screen, expand repetitions only when noise could change the decision,
+   and scale the winner/incumbent pair rather than every historical method.
 
 ## Authorities to read before coding
 

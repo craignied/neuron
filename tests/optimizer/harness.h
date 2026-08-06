@@ -41,9 +41,13 @@
 
 #include "backprop.h"
 #include "bareprop.h"
+#include "crossval.h"
+#include "cvadapters.h"
 #include "dataset.h"
 #include "logistic.h"
+#include "plateau.h"
 #include "simpleprop.h"
+#include "split.h"
 #include "utility.h"
 
 #ifndef OPTBENCH_GIT_REV
@@ -61,6 +65,19 @@
 #ifndef OPTBENCH_BUILD_TYPE
 #define OPTBENCH_BUILD_TYPE "unknown"
 #endif
+// THE ENGINE the harness links, identified apart from the harness itself.
+//    source_id covers everything that can change what is measured, which is the
+//    right authority for an ARM ROW. It is the wrong one for a TARGET: writing a
+//    measured target into this file changes source_id, so a target could never
+//    share an identity with the arms judged against it. What a target depends on
+//    is src/, and engine_id is exactly that -- stable across harness edits, and
+//    invalidated loudly by a change to the engine.
+#ifndef OPTBENCH_ENGINE_ID
+#define OPTBENCH_ENGINE_ID "unknown"
+#endif
+#ifndef OPTBENCH_ENGINE_COUNT
+#define OPTBENCH_ENGINE_COUNT 0
+#endif
 
 namespace optbench {
 
@@ -71,7 +88,43 @@ using namespace std;
 //    function fingerprint, the iteration count is now the completed count
 //    rather than a zero-based index, and data_seed is gone because it had no
 //    effect on anything.
-const unsigned SCHEMA_VERSION = 2;
+// Schema 3 (Step 0B). Bumped because field MEANINGS changed again and new
+//    facts became load-bearing: `rows` is now the TRAINING row count of a real
+//    holdout split rather than the whole fixture, `data_seed` returns as a seed
+//    that actually selects the split, and a row now declares WHICH ENDPOINT it
+//    was aimed at and WHAT SCOPE was timed. A reader that does not know those
+//    two fields can mistake a whole-workflow measurement for an optimizer-only
+//    one, which is precisely the confusion Step 0B must not create.
+const unsigned SCHEMA_VERSION = 3;
+
+// THE TWO PREDECLARED ENDPOINTS. Both are training-objective values and both
+//    come from a canonical characterization run, never from the arm being
+//    timed. They answer different questions and must never be averaged together:
+//
+//      practical  the objective canonical had reached when further training
+//                 stopped materially improving the HELD-OUT model. Reaching it
+//                 fast is what makes a real workload tractable.
+//      strict     the objective canonical reaches when run out to its own
+//                 floor. It is the late-stage failure detector: an optimizer
+//                 that races to the practical endpoint and then cannot finish
+//                 is a different animal from one that does both.
+//
+//    A third value, "none", is for arms that are not endpoint comparisons at
+//    all (the pass-count and ceiling mechanics cases).
+static const char* const ENDPOINT_PRACTICAL = "practical";
+static const char* const ENDPOINT_STRICT = "strict";
+static const char* const ENDPOINT_NONE = "none";
+
+// WHAT THE CLOCK COVERED. A complete-workflow number is a legitimate and
+//    necessary measurement -- it is the one the user actually waits for -- but
+//    it is not an optimizer timing, and a row that does not say which it is can
+//    be quoted as either. So every row says.
+//
+//      optimizer  exactly train() on one model, epilogue suppressed
+//      workflow   a whole repeated-fit consumer: every fold's fit AND its
+//                 scoring epilogue, plus the locked refit
+static const char* const SCOPE_OPTIMIZER = "optimizer";
+static const char* const SCOPE_WORKFLOW = "workflow";
 
 // ---------------------------------------------------------------------------
 // FNV-1a over raw bytes. Used for three distinct identities answering three
@@ -239,9 +292,42 @@ struct Case {
 	string group;
 	string groupAxis; // "optimizer", or the other axis this group varies
 	string model;     // logistic | simpleprop | bareprop | backprop
-	string fixture;   // linear2 | xor2
+	string fixture;   // linear2 | xor2, or the name of a prepared data file
+
+	// A FILE-BACKED FIXTURE. Non-empty means the fixture is a groomed dataset on
+	//    disk -- Civic Choice and its row-count series -- loaded through the
+	//    maintained recipe rather than generated here. `rows` is then ignored:
+	//    the file decides how many rows there are, and the row reports what was
+	//    actually loaded rather than what was requested.
+	string dataFile;
+	unsigned inputs;  // input nodes of that file; 0 for a generated fixture
+
+	// THE SPLIT SEED, which now genuinely selects a split. Step 0A carried a
+	//    data_seed that nothing consumed, so it was removed as false provenance;
+	//    it returns here because a real stratified holdout depends on it.
+	unsigned dataSeed;
+	double testFraction; // 0 = train on everything (the Step 0A behavior)
+
 	unsigned rows;
 	unsigned weightSeed;
+
+	// WHICH ENDPOINT this arm is aimed at, and WHAT ITS CLOCK COVERED. Both are
+	//    part of the comparison group's invariant: an arm racing to the
+	//    practical endpoint and an arm racing to the strict one are not
+	//    comparable, and neither is an optimizer-only timing against a
+	//    whole-workflow one.
+	string endpoint;    // practical | strict | none
+	string timingScope; // optimizer | workflow
+
+	// THE REPEATED-FIT CONSUMER. "fit" is one train() call; "cv" is repeated
+	//    cross-validation over a shared fold plan plus the locked refit, which
+	//    is the operation that actually dominates the intended workflow. A cv
+	//    arm is timed at workflow scope by construction -- its clock necessarily
+	//    covers each fold's scoring epilogue, because that is where a fold's
+	//    held-out predictions come from.
+	string workload;    // fit | cv
+	unsigned cvFolds;
+	unsigned cvRepeats;
 	unsigned hidden;            // one-hidden models
 	vector< unsigned > layers;  // backprop
 	unsigned optimizer;         // 0 canonical, 1 CGD, 2 Shanno
@@ -259,6 +345,26 @@ struct Case {
 	//    use the same instrumentation or the group is timing two different code
 	//    paths under one label. The limit is 0, so the rule can never fire.
 	bool gradStop;
+
+	// THE PLATEAU AUTO-STOP, the engine's own fold-relative stopping rule.
+	//    A matched OBJECTIVE endpoint is the right instrument for a single fit
+	//    on a fixed training set. It is the wrong one for cross-validation, and
+	//    that was measured rather than assumed: the endpoint characterized on
+	//    the full development set was unreachable on 4 of 10 folds, because a
+	//    fold trains on 80% of those rows and its achievable objective is its
+	//    own. Racing four methods to an objective that 40% of the work cannot
+	//    reach produces no timing at all.
+	//
+	//    So a cv arm stops where the ENGINE says a fit has stopped improving --
+	//    setAutoStop, at Iterative's own default tolerance and window. Every arm
+	//    of the group uses the identical rule, so the comparison stays fair; it
+	//    is simply not a matched-objective race, and the row says so by
+	//    declaring endpoint "none" rather than borrowing a name it has not
+	//    earned. Model quality is then checked directly, through the pooled
+	//    out-of-fold and locked-test ROC areas the arm reports.
+	bool autoStop;
+	bool minStop;     // is the matched objective armed at all?
+
 	double target;    // matched endpoint, strictly inside (0,1)
 	unsigned ceiling; // safety ceiling: reaching it is failure, never convergence
 	bool xentropy;
@@ -276,10 +382,22 @@ struct Case {
 
 struct Row {
 	unsigned schema;
-	string rev, sourceId, buildType;
+	string rev, sourceId, engineId, buildType;
 	unsigned sourceFiles;   // how many source files the identity covers
+	unsigned engineFiles;   // how many src/ files the ENGINE identity covers
 	bool dirty;
 	string caseName, group, groupAxis, fixture, splitId, model, arch, loss;
+	// dataId is the content of the RAW dataset, BEFORE any split: which
+	//    observations. splitId is the content of the TRAINING matrix after the
+	//    split and its scaling: which rows, in which order, on which scale. They
+	//    are separate questions -- two arms can share observations and still be
+	//    trained on different rows -- so both are reported.
+	string dataId;
+	unsigned dataSeed;
+	double testFraction;
+	unsigned rowsTotal, rowsTest; // rows = TRAINING rows, as it always did
+	string endpoint, timingScope, workload;
+	unsigned cvFolds, cvRepeats;
 	unsigned rows, inputs, params, weightSeed;
 	// The parameter-state identity: what an arm is actually compared on.
 	bool weightIdAvailable;
@@ -288,11 +406,17 @@ struct Row {
 	// Secondary, diagnostic: the function the weights compute on the inputs.
 	string functionStartId, functionEndId;
 	unsigned optimizer;
+	// THE METHOD, as one name. "canonical fixed eta" and "canonical automatic
+	//    step size" are the same trainingType and are NOT the same method: the
+	//    search costs maxLoops extra full passes per iteration and can land on a
+	//    different step. The brief compares four methods, so a row names the
+	//    method rather than making every reader recombine two fields.
+	string method;
 	string optimizerName, mode;
 	double eta;
 	bool autoStep, decayOn;
 	double decay;
-	bool gradStop;
+	bool gradStop, autoStop, minStop;
 	double target, achieved;
 	unsigned ceiling;
 	// iterationIndex is Iterative::getIterations(), whose meaning DIFFERS by
@@ -308,6 +432,15 @@ struct Row {
 	long long peakRssKb;    // -1 = unavailable on this platform
 	string stopReason;
 	bool converged, targetReached, finite, usable;
+	// The HELD-OUT reading at the end of the run: the quality the endpoint
+	//    definitions are ultimately about. -1 when there is no held-out set.
+	//    Diagnostic -- it is never a stopping rule and never enters `usable`,
+	//    because a rule that read it would be selecting on the test set.
+	double heldoutError;
+	// Workflow (cv) arms only; -1 otherwise.
+	double cvAuc;      // pooled out-of-fold ROC area over all repetitions
+	double lockedAuc;  // the locked refit's ROC area on the untouched test set
+	unsigned cvFoldsOk, cvFoldsTotal;
 	string failureStage;    // none | refused | setup | training
 	string error;
 };
@@ -364,16 +497,28 @@ static inline string toJsonLine( const Row& r )
 	o << ",\"dirty\":" << ( r.dirty ? "true" : "false" );
 	o << jstr( "source_id", r.sourceId );
 	o << ",\"source_files\":" << r.sourceFiles;
+	o << jstr( "engine_id", r.engineId );
+	o << ",\"engine_files\":" << r.engineFiles;
 	o << jstr( "build", r.buildType );
 	o << jstr( "case", r.caseName );
 	o << jstr( "comparison_group", r.group );
 	o << jstr( "group_axis", r.groupAxis );
 	o << jstr( "fixture", r.fixture );
 	o << jstr( "split", r.splitId );
+	o << jstr( "data_id", r.dataId );
+	o << ",\"data_seed\":" << r.dataSeed;
+	o << ",\"test_fraction\":" << jnum( r.testFraction );
+	o << jstr( "endpoint", r.endpoint );
+	o << jstr( "timing_scope", r.timingScope );
+	o << jstr( "workload", r.workload );
+	o << ",\"cv_folds\":" << r.cvFolds;
+	o << ",\"cv_repeats\":" << r.cvRepeats;
 	o << jstr( "model", r.model );
 	o << jstr( "arch", r.arch );
 	o << jstr( "loss", r.loss );
 	o << ",\"rows\":" << r.rows;
+	o << ",\"rows_total\":" << r.rowsTotal;
+	o << ",\"rows_test\":" << r.rowsTest;
 	o << ",\"inputs\":" << r.inputs;
 	o << ",\"params\":" << r.params;
 	o << ",\"weight_seed\":" << r.weightSeed;
@@ -385,6 +530,7 @@ static inline string toJsonLine( const Row& r )
 	o << jstr( "function_start_id", r.functionStartId );
 	o << jstr( "function_end_id", r.functionEndId );
 	o << ",\"optimizer\":" << r.optimizer;
+	o << jstr( "method", r.method );
 	o << jstr( "optimizer_name", r.optimizerName );
 	o << jstr( "mode", r.mode );
 	o << ",\"eta\":" << jnum( r.eta );
@@ -392,6 +538,8 @@ static inline string toJsonLine( const Row& r )
 	o << ",\"decay_on\":" << ( r.decayOn ? "true" : "false" );
 	o << ",\"decay\":" << jnum( r.decay );
 	o << ",\"grad_stop\":" << ( r.gradStop ? "true" : "false" );
+	o << ",\"auto_stop\":" << ( r.autoStop ? "true" : "false" );
+	o << ",\"min_stop\":" << ( r.minStop ? "true" : "false" );
 	o << ",\"target\":" << jnum( r.target );
 	o << ",\"achieved\":" << jnum( r.achieved );
 	o << ",\"ceiling\":" << r.ceiling;
@@ -404,6 +552,11 @@ static inline string toJsonLine( const Row& r )
 	if ( r.peakRssKb < 0 ) o << ",\"peak_rss_kb\":null";
 	else o << ",\"peak_rss_kb\":" << r.peakRssKb;
 	o << jstr( "stop_reason", r.stopReason );
+	o << ",\"heldout_error\":" << jnum( r.heldoutError );
+	o << ",\"cv_auc\":" << jnum( r.cvAuc );
+	o << ",\"locked_auc\":" << jnum( r.lockedAuc );
+	o << ",\"cv_folds_ok\":" << r.cvFoldsOk;
+	o << ",\"cv_folds_total\":" << r.cvFoldsTotal;
 	o << ",\"converged\":" << ( r.converged ? "true" : "false" );
 	o << ",\"target_reached\":" << ( r.targetReached ? "true" : "false" );
 	o << ",\"finite\":" << ( r.finite ? "true" : "false" );
@@ -422,10 +575,24 @@ static inline string toJsonLine( const Row& r )
 // every hot loop and rule 7 is untouched. The innerTrainSet override is the
 // idiom tests/network/check_autostep.cpp already established and CI runs.
 
+// THE TWO READINGS CHARACTERIZATION NEEDS, behind an interface, because both are
+//    PROTECTED on Network and only a subclass can take them. Declaring the seam
+//    explicitly is better than templating the recorder on the model: it says in
+//    one place exactly what the trajectory recorder is allowed to touch, and it
+//    is read-only.
+struct Sampler {
+	virtual ~Sampler() { }
+	virtual double sampleGradMax() = 0;   // the engine's own convergence measure
+	virtual double sampleHeldoutError() = 0; // -1 when there is no held-out set
+};
+
 template < class NET >
-class Probe : public NET {
+class Probe : public NET, public Sampler {
 public:
 	Probe() : innerCalls( 0 ), outerCalls( 0 ), injectTraining( false ) { }
+
+	double sampleGradMax() override { return this->getGradMax(); }
+	double sampleHeldoutError() override { return this->sampleTestError( 1 ); }
 
 	// Every full pass through the training set. The step-size search runs
 	//    maxLoops trial passes and then one real one, so this is what makes
@@ -560,21 +727,94 @@ static inline unsigned long long matrixIdentity( const Matrix< double >& m )
 	return f.h;
 }
 
-static inline DataSet makeDataSet( const Case& c, unsigned long long& fixtureId )
+// Where the prepared Step 0B datasets live. Compiled in rather than resolved
+//    relative to the working directory, so a campaign launched from anywhere
+//    reads the same files -- and so a MISSING file is a clear refusal naming the
+//    path rather than a silently empty dataset.
+#ifndef OPTBENCH_DATA_DIR
+#define OPTBENCH_DATA_DIR "."
+#endif
+
+static inline string dataPath( const string& file )
 {
-	Matrix< double > raw = fixtureMatrix( c.fixture, c.rows );
+	// An ABSOLUTE path passes through. The deterministic gate writes its own
+	//    tiny fixture to a temporary file and names it absolutely, so proving
+	//    the split mechanics does not require the prepared Civic Choice data to
+	//    exist -- a ctest case that depends on a generated directory is a ctest
+	//    case that fails on a fresh clone.
+	if ( !file.empty() && file[ 0 ] == '/' )
+		return file;
+	return string( OPTBENCH_DATA_DIR ) + "/" + file;
+}
+
+// TWO IDENTITIES, TAKEN AT TWO MOMENTS, because they answer two questions.
+//
+//    dataId   the RAW matrix as loaded, before anything is split or scaled:
+//             WHICH OBSERVATIONS.
+//    splitId  the TRAINING matrix after the split and its scaling: WHICH ROWS,
+//             on WHICH SCALE. Two arms can share every observation and still
+//             train on different rows, so sharing dataId is not sharing a split.
+//
+// The split is REAL now: util::set_seed( dataSeed ) then DataSet::randomizeD,
+// the stratified holdout the maintained recipe uses (menu 5 / /api/load with a
+// fraction). Step 0A had no holdout and therefore no honest data seed; the
+// schema carried one anyway and it was removed as false provenance. It returns
+// here because it now selects something.
+static inline DataSet makeDataSet( const Case& c, unsigned long long& dataId,
+	unsigned long long& splitId, unsigned& rowsTotal, unsigned& rowsTest )
+{
 	DataSet d;
-	d.setInput( 2 );
 	d.setOutput( 1 );
 	d.setDiscrete( true );
 	d.setHistory( false );
 	util::ScreenCapture hush;
-	d.setRawMatrix( raw );
-	// Step 0A trains on the whole fixture: no holdout, so the split identity is
-	//    the fixture identity and there is one fewer moving part while the
-	//    mechanics are proven. Step 0B introduces real splits with Civic Choice.
-	d.setTrainMatrix( raw );
-	fixtureId = matrixIdentity( raw );
+
+	if ( c.dataFile.empty() )
+	{
+		Matrix< double > raw = fixtureMatrix( c.fixture, c.rows );
+		d.setInput( 2 );
+		d.setRawMatrix( raw );
+		dataId = matrixIdentity( raw );
+	}
+	else
+	{
+		d.setInput( c.inputs );
+		string path = dataPath( c.dataFile );
+		d.loadRaw( path );
+		if ( !d.rawLoaded() )
+			throw runtime_error( "could not load prepared dataset '" + path
+				+ "'. Run tests/optimizer/prepare_data.py." );
+		dataId = matrixIdentity( d.getRawMatrix() );
+	}
+
+	rowsTotal = d.getRawMatrix().rows();
+
+	// A cv arm does NOT pre-split here: cross-validation materializes its own
+	//    folds from Raw, and the locked test is carved by the same planner the
+	//    GUI uses. Splitting twice would give it a training set nothing trains on.
+	if ( c.workload == "cv" )
+	{
+		rowsTest = 0;
+		splitId = dataId;
+		return d;
+	}
+
+	if ( c.testFraction > 0.0 )
+	{
+		util::set_seed( c.dataSeed );
+		if ( !d.randomizeD( c.testFraction ) )
+			throw runtime_error( "the stratified holdout split failed" );
+	}
+	else
+	{
+		// No holdout: train on everything. The Step 0A behavior, retained so the
+		//    mechanics fixtures keep measuring exactly what they measured.
+		Matrix< double >& raw = d.getRawMatrix();
+		d.setTrainMatrix( raw );
+	}
+
+	rowsTest = d.getNumTest();
+	splitId = matrixIdentity( d.getTrainMatrix() );
 	return d;
 }
 
@@ -582,10 +822,48 @@ static inline DataSet makeDataSet( const Case& c, unsigned long long& fixtureId 
 // Architecture, per model. Overloads rather than a switch: each model's
 // architecture call has its own type, and the compiler should say so.
 
-static inline void arch( Probe< Logistic >&, const Case& ) { }
-static inline void arch( Probe< SimpleProp >& p, const Case& c ) { p.setHidden( c.hidden ); }
-static inline void arch( Probe< BareProp >& p, const Case& c ) { p.setHidden( c.hidden ); }
-static inline void arch( Probe< BackProp >& p, const Case& c ) { p.setHidden( c.layers ); }
+// Taken by CONCRETE MODEL reference rather than by Probe<>, so the same four
+//    overloads serve both the instrumented arm and the plain template network a
+//    cv workload clones -- cloneNetwork dispatches on typeid, so a cv template
+//    cannot be a Probe. One definition of "what architecture does this case
+//    ask for" (rule 6): a second one is how a cv arm comes to benchmark a
+//    different network than the fit arm it is compared against.
+static inline void arch( Logistic&, const Case& ) { }
+static inline void arch( SimpleProp& p, const Case& c ) { p.setHidden( c.hidden ); }
+static inline void arch( BareProp& p, const Case& c ) { p.setHidden( c.hidden ); }
+static inline void arch( BackProp& p, const Case& c ) { p.setHidden( c.layers ); }
+
+// THE TRAINING CONFIGURATION A CASE ASKS FOR, in one place, for the same reason.
+//    A cv template is configured by this and then cloned per fold, so every fold
+//    runs the optimizer, loss, step rule and matched endpoint the case declares.
+template < class NET >
+static inline void configure( NET& p, const Case& c )
+{
+	p.setHistory( false );  // no neuron.log
+	p.setLastop( false );   // no model.txt
+	p.setLogPrint( false );
+	p.setQuiet( true );     // no epilogue: no report, no ROC bootstrap
+	if ( c.xentropy ) p.setXEerror(); else p.setLMSerror();
+	p.setWeightDecay( c.decayOn );
+	p.setDecay( c.decay );
+	p.setBatchEpoch( c.batch );
+	p.setAutoStepSize( c.autoStep );
+	p.setEta( c.eta );
+	p.setTrainingType( c.optimizer );
+
+	// THE MATCHED ENDPOINT, and only it.
+	p.setMinStop( c.minStop );
+	p.setMinError( c.target );
+	p.setChangeStop( false );
+	p.setWindowStop( false );
+	p.setGradStop( c.gradStop );
+	p.setGradMaxLimit( 0.0 ); // armed branch, but a rule that can never fire
+	// Iterative's own defaults (iterative.cpp:35-36), for the same reason the
+	//    strict endpoint uses its gradient limit: the project already decided
+	//    what "stopped improving" means.
+	p.setAutoStop( c.autoStop, 1e-4, 100 );
+	p.setMaxIterations( c.ceiling );
+}
 
 static inline string archLabel( const Case& c )
 {
@@ -630,11 +908,46 @@ static inline string validate( const Case& c )
 	if ( c.model != "logistic" && c.model != "simpleprop"
 		&& c.model != "bareprop" && c.model != "backprop" )
 		return "model: unknown model '" + c.model + "'";
-	if ( c.fixture != "linear2" && c.fixture != "xor2" )
-		return "fixture: unknown fixture '" + c.fixture + "'";
+	if ( c.dataFile.empty() && c.fixture != "linear2" && c.fixture != "xor2" )
+		return "fixture: unknown generated fixture '" + c.fixture + "'";
+	if ( !c.dataFile.empty() && c.inputs < 1 )
+		return "inputs: a file-backed fixture must declare its input count";
+	if ( !std::isfinite( c.testFraction ) || c.testFraction < 0.0
+		|| c.testFraction >= 1.0 )
+		return "test_fraction: must be finite and within [0,1)";
+	if ( c.endpoint != ENDPOINT_PRACTICAL && c.endpoint != ENDPOINT_STRICT
+		&& c.endpoint != ENDPOINT_NONE )
+		return "endpoint: must be practical, strict or none";
+	if ( c.timingScope != SCOPE_OPTIMIZER && c.timingScope != SCOPE_WORKFLOW )
+		return "timing_scope: must be optimizer or workflow";
+	if ( c.workload != "fit" && c.workload != "cv" )
+		return "workload: must be fit or cv";
+	// A CV arm's clock NECESSARILY covers each fold's scoring epilogue -- that is
+	//    where a fold's held-out predictions come from -- so it cannot be an
+	//    optimizer-only timing. Refusing the combination is what stops a
+	//    whole-workflow number from being labelled as one.
+	if ( c.workload == "cv" && c.timingScope != SCOPE_WORKFLOW )
+		return "timing_scope: a cv workload is workflow scope, never optimizer";
+	if ( c.workload == "cv" && c.cvFolds < 2 )
+		return "cv_folds: a cv workload needs at least 2 folds";
+	if ( c.workload == "cv" && c.cvRepeats < 1 )
+		return "cv_repeats: a cv workload needs at least 1 repetition";
+	if ( c.workload == "cv" && !( c.testFraction > 0.0 ) )
+		return "test_fraction: a cv workload needs a locked test set to refit onto";
+	// A FIT MUST HAVE A STOPPING RULE THAT CAN FIRE. Without one every fold
+	//    runs to its ceiling, which the convergence contract calls a failure --
+	//    so an arm with no armed rule cannot produce a result, only a wait.
+	if ( !c.minStop && !c.autoStop )
+		return "stopping: no rule is armed that can fire (min_error or auto_stop)";
+	// An arm not racing to an objective must not claim an objective endpoint.
+	if ( !c.minStop && c.endpoint != ENDPOINT_NONE )
+		return "endpoint: an arm with no objective target cannot declare the '"
+			+ c.endpoint + "' endpoint";
+	if ( c.workload != "cv" && ( c.cvFolds || c.cvRepeats ) )
+		return "cv_folds/cv_repeats: only a cv workload may set these";
 	if ( c.optimizer > 2 )
 		return "optimizer: must be 0, 1 or 2";
-	if ( c.rows < 2 )
+	if ( c.dataFile.empty() && c.rows < 2 )
 		return "rows: must be at least 2";
 	if ( !( c.target > 0.0 && c.target < 1.0 ) )
 		return "target: must be strictly between 0 and 1 (Iterative::setMinError)";
@@ -662,12 +975,26 @@ static inline void describe( Row& r, const Case& c, const string& rev )
 	r.dirty = OPTBENCH_GIT_DIRTY ? true : false;
 	r.sourceId = OPTBENCH_SOURCE_ID;
 	r.sourceFiles = OPTBENCH_SOURCE_COUNT;
+	r.engineId = OPTBENCH_ENGINE_ID;
+	r.engineFiles = OPTBENCH_ENGINE_COUNT;
 	r.buildType = buildIdentity();
 	r.caseName = c.name;
 	r.group = c.group;
 	r.groupAxis = c.groupAxis;
-	r.fixture = c.fixture;
+	r.fixture = c.dataFile.empty() ? c.fixture : c.dataFile;
 	r.splitId = "";
+	r.dataId = "";
+	r.dataSeed = c.dataSeed;
+	r.testFraction = c.testFraction;
+	r.rowsTotal = r.rowsTest = 0;
+	r.endpoint = c.endpoint;
+	r.timingScope = c.timingScope;
+	r.workload = c.workload;
+	r.cvFolds = c.cvFolds;
+	r.cvRepeats = c.cvRepeats;
+	r.heldoutError = -1;
+	r.cvAuc = r.lockedAuc = -1;
+	r.cvFoldsOk = r.cvFoldsTotal = 0;
 	r.model = c.model;
 	r.arch = archLabel( c );
 	r.loss = c.xentropy ? "xentropy" : "lms";
@@ -679,12 +1006,16 @@ static inline void describe( Row& r, const Case& c, const string& rev )
 	r.functionStartId = r.functionEndId = "";
 	r.optimizer = c.optimizer;
 	r.optimizerName = optimizerName( c.optimizer );
+	r.method = string( optimizerName( c.optimizer ) )
+		+ ( c.autoStep ? "-autostep" : "" );
 	r.mode = c.batch ? "batch" : "online";
 	r.eta = c.eta;
 	r.autoStep = c.autoStep;
 	r.decayOn = c.decayOn;
 	r.decay = c.decay;
 	r.gradStop = c.gradStop;
+	r.autoStop = c.autoStop;
+	r.minStop = c.minStop;
 	r.target = c.target;
 	r.achieved = numeric_limits< double >::quiet_NaN();
 	r.ceiling = c.ceiling;
@@ -721,13 +1052,14 @@ static Row runTyped( const Case& c, const string& rev )
 	describe( r, c, rev );
 
 	Probe< NET > p;
-	unsigned long long fixtureId = 0;
+	unsigned long long dataId = 0, splitId = 0;
 
 	// --- setup, outside the timed region -----------------------------------
 	try
 	{
-		DataSet d = makeDataSet( c, fixtureId );
-		r.splitId = hex64( fixtureId );
+		DataSet d = makeDataSet( c, dataId, splitId, r.rowsTotal, r.rowsTest );
+		r.dataId = hex64( dataId );
+		r.splitId = hex64( splitId );
 		r.rows = d.getNumTrain();
 		r.inputs = d.getInput();
 
@@ -736,27 +1068,7 @@ static Row runTyped( const Case& c, const string& rev )
 
 		p.setDataSet( d );
 		arch( p, c );
-
-		p.setHistory( false );  // no neuron.log
-		p.setLastop( false );   // no model.txt
-		p.setLogPrint( false );
-		p.setQuiet( true );     // no epilogue: no report, no ROC bootstrap
-		if ( c.xentropy ) p.setXEerror(); else p.setLMSerror();
-		p.setWeightDecay( c.decayOn );
-		p.setDecay( c.decay );
-		p.setBatchEpoch( c.batch );
-		p.setAutoStepSize( c.autoStep );
-		p.setEta( c.eta );
-		p.setTrainingType( c.optimizer );
-
-		// THE MATCHED ENDPOINT, and only it.
-		p.setMinStop( true );
-		p.setMinError( c.target );
-		p.setChangeStop( false );
-		p.setWindowStop( false );
-		p.setGradStop( c.gradStop );
-		p.setGradMaxLimit( 0.0 ); // armed branch, but a rule that can never fire
-		p.setMaxIterations( c.ceiling );
+		configure( p, c );
 
 		util::set_seed( c.weightSeed );
 		p.randomize();
@@ -858,6 +1170,14 @@ static Row runTyped( const Case& c, const string& rev )
 	bool endFinite = true;
 	r.functionEndId = hex64( p.functionIdentity( endRows, endFinite ) );
 
+	// THE HELD-OUT READING, taken AFTER the clock stopped and used by nothing
+	//    that decides the run. It is what the practical endpoint is ultimately
+	//    about, so a row that reached its endpoint fast can be checked against
+	//    the model it actually produced. Deliberately NOT part of `usable` and
+	//    deliberately not a stopping rule: a rule reading it would be selecting
+	//    on held-out data. -1 when there is no held-out set to sample.
+	r.heldoutError = p.sampleTestError( 1 );
+
 	r.targetReached = r.finite && achieved < c.target
 		&& why == Iterative::STOP_MIN_ERROR;
 
@@ -894,6 +1214,665 @@ static Row runTyped( const Case& c, const string& rev )
 	return r;
 }
 
+// ---------------------------------------------------------------------------
+// THE REPEATED-FIT CONSUMER: repeated cross-validation plus the locked refit.
+//
+// This is the operation the intended workflow actually spends its hours in, and
+// it is the reason the whole program cares about single-fit speed: a k-fold,
+// r-repetition comparison pays for k*r fits plus one, so a per-fit saving is
+// multiplied by k*r+1 before the user sees it.
+//
+// IT IS A WORKFLOW MEASUREMENT AND SAYS SO. The clock covers each fold's fit AND
+// the scoring epilogue that produces its held-out predictions, because a fold
+// with no predictions is not a fold. Comparing this number against an
+// optimizer-only one would be comparing two different jobs, so validate()
+// refuses a cv arm that claims optimizer scope and the runner keeps the two
+// scopes in different comparison groups.
+//
+// THE POLICY IS THE MAINTAINED ONE, not a benchmark invention: a stratified
+// locked holdout (nsplit::stratifiedHoldout), cross-validation over the
+// DEVELOPMENT rows only, k-fold stratified on the outcome (nsplit::kFold), and
+// the locked refit through crossval::evaluateOnce -- the same sequence
+// gui.cpp's /api/cv performs. Reimplementing it here would benchmark a
+// procedure no user runs.
+//
+// The convergence contract is inherited, not re-stated: cvadapters::
+// trainProcedure already fails any fold whose fit ended at the iteration
+// ceiling, so an unreachable matched endpoint makes this arm FAIL rather than
+// return a fast time for a set of models nobody would use.
+
+// The 0/1 outcome of every row of a raw matrix -- the label a stratified
+//    planner balances on. Written once because three callers need it and a
+//    second spelling of "which column is the outcome" is a defect waiting.
+static inline vector< unsigned > outcomeLabels( const Matrix< double >& raw )
+{
+	unsigned n = raw.rows(), outCol = raw.cols() - 1;
+	vector< unsigned > label( n );
+	for ( unsigned i = 0; i < n; i++ )
+		label[ i ] = ( raw( i, outCol ) != 0 ) ? 1u : 0u;
+	return label;
+}
+
+template < class NET >
+static Row runCv( const Case& c, const string& rev )
+{
+	Row r;
+	describe( r, c, rev );
+
+	DataSet data;
+	DataSet devData;
+	vector< unsigned > devRows, lockedRows;
+	NET templateNet;
+
+	try
+	{
+		unsigned long long dataId = 0, splitId = 0;
+		data = makeDataSet( c, dataId, splitId, r.rowsTotal, r.rowsTest );
+		r.dataId = hex64( dataId );
+		r.inputs = data.getInput();
+
+		util::ScreenCapture hush;
+		Matrix< double >& raw = data.getRawMatrix();
+		unsigned n = raw.rows();
+		vector< unsigned > label = outcomeLabels( raw );
+
+		// The locked test set, carved once and never touched by any fold.
+		util::set_seed( c.dataSeed );
+		nsplit::Holdout h = nsplit::stratifiedHoldout( label,
+			( unsigned ) ( c.testFraction * ( double ) n ) );
+		devRows = h.train;
+		lockedRows = h.test;
+		string bad = nsplit::partitionError( n, devRows, lockedRows, true );
+		if ( !bad.empty() )
+			throw runtime_error( "the locked-test split is not a valid partition: "
+				+ bad );
+
+		// Cross-validation sees the development rows ONLY.
+		Matrix< double > devRaw = raw.includerows( devRows );
+		devData = data;
+		devData.setRawMatrix( devRaw );
+
+		r.rows = devRaw.rows();
+		r.rowsTest = ( unsigned ) lockedRows.size();
+		r.splitId = hex64( matrixIdentity( devRaw ) );
+
+		// The template every fold clones. Its architecture, loss, optimizer and
+		//    matched endpoint are the case's, through the SAME two helpers the
+		//    fit arms use -- so a cv arm and a fit arm on one case describe one
+		//    configuration.
+		arch( templateNet, c );
+		configure( templateNet, c );
+		templateNet.setDataSet( devData );
+		util::set_seed( c.weightSeed );
+		templateNet.randomize();
+		r.params = templateNet.df();
+
+		// NO WEIGHT IDENTITY IS CLAIMED. Every fold randomizes its own fresh
+		//    weights inside the procedure (that is what an honest per-fold fit
+		//    does), so there is no single starting parameter state for this arm
+		//    and reporting the template's would name a state nothing trained
+		//    from. An absent identity is refused by the runner for optimizer
+		//    groups; a workflow group is compared on its declared axis instead.
+		r.weightIdAvailable = false;
+		r.weightIdNote = "a cv arm has no single starting state: each fold "
+			"randomizes its own weights inside the procedure";
+
+		if ( c.inject == Case::INJECT_SETUP )
+			throw runtime_error( "benchmark-only injected setup fault" );
+	}
+	catch ( const exception& e )
+	{
+		r.failureStage = "setup";
+		r.error = string( "exception during setup: " ) + e.what();
+		return r;
+	}
+	catch ( ... )
+	{
+		r.failureStage = "setup";
+		r.error = "unknown exception during setup";
+		return r;
+	}
+
+	double aucSum = 0;
+	unsigned aucCount = 0;
+	bool everyFoldOk = true, lockedOk = false;
+
+	try
+	{
+		util::ScreenCapture hush;
+		chrono::steady_clock::time_point t0 = chrono::steady_clock::now();
+
+		for ( unsigned rep = 0; rep < c.cvRepeats; rep++ )
+		{
+			vector< crossval::ProcedureSpec > procs( 1 );
+			procs[ 0 ].name = c.name;
+			procs[ 0 ].proc = cvadapters::trainProcedure( templateNet, c.ceiling );
+
+			// Each repetition is a DIFFERENT fold plan of the same development
+			//    rows -- that is what repetition means. The locked test is not
+			//    re-drawn: it is locked.
+			util::set_seed( c.dataSeed + 1000u + rep );
+			vector< unsigned > repFolds = nsplit::kFold(
+				outcomeLabels( devData.getRawMatrix() ), c.cvFolds );
+
+			crossval::Comparison cmp = crossval::compare( devData, repFolds, procs,
+				nullptr, true, c.dataSeed + 1000u + rep );
+			if ( !cmp.ok || cmp.entries.empty() )
+				throw runtime_error( "cross-validation refused: " + cmp.message );
+
+			const crossval::RunResult& rr = cmp.entries[ 0 ].result;
+			r.cvFoldsTotal += ( unsigned ) rr.folds.size();
+			r.cvFoldsOk += rr.validFolds;
+			if ( rr.validFolds != rr.folds.size() )
+				everyFoldOk = false;
+			if ( rr.oofTrap >= 0 ) { aucSum += rr.oofTrap; aucCount++; }
+		}
+
+		// The locked refit: one final fit on every development row, scored once
+		//    on the untouched locked test set.
+		{
+			vector< crossval::ProcedureSpec > procs( 1 );
+			procs[ 0 ].name = c.name;
+			procs[ 0 ].proc = cvadapters::trainProcedure( templateNet, c.ceiling );
+			crossval::LockedResult lr = crossval::evaluateOnce( data, devRows,
+				lockedRows, procs, nullptr, true, c.dataSeed );
+			if ( lr.ok && !lr.entries.empty() && lr.entries[ 0 ].ok )
+			{
+				lockedOk = true;
+				vector< unsigned > all( lr.outcome.size() );
+				for ( size_t i = 0; i < all.size(); i++ ) all[ i ] = ( unsigned ) i;
+				crossval::Metrics m = crossval::metricsFor( lr.outcome,
+					lr.entries[ 0 ].pred, all );
+				r.lockedAuc = m.trap;
+			}
+			else if ( !lr.entries.empty() )
+				r.error = "locked refit failed: " + lr.entries[ 0 ].reason;
+			else
+				r.error = "locked refit refused: " + lr.message;
+		}
+
+		chrono::steady_clock::time_point t1 = chrono::steady_clock::now();
+		r.elapsedNs = chrono::duration_cast< chrono::nanoseconds >( t1 - t0 ).count();
+	}
+	catch ( const exception& e )
+	{
+		r.failureStage = "training";
+		r.error = string( "exception during training: " ) + e.what();
+		return r;
+	}
+	catch ( ... )
+	{
+		r.failureStage = "training";
+		r.error = "unknown exception during training";
+		return r;
+	}
+
+	r.peakRssKb = peakRssKb();
+	if ( aucCount ) r.cvAuc = aucSum / aucCount;
+
+	// A cv arm reports NO iteration or pass count. Those are per-fit facts and
+	//    this arm ran k*repeats+1 fits; summing them would invite a per-pass
+	//    ratio that describes no single training run. Left null rather than
+	//    filled with a number that means something else.
+	r.iterationsCompleted = -1;
+	r.fullPasses = -1;
+	r.stopReason = everyFoldOk && lockedOk ? "cv_complete" : "cv_incomplete";
+	r.finite = std::isfinite( r.cvAuc ) && r.cvAuc >= 0;
+	r.converged = everyFoldOk && lockedOk;
+	r.targetReached = r.converged;
+	r.achieved = r.cvAuc;
+
+	// USABLE MEANS THE WHOLE CONSUMER SUCCEEDED. Every fold of every repetition
+	//    produced predictions -- which, by the adapter's own contract, means
+	//    every fold's fit CONVERGED to the matched endpoint -- and the locked
+	//    refit produced a scored model. A partial run is retained and reported,
+	//    never averaged.
+	r.usable = r.finite && everyFoldOk && lockedOk
+		&& r.cvFoldsTotal == c.cvFolds * c.cvRepeats
+		&& r.cvFoldsOk == r.cvFoldsTotal
+		&& r.lockedAuc >= 0;
+
+	if ( !r.usable && r.error.empty() )
+		r.error = "cross-validation completed " + to_string( r.cvFoldsOk )
+			+ " of " + to_string( r.cvFoldsTotal ) + " folds";
+
+	return r;
+}
+
+// ---------------------------------------------------------------------------
+// ENDPOINT CHARACTERIZATION: where the two predeclared targets come from.
+//
+// Run the CANONICAL REFERENCE arm alone, with an unreachable target so it runs
+// its whole ceiling, and record two series per iteration: the training
+// objective, and the held-out error. Then:
+//
+//   strict     the training objective canonical reached at its floor. The
+//              late-stage failure detector.
+//   practical  the training objective canonical had reached at the iteration
+//              where the HELD-OUT error stopped improving. Past that point more
+//              training buys the usable model nothing, so reaching it fast is
+//              what makes a real workload tractable.
+//
+// THE PLATEAU IS THE ENGINE'S OWN DETECTOR, NOT A RULE INVENTED HERE.
+// PlateauDetector (src/plateau.h) already owns "has this series stopped
+// improving" for the whole project -- it is what setAutoStop uses -- and it is
+// used here at its own default window, tolerance and patience. Two reasons, and
+// the second is the load-bearing one:
+//
+//   1. rule 6. A second definition of "plateaued" would be a second
+//      implementation of the one thing the project already decided.
+//   2. IT IS HORIZON-INDEPENDENT, and the first version of this was not. That
+//      version took the best held-out error over the WHOLE run and asked when
+//      the series first came within 1% of it -- so a longer characterization
+//      found a better best, moved the band, and moved the endpoint. Measured:
+//      the same neural workload put its practical endpoint at iteration 11,299
+//      under a 20,000 ceiling and at 78,764 under a 100,000 one. An endpoint
+//      that moves when you watch it longer is not an endpoint. The detector
+//      fires where the series flattens and does not care what happens after.
+
+// THE STRICT ENDPOINT IS A CONVERGED RUN, NOT A CEILING. Running canonical with
+//    an unreachable min_error and calling wherever it stopped "the floor" would
+//    violate the convergence contract in the one place it matters most: the
+//    ceiling is a failure to converge, never a stopping condition, so a target
+//    derived from an exhausted ceiling describes an unfinished fit.
+//
+//    So characterization arms the engine's own mathematical convergence rule --
+//    STOP_GRADMAX, the maximum absolute gradient -- at a limit declared here,
+//    and REFUSES to publish a strict endpoint for a run that ended at the
+//    ceiling anyway. A characterization that cannot converge is a stop
+//    condition to report, not a number to round off.
+//    THE LIMIT IS THE ENGINE'S OWN DEFAULT, not a number chosen here.
+//    Iterative constructs with gradMaxFlag on and gradMaxLimit 1e-6
+//    (iterative.cpp:33-35), so "converged" already has a shipped meaning in this
+//    project and the strict endpoint uses it rather than inventing a second one.
+static const double STRICT_GRADMAX = 1e-6;
+
+// Likewise the ceiling: Iterative's own default maxIterations. It is a SAFETY
+//    LIMIT, and a characterization that reaches it is reported as a failure to
+//    converge, never rounded off into a floor.
+static const unsigned STRICT_CEILING = 1000000;
+
+// THE GUARD RUNS SHORT, AND SAYS SO. Proving that watching the held-out set does
+//    not change the fit is a proof about a MECHANISM -- sampling calls forward()
+//    on held-out rows and writes scratch the next training pass overwrites -- and
+//    a mechanism that perturbed the fit would perturb it on the first iteration,
+//    not the hundred-thousandth. So the two-run comparison uses a short ceiling
+//    and the long characterization runs once. What is NOT claimed: that the
+//    trajectories were compared out to the strict endpoint.
+static const unsigned GUARD_ITERATIONS = 400;
+
+// The strict TARGET is the converged objective raised by one part in a hundred
+//    thousand, because reaching an endpoint is `achieved < target` and a target
+//    set exactly at the floor is one the reference itself cannot satisfy.
+static const double STRICT_HEADROOM = 1e-5;
+
+// The trajectory recorder. It runs ONLY during characterization, never inside a
+//    timed arm, so nothing it costs can appear in a benchmark number.
+//
+//    IT MUST NOT CHANGE THE FIT. Sampling the held-out set calls forward() on
+//    held-out rows, which writes the network's scratch output -- exactly the
+//    shape of legacy bug #10, where recalculating for a REPORT changed which
+//    model a run produced. So characterization runs twice, with and without the
+//    held-out sampling, and REFUSES unless the two objective trajectories are
+//    bit-identical. A rationale is not a measurement (2026-08-02).
+struct Trajectory : Iterative::Observer {
+	Sampler* net;
+	bool sampleHeldout;
+	vector< double > objective, heldout, gradmax;
+	Trajectory() : net( 0 ), sampleHeldout( false ) { }
+	bool onIteration( unsigned, double setError ) override
+	{
+		objective.push_back( setError );
+		// BOTH passes record the gradient, so it cannot confound the guard
+		//    below: the only difference between the two passes is the held-out
+		//    sampling, which is the thing being tested. getGradMax() is the same
+		//    call the armed stopping rule already makes each iteration.
+		if ( net ) gradmax.push_back( net->sampleGradMax() );
+		if ( sampleHeldout && net )
+			heldout.push_back( net->sampleHeldoutError() );
+		return true;
+	}
+};
+
+// WHERE THE PRACTICAL ENDPOINT IS, given the two series a characterization
+//    recorded. Free-standing rather than inline in characterizeTyped, for the
+//    same reason oneHiddenIdentity is: a rule that can only be exercised by
+//    running a model for tens of thousands of iterations is a rule that gets
+//    tested by eye. This one is a pure function of two vectors, so the gate can
+//    hand it a series whose right answer is known and vary the horizon alone.
+//
+//    A held-out sample of -1 means "not sampled" and is skipped; the returned
+//    iteration indexes the ORIGINAL series, so it still names a training
+//    iteration.
+struct PracticalPoint {
+	bool fired;
+	unsigned iteration;
+	double objective;
+	double heldout;
+	PracticalPoint() : fired( false ), iteration( 0 ), objective( 0 ),
+		heldout( -1 ) { }
+};
+
+static inline PracticalPoint practicalEndpoint( const vector< double >& objective,
+	const vector< double >& heldout )
+{
+	PracticalPoint p;
+	PlateauDetector det;   // the engine's own defaults
+	for ( size_t i = 0; i < heldout.size() && i < objective.size(); i++ )
+	{
+		if ( heldout[ i ] < 0 ) continue;
+		if ( det.update( heldout[ i ] ) )
+		{
+			p.fired = true;
+			p.iteration = ( unsigned ) i;
+			p.objective = objective[ i ];
+			p.heldout = heldout[ i ];
+			return p;
+		}
+	}
+	return p;
+}
+
+struct Characterization {
+	bool ok;
+	string error;
+	string caseName, model, dataId, splitId;
+	unsigned rows, rowsTotal, rowsTest, inputs, params;
+	unsigned iterations, ceiling, guardIterations;
+	long long elapsedNs;
+	bool practicalOk, strictOk, plateauFired;
+	string stopReason;
+	bool converged;          // did canonical reach the gradient rule, or the ceiling?
+	double finalObjective;   // the floor canonical reached
+	double bestHeldout;      // the best held-out error anywhere in the run
+	double finalGradmax;     // the gradient the run actually reached
+	double bestGradmax;      // the smallest gradient anywhere in the run
+	unsigned practicalIteration; // first iteration within tolerance of it
+	double practicalObjective;   // the training objective THERE
+	double practicalHeldout;
+	bool samplingWasFree;    // the two objective trajectories were identical
+	Characterization() : ok( false ), rows( 0 ), rowsTotal( 0 ), rowsTest( 0 ),
+		inputs( 0 ), params( 0 ), iterations( 0 ), ceiling( 0 ),
+		guardIterations( 0 ), elapsedNs( 0 ),
+		practicalOk( false ), strictOk( false ), plateauFired( false ),
+		converged( false ),
+		finalObjective( 0 ), bestHeldout( -1 ),
+		finalGradmax( -1 ), bestGradmax( -1 ),
+		practicalIteration( 0 ), practicalObjective( 0 ), practicalHeldout( -1 ),
+		samplingWasFree( false ) { }
+};
+
+template < class NET >
+static Characterization characterizeTyped( const Case& c, unsigned ceiling )
+{
+	Characterization ch;
+	ch.caseName = c.name;
+	ch.model = c.model;
+	ch.ceiling = ceiling;
+
+	// One prepared reference model. Written once and called three times, so the
+	//    guard runs and the characterization run cannot drift apart -- if they
+	//    could, the guard would be proving something about a different fit.
+	struct Prepared {
+		Probe< NET > net;
+		DataSet data;
+	};
+
+	try
+	{
+		// --- the guard: the same short run twice, watched and unwatched -------
+		vector< double > guardQuiet, guardWatched;
+		for ( int pass = 0; pass < 2; pass++ )
+		{
+			Probe< NET > p;
+			unsigned long long dataId = 0, splitId = 0;
+			unsigned rt = 0, rs = 0;
+			DataSet d = makeDataSet( c, dataId, splitId, rt, rs );
+			p.setDataSet( d );
+			arch( p, c );
+			configure( p, c );
+			p.setMinStop( false );
+			p.setAutoStop( false, 1e-4, 100 );
+			p.setGradStop( true );
+			p.setGradMaxLimit( STRICT_GRADMAX );
+			p.setMaxIterations( GUARD_ITERATIONS );
+			util::set_seed( c.weightSeed );
+			p.randomize();
+
+			Trajectory t;
+			t.net = &p;
+			t.sampleHeldout = ( pass == 1 );
+			p.setObserver( &t );
+			{
+				util::ScreenCapture hush;
+				p.train();
+			}
+			p.setObserver( 0 );
+			( pass ? guardWatched : guardQuiet ) = t.objective;
+		}
+
+		// If watching the held-out set moved the fit by a single bit, the
+		//    trajectory it reports is not the trajectory the timed arms follow,
+		//    and every endpoint derived from it would describe a different run.
+		//    This is legacy bug #10's exact shape: a reporting action that
+		//    changes which model a run produces.
+		ch.guardIterations = ( unsigned ) guardQuiet.size();
+		ch.samplingWasFree = !guardQuiet.empty() && ( guardQuiet == guardWatched );
+		if ( !ch.samplingWasFree )
+		{
+			ch.error = guardQuiet.empty()
+				? "the guard run completed no iterations"
+				: "sampling the held-out set CHANGED the fit: the two objective "
+				  "trajectories differ over " + to_string( guardQuiet.size() )
+				  + " iterations. An endpoint derived from the watched run would "
+				  "not describe the runs being timed (legacy bug #10).";
+			return ch;
+		}
+
+		// --- the characterization: one long run, watched ---------------------
+		Probe< NET > p;
+		unsigned long long dataId = 0, splitId = 0;
+		DataSet d = makeDataSet( c, dataId, splitId, ch.rowsTotal, ch.rowsTest );
+		ch.dataId = hex64( dataId );
+		ch.splitId = hex64( splitId );
+		ch.inputs = d.getInput();
+
+		p.setDataSet( d );
+		arch( p, c );
+		configure( p, c );
+		p.setMinStop( false );
+		p.setAutoStop( false, 1e-4, 100 );  // the reference runs to its own floor
+		p.setGradStop( true );
+		p.setGradMaxLimit( STRICT_GRADMAX );
+		p.setMaxIterations( ceiling );
+		util::set_seed( c.weightSeed );
+		p.randomize();
+		ch.params = p.df();
+		ch.rows = d.getNumTrain();
+
+		Trajectory t;
+		t.net = &p;
+		t.sampleHeldout = true;
+		p.setObserver( &t );
+		chrono::steady_clock::time_point t0 = chrono::steady_clock::now();
+		{
+			util::ScreenCapture hush;
+			p.train();
+		}
+		chrono::steady_clock::time_point t1 = chrono::steady_clock::now();
+		p.setObserver( 0 );
+		ch.elapsedNs = chrono::duration_cast< chrono::nanoseconds >( t1 - t0 ).count();
+		ch.stopReason = Iterative::stopReasonToken( p.getStopReason() );
+		ch.converged = Iterative::converged( p.getStopReason() );
+
+		if ( t.objective.empty() )
+		{
+			ch.error = "the canonical reference completed no iterations";
+			return ch;
+		}
+
+		ch.iterations = ( unsigned ) t.objective.size();
+		ch.finalObjective = t.objective.back();
+		if ( !t.gradmax.empty() )
+		{
+			ch.finalGradmax = t.gradmax.back();
+			ch.bestGradmax = t.gradmax[ 0 ];
+			for ( size_t i = 1; i < t.gradmax.size(); i++ )
+				if ( t.gradmax[ i ] < ch.bestGradmax ) ch.bestGradmax = t.gradmax[ i ];
+		}
+
+		// THE PRACTICAL ENDPOINT is derived whether or not the strict one is
+		//    available: "when did the useful model arrive" is answerable from a
+		//    run that has not yet reached its floor, and it is the endpoint the
+		//    tractability question actually turns on.
+		bool haveHeldout = false;
+		for ( size_t i = 0; i < t.heldout.size(); i++ )
+			if ( t.heldout[ i ] >= 0 ) { haveHeldout = true; break; }
+		if ( !haveHeldout )
+		{
+			ch.error = "no held-out set: a practical endpoint cannot be derived "
+				"without one (set test_fraction)";
+			return ch;
+		}
+
+		ch.bestHeldout = -1;
+		double watchedHeldoutBack = -1;
+		for ( size_t i = 0; i < t.heldout.size(); i++ )
+			if ( t.heldout[ i ] >= 0 )
+			{
+				watchedHeldoutBack = t.heldout[ i ];
+				if ( ch.bestHeldout < 0 || t.heldout[ i ] < ch.bestHeldout )
+					ch.bestHeldout = t.heldout[ i ];
+			}
+
+		// THE PLATEAU, by the engine's own detector at its own defaults,
+		//    through the one function that owns the rule.
+		PracticalPoint pp = practicalEndpoint( t.objective, t.heldout );
+		ch.plateauFired = pp.fired;
+		if ( pp.fired )
+		{
+			ch.practicalIteration = pp.iteration;
+			ch.practicalHeldout = pp.heldout;
+			ch.practicalObjective = pp.objective;
+		}
+		else
+		{
+			ch.practicalIteration = ch.iterations - 1;
+			ch.practicalHeldout = watchedHeldoutBack;
+			ch.practicalObjective = ch.finalObjective;
+		}
+		// A run that never plateaued has no practical endpoint to publish: the
+		//    useful model had not stopped improving when the run ended, so the
+		//    objective at the end is a budget, not a plateau.
+		if ( !ch.plateauFired )
+		{
+			ch.error = "the held-out error had not plateaued when the run ended "
+				"after " + to_string( ch.iterations ) + " iterations, so no "
+				"practical endpoint is published: the last objective is where a "
+				"budget ran out, not where the useful model stopped improving.";
+			return ch;
+		}
+
+		ch.practicalOk = true;
+
+		// THE CEILING IS NOT A FLOOR. A reference that exhausted its iteration
+		//    ceiling did not converge, and the objective it is sitting on is
+		//    where an unfinished fit happened to be. No strict endpoint is
+		//    published for it -- the practical one above still is, and the row
+		//    says which of the two it is offering.
+		if ( !ch.converged )
+		{
+			ch.error = "the canonical reference did NOT converge (" + ch.stopReason
+				+ ") within " + to_string( ch.iterations ) + " iterations; its "
+				"gradient reached " + to_string( ch.finalGradmax ) + " against the "
+				"engine's own " + to_string( STRICT_GRADMAX ) + " limit. No strict "
+				"endpoint is published for this workload.";
+			return ch;
+		}
+
+		ch.strictOk = true;
+		ch.ok = true;
+		return ch;
+	}
+	catch ( const exception& e )
+	{
+		ch.error = string( "exception during characterization: " ) + e.what();
+		return ch;
+	}
+	catch ( ... )
+	{
+		ch.error = "unknown exception during characterization";
+		return ch;
+	}
+}
+
+static inline Characterization characterize( const Case& c, unsigned ceiling )
+{
+	Characterization bad;
+	string why = validate( c );
+	if ( !why.empty() ) { bad.error = "refused -- " + why; return bad; }
+	if ( c.workload != "fit" )
+	{
+		bad.error = "refused -- characterize: only a fit workload has a "
+			"training-objective trajectory to characterize";
+		return bad;
+	}
+	if ( c.model == "logistic" )   return characterizeTyped< Logistic >( c, ceiling );
+	if ( c.model == "simpleprop" ) return characterizeTyped< SimpleProp >( c, ceiling );
+	if ( c.model == "bareprop" )   return characterizeTyped< BareProp >( c, ceiling );
+	return characterizeTyped< BackProp >( c, ceiling );
+}
+
+static inline string toJsonLine( const Characterization& ch )
+{
+	ostringstream o;
+	o << "{\"record\":\"characterization\"";
+	// A CHARACTERIZATION IS EVIDENCE, so it identifies the binary that produced
+	//    it exactly as an arm row does. It sets the targets every later arm is
+	//    judged against; a target whose provenance cannot be traced to a
+	//    specific engine is a target nobody can re-derive.
+	o << ",\"schema\":" << SCHEMA_VERSION;
+	o << jstr( "rev", OPTBENCH_GIT_REV );
+	o << ",\"dirty\":" << ( OPTBENCH_GIT_DIRTY ? "true" : "false" );
+	o << jstr( "source_id", OPTBENCH_SOURCE_ID );
+	o << ",\"source_files\":" << ( unsigned ) OPTBENCH_SOURCE_COUNT;
+	o << jstr( "engine_id", OPTBENCH_ENGINE_ID );
+	o << ",\"engine_files\":" << ( unsigned ) OPTBENCH_ENGINE_COUNT;
+	o << jstr( "build", buildIdentity() );
+	o << jstr( "case", ch.caseName );
+	o << jstr( "model", ch.model );
+	o << jstr( "data_id", ch.dataId );
+	o << jstr( "split", ch.splitId );
+	o << ",\"rows\":" << ch.rows;
+	o << ",\"rows_total\":" << ch.rowsTotal;
+	o << ",\"rows_test\":" << ch.rowsTest;
+	o << ",\"inputs\":" << ch.inputs;
+	o << ",\"params\":" << ch.params;
+	o << ",\"iterations\":" << ch.iterations;
+	o << ",\"ceiling\":" << ch.ceiling;
+	o << ",\"guard_iterations\":" << ch.guardIterations;
+	o << ",\"elapsed_ns\":" << ch.elapsedNs;
+	o << ",\"practical_ok\":" << ( ch.practicalOk ? "true" : "false" );
+	o << ",\"strict_ok\":" << ( ch.strictOk ? "true" : "false" );
+	o << jstr( "stop_reason", ch.stopReason );
+	o << ",\"converged\":" << ( ch.converged ? "true" : "false" );
+	o << ",\"plateau_fired\":" << ( ch.plateauFired ? "true" : "false" );
+	o << ",\"strict_gradmax\":" << jnum( STRICT_GRADMAX );
+	o << ",\"final_gradmax\":" << jnum( ch.finalGradmax );
+	o << ",\"best_gradmax\":" << jnum( ch.bestGradmax );
+	o << ",\"strict_objective\":" << jnum( ch.finalObjective );
+	o << ",\"strict_target\":" << jnum( ch.finalObjective * ( 1.0 + STRICT_HEADROOM ) );
+	o << ",\"practical_objective\":" << jnum( ch.practicalObjective );
+	o << ",\"practical_iteration\":" << ch.practicalIteration;
+	o << ",\"practical_heldout\":" << jnum( ch.practicalHeldout );
+	o << ",\"best_heldout\":" << jnum( ch.bestHeldout );
+	o << ",\"sampling_was_free\":" << ( ch.samplingWasFree ? "true" : "false" );
+	o << ",\"ok\":" << ( ch.ok ? "true" : "false" );
+	o << jstr( "error", ch.error );
+	o << "}";
+	return o.str();
+}
+
 static inline Row runCase( const Case& c, const string& rev )
 {
 	string bad = validate( c );
@@ -904,6 +1883,14 @@ static inline Row runCase( const Case& c, const string& rev )
 		r.failureStage = "refused";
 		r.error = "refused -- " + bad;
 		return r;
+	}
+
+	if ( c.workload == "cv" )
+	{
+		if ( c.model == "logistic" )   return runCv< Logistic >( c, rev );
+		if ( c.model == "simpleprop" ) return runCv< SimpleProp >( c, rev );
+		if ( c.model == "bareprop" )   return runCv< BareProp >( c, rev );
+		return runCv< BackProp >( c, rev );
 	}
 
 	if ( c.model == "logistic" )   return runTyped< Logistic >( c, rev );
@@ -925,6 +1912,15 @@ static inline Case baseCase()
 	c.groupAxis = "optimizer";
 	c.model = "logistic";
 	c.fixture = "linear2";
+	c.dataFile = "";
+	c.inputs = 0;
+	c.dataSeed = 0;
+	c.testFraction = 0.0;
+	c.endpoint = ENDPOINT_NONE;
+	c.timingScope = SCOPE_OPTIMIZER;
+	c.workload = "fit";
+	c.cvFolds = 0;
+	c.cvRepeats = 0;
 	c.rows = 240;
 	c.weightSeed = 7;
 	c.hidden = 3;
@@ -938,11 +1934,363 @@ static inline Case baseCase()
 	//    it, so a canonical arm compared with them must run it too, or the group
 	//    is timing two different code paths. The limit is 0, so it never fires.
 	c.gradStop = true;
+	c.autoStop = false;
+	c.minStop = true;
 	c.target = 0.35;
 	c.ceiling = 4000;
 	c.xentropy = true;
 	c.inject = Case::INJECT_NONE;
 	return c;
+}
+
+// ---------------------------------------------------------------------------
+// THE COMMITTED TARGET TABLE (Step 0B).
+//
+// Every entry is a MEASUREMENT, produced by `optimizer_probe --characterize` on
+// the canonical reference of that workload and then written down here. It is
+// committed rather than recomputed at run time for one reason: a target
+// recomputed by the campaign is not a control. If the engine changes, these
+// values must be re-characterized deliberately and the change recorded --
+// which is exactly the visibility a silently-recomputed target would remove.
+//
+// A `strict` value is the objective canonical reached at its ceiling, raised by
+// one part in a thousand so the reference itself can satisfy `achieved <
+// target`. A `practical` value is the objective canonical had reached when the
+// held-out error first came within PRACTICAL_TOLERANCE of its best.
+//
+// UNSET (0) MEANS NOT YET CHARACTERIZED, and validate() refuses a target of 0,
+// so a case referring to an uncharacterized workload cannot silently run
+// against a meaningless endpoint.
+struct Endpoints {
+	const char* key;
+	double practical;      // 0 = no practical endpoint is published
+	double strict;         // 0 = NO STRICT ENDPOINT EXISTS; strictNote says why
+	unsigned ceiling;      // the safety limit the timed arms run under
+	unsigned charCeiling;  // the ceiling the characterization itself ran under
+	const char* strictNote;
+};
+
+// Measured on Apple Silicon, Release/NDEBUG, at the source_id recorded in
+//    docs/learning_research/optimizer_baseline_results.md. Keys are
+//    <model>-<rows>-<arch>.
+//
+// A ZERO STRICT ENDPOINT IS A RESULT, NOT AN OMISSION. It means the canonical
+//    reference did not converge on that workload, so there is no converged
+//    objective to match -- and publishing wherever its ceiling left it would be
+//    the ceiling-is-a-floor error the convergence contract exists to forbid.
+static const Endpoints ENDPOINT_TABLE[] = {
+	// Measured against engine_id 20233b71ed257605 over 71 src/ files, build Release/NDEBUG.
+	// Regenerate with tests/optimizer/fill_targets.py after any change
+	// to src/ -- these are measurements of THAT engine's behavior.
+	{ "logistic-6000-linear",       0.665221248, 0.664939378, 50000, 1000000,
+	  "" },
+	{ "logistic-25000-linear",      0.662455956, 0.661943767, 50000, 1000000,
+	  "" },
+	{ "logistic-100000-linear",     0.665042606, 0.664748927, 50000, 1000000,
+	  "" },
+	{ "logistic-400000-linear",     0.663610259, 0.663446411, 40000, 1000000,
+	  "" },
+	{ "simpleprop-6000-4",          0.118124155, 0, 40000, 40000,
+	  "canonical did not converge: gradient 7.52e-04 against the engine's 1e-6 rule after 40001 iterations" },
+	{ "simpleprop-25000-4",         0.117689406, 0, 40000, 40000,
+	  "canonical did not converge: gradient 4.29e-04 against the engine's 1e-6 rule after 40001 iterations" },
+	{ "simpleprop-100000-4",        0.118292976, 0, 40000, 40000,
+	  "canonical did not converge: gradient 6.11e-04 against the engine's 1e-6 rule after 40001 iterations" },
+	{ "simpleprop-25000-2",         0.1075966, 0, 130000, 200000,
+	  "canonical did not converge: gradient 4.26e-05 against the engine's 1e-6 rule after 200001 iterations" },
+	{ "simpleprop-25000-8",         0.106751914, 0, 120000, 200000,
+	  "canonical did not converge: gradient 3.75e-04 against the engine's 1e-6 rule after 200001 iterations" },
+	{ "simpleprop-25000-16",        0.118096561, 0, 30000, 40000,
+	  "canonical did not converge: gradient 1.67e-03 against the engine's 1e-6 rule after 40001 iterations" },
+	{ 0, 0, 0, 0, 0, "" }
+};
+
+static inline const Endpoints* endpointsFor( const string& key )
+{
+	for ( unsigned i = 0; ENDPOINT_TABLE[ i ].key; i++ )
+		if ( key == ENDPOINT_TABLE[ i ].key )
+			return &ENDPOINT_TABLE[ i ];
+	return 0;
+}
+
+// WHETHER THIS WORKLOAD HAS THAT ENDPOINT AT ALL. A strict endpoint exists only
+//    where the canonical reference actually CONVERGED. On the neural workloads
+//    it did not: measured, its maximum gradient settles around 5e-4 and does not
+//    approach the engine's own 1e-6 rule -- 4.5e-4 after 20,000 iterations and
+//    still 6.2e-4 after 100,000, having risen in between. Declaring a strict arm
+//    there would mean racing four methods to an objective no canonical run ever
+//    established, so those arms are NOT DECLARED and the reason travels with the
+//    table rather than living only in a document.
+static inline bool endpointAvailable( const string& key, const string& endpoint )
+{
+	const Endpoints* e = endpointsFor( key );
+	if ( !e ) return false;
+	if ( endpoint == ENDPOINT_STRICT ) return e->strict > 0;
+	return e->practical > 0;
+}
+
+static inline string endpointKey( const string& model, unsigned rows,
+	unsigned hidden )
+{
+	string archKey = ( model == "logistic" ) ? "linear" : to_string( hidden );
+	return model + "-" + to_string( rows ) + "-" + archKey;
+}
+
+// The Civic Choice workload's fixed facts, in one place.
+static const unsigned CIVIC_INPUTS = 14;      // from the maintained grooming
+static const unsigned CIVIC_HIDDEN = 4;       // the walkthrough's OBD selection
+static const unsigned CIVIC_DATA_SEED = 20260804;
+static const double CIVIC_TEST_FRACTION = 0.25;
+
+static inline string civicFile( unsigned rows )
+{
+	return "civic_" + to_string( rows ) + ".txt";
+}
+
+// One Civic Choice arm. Everything that defines the WORK comes from (model,
+//    rows, hidden, endpoint); only the method varies within a group.
+static inline Case civicCase( const string& model, unsigned rows,
+	unsigned hidden, const string& endpoint, unsigned optimizer, bool autoStep )
+{
+	Case c = baseCase();
+	c.model = model;
+	c.dataFile = civicFile( rows );
+	c.inputs = CIVIC_INPUTS;
+	c.dataSeed = CIVIC_DATA_SEED;
+	c.testFraction = CIVIC_TEST_FRACTION;
+	c.hidden = hidden;
+	c.rows = 0;               // the file decides
+	c.optimizer = optimizer;
+	c.autoStep = autoStep;
+	c.endpoint = endpoint;
+	c.groupAxis = "method";
+
+	// EACH MODEL'S OWN CONSTRUCTED DEFAULTS, written down rather than inherited
+	//    silently, so the row reports them and the group invariant checks them.
+	//    A benchmark of a configuration no user runs answers a question nobody
+	//    asked, and these are the values a user gets:
+	//
+	//      Network      eta 0.05, batch epoch, weight decay ON at 5e-5, LMS,
+	//                   no step-size search      (network.cpp:20-46, model.cpp:9)
+	//      Logistic     cross-entropy and batch BY DEFINITION, weight decay OFF,
+	//                   and the step-size search ON       (logistic.cpp:8-18)
+	//
+	//    autoStep is the one the caller varies, because "canonical fixed eta"
+	//    and "canonical automatic step size" are two of the four methods the
+	//    comparison is about -- and for Logistic the automatic one is the
+	//    default, which is itself worth knowing.
+	c.eta = 0.05;
+	c.batch = true;
+	if ( model == "logistic" )
+	{
+		c.xentropy = true;
+		c.decayOn = false;
+		c.decay = 0.0;
+	}
+	else
+	{
+		c.xentropy = false;
+		c.decayOn = true;
+		c.decay = 5e-5;
+	}
+
+	string archKey = ( model == "logistic" ) ? "linear" : to_string( hidden );
+	const Endpoints* e = endpointsFor( endpointKey( model, rows, hidden ) );
+	if ( e )
+	{
+		c.target = ( endpoint == ENDPOINT_STRICT ) ? e->strict : e->practical;
+		c.ceiling = e->ceiling;
+	}
+	else
+	{
+		c.target = 0; // refused by validate(): an uncharacterized workload
+		c.ceiling = 1;
+	}
+
+	c.group = "civic-" + model + "-r" + to_string( rows ) + "-h" + archKey
+		+ "-" + endpoint;
+	c.name = c.group + "-"
+		+ optimizerName( optimizer ) + ( autoStep ? "-autostep" : "" );
+	return c;
+}
+
+// The four methods the brief compares for a neural model. Logistic takes the
+//    three that apply to it -- the step-size search is a Network mechanism and
+//    Logistic's own fit is the same three trainingTypes.
+// THE CANONICAL REFERENCE FOR A WORKLOAD, built from its key alone and
+//    independent of whether that workload currently has any declared arms.
+//
+//    Without this the table is a one-way door: a workload whose endpoint could
+//    not be established declares no arms, so its canonical reference case stops
+//    existing, so `--characterize --case ...` cannot name it, so it can never be
+//    re-characterized at a larger budget. A control that disappears when its
+//    measurement fails is the wrong shape for a control.
+static inline bool referenceCaseFor( const string& key, Case& out )
+{
+	string model;
+	unsigned rows = 0, hidden = 0;
+	size_t r = key.find( "-r" ) == string::npos ? key.find( '-' ) : 0;
+	// key is <model>-<rows>-<arch>; arch is "linear" or a hidden-unit count.
+	size_t a = key.find( '-' );
+	if ( a == string::npos ) return false;
+	size_t b = key.find( '-', a + 1 );
+	if ( b == string::npos ) return false;
+	model = key.substr( 0, a );
+	string rowsStr = key.substr( a + 1, b - a - 1 );
+	string archStr = key.substr( b + 1 );
+	for ( size_t i = 0; i < rowsStr.size(); i++ )
+		if ( !isdigit( ( unsigned char ) rowsStr[ i ] ) ) return false;
+	rows = ( unsigned ) atoi( rowsStr.c_str() );
+	if ( archStr != "linear" )
+	{
+		for ( size_t i = 0; i < archStr.size(); i++ )
+			if ( !isdigit( ( unsigned char ) archStr[ i ] ) ) return false;
+		hidden = ( unsigned ) atoi( archStr.c_str() );
+	}
+	( void ) r;
+	if ( !endpointsFor( key ) ) return false;
+	out = civicCase( model, rows, hidden, ENDPOINT_PRACTICAL, 0, false );
+	// The declared target may be 0 -- that is exactly the case this exists for.
+	//    characterize() replaces it, and refuses nothing on account of it.
+	out.target = 0.5;
+	out.name = key + "-reference";
+	return true;
+}
+
+static inline void addMethods( vector< Case >& v, const string& model,
+	unsigned rows, unsigned hidden, const string& endpoint,
+	bool includeQuasiNewton = true )
+{
+	if ( !endpointAvailable( endpointKey( model, rows, hidden ), endpoint ) )
+		return;
+	v.push_back( civicCase( model, rows, hidden, endpoint, 0, false ) );
+	v.push_back( civicCase( model, rows, hidden, endpoint, 0, true ) );
+	if ( !includeQuasiNewton )
+		return;
+	v.push_back( civicCase( model, rows, hidden, endpoint, 1, false ) );
+	v.push_back( civicCase( model, rows, hidden, endpoint, 2, false ) );
+}
+
+// The repeated-fit consumer: k-fold cross-validation repeated r times over the
+//    development rows, plus the locked refit. Aimed at the PRACTICAL endpoint --
+//    a repeated workload run to the strict floor is a different (and much more
+//    expensive) question, and conflating them is how a "workflow is now
+//    tractable" claim comes to rest on an endpoint nobody would use in a fit.
+static inline Case civicCvCase( const string& model, unsigned rows,
+	unsigned hidden, unsigned optimizer, bool autoStep )
+{
+	Case c = civicCase( model, rows, hidden, ENDPOINT_PRACTICAL, optimizer, autoStep );
+	c.workload = "cv";
+	c.timingScope = SCOPE_WORKFLOW;
+	c.cvFolds = 5;
+	c.cvRepeats = 2;
+	// Fold-relative, for the reason recorded on Case::autoStop: the matched
+	//    objective was measurably unreachable on 4 of 10 folds.
+	c.endpoint = ENDPOINT_NONE;
+	c.minStop = false;
+	c.autoStop = true;
+	c.target = 0.5;   // carried, unused: no objective rule is armed
+	string archKey = ( model == "logistic" ) ? "linear" : to_string( hidden );
+	c.group = "civic-cv-" + model + "-r" + to_string( rows ) + "-h" + archKey;
+	c.name = c.group + "-" + optimizerName( optimizer )
+		+ ( autoStep ? "-autostep" : "" );
+	return c;
+}
+
+// ---------------------------------------------------------------------------
+// The Step 0B workload matrix.
+//
+// DELIBERATELY NOT AN EXHAUSTIVE TAXONOMY. Correlation, separation, non-finite
+// and poorly-scaled fixtures are candidate-specific correctness questions and
+// belong to the phase that has a candidate to discriminate. The plan's scope
+// governor is explicit that timing minutiae must not displace candidate
+// investigation, and a taxonomy no pending decision depends on is exactly that.
+// What is here is what establishes the baseline a candidate must beat:
+//
+//   1  Civic Choice logistic, both endpoints
+//   2  Civic Choice neural at the walkthrough's own architecture, both endpoints
+//   3  a row-count series over the same problem at 6k / 25k / 100k / 400k
+//   4  a parameter-count series over hidden = 2 / 4 / 8 / 16
+//   5  the repeated-fit consumer: repeated CV plus the locked refit
+static inline vector< Case > step0bCases()
+{
+	vector< Case > v;
+
+	// 1 + 2: the application benchmark at the committed walkthrough size.
+	const string ends[ 2 ] = { ENDPOINT_PRACTICAL, ENDPOINT_STRICT };
+	for ( int e = 0; e < 2; e++ )
+	{
+		addMethods( v, "logistic", 6000, 0, ends[ e ] );
+		addMethods( v, "simpleprop", 6000, CIVIC_HIDDEN, ends[ e ] );
+	}
+
+	// 3: row-count scaling. Each size is its OWN comparison group -- an endpoint
+	//    characterized at 6,000 rows is not the endpoint at 400,000, and forcing
+	//    one target across sizes would compare arms against a target only some of
+	//    them can reach. Scaling is read ACROSS groups, in the report.
+	//    THE NEURAL SERIES STOPS AT 100,000 AND THE LOGISTIC ONE DOES NOT.
+	//    Characterizing the 400,000-row neural workload alone costs hours before
+	//    a single arm is timed, and the plan's scope governor says to run a
+	//    smaller series and label the extrapolation rather than spend the hours.
+	//    The logistic series runs the whole way because it is cheap: its
+	//    canonical reference converges in ~17,000 iterations at every size.
+	// CGD AND SHANNO ARE NOT RE-RUN ON THE LARGEST LOGISTIC WORKLOADS, and this
+	//    is a measured decision rather than an omission. Both fail to reach the
+	//    Logistic endpoint at 6,000 and at 25,000 rows, on BOTH endpoints -- six
+	//    independent demonstrations -- and a failing arm burns its entire
+	//    iteration ceiling on every run. At 100,000 rows that is ~11 minutes per
+	//    run and at 400,000 it is ~45; re-establishing the same failure at the
+	//    two largest sizes costs about four hours of machine time to learn
+	//    nothing that is not already established. The plan's scope governor is
+	//    explicit that timing minutiae must not displace candidate
+	//    investigation. What IS measured at every size is the pair that
+	//    succeeds, canonical and canonical-autostep, which is where the
+	//    Logistic scaling answer lives.
+	//
+	//    The neural sizes keep all four methods: that is where the interesting
+	//    result is, and there CGD and Shanno do not fail.
+	const unsigned sizes[ 3 ] = { 25000, 100000, 400000 };
+	for ( int i = 0; i < 3; i++ )
+	{
+		addMethods( v, "logistic", sizes[ i ], 0, ENDPOINT_PRACTICAL,
+			sizes[ i ] <= 25000 );
+		addMethods( v, "simpleprop", sizes[ i ], CIVIC_HIDDEN, ENDPOINT_PRACTICAL );
+	}
+	// The strict endpoint at the largest sizes too, so late-stage failure has
+	//    somewhere to show up rather than being assumed absent.
+	addMethods( v, "simpleprop", 100000, CIVIC_HIDDEN, ENDPOINT_STRICT );
+	addMethods( v, "logistic", 100000, 0, ENDPOINT_STRICT, false );
+
+	// 4: parameter-count scaling, at a size whose runs are long enough to
+	//    measure and short enough to repeat. Sizes relevant to intended use --
+	//    the walkthrough's own search ran 2..12 hidden nodes.
+	const unsigned hiddens[ 3 ] = { 2, 8, 16 };
+	for ( int i = 0; i < 3; i++ )
+		addMethods( v, "simpleprop", 25000, hiddens[ i ], ENDPOINT_PRACTICAL );
+	// hidden = 4 at 25,000 is already in the row series; it is the same group.
+
+	// 5: the repeated-fit consumer.
+	//    Aimed at the practical endpoint, so they are declared only where one
+	//    exists -- the same rule the fit arms follow.
+	if ( endpointAvailable( endpointKey( "logistic", 6000, 0 ), ENDPOINT_PRACTICAL ) )
+	{
+		v.push_back( civicCvCase( "logistic", 6000, 0, 0, false ) );
+		v.push_back( civicCvCase( "logistic", 6000, 0, 2, false ) );
+	}
+	if ( endpointAvailable( endpointKey( "simpleprop", 6000, CIVIC_HIDDEN ),
+		ENDPOINT_PRACTICAL ) )
+	{
+		v.push_back( civicCvCase( "simpleprop", 6000, CIVIC_HIDDEN, 0, false ) );
+		v.push_back( civicCvCase( "simpleprop", 6000, CIVIC_HIDDEN, 2, false ) );
+	}
+	if ( endpointAvailable( endpointKey( "simpleprop", 25000, CIVIC_HIDDEN ),
+		ENDPOINT_PRACTICAL ) )
+	{
+		v.push_back( civicCvCase( "simpleprop", 25000, CIVIC_HIDDEN, 0, false ) );
+		v.push_back( civicCvCase( "simpleprop", 25000, CIVIC_HIDDEN, 2, false ) );
+	}
+
+	return v;
 }
 
 static inline vector< Case > pilotCases()
@@ -1114,11 +2462,22 @@ static inline bool isCanonicalReference( const Case& c )
 	return c.optimizer == 0 && !c.autoStep;
 }
 
+// EVERY case the probe knows: the Step 0A mechanics pilot and the Step 0B
+//    workload matrix. One list, because a name must resolve to exactly one case
+//    no matter which selection the caller asked for.
+static inline vector< Case > allCases()
+{
+	vector< Case > v = pilotCases();
+	vector< Case > b = step0bCases();
+	v.insert( v.end(), b.begin(), b.end() );
+	return v;
+}
+
 // Which canonical reference case belongs to a given group. Empty when the group
 //    has none, so the caller can say so rather than guess.
 static inline string canonicalReferenceFor( const string& group )
 {
-	vector< Case > all = pilotCases();
+	vector< Case > all = allCases();
 	for ( size_t i = 0; i < all.size(); i++ )
 		if ( all[ i ].group == group && isCanonicalReference( all[ i ] ) )
 			return all[ i ].name;
@@ -1127,7 +2486,7 @@ static inline string canonicalReferenceFor( const string& group )
 
 static inline bool findCase( const string& name, Case& out )
 {
-	vector< Case > all = pilotCases();
+	vector< Case > all = allCases();
 	for ( size_t i = 0; i < all.size(); i++ )
 		if ( all[ i ].name == name )
 		{

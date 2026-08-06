@@ -524,6 +524,12 @@ set(OPTBENCH_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/tests/optimizer/harness.h
     ${CMAKE_CURRENT_SOURCE_DIR}/tests/optimizer/optimizer_probe.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/tests/optimizer/check_optimizer_harness.cpp
+    # prepare_data.py decides WHAT DATA the Step 0B workloads run on. It is not
+    # compiled, but changing it changes what is measured just as surely as
+    # changing the engine does, so it belongs to the same identity. (The data
+    # itself is identified per row by content hash -- data_id -- so provenance
+    # does not depend on this directory surviving.)
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/optimizer/prepare_data.py
     ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
     ${OPTBENCH_ENGINE_SOURCES})
 list(SORT OPTBENCH_SOURCES)     # deterministic order, so the id is reproducible
@@ -534,6 +540,29 @@ foreach(_gitfile HEAD index)
             ${CMAKE_CURRENT_SOURCE_DIR}/.git/${_gitfile})
     endif()
 endforeach()
+
+# THE ENGINE IDENTITY, separately from the benchmark's own.
+#
+# The committed endpoint table in harness.h holds MEASUREMENTS of how the engine
+# behaves. Writing a measurement into harness.h necessarily changes
+# OPTBENCH_SOURCE_ID -- so "the targets and the arms share a source identity" is
+# a condition that can never hold, and demanding it would mean re-characterizing
+# forever. What the targets actually depend on is src/, and nothing in the
+# harness can change how the engine trains. OPTBENCH_ENGINE_ID hashes exactly
+# that, so a characterization can say WHICH ENGINE it describes and a later
+# harness edit leaves that claim intact -- while an edit to src/network.cpp
+# invalidates it loudly, which is the case that matters.
+set(OPTBENCH_ENGINE_BLOB "")
+foreach(f ${OPTBENCH_ENGINE_SOURCES})
+    if(EXISTS ${f})
+        file(SHA256 ${f} _h)
+        file(RELATIVE_PATH _rel ${CMAKE_CURRENT_SOURCE_DIR} ${f})
+        string(APPEND OPTBENCH_ENGINE_BLOB "${_rel}:${_h}\n")
+    endif()
+endforeach()
+string(SHA256 OPTBENCH_ENGINE_FULL "${OPTBENCH_ENGINE_BLOB}")
+string(SUBSTRING "${OPTBENCH_ENGINE_FULL}" 0 16 OPTBENCH_ENGINE_ID)
+list(LENGTH OPTBENCH_ENGINE_SOURCES OPTBENCH_ENGINE_COUNT)
 
 set(OPTBENCH_SOURCE_BLOB "")
 foreach(f ${OPTBENCH_SOURCES})
@@ -569,21 +598,28 @@ else()
     set(OPTBENCH_DIRTY 1)   # also the safe default when git is unavailable
 endif()
 message(STATUS "optimizer benchmark identity: rev=${OPTBENCH_REV} dirty=${OPTBENCH_DIRTY} "
-    "source_id=${OPTBENCH_SOURCE_ID} over ${OPTBENCH_SOURCE_COUNT} source files")
+    "source_id=${OPTBENCH_SOURCE_ID} over ${OPTBENCH_SOURCE_COUNT} source files; "
+    "engine_id=${OPTBENCH_ENGINE_ID} over ${OPTBENCH_ENGINE_COUNT} engine files")
 
 # The MEASURING end. Built so it cannot rot; deliberately NOT registered with
 # add_test, because wall time is machine-dependent and a timing assertion in the
 # suite is a flake generator (the scale_probe precedent). Run it deliberately:
 #   ./build/optimizer_probe --all
 add_executable(optimizer_probe tests/optimizer/optimizer_probe.cpp)
-target_link_libraries(optimizer_probe PRIVATE neuron_engine)
+# neuron_eval, not neuron_engine: the Step 0B repeated-fit workload measures the
+# real cross-validation runner and its locked refit, so it links the layer that
+# owns them rather than reimplementing a fold loop the user never runs.
+target_link_libraries(optimizer_probe PRIVATE neuron_eval)
 target_include_directories(optimizer_probe PRIVATE tests/optimizer)
 target_compile_definitions(optimizer_probe PRIVATE
     OPTBENCH_GIT_REV="${OPTBENCH_REV}"
     OPTBENCH_GIT_DIRTY=${OPTBENCH_DIRTY}
     OPTBENCH_SOURCE_ID="${OPTBENCH_SOURCE_ID}"
     OPTBENCH_SOURCE_COUNT=${OPTBENCH_SOURCE_COUNT}
-    OPTBENCH_BUILD_TYPE="${CMAKE_BUILD_TYPE}")
+    OPTBENCH_BUILD_TYPE="${CMAKE_BUILD_TYPE}"
+    OPTBENCH_ENGINE_ID="${OPTBENCH_ENGINE_ID}"
+    OPTBENCH_ENGINE_COUNT=${OPTBENCH_ENGINE_COUNT}
+    OPTBENCH_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/optimizer/data")
 
 # The MECHANICS, asserted deterministically and with no timing assertion at all:
 # identical starts, the non-vacuity of that identity, split identity, the
@@ -592,14 +628,17 @@ target_compile_definitions(optimizer_probe PRIVATE
 # leaving no artifacts. This one IS a ctest case, so the harness cannot rot
 # silently while the probe still compiles.
 add_executable(check_optimizer_harness tests/optimizer/check_optimizer_harness.cpp)
-target_link_libraries(check_optimizer_harness PRIVATE neuron_engine)
+target_link_libraries(check_optimizer_harness PRIVATE neuron_eval)
 target_include_directories(check_optimizer_harness PRIVATE tests/optimizer)
 target_compile_definitions(check_optimizer_harness PRIVATE
     OPTBENCH_GIT_REV="${OPTBENCH_REV}"
     OPTBENCH_GIT_DIRTY=${OPTBENCH_DIRTY}
     OPTBENCH_SOURCE_ID="${OPTBENCH_SOURCE_ID}"
     OPTBENCH_SOURCE_COUNT=${OPTBENCH_SOURCE_COUNT}
-    OPTBENCH_BUILD_TYPE="${CMAKE_BUILD_TYPE}")
+    OPTBENCH_BUILD_TYPE="${CMAKE_BUILD_TYPE}"
+    OPTBENCH_ENGINE_ID="${OPTBENCH_ENGINE_ID}"
+    OPTBENCH_ENGINE_COUNT=${OPTBENCH_ENGINE_COUNT}
+    OPTBENCH_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/optimizer/data")
 add_test(NAME optimizer_harness COMMAND check_optimizer_harness)
 
 # The ORCHESTRATION layer is part of the evidence system, so it is tested too:
