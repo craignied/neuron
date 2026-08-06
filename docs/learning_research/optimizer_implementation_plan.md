@@ -911,16 +911,44 @@ passes after restoration/recompilation.
 
 ### iRPROP+ benchmarks
 
-Compare against canonical automatic eta, retained BB, L-BFGS, CGD, and Shanno. Include
-poorly scaled fixtures and strict late-stage objectives; report early speed separately
-from time to the matched final target.
+Apply the standing comparison panel below. Include poorly scaled fixtures and strict
+late-stage objectives; report early speed separately from time to the matched final
+target.
 
 ### Exit decision
 
-Retain only if the one-pass update advantage survives to a comparable endpoint and does
-not create excessive late-stage stalls or failures.
+Retain if it is correct and stable, reaches comparable endpoints, and is either reasonably
+competitive with the panel or adds a meaningfully different robustness/workload profile.
+It need not beat L-BFGS on the synthetic benchmark. Reject it only for a clear performance,
+stability, endpoint, or redundancy failure under the portfolio policy below.
 
 ## Phase 5 — candidate decision and public integration
+
+### Standing comparison and portfolio policy
+
+Do not turn the latest benchmark winner into the sole gate for the next candidate. Every
+neural candidate is measured against a stable reference panel with distinct roles:
+
+- **L-BFGS is the current speed leader.** It is the primary modern wall-clock and
+  full-pass reference, not a requirement that every retained method must beat.
+- **Shanno is the established legacy quasi-Newton control.** It preserves continuity
+  with the historical optimizer evidence and exposes regressions specific to the newer
+  implementation path.
+- **Canonical training is the behavioral and matched-objective reference.** It defines
+  legacy training semantics and a numerical endpoint where it can reach that endpoint;
+  it is not presumed to be the speed competitor.
+- **Eventually, all retained algorithms enter the bounded limited-run selector.** Their
+  performance on the user's actual dataset, under identical starts and declared budgets,
+  guides the full-training choice.
+
+Benchmark results rank recommendations and defaults; they do not hide a correct, stable,
+eligible algorithm merely because another method is faster on the synthetic dataset.
+Retain a candidate that is within a defensible performance band or has complementary
+behavior across datasets, seeds, scaling, conditioning, architectures, losses, endpoint
+depth, or failure modes. Reject methods that are prohibitively slow, unstable, fail the
+comparable endpoint, or are demonstrably redundant without a distinct operational value.
+Record both the portfolio-retention decision and the separate default/recommendation
+ranking.
 
 ### Decision meeting artifact
 
@@ -937,8 +965,9 @@ Before changing any public surface, create
 - retain, research-only, or reject decision;
 - reason the benefit does or does not justify permanent public complexity.
 
-Do not integrate two methods merely because both are faster somewhere. Define whether
-their eligible workload claims are distinct enough to justify both.
+Do not require a candidate to beat the most recent winner. Define whether it is reasonably
+competitive or whether its eligible workloads, convergence behavior, or failure profile
+are distinct enough to add portfolio value.
 
 ### Public algorithm identifiers
 

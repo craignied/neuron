@@ -42,7 +42,9 @@ The Manifest and source are authoritative after implementation.
   and optionally configures `lbfgs_memory`.  The retired CLI menus are not
   extended; GUI and automatic-selection integration remain deferred until the
   researched optimizer set is complete.  The next candidate is iRPROP+,
-  screened against L-BFGS.  Read
+  measured against the plan's standing panel: L-BFGS as speed leader, Shanno
+  as legacy quasi-Newton control, and canonical as behavioral/matched-objective
+  reference.  L-BFGS is not a winner-takes-all retention gate.  Read
   `docs/learning_research/neural_optimizer_handoff.md` first.**
   Apply the plan's **large-workload speed scope governor** to every optimizer
   instruction: prioritize implementing and comparing plausible high-impact

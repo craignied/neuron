@@ -90,16 +90,23 @@ and do not tune it after seeing candidate results.
 ## Exact next research step
 
 Prototype **iRPROP+** as a research-only neural optimizer and compare it directly with
-the retained L-BFGS implementation. Do not reopen the completed L-BFGS phase or begin
-another baseline campaign. Follow Phase 4 of the implementation plan: pin the published
-absolute-step contract before coding, prove the sign-product and rollback branches with
-deterministic tests and focused sabotage, then screen on the cheap representative
-workload before scaling a survivor.
+the plan's standing reference panel: **L-BFGS as the current speed leader, Shanno as the
+established legacy quasi-Newton control, and canonical training as the behavioral and
+matched-objective reference**. L-BFGS is a reference, not a winner-takes-all gate:
+iRPROP+ may be retained without beating it when iRPROP+ is correct, stable, reasonably
+competitive, and adds complementary behavior across workloads or failure modes. Do not
+reopen the completed L-BFGS phase or begin another baseline campaign. Follow Phase 4 of
+the implementation plan: pin the published absolute-step contract before coding, prove
+the sign-product and rollback branches with deterministic tests and focused sabotage,
+then screen on the cheap representative workload before scaling a plausible portfolio
+candidate.
 
 No public REST, GUI, Manifest capability, or automatic-selection change belongs in the
 iRPROP+ research prototype. The retired CLI menus are never extended. Public REST
 integration occurs only after the research acceptance gate; GUI and automatic selection
-remain deferred until the researched optimizer set is complete.
+remain deferred until the researched optimizer set is complete. Eventually every retained
+eligible algorithm belongs in the bounded limited-run selector so the user's actual
+dataset, rather than the synthetic benchmark alone, guides the full-training choice.
 
 ## Subsequent candidate order
 
