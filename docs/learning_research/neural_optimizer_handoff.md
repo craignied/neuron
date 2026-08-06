@@ -1,6 +1,6 @@
 # Neural optimizer research handoff
 
-Date: 2026-08-06
+Date: 2026-08-06 (updated after Phase 3)
 
 ## Read first after restart
 
@@ -22,7 +22,32 @@ Do not resume the stopped Step 0B campaign. Benchmarking belongs inside each can
 staged accept/reject loop. Prefer testing another credible neural algorithm over refining
 timing minutiae.
 
-## Established incumbent
+## Phase 3 is complete: L-BFGS is the new bar
+
+Read `docs/learning_research/lbfgs_screen_results.md` for the evidence and
+`lbfgs_source_decision.md` for the algorithm, its sources and every constant.
+
+On the committed practical endpoint, from identical starting weights, the
+research-only L-BFGS prototype beat Shanno by **8.8x to 13.0x** at 6,000,
+25,000 and 100,000 rows and across four weight seeds, taking **14-20 full
+training-set traversals against Shanno's 123-210**. Every trial evaluation the
+line search makes is counted. Decision: **RETAIN** — the measurements justify
+the next phase. **No public integration was performed and none may be assumed.**
+
+So the bar is now L-BFGS, not Shanno: roughly 15 full passes on a 4,500-row
+problem. The next candidate is **iRPROP+**, screened the same way — cheap
+representative workload first, reject an obvious loser there, scale only a
+survivor.
+
+Two results that must travel with the headline:
+- the held-out differences are **noise** (five of six matched groups favour
+  L-BFGS, one favours Shanno by the largest margin of the six), so this
+  supports *no degradation*, never *better*;
+- **late-stage it is not strictly dominant**: run to the engine's own plateau
+  rule it is 22x faster but lands slightly *worse* on both training objective
+  and held-out error.
+
+## Established incumbent (superseded as the bar; still the control)
 
 On Civic Choice with 6,000 rows, a 25% fixed holdout, 14 inputs, four hidden units, and
 identical starting weights, three interleaved runs to the same practical training
@@ -48,13 +73,13 @@ and do not tune it after seeing candidate results.
 ## Current repository state
 
 - Step 0A was committed as `91ef241 Add optimizer benchmark harness`.
-- Step 0B is deliberately partial. Its retained result is the neural incumbent above.
-- The uncommitted Step 0B tree contains no production optimizer changes; it extends the
-  research harness, preparation/orchestration tools, tests, and evidence documentation.
+- Step 0B was committed as `a9525b0 Characterize neural optimizer baseline`. It is
+  deliberately partial and CLOSED; its retained result is the incumbent above.
+- Phase 3 landed as two commits: the behavior-preserving packed-boundary
+  extraction, then the research-only L-BFGS prototype, then its measurements.
 - `CLAUDE.md` and the implementation plan contain the corrected neural-only scope.
-- At the last report, all discovered CTest cases and goldens passed and
-  `git diff --check` was clean. Re-run the focused gates before committing rather than
-  relying on this handoff.
+- Re-run the focused gates before committing rather than relying on this handoff;
+  never copy a remembered CTest count into a status report.
 
 ## Exact next research step
 
@@ -77,13 +102,13 @@ Use staged gates:
 6. Only after it survives scaled timing, test a small predeclared set of weight seeds and
    a late-stage incumbent endpoint. Then decide retain/reject.
 
-No public CLI, GUI, API, Manifest capability, or automatic-selection change belongs in
-the research prototype. Public integration occurs only after a candidate wins its full
-acceptance gate.
+No public REST, GUI, Manifest capability, or automatic-selection change belongs in the
+research prototype, and the retired CLI menus are never extended. Public integration
+occurs only after the research acceptance gate.
 
 ## Subsequent candidate order
 
-1. L-BFGS
+1. ~~L-BFGS~~ — done, retained, now the bar
 2. iRPROP+
 3. Safeguarded BB as a low-cost candidate/control
 4. Other neural candidates such as LM or online/noisy-gradient methods only when their

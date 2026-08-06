@@ -331,7 +331,12 @@ struct Case {
 	unsigned cvRepeats;
 	unsigned hidden;            // one-hidden models
 	vector< unsigned > layers;  // backprop
-	unsigned optimizer;         // 0 canonical, 1 CGD, 2 Shanno
+	unsigned optimizer;         // 0 canonical, 1 CGD, 2 Shanno, 3 L-BFGS (research)
+
+	// L-BFGS memory length m. Ignored by every other optimizer, and a GROUP
+	//    INVARIANT: two L-BFGS arms at different m are not the same method, so
+	//    comparing them needs its own group with its own declared axis.
+	unsigned lbfgsMemory;
 	bool batch;
 	bool autoStep;
 	double eta;
@@ -407,6 +412,7 @@ struct Row {
 	// Secondary, diagnostic: the function the weights compute on the inputs.
 	string functionStartId, functionEndId;
 	unsigned optimizer;
+	unsigned lbfgsMemory;
 	// THE METHOD, as one name. "canonical fixed eta" and "canonical automatic
 	//    step size" are the same trainingType and are NOT the same method: the
 	//    search costs maxLoops extra full passes per iteration and can land on a
@@ -453,6 +459,7 @@ static inline const char* optimizerName( unsigned t )
 	case 0: return "canonical";
 	case 1: return "cgd";
 	case 2: return "shanno";
+	case 3: return "lbfgs";
 	default: return "unknown";
 	}
 }
@@ -532,6 +539,7 @@ static inline string toJsonLine( const Row& r )
 	o << jstr( "function_end_id", r.functionEndId );
 	o << ",\"optimizer\":" << r.optimizer;
 	o << jstr( "method", r.method );
+	o << ",\"lbfgs_memory\":" << r.lbfgsMemory;
 	o << jstr( "optimizer_name", r.optimizerName );
 	o << jstr( "mode", r.mode );
 	o << ",\"eta\":" << jnum( r.eta );
@@ -590,7 +598,8 @@ struct Sampler {
 template < class NET >
 class Probe : public NET, public Sampler {
 public:
-	Probe() : innerCalls( 0 ), outerCalls( 0 ), injectTraining( false ) { }
+	Probe() : innerCalls( 0 ), outerCalls( 0 ), evaluationCalls( 0 ),
+		injectTraining( false ) { }
 
 	double sampleGradMax() override { return this->getGradMax(); }
 	double sampleHeldoutError() override { return this->sampleTestError( 1 ); }
@@ -615,7 +624,33 @@ public:
 		return NET::trainSet();
 	}
 
+	// EVERY FULL TRAVERSAL AN OPTIMIZER MAKES THROUGH THE PACKED BOUNDARY.
+	//
+	//    innerTrainSet() above counts a traversal for every method that makes
+	//    exactly one per call, which was all of them until L-BFGS. A Wolfe
+	//    line search makes SEVERAL per iteration -- one per trial point -- and
+	//    they all go through batchObjectiveGradient(). Counting them here, in
+	//    the same override idiom, is what stops an optimizer from appearing to
+	//    win because its extra passes were invisible. The plan is explicit:
+	//    a lower outer-iteration count is not a win.
+	//
+	//    Zero for canonical, CGD and Shanno: their batch path calls the
+	//    non-virtual batchGradient() directly and never enters this. So the
+	//    reported pass count for those arms is unchanged, bit for bit, from
+	//    the committed Step 0B campaign.
+	double batchObjectiveGradient( vector< double >& g ) override
+	{
+		evaluationCalls++;
+		return NET::batchObjectiveGradient( g );
+	}
+
+	// The one L-BFGS knob the screen varies. lbfgs is Network's protected
+	//    member, so a subclass reaches it -- no public setter is added to the
+	//    engine for a research-only comparison.
+	void setLBFGSMemory( const unsigned m ) { this->lbfgs.setMemory( m ); }
+
 	unsigned innerCalls, outerCalls;
+	unsigned long long evaluationCalls;
 	bool injectTraining;
 
 	// THE PARAMETER-STATE IDENTITY. Specialized per model below, because each
@@ -948,8 +983,23 @@ static inline string validate( const Case& c )
 			+ c.endpoint + "' endpoint";
 	if ( c.workload != "cv" && ( c.cvFolds || c.cvRepeats ) )
 		return "cv_folds/cv_repeats: only a cv workload may set these";
-	if ( c.optimizer > 2 )
-		return "optimizer: must be 0, 1 or 2";
+	if ( c.optimizer > Network::TRAIN_LBFGS )
+		return "optimizer: must be 0 (canonical), 1 (CGD), 2 (Shanno) or "
+			"3 (the research-only L-BFGS prototype)";
+	// L-BFGS OWNS ITS OWN STEP AND ITS OWN GRADIENT. It refuses the automatic
+	//    step-size search and on-line mode in the engine; declaring either here
+	//    would produce an arm that throws at its first pass rather than a row
+	//    that says what is wrong with the case.
+	if ( c.optimizer == Network::TRAIN_LBFGS && c.autoStep )
+		return "auto_step: L-BFGS chooses its own step and cannot run with the "
+			"automatic step-size search";
+	if ( c.optimizer == Network::TRAIN_LBFGS && !c.batch )
+		return "mode: L-BFGS requires batch/epoch training";
+	if ( c.optimizer == Network::TRAIN_LBFGS && c.lbfgsMemory < 1 )
+		return "lbfgs_memory: must be at least 1";
+	if ( c.optimizer == Network::TRAIN_LBFGS && c.model == "logistic" )
+		return "model: Logistic does not implement the packed parameter "
+			"boundary L-BFGS needs";
 	if ( c.dataFile.empty() && c.rows < 2 )
 		return "rows: must be at least 2";
 	if ( !( c.target > 0.0 && c.target < 1.0 ) )
@@ -1017,6 +1067,7 @@ static inline void describe( Row& r, const Case& c, const string& rev )
 	r.decayOn = c.decayOn;
 	r.decay = c.decay;
 	r.gradStop = c.gradStop;
+	r.lbfgsMemory = c.lbfgsMemory;
 	r.autoStop = c.autoStop;
 	r.minStop = c.minStop;
 	r.target = c.target;
@@ -1072,6 +1123,8 @@ static Row runTyped( const Case& c, const string& rev )
 		p.setDataSet( d );
 		arch( p, c );
 		configure( p, c );
+		if ( c.optimizer == Network::TRAIN_LBFGS )
+			p.setLBFGSMemory( c.lbfgsMemory );
 
 		util::set_seed( c.weightSeed );
 		p.randomize();
@@ -1122,6 +1175,7 @@ static Row runTyped( const Case& c, const string& rev )
 	// --- the measurement ----------------------------------------------------
 	p.innerCalls = 0;
 	p.outerCalls = 0;
+	p.evaluationCalls = 0;
 	p.injectTraining = ( c.inject == Case::INJECT_TRAINING );
 
 	double achieved = 0;
@@ -1148,7 +1202,20 @@ static Row runTyped( const Case& c, const string& rev )
 	}
 
 	// Whatever survived the attempt is still worth recording.
-	r.fullPasses = ( long long ) p.innerCalls;
+	// FULL PASSES MEANS FULL TRAVERSALS OF THE TRAINING SET, which is the
+	//    currency a speed comparison is denominated in. For every method that
+	//    performs exactly one traversal per innerTrainSet() call -- canonical,
+	//    canonical-autostep, CGD, Shanno -- that is the inner-call count, and
+	//    this is unchanged from Step 0B.
+	//
+	//    For L-BFGS it is NOT. Its innerTrainSet() traverses nothing itself: it
+	//    delegates, and every traversal is a batchObjectiveGradient() call, one
+	//    per trial point of the line search. The test is what the run actually
+	//    did, not which model it is -- an arm that made evaluation calls is an
+	//    arm whose traversals are counted there.
+	r.fullPasses = p.evaluationCalls > 0
+		? ( long long ) p.evaluationCalls
+		: ( long long ) p.innerCalls;
 	r.iterationsCompleted = ( long long ) p.outerCalls;
 	r.iterationIndex = p.getIterations();
 	r.peakRssKb = peakRssKb();
@@ -1937,6 +2004,7 @@ static inline Case baseCase()
 	//    it, so a canonical arm compared with them must run it too, or the group
 	//    is timing two different code paths. The limit is 0, so it never fires.
 	c.gradStop = true;
+	c.lbfgsMemory = 5; // Liu & Nocedal (1989) section 5: 3 <= m <= 7
 	c.autoStop = false;
 	c.minStop = true;
 	c.target = 0.35;
@@ -2296,6 +2364,135 @@ static inline vector< Case > step0bCases()
 	return v;
 }
 
+// ---------------------------------------------------------------------------
+// THE PHASE 3 SCREEN: L-BFGS against the incumbent, and nothing else.
+//
+// The plan's scope governor is explicit that a candidate is screened on ONE
+// cheap representative neural workload before any large-data time is spent on
+// it, and that an obvious loser is rejected there rather than tuned into
+// contention. So this is deliberately two arms, not six:
+//
+//   * Civic Choice at 6,000 rows, the walkthrough's own four hidden units, the
+//     committed 25% stratified holdout and the committed practical objective --
+//     the identical workload, split and endpoint Shanno's 238.7 ms / 194 passes
+//     were measured on, so the comparison is against a published number rather
+//     than a re-measured one;
+//   * the same comparison group, so run_probe.py REFUSES the pair if anything
+//     defining the work differs between them;
+//   * Shanno as the incumbent control, re-run here rather than quoted, because
+//     the engine has changed since Step 0B (the packed-boundary extraction) and
+//     an incumbent quoted from a different binary is not a control.
+//
+// Canonical and CGD are NOT included. Their standing is already measured and
+// the plan forbids scaling every historical arm; adding them would spend
+// roughly a minute of ceiling per repetition to re-establish a settled result.
+static inline vector< Case > screenCases()
+{
+	vector< Case > v;
+	if ( !endpointAvailable( endpointKey( "simpleprop", 6000, CIVIC_HIDDEN ),
+		ENDPOINT_PRACTICAL ) )
+		return v;
+
+	// 2 = Shanno, the incumbent; 3 = the L-BFGS prototype.
+	v.push_back( civicCase( "simpleprop", 6000, CIVIC_HIDDEN,
+		ENDPOINT_PRACTICAL, 2, false ) );
+	v.push_back( civicCase( "simpleprop", 6000, CIVIC_HIDDEN,
+		ENDPOINT_PRACTICAL, Network::TRAIN_LBFGS, false ) );
+
+	// THE PREDECLARED MEMORY COMPARISON, and nothing beyond it. The plan names
+	//    m = 5, 10 and 20 and forbids an unbounded tuning exercise, so these
+	//    three are declared here rather than chosen after seeing a result.
+	//    Their own comparison group with its own axis: two L-BFGS arms at
+	//    different m are not the same method, and putting them in the method
+	//    group would let run_probe.py's invariant check pass a group that is
+	//    varying two things at once.
+	const unsigned mem[ 3 ] = { 5, 10, 20 };
+	for ( int i = 0; i < 3; i++ )
+	{
+		Case c = civicCase( "simpleprop", 6000, CIVIC_HIDDEN,
+			ENDPOINT_PRACTICAL, Network::TRAIN_LBFGS, false );
+		c.lbfgsMemory = mem[ i ];
+		c.group = "civic-lbfgs-memory-r6000-h4-practical";
+		c.groupAxis = "lbfgs_memory";
+		c.name = c.group + "-m" + to_string( mem[ i ] );
+		v.push_back( c );
+	}
+
+	// THE WEIGHT-SEED TEST, predeclared and small. Every result above rests on
+	//    ONE initialization, and repeated runs from one fixed start establish
+	//    deterministic reproducibility rather than reliability -- a distinction
+	//    Step 0B's report was explicit about and this must not quietly drop.
+	//    Three further seeds, fixed here before any of them was run.
+	//
+	//    EACH SEED IS ITS OWN COMPARISON GROUP. weight_seed and
+	//    weight_start_id are group invariants precisely because two arms from
+	//    different starting weights are not racing the same race; the matched
+	//    comparison is Shanno against L-BFGS at the SAME start, repeated at
+	//    several starts.
+	const unsigned seeds[ 3 ] = { 101, 202, 303 };
+	for ( int i = 0; i < 3; i++ )
+	{
+		const unsigned methods[ 2 ] = { 2, Network::TRAIN_LBFGS };
+		for ( int k = 0; k < 2; k++ )
+		{
+			Case c = civicCase( "simpleprop", 6000, CIVIC_HIDDEN,
+				ENDPOINT_PRACTICAL, methods[ k ], false );
+			c.weightSeed = seeds[ i ];
+			c.group = "civic-seed" + to_string( seeds[ i ] )
+				+ "-simpleprop-r6000-h4-practical";
+			c.name = c.group + "-" + optimizerName( methods[ k ] );
+			v.push_back( c );
+		}
+	}
+
+	// THE SURVIVOR/INCUMBENT PAIR ONLY, scaled. The plan is explicit that a
+	//    survivor and the incumbent are scaled, not every historical arm, and
+	//    each size is its own comparison group because an endpoint
+	//    characterized at 6,000 rows is not the endpoint at 100,000.
+	const unsigned sizes[ 2 ] = { 25000, 100000 };
+	for ( int i = 0; i < 2; i++ )
+	{
+		if ( !endpointAvailable( endpointKey( "simpleprop", sizes[ i ],
+			CIVIC_HIDDEN ), ENDPOINT_PRACTICAL ) )
+			continue;
+		v.push_back( civicCase( "simpleprop", sizes[ i ], CIVIC_HIDDEN,
+			ENDPOINT_PRACTICAL, 2, false ) );
+		v.push_back( civicCase( "simpleprop", sizes[ i ], CIVIC_HIDDEN,
+			ENDPOINT_PRACTICAL, Network::TRAIN_LBFGS, false ) );
+	}
+
+	// THE LATE-STAGE QUESTION, asked in the only way this workload permits.
+	//
+	//    Step 0B established that canonical gradient descent does not converge
+	//    on the neural workloads at the engine's own 1e-6 rule, so there is no
+	//    canonical strict endpoint to race to and none is invented here. What
+	//    can be asked is what each method does when it is allowed to run until
+	//    THE ENGINE'S OWN plateau rule says it has stopped improving --
+	//    setAutoStop at Iterative's shipped tolerance and window, identical for
+	//    both arms.
+	//
+	//    THIS IS NOT A MATCHED-ENDPOINT RACE and does not pretend to be: the
+	//    arms stop at their own plateaus, so the row declares endpoint `none`
+	//    rather than borrowing a name it has not earned, and the comparison to
+	//    read is WHERE each lands, not only how fast it got there. A method
+	//    that stops earlier at a worse objective has not won.
+	const unsigned lateMethods[ 2 ] = { 2, Network::TRAIN_LBFGS };
+	for ( int k = 0; k < 2; k++ )
+	{
+		Case c = civicCase( "simpleprop", 6000, CIVIC_HIDDEN,
+			ENDPOINT_PRACTICAL, lateMethods[ k ], false );
+		c.minStop = false;
+		c.autoStop = true;
+		c.endpoint = ENDPOINT_NONE;
+		c.target = 0.5;  // carried, unused: no objective rule is armed
+		c.group = "civic-latestage-simpleprop-r6000-h4";
+		c.name = c.group + "-" + optimizerName( lateMethods[ k ] );
+		v.push_back( c );
+	}
+
+	return v;
+}
+
 static inline vector< Case > pilotCases()
 {
 	vector< Case > v;
@@ -2473,6 +2670,20 @@ static inline vector< Case > allCases()
 	vector< Case > v = pilotCases();
 	vector< Case > b = step0bCases();
 	v.insert( v.end(), b.begin(), b.end() );
+
+	// The Phase 3 screen's Shanno arm IS a Step 0B arm -- same group, same
+	//    name -- so only the candidate is new. Appended by name rather than
+	//    wholesale, because a duplicate case name would make --case ambiguous
+	//    and would run the same arm twice under --all.
+	vector< Case > sc = screenCases();
+	for ( size_t i = 0; i < sc.size(); i++ )
+	{
+		bool known = false;
+		for ( size_t j = 0; j < v.size() && !known; j++ )
+			known = ( v[ j ].name == sc[ i ].name );
+		if ( !known )
+			v.push_back( sc[ i ] );
+	}
 	return v;
 }
 

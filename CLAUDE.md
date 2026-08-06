@@ -2,7 +2,7 @@ Read and follow the instructions in /Users/craign/code/locker/CLAUDE.md before p
 
 # neuron 3.0 — project instructions
 
-neuron is a C++ neural-modeling and statistical engine with a menu CLI, a
+neuron is a C++ neural-modeling and statistical engine with a legacy menu CLI, a
 loopback HTTP GUI, and small Python data/deployment tools.  The legacy source in
 `../distro/` is read-only oracle material.  Current production source is `src/`.
 
@@ -15,7 +15,7 @@ Start here, then open the smallest relevant authority:
 | Build, dataset grooming, training, deployment | `AGENTS.md` |
 | Engine or numerical code | `docs/development_rules.md`; relevant Manifest class section |
 | Optimizer or learning-algorithm research | `docs/optimizer_research.md`; rules 4, 6, 7 in `docs/development_rules.md` |
-| GUI, REST fields, or CLI parity | `docs/gui_cli_parity.md`; Manifest REST chapter |
+| GUI or REST fields | `docs/gui_cli_parity.md`; Manifest REST chapter |
 | Cross-validation or inference | `docs/cross_validation.md`; `docs/evaluation_report_spec.md`; relevant Manifest services |
 | ROC/statistics | `docs/roc_theory.md`; relevant cited Manifest section |
 | Manifest editing | `docs/manifest_maintenance.md` in full |
@@ -33,8 +33,13 @@ The Manifest and source are authoritative after implementation.
   from CTest; never copy a remembered count into a status report.
 - Current optimizer research and implementation follows
   `docs/learning_research/optimizer_implementation_plan.md`.  Resume at the
-  first incomplete phase (initially Phase 0 characterization/harness), and do
-  not expose a candidate publicly before its matched-endpoint acceptance gate.
+  first incomplete phase, and do not expose a candidate publicly before its
+  matched-endpoint acceptance gate.  **Phase 0 and Phase 3 are complete:
+  Shanno was the incumbent, and the research-only L-BFGS prototype
+  (`src/lbfgs.*`) now beats it 8.8x-13.0x to the committed practical endpoint
+  across three row counts and four weight seeds.  It is RETAINED, and NOT
+  publicly integrated.  The next candidate is iRPROP+, screened against
+  L-BFGS.  Read `docs/learning_research/neural_optimizer_handoff.md` first.**
   Apply the plan's **large-workload speed scope governor** to every optimizer
   instruction: prioritize implementing and comparing plausible high-impact
   algorithms on representative scaled workloads. Existing methods establish
@@ -55,16 +60,19 @@ The Manifest and source are authoritative after implementation.
 The complete operational wording is in `docs/development_rules.md`; these are the
 session-level triggers:
 
-1. Update `AGENTS.md` when an operational recipe changes.  If CLI or GUI surface
-   changes, update `docs/gui_cli_parity.md` in the same commit.
+1. Update `AGENTS.md` when an operational recipe changes.  If the GUI or REST
+   surface changes, update `docs/gui_cli_parity.md` in the same commit.
 2. Prove a new test can fail.  Demonstrably recompile affected translation units
    after introducing a sabotage and again after restoring it; require the build
    log to show both compilations.  Guard against vacuous empty/default comparisons.
 3. Measure a claimed defect or performance opportunity before acting on it.
 4. Keep numerical vocabulary and contract checks in `Matrix`, `vector_ops`, and
    `Population`; extend that layer instead of dropping to raw arrays.
-5. GUI/CLI parity is a hard public contract.  The GUI page and HTTP API together
-   must expose every menu capability.
+5. **Do no further feature work on the legacy CLI menus.** They remain frozen
+   for compatibility and regression testing only. Every new interactive
+   capability is designed REST-first and exposed through the GUI where a human
+   control is appropriate; it does not receive a menu equivalent. Preserve the
+   existing menu surface, and keep GUI controls and REST fields synchronized.
 6. One class or service owns each mechanism.  Coordinators compose it; they do
    not reimplement it.
 7. Speed is architectural.  Keep allocation, `std::function`, and virtual

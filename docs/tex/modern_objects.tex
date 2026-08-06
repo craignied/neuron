@@ -336,6 +336,56 @@ specification later in this chapter:
       absolute eigenvalue, or $-1$ before calculation.
 \end{itemize}
 
+\subsubsection{The packed parameter boundary}
+\index{Network!packWeights}
+\index{Network!unpackWeights}
+\index{Network!batchObjectiveGradient}
+\index{Network!packedSize}
+\index{Network!NoPackedBoundary}
+\index{Packed parameter boundary}
+These four \texttt{protected} contracts exist because a genuine Wolfe line
+search must evaluate the objective at \emph{trial} points, and
+\texttt{innerTrainSet()} cannot serve as that evaluator: it updates the weights.
+They are not a public capability and have no menu, GUI or API surface; the sole
+consumer is \texttt{Network::Evaluator}, which serves \texttt{LBFGS}.
+
+\begin{itemize}
+\item \texttt{virtual unsigned packedSize() const}: the number of doubles a
+      packed parameter vector holds.  \emph{Zero means the boundary is
+      unavailable} --- it is the eligibility question, asked before a run.
+\item \texttt{virtual void packWeights(vector<double>\& destination) const}:
+      writes the current weights in the one layout the gradient also uses, so a
+      step computed in one applies to the other.  \texttt{OneHiddenNet} writes
+      \texttt{hW} row by row then \texttt{oW}, for both bias architectures,
+      taking every width from \texttt{hW}'s own dimensions rather than from a
+      flag; \texttt{BackProp} writes \texttt{Weights[0]} through the output
+      layer in container order.
+\item \texttt{virtual void unpackWeights(const vector<double>\& source)}:
+      installs packed parameters, validating the length once at entry and
+      throwing \texttt{nvec::SizeMismatch} otherwise.  A refused call installs
+      nothing.
+\item \texttt{virtual double batchObjectiveGradient(vector<double>\&
+      packedRawGradient)}: returns the mean batch objective at the currently
+      installed weights, including the current weight-decay policy, and writes
+      the \emph{raw} mean gradient of that same objective --- the gradient
+      itself, never a search direction.  It updates no weight, no optimizer
+      history, no iteration state, no report and no cached statistic; it writes
+      only the model's per-pass scratch, as \texttt{forward()} writes
+      \texttt{o}.  One virtual call per full evaluation, and none inside the
+      exemplar loop it runs.
+\end{itemize}
+
+The default implementations refuse: \texttt{packedSize()} returns zero and the
+other three throw \texttt{Network::NoPackedBoundary}.  Refusal is the point --- an
+empty parameter vector is a value a caller would act on, and a packed optimizer
+handed one would report that it had converged.  \texttt{Logistic} deliberately
+does not implement the boundary.
+
+The batch separate-gradient path of \texttt{OneHiddenNet::innerTrainSet()} and
+\texttt{BackProp::innerTrainSet()} consumes the same authoritative evaluation,
+so the model equations exist once and a trial point and a training iteration
+cannot disagree.
+
 \texttt{OneHiddenNet} sits between \texttt{Network} and the two
 one-hidden-layer models.
 \index{OneHiddenNet}
@@ -1080,6 +1130,147 @@ claim that the selected optimizer is globally best.
       const atomic<bool>* cancel)}: probes canonical, CGD, and Shanno on clones
       of identical starting weights and returns the lowest-error usable clone.
 \end{itemize}
+
+\subsection{LBFGSObjective and LBFGS}
+\index{LBFGS}
+\index{LBFGSObjective}
+\index{Optimizer!limited-memory BFGS}
+\index{LBFGS!iterate}
+\index{LBFGS!setMemory}
+\index{LBFGS!reset}
+\index{LBFGS!applyInverseHessian}
+\index{LBFGS!pushPair}
+\index{LBFGS!Ineligible}
+\index{Wolfe conditions}
+\index{Line search!strong Wolfe}
+\index{Two-loop recursion}
+\texttt{LBFGS} is a \emph{research-only} limited-memory BFGS optimizer.  It is
+not selectable from the training menu, the GUI, the HTTP API or automatic
+selection, it is never written to a saved network, and it is not a public
+capability of the engine.  It is reachable only through
+\texttt{Network::setTrainingType(Network::TRAIN\_LBFGS)}, a training type no
+menu produces, so that the optimizer benchmark and
+\texttt{tests/network/check\_lbfgs.cpp} can measure it.  This section documents
+what exists in the source; it does not announce a user-visible feature.
+
+\paragraph{Published derivation.}  The limited-memory update is Nocedal
+(1980), \emph{Mathematics of Computation} \textbf{35}(151):773--782, and Liu and
+Nocedal (1989), \emph{Mathematical Programming} \textbf{45}:503--528.  The
+two-loop recursion is Nocedal and Wright, \emph{Numerical Optimization}, 2nd
+ed.\ (Springer, 2006), Algorithm 7.4, p.~178; the initial inverse-Hessian
+scaling $\gamma_k = ({\bf s}_{k-1}^T{\bf y}_{k-1}) /
+({\bf y}_{k-1}^T{\bf y}_{k-1})$ is equation (7.20) on the same page; the outer
+loop is Algorithm 7.5, p.~179.  The line search is a \emph{complete strong-Wolfe
+search}: Algorithm 3.5 (bracketing, p.~60) with Algorithm 3.6 (\texttt{zoom},
+p.~61), enforcing sufficient decrease (3.6a) and the two-sided curvature bound
+(3.7b) of Wolfe (1969), \emph{SIAM Review} \textbf{11}(2):226--235.  Armijo
+backtracking is deliberately not implemented: it never tests curvature and
+therefore cannot guarantee ${\bf s}^T{\bf y} > 0$.
+
+\paragraph{neuron-specific policy, distinguished from the mathematics.}  The
+published constants are $c_1 = 10^{-4}$ and $c_2 = 0.9$ (Nocedal and Wright
+pp.~33--34), a unit initial step for a quasi-Newton direction (p.~142) and
+$\min(1, 1/\|{\bf g}\|_1)$ for a steepest-descent one (p.~59).  Declared by
+this project rather than by the sources: a bracketing expansion factor of $2$, a
+bracketing ceiling $\alpha_{\max} = 10^{10}$, at most twenty evaluations per
+line search, bisection as \texttt{zoom}'s interpolation, refusal of a bracket
+narrower than $10^{-16}\max(1,|\alpha_{lo}|)$, and acceptance of a curvature
+pair only when ${\bf s}^T{\bf y} > 10^{-10}\,{\bf y}^T{\bf y}$ --- a relative
+floor on top of the published ${\bf s}^T{\bf y} > 0$ so that $\rho = 1/
+({\bf s}^T{\bf y})$ stays representable.  A rejected pair is skipped, never
+damped.  All are recorded in
+\texttt{docs/learning\_research/lbfgs\_source\_decision.md}, which was written
+before the implementation and may not be revised after a measurement.
+
+\paragraph{Ownership.}  \texttt{LBFGS} owns the memory length $m$, the
+${\bf s}$, ${\bf y}$ and $\rho$ ring buffers, the last accepted parameters,
+objective and raw gradient, the two-loop scratch, the line search and its
+counters, curvature acceptance and history reset, the direction, and trial
+installation, acceptance, failure and exact restoration.  It does \emph{not}
+own stopping, cancellation, the iteration counter or reporting: \texttt{Iterative}
+keeps all of those, and this class only asks whether cancellation has been
+requested.  It does not touch \texttt{eta}, and it does not share
+\texttt{lastG}/\texttt{lastF} with conjugate gradient descent and Shanno.  It
+does not pass through \texttt{Network::engine()}, which dispatches a gradient
+transformation that the caller then applies as ${\bf w} \leftarrow {\bf w} -
+\eta{\bf g}$; a search making several objective evaluations per iteration
+cannot honestly fit that contract.
+
+\texttt{LBFGSObjective} is the boundary \texttt{LBFGS} consumes, with one
+implementation --- \texttt{Network::Evaluator}, a local of one outer iteration
+that forwards to the protected packed boundary of section
+\ref{current_established_objects}.  It is not a general callback framework:
+
+\begin{itemize}
+\item \texttt{virtual void currentPoint(vector<double>\& w) const}: the
+      currently installed parameters, packed.
+\item \texttt{virtual void install(const vector<double>\& w)}: installs packed
+      parameters, for a trial point and for exact restoration.
+\item \texttt{virtual double evaluate(vector<double>\& g)}: returns the
+      objective at the installed parameters and writes the raw gradient.
+\item \texttt{virtual bool cancelled() const}: whether an outside request has
+      asked the run to stop.  Consulted before every trial evaluation, because
+      one evaluation is a whole pass over the training set.
+\end{itemize}
+
+\texttt{LBFGS} provides:
+
+\begin{itemize}
+\item \texttt{void setMemory(unsigned m)}: sets the history length and resets
+      the working state.  Throws \texttt{LBFGS::Ineligible} when $m$ is zero.
+\item \texttt{unsigned getMemory() const}: the configured history length.
+\item \texttt{void reset()}: clears history, accepted point, scratch and
+      counters.  Called from \texttt{Network::prepareRun()}, so working state is
+      per \texttt{train()} run and a quiet run resets exactly as an audible one
+      does.
+\item \texttt{bool started() const}: whether this run has evaluated its starting
+      point.
+\item \texttt{double iterate(LBFGSObjective\& obj)}: performs one outer
+      iteration and returns the objective \emph{at the point the step departed
+      from}, matching the pre-update reporting every other optimizer here uses,
+      so no stopping rule in \texttt{Iterative} sees a shifted timeline.  On
+      line-search failure or cancellation it reinstalls the last accepted
+      parameters exactly, drops the history and reports the unchanged accepted
+      objective; it invents no stop reason.
+\item \texttt{double gradMax() const}: $\max_i |g_i|$ of the \emph{raw} gradient
+      at that same point, taken before the direction is computed.
+\item \texttt{objectiveEvaluations()}, \texttt{gradientEvaluations()},
+      \texttt{lineSearchFailures()}, \texttt{historyResets()},
+      \texttt{curvatureRejections()}, \texttt{cancellations()}: counts, all
+      \texttt{unsigned long long}, kept separate from outer iterations because a
+      single iteration may cost many full passes.
+\item \texttt{unsigned pairs() const}: stored curvature pairs, $0$ to $m$.
+\item \texttt{void applyInverseHessian(const vector<double>\& g,
+      vector<double>\& result) const}: Algorithm 7.4, writing $H_k{\bf g}$.
+\item \texttt{double scaling() const}: $\gamma_k$ of equation (7.20); $1$ with
+      an empty history.
+\item \texttt{bool pushPair(const vector<double>\& s,const vector<double>\& y)}:
+      stores a curvature pair, returning \texttt{false} when it is skipped.
+\item \texttt{void resetHistory()}: drops the history, the fallback shared by a
+      non-descent direction and a failed line search.
+\item \texttt{void copyConfigurationFrom(const LBFGS\& rhs)}: copies the memory
+      length only.  A copied model does not promise to continue a mid-run
+      trajectory, because \texttt{train()} begins a new run and resets the
+      working history.
+\end{itemize}
+
+\paragraph{Failure contract.}  \texttt{LBFGS::Ineligible} is raised, rather than
+the method silently becoming a different one, for on-line training (a
+per-exemplar update has no deterministic objective to line search), the
+automatic step-size search (two step rules cannot own one iteration), a model
+that does not implement the packed boundary, and $m = 0$.  A measured property
+worth recording: at the objective's floating-point floor no step can demonstrate
+sufficient decrease, so the search spends its evaluation ceiling and fails; the
+weights then do not move, the history is dropped, and a real run stops earlier
+on a rule \texttt{Iterative} owns.
+
+\paragraph{Performance evidence.}  On Civic Choice at the committed practical
+endpoint, from identical starting weights, L-BFGS reached the same endpoint
+between $8.8\times$ and $13.0\times$ faster than Shanno --- the incumbent --- at
+6,000, 25,000 and 100,000 rows and across four weight seeds, taking $14$ to $20$
+full training-set traversals against Shanno's $123$ to $210$.  The measurements,
+their spread and their limitations are in
+\texttt{docs/learning\_research/lbfgs\_screen\_results.md}.
 
 \subsection{modelfactory and netclone}
 \index{modelfactory}

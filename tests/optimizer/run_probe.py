@@ -56,7 +56,8 @@ REQUIRED_FIELDS = [
     "model", "arch", "loss", "rows", "rows_total", "rows_test", "inputs",
     "params", "weight_seed", "weight_id_available", "weight_start_id",
     "weight_end_id", "weight_elements", "weight_id_note", "function_start_id",
-    "function_end_id", "optimizer", "method", "optimizer_name", "mode", "eta",
+    "function_end_id", "optimizer", "lbfgs_memory", "method", "optimizer_name",
+    "mode", "eta",
     "auto_step", "decay_on", "decay", "grad_stop", "auto_stop", "min_stop",
     "target", "achieved",
     "ceiling", "iteration_index", "iterations_completed", "full_passes",
@@ -86,7 +87,8 @@ STR_FIELDS = ["rev", "source_id", "engine_id", "build", "case",
 # satisfy a naive isinstance(x, int) check and slip through as 1 -- every
 # integer check below rejects bool explicitly.
 INT_FIELDS = ["schema", "rows", "rows_total", "rows_test", "inputs", "params",
-              "weight_seed", "weight_elements", "optimizer", "ceiling",
+              "weight_seed", "weight_elements", "optimizer", "lbfgs_memory",
+              "ceiling",
               "iteration_index", "elapsed_ns", "source_files", "engine_files",
               "data_seed",
               "cv_folds", "cv_repeats", "cv_folds_ok", "cv_folds_total"]
@@ -126,7 +128,10 @@ STOP_REASONS = {"none", "max_iterations", "min_error", "min_change",
 # Real numbers that MAY be null or -1 ("not applicable here").
 NULLABLE_NUM_FIELDS = ["heldout_error", "cv_auc", "locked_auc"]
 
-OPTIMIZER_NAMES = {0: "canonical", 1: "cgd", 2: "shanno"}
+# 3 is the RESEARCH-ONLY L-BFGS prototype (Network::TRAIN_LBFGS).  No menu, GUI
+# control, HTTP field or automatic-selection rule produces it; it exists so this
+# harness and tests/network/check_lbfgs.cpp can measure the Phase 3 candidate.
+OPTIMIZER_NAMES = {0: "canonical", 1: "cgd", 2: "shanno", 3: "lbfgs"}
 
 # Fields that must be identical across every arm of a comparison group.  The
 # group's declared axis is removed from this list for that group, and nothing
@@ -137,6 +142,11 @@ GROUP_INVARIANTS = [
     "arch", "loss", "rows", "rows_total", "rows_test", "inputs", "params",
     "weight_seed", "weight_start_id", "mode", "eta", "auto_step", "decay_on",
     "decay", "grad_stop", "auto_stop", "min_stop", "target", "ceiling",
+    # L-BFGS's memory length. An invariant for the same reason as the rest: two
+    # arms at different m are two methods, so a group holding both is varying
+    # something it has not declared.  The memory-sweep group declares
+    # `lbfgs_memory` as its axis, which removes it from this list there.
+    "lbfgs_memory",
     # THE TWO STEP 0B ADDITIONS, and the reason they are invariants rather than
     # descriptive labels.  `endpoint` pins WHICH TARGET the arms raced to: a
     # practical arm and a strict arm are aimed at different objectives, so a
@@ -159,6 +169,11 @@ AXIS_FIELDS = {
     "method": {"optimizer", "auto_step"},
     "auto_step": {"auto_step"},
     "grad_stop branch": {"grad_stop"},
+    # The L-BFGS memory length, and ONLY it: a group on this axis holds one
+    # optimizer at several m, so `optimizer` stays invariant there.  Declaring
+    # the axis is what permits lbfgs_memory to differ; every other field still
+    # has to match.
+    "lbfgs_memory": {"lbfgs_memory"},
     "none": set(),
 }
 
@@ -336,7 +351,7 @@ def validate_row(row, expected_case=None, identity=None):
                           row["auto_step"], expected_method))
 
     if row["optimizer"] not in OPTIMIZER_NAMES:
-        refuse("optimizer %r is not 0, 1 or 2" % row["optimizer"])
+        refuse("optimizer %r is not a known training type" % row["optimizer"])
     if row["model"] not in MODELS:
         refuse("unknown model %r" % row["model"])
     if row["mode"] not in MODES:
@@ -909,7 +924,7 @@ def _good_row(**over):
         "inputs": 2, "params": 13, "weight_seed": 7, "weight_id_available": True,
         "weight_start_id": "0xw1", "weight_end_id": "0xw2", "weight_elements": 13,
         "weight_id_note": "", "function_start_id": "0xf1", "function_end_id": "0xf2",
-        "optimizer": 0, "method": "canonical",
+        "optimizer": 0, "lbfgs_memory": 5, "method": "canonical",
         "optimizer_name": "canonical", "mode": "batch", "eta": 0.5,
         "auto_step": False, "decay_on": False, "decay": 0.0, "grad_stop": True,
         "auto_stop": False, "min_stop": True,
@@ -1434,6 +1449,10 @@ def main():
                     help="restrict to the Step 0B workload matrix (the Civic "
                          "Choice application benchmark, the scaling series and "
                          "the repeated-fit consumer)")
+    ap.add_argument("--screen", action="store_true",
+                    help="restrict to the Phase 3 candidate screen: the L-BFGS "
+                         "prototype against the Shanno incumbent, on Civic "
+                         "Choice 6k/h4 at the committed practical endpoint")
     ap.add_argument("--timeout", type=float, default=120.0,
                     help="per-arm timeout in seconds (default 120; raise it "
                          "deliberately for a genuinely long Step 0B workload)")
@@ -1454,7 +1473,10 @@ def main():
     probe = find_probe(args.probe)
     identity = probe_identity(probe)
 
-    subset = "--step0b" if args.step0b else ("--pilot" if args.pilot else None)
+    subset = ("--step0b" if args.step0b
+              else "--screen" if args.screen
+              else "--pilot" if args.pilot
+              else None)
     available = list_cases(probe, subset)
     if args.case:
         unknown = [c for c in args.case if c not in available]

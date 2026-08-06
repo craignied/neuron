@@ -2,11 +2,16 @@
 
 Phase 0, Step 0A of `docs/learning_research/optimizer_implementation_plan.md`.
 
-This directory measures the optimizers neuron **already has** — canonical
-gradient descent, conjugate gradient descent, and Shanno — from identical
-starting states to a fixed objective. It contains no new optimizer, no packed
-weight API, and no pure objective/gradient boundary. Those belong to the L-BFGS
-phase, shaped by their first real consumer.
+This directory measures neuron's optimizers from identical starting states to a
+fixed objective: canonical gradient descent, conjugate gradient descent, Shanno,
+and — since Phase 3 — the research-only L-BFGS prototype (`src/lbfgs.*`,
+`Network::TRAIN_LBFGS`). The packed weight/objective/gradient boundary the last
+of those needs lives in `src/network.h`, shaped by that one real consumer.
+
+**Phase 3 results: `docs/learning_research/lbfgs_screen_results.md`.** The short
+version: L-BFGS reaches the committed practical endpoint 8.8x to 13.0x faster
+than Shanno across three row counts and four weight seeds, in 14-20 full passes
+against 123-210.
 
 ## What is here
 
@@ -175,6 +180,25 @@ every hot loop and rule 7 is untouched. No production counter was added.
 |---|---:|---:|
 | `passcount-nosearch` | 21 | 21 |
 | `passcount-search` | 21 | **84** |
+
+### What `full_passes` means once one iteration can traverse the data many times
+
+`innerTrainSet()` counted a traversal for every method that makes exactly one
+per call, which was all of them until L-BFGS. A Wolfe line search makes
+**several per outer iteration**, one per trial point, and they all go through
+`Network::batchObjectiveGradient()`. `Probe` overrides that too, in the same
+idiom, and `full_passes` reports **training-set traversals**:
+
+- an arm that made evaluation calls reports those — every trial point included;
+- every other arm reports its `innerTrainSet()` count, unchanged.
+
+The test is what the run *did*, not which model it is. Counting only outer
+iterations is precisely how an optimizer comes to look like a winner because its
+extra passes were invisible, and the plan is explicit that a lower
+outer-iteration count is not a win. Canonical, CGD and Shanno never enter
+`batchObjectiveGradient()` — their batch path calls the non-virtual
+`batchGradient()` directly — so their pass counts are bit-identical to Step 0B's,
+and Shanno's 194 passes on Civic Choice 6K reproduced exactly.
 
 Both run to the same fixed ceiling on an unreachable target, so the iteration
 counts are equal by construction and the pass count is the only free variable.
@@ -550,6 +574,20 @@ ctest --test-dir build -R optimizer --output-on-failure
 ./build/optimizer_probe --characterize --case <a canonical reference>
 ./tests/optimizer/run_probe.py --step0b --timeout 3600 --out step0b.jsonl
 ```
+
+## Reproducing the Phase 3 screen
+
+```bash
+./tests/optimizer/run_probe.py --screen --seed 20260806 --timeout 600 --out screen.jsonl
+```
+
+`--screen` is the candidate comparison and nothing else: L-BFGS against the
+Shanno incumbent at 6,000/25,000/100,000 rows, the predeclared `m` in {5,10,20}
+sweep in its own group on the `lbfgs_memory` axis, three further predeclared
+weight seeds each as its own matched group, and two late-stage arms that run to
+the engine's plateau rule and therefore declare `endpoint: none`. Canonical and
+CGD are deliberately absent — their standing is settled, and the plan forbids
+scaling every historical arm.
 
 The runner narrows to one half of the table with `--step0b` (the workload
 matrix) or `--pilot` (the Step 0A mechanics, at 3 repetitions — plumbing, not
