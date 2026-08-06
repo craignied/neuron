@@ -61,6 +61,21 @@ public:
 		//    request). An observer that stops for its own reason overrides this
 		//    and MUST NOT report a convergence reason it did not observe.
 		virtual StopReason whyStopped() const { return STOP_CANCELLED; }
+
+		// Has this observer already decided the run should stop?
+		//
+		//    onIteration() above is called at the BOTTOM of an iteration, which
+		//    is the only place a run could be stopped until an optimizer
+		//    appeared whose single iteration performs several full passes over
+		//    the training set. A Wolfe line search does exactly that, and a
+		//    cancelled run should not pay for the rest of one.
+		//
+		//    DEFAULT FALSE, so every existing observer is unchanged and no
+		//    existing run stops anywhere it did not stop before -- the goldens'
+		//    rule. It is a QUESTION, never an instruction: an observer answering
+		//    true does not stop anything by itself, it only lets an optimizer
+		//    stop paying for work whose result is about to be discarded.
+		virtual bool cancelled() const { return false; }
 	};
 
 	// THE machine-readable name of a stop reason -- one spelling, used by every

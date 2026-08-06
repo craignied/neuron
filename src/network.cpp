@@ -115,6 +115,13 @@ void Network::copy( const Network& rhs )
 	condMaxEig = rhs.condMaxEig;
 	condMinEig = rhs.condMinEig;
 	currGradMax = rhs.currGradMax;
+
+	// CONFIGURATION ONLY. A copy does not promise to continue the original's
+	//    L-BFGS trajectory, because train() begins a new run and prepareRun()
+	//    resets the working history anyway. Copying the ring buffers would
+	//    carry 2m parameter-sized vectors into every stepwise candidate and
+	//    every cross-validation fold to no purpose.
+	lbfgs.copyConfigurationFrom( rhs.lbfgs );
 }
 
 // Set the learning rate
@@ -460,6 +467,14 @@ void Network::prepareRun()
 {
 	regularizer = decay / 2; // the regularization term lambda
 	decayTerm = 1 - ( eta * decay ); // 1 - 2*eta*lambda
+
+	// NEW OPTIMIZER WORKING STATE IS PER RUN (the plan's architecture decision
+	//    6). train() calls this once, before the loop and outside every
+	//    reporting guard, so a fresh run never inherits the previous run's
+	//    curvature history, accepted point or evaluation counters -- and a
+	//    quiet run resets exactly as an audible one does. The configured
+	//    memory length survives; it is configuration, not working state.
+	lbfgs.reset();
 }
 
 // Utility to output Network specific parameters prior to an Iterative run.
@@ -518,6 +533,36 @@ void Network::unpackWeights( const vector< double >& )
 double Network::batchObjectiveGradient( vector< double >& )
 {
 	throw NoPackedBoundary();
+}
+
+// ONE L-BFGS OUTER ITERATION. Network composes; LBFGS owns the algorithm;
+//    Iterative owns stopping. See network.h and lbfgs.h.
+double Network::lbfgsIteration()
+{
+	// REFUSALS, stated before any work is done. Each is a configuration under
+	//    which this method would have to become a different method to run.
+	if ( !batchEpochFlag )
+		throw LBFGS::Ineligible( "L-BFGS requires batch/epoch training: a "
+			"per-exemplar update has no deterministic objective to line search" );
+
+	if ( automaticStepSizeFlag )
+		throw LBFGS::Ineligible( "L-BFGS chooses its own step and cannot run "
+			"with the automatic step-size search" );
+
+	if ( packedSize() == 0 )
+		throw LBFGS::Ineligible( "this model does not implement the packed "
+			"parameter boundary L-BFGS needs" );
+
+	Evaluator evaluator( *this );
+	double setError = lbfgs.iterate( evaluator );
+
+	// The RAW gradient at the point the step departed from -- the same point
+	//    the returned objective describes. currGradMax always means that
+	//    (the plan's architecture decision 7), and getGradMax() returns it
+	//    unchanged because trainingType is not 0 here.
+	currGradMax = lbfgs.gradMax();
+
+	return setError;
 }
 
 // Returns maximum gradient of this Network object

@@ -70,7 +70,7 @@ target_link_libraries(neuron_infer PUBLIC neuron_core)
 # the first that passes it on. PUBLIC because a caller linking the engine links
 # GSL transitively; that is the boundary, stated once.
 add_library(neuron_engine STATIC
-    src/model.cpp src/iterative.cpp src/network.cpp
+    src/model.cpp src/iterative.cpp src/network.cpp src/lbfgs.cpp
     src/onehidden.cpp src/simpleprop.cpp src/bareprop.cpp
     src/backprop.cpp src/logistic.cpp
     src/dfa.cpp src/ldfa.cpp src/qdfa.cpp
@@ -214,6 +214,22 @@ add_executable(check_packedboundary
     tests/network/check_packedboundary.cpp)
 target_link_libraries(check_packedboundary PRIVATE neuron_engine)
 add_test(NAME network_packed_boundary COMMAND check_packedboundary)
+
+# Unit test: the research-only L-BFGS prototype (src/lbfgs.*). The two-loop
+# recursion is checked against an INDEPENDENT dense inverse-BFGS matrix built
+# in the test from the defining update, over m=1/5/20 with partially filled and
+# rolled-over histories; both strong-Wolfe conditions are checked from outside
+# the optimizer on every accepted step (alpha cancels when they are written in
+# terms of the step actually taken); plus curvature-pair rejection, the
+# evaluation ceiling, exact restoration on line-search failure and on
+# cancellation, the reachable half of the non-descent fallback, the per-run
+# reset and configuration copy, currGradMax being the RAW gradient, the
+# on-line/auto-step refusals, and fixed-start integration for SimpleProp,
+# BareProp and BackProp.
+add_executable(check_lbfgs
+    tests/network/check_lbfgs.cpp)
+target_link_libraries(check_lbfgs PRIVATE neuron_engine)
+add_test(NAME network_lbfgs COMMAND check_lbfgs)
 
 # Unit test: DeLong's test for correlated ROC areas (ROADMAP 4 Phase 4, the
 # locked-test inference layer). AUC == the engine's exact Mann-Whitney area, a

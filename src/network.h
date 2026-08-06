@@ -11,9 +11,17 @@
 #include <iomanip>
 
 #include "iterative.h"
+#include "lbfgs.h"
 
 class Network : public Iterative {
 public:
+	// TRAINING TYPES. 0, 1 and 2 are the frozen menu tokens -- canonical
+	//    backpropagation, conjugate gradient descent, Shanno -- and are not
+	//    changed here. TRAIN_LBFGS is RESEARCH ONLY: no menu produces it, no
+	//    GUI control or HTTP field selects it, automatic selection never probes
+	//    it, and no saved network records it. It exists so the optimizer
+	//    benchmark and tests/network/check_lbfgs.cpp can reach the prototype.
+	static const unsigned TRAIN_LBFGS = 3;
 	Network(); // default constructor
 	virtual ~Network(); // destructor
 
@@ -216,6 +224,50 @@ protected:
 	//    One virtual call per full evaluation. There is none inside the
 	//    exemplar loop it runs.
 	virtual double batchObjectiveGradient( vector< double >& packedRawGradient );
+
+	// --- The L-BFGS prototype (research only; see lbfgs.h) ----------------
+	//
+	//    Network COMPOSES the optimizer and supplies model evaluation through
+	//    the boundary above; LBFGS owns the algorithm and all of its state;
+	//    Iterative keeps stopping and cancellation. Nothing here reimplements
+	//    anything the other two own (rule 6).
+	//
+	//    It does NOT go through engine(). engine() is a direction/step dispatch
+	//    point for algorithms that transform a gradient and let the caller
+	//    apply `w -= g * eta`; a Wolfe line search evaluates the objective
+	//    several times per iteration and cannot honestly fit that contract
+	//    (the plan's architecture decision 2).
+	LBFGS lbfgs;
+
+	// The evaluator LBFGS drives. A LOCAL of one outer iteration holding a
+	//    reference and no state, so no allocation happens per trial. As a
+	//    nested class it reaches Network's protected boundary directly, which
+	//    is why the boundary needs no friendship and no widening.
+	class Evaluator : public LBFGSObjective {
+	public:
+		explicit Evaluator( Network& n ) : net( n ) { }
+		virtual void currentPoint( vector< double >& weights ) const
+		{ net.packWeights( weights ); }
+		virtual void install( const vector< double >& weights )
+		{ net.unpackWeights( weights ); }
+		virtual double evaluate( vector< double >& gradient )
+		{ return net.batchObjectiveGradient( gradient ); }
+		virtual bool cancelled() const
+		{ return net.observerPtr && net.observerPtr->cancelled(); }
+	private:
+		Network& net;
+	};
+
+	// ONE L-BFGS ITERATION, called from the concrete model's innerTrainSet()
+	//    when trainingType is TRAIN_LBFGS. Returns the objective at the point
+	//    the step departed from, which is what every other optimizer here
+	//    returns, and sets currGradMax from that point's RAW gradient.
+	//
+	//    REFUSES rather than quietly becoming something else: on-line mode
+	//    (the method needs a deterministic objective), the automatic step-size
+	//    search (two step rules cannot own one iteration), and a model with no
+	//    packed boundary.
+	double lbfgsIteration();
 
 	// Returns maximum gradient of a Network object
 	virtual double getGradMax();

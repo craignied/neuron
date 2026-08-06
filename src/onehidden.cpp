@@ -174,16 +174,6 @@ bool OneHiddenNet::load( string& filename )
 	return success; // return flag to indicate if file successfully loaded
 }
 
-// Inner training set algorithm called for automatic stepsize selection
-//    calculates the gradient descent, and returns set error.
-//
-// ONE implementation for both architectures. It was ~185 lines written out
-//    twice, and the executable difference was a single line -- the hidden
-//    error term -- which is the SAME formula once its domain is written as a
-//    range instead of assumed (see the note at that line). Everything the bias
-//    architecture does decide happens elsewhere: forward() pins the bias slot,
-//    setHidden() and setDataSet() size the structures, and this method reads
-//    whatever sizes it was given.
 // THE PER-EXEMPLAR PROLOGUE, shared by every training path in this class and by
 //    the trial-point evaluation the packed boundary provides. See the
 //    declaration in onehidden.h for why setError is accumulated in place rather
@@ -303,8 +293,25 @@ double OneHiddenNet::batchGradient()
 	return setError / nTrain; // return the calculated set error
 }
 
+// Inner training set algorithm called for automatic stepsize selection
+//    calculates the gradient descent, and returns set error.
+//
+// ONE implementation for both architectures. It was ~185 lines written out
+//    twice, and the executable difference was a single line -- the hidden
+//    error term -- which is the SAME formula once its domain is written as a
+//    range instead of assumed. Everything the bias architecture does decide
+//    happens elsewhere: forward() pins the bias slot, setHidden() and
+//    setDataSet() size the structures, and this method reads whatever sizes it
+//    was given.
 double OneHiddenNet::innerTrainSet()
 {
+	// THE L-BFGS PROTOTYPE owns its whole iteration -- direction, line search
+	//    and update -- so it cannot be expressed as a gradient transformation
+	//    followed by `w -= g * eta`, and does not go through engine(). Research
+	//    only; no menu, GUI control or API field produces this training type.
+	if ( trainingType == TRAIN_LBFGS )
+		return lbfgsIteration();
+
 	// THE BATCH SEPARATE-GRADIENT PATH is one authoritative evaluation, then
 	//    the selected optimizer's direction, then the epoch's single update.
 	//    Written as an early return rather than as a branch inside the exemplar

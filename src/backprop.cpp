@@ -476,6 +476,11 @@ double BackProp::batchGradient()
 
 double BackProp::innerTrainSet()
 {
+	// See onehidden.cpp: L-BFGS owns its whole iteration and does not go
+	//    through engine(). Research only.
+	if ( trainingType == TRAIN_LBFGS )
+		return lbfgsIteration();
+
 	// THE BATCH SEPARATE-GRADIENT PATH is one authoritative evaluation, then
 	//    the optimizer's direction, then the epoch's single update. An early
 	//    return, because an evaluation with an update after it cannot be reused
