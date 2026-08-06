@@ -1,6 +1,33 @@
-# Neural optimizer research handoff
+# Neural optimizer reboot handoff
 
-Date: 2026-08-06 (updated after Phase 3)
+Date: 2026-08-06 (ready for a system reboot)
+
+## Reboot snapshot
+
+- Repository: `/Users/craign/code/neUROn2++/neuron-3.0`
+- Branch: `main`, synchronized with `origin/main` when this handoff was written.
+- Last substantive commit: `e7a8188 Adopt a portfolio policy for optimizers`.
+- The working tree was clean before this handoff-only update.
+- L-BFGS implementation, measurement, REST integration, Manifest work, and the
+  portfolio policy are committed and pushed. Nothing from those tasks remains
+  only in the build directory or an untracked file.
+- GitHub Actions did not dispatch for the L-BFGS push during GitHub's 2026-08-06
+  Actions outage. Full local Release verification passed, but three-platform CI
+  must still be confirmed after GitHub recovers. Check the Actions page first;
+  if no run exists for current `main`, retrigger it with an empty commit. A no-op
+  `git push` alone does not reliably create a push event.
+
+Immediately after reboot, run:
+
+```sh
+cd /Users/craign/code/neUROn2++/neuron-3.0
+git status -sb
+git log -5 --oneline --decorate
+```
+
+Expect a clean `main` synchronized with `origin/main`. Do not discard unexpected
+changes; identify their owner before proceeding. Reconfigure or rebuild only if
+the existing `build/` directory is unavailable or invalid.
 
 ## Read first after restart
 
@@ -38,10 +65,10 @@ neural, batch-only, and requires `autostep=0`. The retired CLI menus deliberatel
 have no L-BFGS entry. GUI selection and automatic selection remain deferred until
 the researched optimizer set is complete.
 
-So the bar is now L-BFGS, not Shanno: roughly 15 full passes on a 4,500-row
-problem. The next candidate is **iRPROP+**, screened the same way — cheap
-representative workload first, reject an obvious loser there, scale only a
-survivor.
+So the speed bar is now L-BFGS, not Shanno: roughly 15 full passes on a
+4,500-row problem. The next candidate is **iRPROP+**. Start with the cheap
+representative workload and scale only a plausible portfolio candidate, but do
+not use “faster than L-BFGS” as a winner-takes-all retention rule.
 
 Two results that must travel with the headline:
 - the held-out differences are **noise** (five of six matched groups favour
@@ -83,6 +110,8 @@ and do not tune it after seeing candidate results.
   L-BFGS implementation, its measurements and retain decision, and its public
   REST integration. The relevant commits are `6bc343b`, `4ced9c2`, `b132922`,
   and `71b9b34`.
+- The restart/status correction is `6ac2ad7`; the standing portfolio policy is
+  `e7a8188`.
 - `CLAUDE.md` and the implementation plan contain the corrected neural-only scope.
 - Re-run the focused gates before committing rather than relying on this handoff;
   never copy a remembered CTest count into a status report.
@@ -118,3 +147,18 @@ dataset, rather than the synthetic benchmark alone, guides the full-training cho
 
 Each candidate gets the same cheap-screen-first treatment. A tractable Shanno result does
 not end the search for a credible further 10x or 100x improvement.
+
+## Last completed verification
+
+Before the REST/Manifest integration commit, the completed gates were:
+
+- Release build and all 37 discovered CTest cases;
+- `tests/gui/strictparse.sh` (222 checks);
+- `tests/gui/smoke.sh`;
+- golden transcripts, oracle verification, and Python tools;
+- Manifest index coverage and PDF rebuild/visual inspection;
+- `git diff --check`.
+
+Treat these as provenance, not permission to skip new verification. The iRPROP+
+phase must add and fail-prove its own mechanism tests, then rerun the relevant
+Release gates before any commit.
