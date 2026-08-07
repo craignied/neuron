@@ -5,13 +5,12 @@ Date: 2026-08-07 (Phase 4 complete)
 ## Snapshot
 
 - Repository: `/Users/craign/code/neUROn2++/neuron-3.0`
-- Branch: `main`; inspect `git status -sb` rather than relying on this snapshot
-  after the iRPROP+ REST/GUI integration work.
-- Last substantive commit: the Phase 4 iRPROP+ research prototype, its
-  measurements and its retain decision, followed by its Manifest synchronization.
-- L-BFGS implementation, measurement, REST integration, Manifest work, and the
-  portfolio policy are committed and pushed. The Phase 4 iRPROP+ prototype, its
-  tests, its harness arms, its evidence and its Manifest entry are committed.
+- Branch: `main`; inspect `git status -sb` rather than relying on this snapshot.
+- Last substantive commit: `d712d30`, which integrates retained iRPROP+ through
+  REST and the GUI and closes its Manifest, index and maintenance contracts.
+- L-BFGS and iRPROP+ implementation, measurement, retain decisions, public REST
+  integration, GUI controls, Manifest work, and the portfolio policy are
+  committed and pushed. The Phase 4 tests, harness arms and evidence are included.
   Nothing from either phase remains only in the build directory or an untracked
   file.
 - `tests/optimizer/data/` is generated and not committed; regenerate it with
@@ -122,13 +121,14 @@ and do not tune it after seeing candidate results.
   and `71b9b34`.
 - The restart/status correction is `6ac2ad7`; the standing portfolio policy is
   `e7a8188`.
-- Phase 4 landed as two commits. `0388d01` is the prototype: `src/irprop.*`, the
+- Phase 4 landed as three commits. `0388d01` is the prototype: `src/irprop.*`, the
   `Network` composition and absolute-step path,
   `tests/network/check_irprop.cpp` (ctest `network_irprop`), the harness's
   iRPROP+ arms and conditioning fixtures, and the evidence documents. The commit
   after it synchronizes the Manifest, Figure 12.1 and the index guard. The
-  subsequent integration exposes the retained method through REST and the GUI
-  as `algorithm=5`, without changing the retired menus.
+  subsequent `d712d30` integration exposes the retained method through REST and
+  the GUI as `algorithm=5`, without changing the retired menus, and closes the
+  Chapter 4 optimizer-selection and maintenance contracts.
 - `CLAUDE.md` and the implementation plan contain the corrected neural-only scope.
 - Re-run the focused gates before committing rather than relying on this handoff;
   never copy a remembered CTest count into a status report.
