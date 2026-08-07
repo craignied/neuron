@@ -66,6 +66,7 @@ digraph neuron_objects {
     Plateau [label="PlateauDetector"];
     LBFGS [label="LBFGS"];
     LBFGSObjective [label="LBFGSObjective"];
+    IRprop [label="IRpropState"];
 
     ModelApi [label="Model API"];
     IterativeApi [label="Iterative API"];
@@ -108,5 +109,6 @@ digraph neuron_objects {
     Auto -> NetworkApi [label="probes clones"];
     NetworkApi -> LBFGS [label="composes"];
     LBFGS -> LBFGSObjective [label="evaluates through"];
+    NetworkApi -> IRprop [label="composes"];
   }
 }

@@ -160,7 +160,7 @@ PRINCIPAL_METHODS = {
         "forward", "classAccuracy", "searchStepSize", "computeCondNum",
         "sampleTestError", "getCondNum", "getCondMaxEig", "getCondMinEig",
         "packedSize", "packWeights", "unpackWeights", "batchObjectiveGradient",
-        "setLBFGSMemory", "getLBFGSMemory",
+        "setLBFGSMemory", "getLBFGSMemory", "applyAbsoluteStep",
     },
     "OneHiddenNet": {"setHidden", "randomize", "save", "load", "pack", "innerTrainSet", "propagate"},
     "SimpleProp": {"growHidden", "removeHidden", "hiddenSaliency"},
@@ -189,6 +189,15 @@ PRINCIPAL_METHODS = {
         "historyResets", "curvatureRejections", "cancellations", "pairs",
         "applyInverseHessian", "scaling", "pushPair", "resetHistory",
         "copyConfigurationFrom",
+    },
+    # iRPROP+ (research only; Network::TRAIN_IRPROP). Listed by method for the
+    # same reason LBFGS is: a reader searching the index wants the operation,
+    # and computeStep IS the published table.
+    "IRpropState": {
+        "constructor", "published constants", "reset", "started", "computeStep",
+        "deltas", "previousGradient", "previousStep", "previousObjective",
+        "growths", "shrinks", "rollbacks", "heldFlips", "iterations",
+        "Ineligible", "NotFinite",
     },
     "modelfactory": {"build", "createByTypeName"},
     "obd": {"classify", "stopToken", "run"},

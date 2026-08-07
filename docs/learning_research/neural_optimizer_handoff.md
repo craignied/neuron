@@ -6,21 +6,24 @@ Date: 2026-08-07 (Phase 4 complete)
 
 - Repository: `/Users/craign/code/neUROn2++/neuron-3.0`
 - Branch: `main`, **one commit ahead of `origin/main`** when this handoff was
-  written: the Phase 4 commit was made but not yet pushed.
+  written: the Phase 4 prototype (`0388d01`) is pushed, and the commit that
+  synchronizes the Manifest with it is not yet.
 - Last substantive commit: the Phase 4 iRPROP+ research prototype, its
-  measurements and its retain decision.
+  measurements and its retain decision, followed by its Manifest synchronization.
 - L-BFGS implementation, measurement, REST integration, Manifest work, and the
   portfolio policy are committed and pushed. The Phase 4 iRPROP+ prototype, its
-  tests, its harness arms and its evidence are committed and **awaiting a push**.
+  tests, its harness arms, its evidence and its Manifest entry are committed.
   Nothing from either phase remains only in the build directory or an untracked
   file.
 - `tests/optimizer/data/` is generated and not committed; regenerate it with
   `python3 tests/optimizer/prepare_data.py` before running a campaign.
-- **CI still needs confirming.** GitHub Actions did not dispatch for the L-BFGS
-  push during GitHub's 2026-08-06 Actions outage, and three-platform CI has not
-  been confirmed since. Full local Release verification passed for both phases.
-  Check the Actions page first; if no run exists for current `main`, retrigger it
-  with an empty commit — a no-op `git push` alone does not reliably create a push
+- **CI history, corrected.** Actions did not dispatch for the L-BFGS push during
+  GitHub's 2026-08-06 outage, but it recovered: run 31131633513 on `63c0a4e`
+  passed on all three platforms. The first Phase 4 push (`0388d01`) then FAILED
+  on all three — build and all 38 tests passed everywhere, and the only failing
+  step was `run_tools.sh` hitting the Manifest index check. That is what the
+  Manifest work below closes. If a future push produces no run at all, retrigger
+  with an empty commit; a no-op `git push` does not reliably create a push
   event.
 
 Immediately after a restart, run:
@@ -31,9 +34,9 @@ git status -sb
 git log -5 --oneline --decorate
 ```
 
-Expect a clean `main` **one commit ahead of `origin/main`** if the Phase 4 commit
-has not been pushed, and in sync once it has; either way its CI result must be
-confirmed. Do not discard unexpected changes; identify their owner before
+Expect a clean `main` **one commit ahead of `origin/main`** if the Manifest
+commit has not been pushed, and in sync once it has; either way its CI result
+must be confirmed. Do not discard unexpected changes; identify their owner before
 proceeding. Reconfigure or rebuild only if the existing `build/` directory is
 unavailable or invalid.
 
@@ -120,10 +123,13 @@ and do not tune it after seeing candidate results.
   and `71b9b34`.
 - The restart/status correction is `6ac2ad7`; the standing portfolio policy is
   `e7a8188`.
-- Phase 4 landed as one commit: `src/irprop.*`, the `Network` composition and
-  absolute-step path, `tests/network/check_irprop.cpp` (ctest `network_irprop`),
-  the harness's iRPROP+ arms and conditioning fixtures, and the evidence
-  documents. It changed no public surface.
+- Phase 4 landed as two commits. `0388d01` is the prototype: `src/irprop.*`, the
+  `Network` composition and absolute-step path,
+  `tests/network/check_irprop.cpp` (ctest `network_irprop`), the harness's
+  iRPROP+ arms and conditioning fixtures, and the evidence documents. The commit
+  after it synchronizes the Manifest, Figure 12.1 and the index guard. Neither
+  changed a public surface: iRPROP+ is still not selectable from any menu, REST
+  field, GUI control or selector.
 - `CLAUDE.md` and the implementation plan contain the corrected neural-only scope.
 - Re-run the focused gates before committing rather than relying on this handoff;
   never copy a remembered CTest count into a status report.
@@ -166,25 +172,29 @@ Held-out differences at the matched endpoint are **noise** (seven of eight
 matched groups favour iRPROP+, one favours L-BFGS by a margin comparable to the
 largest of the seven), so this supports *no degradation*, never *better*.
 
-### One gate is deliberately outstanding
+### The Manifest is synchronized — and deferring it was a mistake worth recording
 
-`tools/check_manifest_index.py` (and therefore `tests/tools/run_tools.sh`) fails
-with `Manifest index is missing public classes/namespaces: IRpropState`. This is
-**deferred, not overlooked**, and it is the same trade Phase 3 made: `4ced9c2`
-landed `LBFGS` and `LBFGSObjective` with that gate failing, and `71b9b34`
-documented them in the Manifest as part of the public-integration commit. Both
-the plan and the phase brief say no Manifest capability change belongs in a
-research prototype.
+`IRpropState` is documented in Chapter 12 of the Manifest (§12.7.4), indexed,
+added to Figure 12.1 as a `Network API` composition beside `LBFGS`, and covered
+by `tools/check_manifest_index.py`. Documenting it adds **no** public capability:
+iRPROP+ remains unreachable from any menu, REST field, GUI control or selector,
+and the section says so.
 
-Everything else passes: Release build, all 38 CTest cases, golden transcripts,
-oracle verification, every Python tool fixture (the index check runs first in
-`run_tools.sh`, so run the rest by skipping that one line to see them), and
-`git diff --check`.
+**Why this is called out.** The prototype was first committed with that gate
+deliberately failing, on the reasoning that Phase 3 had made the same trade —
+`4ced9c2` landed `LBFGS` with the index gate red and `71b9b34` documented it
+during integration. That reasoning was wrong in a way worth remembering:
+**Phase 3's version of the trade was never tested, because Actions did not
+dispatch during the 2026-08-06 outage.** When Phase 4 was pushed, CI went red on
+all three platforms — build and all 38 tests passed everywhere, and the sole
+failure on every platform was `run_tools.sh` hitting the index check. A red
+`main` also makes every later commit's CI uninformative, which is exactly when a
+real regression needs to be visible. `CLAUDE.md` already required this: the
+Manifest is normative and stays synchronized with every public class.
 
-**Whoever integrates iRPROP+ publicly owns closing it**: a Chapter 2 derivation
-with the Igel & Hüsken citation and every constant, a Chapter 12 ownership
-section for `IRpropState`, the index entries in `tools/check_manifest_index.py`,
-and a PDF rebuild with the affected pages inspected as images.
+The general rule: **a gate deferred by precedent is still a gate, and "the last
+phase did it too" is not evidence that it was acceptable — check whether that
+precedent was ever actually exercised.**
 
 ## Exact next research step
 
@@ -229,8 +239,10 @@ CTest at the time**, not remembered.
   `network_irprop`;
 - golden transcripts — byte-identical, as a research-only optimizer requires;
 - oracle verification — identical;
-- every Python tool fixture (see the outstanding gate below for how to reach
-  them);
+- `tests/tools/run_tools.sh` in full, including the Manifest index gate;
+- `python3 tools/check_manifest_index.py`, the Graphviz figure regeneration and a
+  clean `latexmk` build, with §12.7.4, the corrected packed-boundary page,
+  Figure 12.1 and the index pages inspected as rendered images;
 - `git diff --check`.
 
 **Fail-proof evidence for `network_irprop`, both sabotages with visible
@@ -247,13 +259,6 @@ recompilation of `src/irprop.cpp` in each direction:**
 
 No sabotage remains in the tree. The full log is at the foot of
 `tests/network/check_irprop.cpp`.
-
-**One gate is deliberately outstanding and is not a pass.**
-`tools/check_manifest_index.py` fails with `Manifest index is missing public
-classes/namespaces: IRpropState`, and `tests/tools/run_tools.sh` runs that check
-on its line 14 and exits before its own fixtures — so to see the tool fixtures
-pass, run the script with that line skipped. The reasoning and the work that
-closes it are in *One gate is deliberately outstanding* above.
 
 `tests/gui/*` were not re-run: Phase 4 changed no REST, GUI or request-parsing
 surface. Treat all of this as provenance, not permission to skip new

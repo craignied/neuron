@@ -354,9 +354,13 @@ specification later in this chapter:
 These four \texttt{protected} contracts exist because a genuine Wolfe line
 search must evaluate the objective at \emph{trial} points, and
 \texttt{innerTrainSet()} cannot serve as that evaluator: it updates the weights.
-They are protected implementation contracts rather than REST fields; their sole
-consumer is \texttt{Network::Evaluator}, which serves \texttt{LBFGS}. The
-optimizer using them is publicly selectable through REST.
+They are protected implementation contracts rather than REST fields.  They were
+shaped by their first consumer, \texttt{Network::Evaluator}, which serves
+\texttt{LBFGS} and is publicly selectable through REST; \texttt{IRpropState}
+now consumes them too, reading the objective and raw gradient through
+\texttt{batchObjectiveGradient()} and applying its absolute step through
+\texttt{packWeights()} and \texttt{unpackWeights()}.  The boundary remains the
+minimum those consumers need rather than a general callback framework.
 
 \begin{itemize}
 \item \texttt{virtual unsigned packedSize() const}: the number of doubles a
@@ -1352,6 +1356,211 @@ The equivalent REST request is:
 POST /api/train
 algorithm=4&lbfgs_memory=10&batch_epoch=1&autostep=0&maxiter=2000
 \end{verbatim}
+
+\subsection{IRpropState}
+\index{IRpropState}
+\index{Optimizer!iRPROP+}
+\index{Optimizer!resilient propagation}
+\index{RPROP}
+\index{Absolute step}
+\index{IRpropState!computeStep}
+\index{IRpropState!constructor}
+\index{IRpropState!published constants}
+\index{IRpropState!reset}
+\index{IRpropState!started}
+\index{IRpropState!deltas}
+\index{IRpropState!previousGradient}
+\index{IRpropState!previousStep}
+\index{IRpropState!previousObjective}
+\index{IRpropState!growths}
+\index{IRpropState!shrinks}
+\index{IRpropState!rollbacks}
+\index{IRpropState!heldFlips}
+\index{IRpropState!iterations}
+\index{IRpropState!Ineligible}
+\index{IRpropState!Ineligible!what}
+\index{IRpropState!NotFinite}
+\index{IRpropState!NotFinite!what}
+\index{Network!applyAbsoluteStep}
+\index{Network!irpropIteration}
+\texttt{IRpropState} is neuron's iRPROP+ optimizer for full-batch neural
+objectives.  It is a \emph{research} optimizer: it is reached only from C++ by
+\texttt{Network::setTrainingType(Network::TRAIN\_IRPROP)}, and no menu token,
+REST field, GUI control, automatic-selection rule or saved-network field
+produces it.  Its public identifier will be assigned when it is integrated.
+
+Where a quasi-Newton method builds curvature information, iRPROP+ keeps one
+step magnitude per parameter and adapts it from the \emph{sign} of that
+parameter's gradient between iterations.  Nothing is scaled by the gradient's
+size, so a parameter whose gradient is small but consistently signed still moves
+at a useful rate.  That is why the step is absolute: $\Delta$ is a displacement
+in parameter units, not a learning rate.
+
+\paragraph{Published derivation.}  iRPROP+ is Igel and H\"usken (2000),
+``Improving the Rprop learning algorithm,'' \emph{Proceedings of the Second
+International ICSC Symposium on Neural Computation}, pp.~115--121, evaluated and
+recommended in Igel and H\"usken (2003), \emph{Neurocomputing}
+\textbf{50}:105--123, \url{https://doi.org/10.1016/S0925-2312(01)00700-7}, whose
+pseudocode this implementation transcribes.  The sign-based update and every
+constant come from Riedmiller and Braun (1993), ``A direct adaptive method for
+faster backpropagation learning: the RPROP algorithm,'' \emph{Proceedings of the
+IEEE International Conference on Neural Networks}, pp.~586--591,
+\url{https://doi.org/10.1109/ICNN.1993.298623}.  For each parameter $w$, with
+$E^{(t)}$ the objective at the current point:
+
+\begin{itemize}
+\item if $\frac{\partial E^{(t-1)}}{\partial w}\,
+      \frac{\partial E^{(t)}}{\partial w} > 0$:
+      $\Delta^{(t)} = \min(\Delta^{(t-1)}\eta^{+}, \Delta_{\max})$,
+      $\delta w^{(t)} = -\mathrm{sign}
+      \bigl(\frac{\partial E^{(t)}}{\partial w}\bigr)\Delta^{(t)}$, and
+      $w \leftarrow w + \delta w^{(t)}$;
+\item if $\frac{\partial E^{(t-1)}}{\partial w}\,
+      \frac{\partial E^{(t)}}{\partial w} < 0$:
+      $\Delta^{(t)} = \max(\Delta^{(t-1)}\eta^{-}, \Delta_{\min})$; then
+      \emph{only if} $E^{(t)} > E^{(t-1)}$ is the previous step undone,
+      $w \leftarrow w - \delta w^{(t-1)}$; and
+      $\frac{\partial E^{(t)}}{\partial w}$ is set to zero;
+\item otherwise $\delta w^{(t)} = -\mathrm{sign}
+      \bigl(\frac{\partial E^{(t)}}{\partial w}\bigr)\Delta^{(t)}$ and
+      $w \leftarrow w + \delta w^{(t)}$, with $\Delta$ carried unchanged.
+\end{itemize}
+
+Three properties carry the method's identity.  The rollback is
+\emph{error-dependent}: RPROP+ reverts on every sign flip, while iRPROP+ reverts
+only when the objective worsened and otherwise leaves that parameter
+\emph{unmoved} for the iteration.  Zeroing the current gradient after a flip is
+the algorithm's memory, not a cleanup: it forces the next iteration into the
+third branch, which steps by the freshly shrunk $\Delta$ along the new sign.
+And $\Delta$ is never multiplied by $\eta$.
+
+\paragraph{neuron-specific policy, distinguished from the mathematics.}  The
+published constants are $\Delta_0 = 0.1$, $\eta^{+} = 1.2$, $\eta^{-} = 0.5$,
+$\Delta_{\min} = 10^{-6}$ and $\Delta_{\max} = 50$.  None is configurable: a
+tunable initial step would make a benchmark a description of the tuning.
+Declared by this project rather than by the sources: the objective and gradient
+both include the current weight-decay policy before the sign product is formed;
+a non-finite objective or gradient element is refused outright rather than
+stepped upon; the value returned to \texttt{Iterative} is the objective at the
+point the step departed from; and \texttt{currGradMax} is taken from the raw
+gradient \emph{before} the table runs, so a parameter zeroed by a sign flip
+cannot shrink the reported maximum and fake a convergence.  There is
+deliberately no $\Delta$ finiteness branch: $\Delta$ starts finite, is only
+multiplied by a finite constant and immediately clamped into
+$[\Delta_{\min},\Delta_{\max}]$, so the invariant is asserted by test rather
+than guarded by an unreachable branch.  All are recorded in
+\texttt{docs/learning\_research/irprop\_source\_decision.md}, which was written
+before the implementation and may not be revised after a measurement.
+
+\paragraph{Ownership.}  \texttt{IRpropState} owns the published table, the
+per-parameter $\Delta$, the previous raw gradient (as remembered \emph{after}
+the sign-flip zeroing), the previous applied step, the previous objective, the
+initialization flag and the research counters.  It has \emph{no model
+dependency at all}: it is handed an objective and a raw gradient and produces an
+absolute step, which is what allows its branches to be driven by hand in
+\path{tests/network/check_irprop.cpp} rather than inferred from a training run.
+It does not own stopping, cancellation, the iteration counter or reporting, and
+it does not touch \texttt{eta}, \texttt{stackG}, \texttt{lastG} or
+\texttt{lastF}.  Because it makes exactly one evaluation per iteration,
+\texttt{Iterative}'s existing between-iteration cancellation check is
+sufficient and none is added.  Like \texttt{LBFGS} it does not pass through
+\texttt{Network::engine()}: an absolute step cannot fit a contract whose caller
+applies ${\bf w} \leftarrow {\bf w} - \eta{\bf g}$.
+
+\texttt{IRpropState} provides:
+
+\begin{itemize}
+\item \texttt{IRpropState()}: constructs uninitialized working state with zero
+      counters; the first \texttt{computeStep} sizes it.
+\item \texttt{static const double DELTA\_INIT, ETA\_PLUS, ETA\_MINUS}:
+      $\Delta_0 = 0.1$, $\eta^{+} = 1.2$, $\eta^{-} = 0.5$.
+\item \texttt{static const double DELTA\_MIN, DELTA\_MAX}: the clamps
+      $10^{-6}$ and $50$.
+\item \texttt{void reset()}: clears $\Delta$, the remembered gradient and step,
+      the previous objective and the counters.  Called from
+      \texttt{Network::prepareRun()}, so working state is per \texttt{train()}
+      run.  There is no persistent configuration to preserve, which is why this
+      class has no \texttt{copyConfigurationFrom} and a copied model starts
+      clean.
+\item \texttt{bool started() const}: whether this run has seen its first point.
+\item \texttt{void computeStep(double objective, const vector<double>\&
+      rawGradient, vector<double>\& step)}: applies the table once and writes
+      the absolute step to apply as ${\bf w} \leftarrow {\bf w} + \mathrm{step}$.
+      \texttt{rawGradient} is read and never written --- the published zeroing
+      applies to what this class remembers, and the caller's raw gradient must
+      survive intact because \texttt{currGradMax} is taken from it.  On the
+      first call of a run it sizes $\Delta$ to $\Delta_0$ and the remembered
+      gradient to zero, so every sign product is zero and every parameter takes
+      the third branch, which is exactly what $\Delta^{(0)} = \Delta_0$ means.
+\item \texttt{const vector<double>\& deltas() const}, \texttt{previousGradient()
+      const}, \texttt{previousStep() const}: the working state, read-only, so
+      the deterministic tests can assert the table element by element.
+\item \texttt{double previousObjective() const}: $E^{(t-1)}$; positive infinity
+      before the first step, where the branch that reads it is unreachable.
+\item \texttt{growths()}, \texttt{shrinks()}, \texttt{rollbacks()},
+      \texttt{heldFlips()}, \texttt{iterations()}: counts, all
+      \texttt{unsigned long long}.  \texttt{rollbacks} and \texttt{heldFlips}
+      separate the two halves of the second branch, which is how a report can
+      show that the error-dependent rule actually fired.
+\end{itemize}
+
+\texttt{Network} composes it through two protected methods:
+
+\begin{itemize}
+\item \texttt{void applyAbsoluteStep(const vector<double>\& step)}: the one
+      absolute-step application path, packing the current weights, adding the
+      step and installing the result.  \emph{A direction is not a step}:
+      \texttt{engine()} produces a transformed gradient that its caller scales
+      by \texttt{eta}, whereas an absolute step is already in parameter units
+      and carries its own sign, so the single convention here is
+      ${\bf w} \leftarrow {\bf w} + \mathrm{step}$.  An absolute step is never
+      expressed by dividing by \texttt{eta} or by setting \texttt{eta} to one.
+\item \texttt{double irpropIteration()}: one iteration --- the eligibility
+      refusals, one \texttt{batchObjectiveGradient()} evaluation,
+      \texttt{currGradMax} from that raw gradient, one call into the table and
+      one absolute step.  Returns the objective at the point the step departed
+      from.
+\end{itemize}
+
+The nested exceptions provide
+\texttt{explicit Ineligible(const char* why)} with
+\texttt{const char* what() const}, and \texttt{NotFinite} with the same
+accessor returning a fixed explanation.
+
+\paragraph{Failure contract.}  \texttt{IRpropState::Ineligible} is raised, rather
+than the method silently becoming a different one, for on-line training (the
+published method compares one full-batch gradient with the previous one), the
+automatic step-size search (a second step rule cannot own the iteration), a
+model that does not implement the packed boundary, and a call with no
+parameters.  \texttt{IRpropState::NotFinite} is raised for a non-finite
+objective or any non-finite gradient element, before any state is modified and
+before any weight moves: an optimizer that quietly degenerates into gradient
+descent would make the reported method untrue.
+
+\paragraph{Performance evidence.}  On Civic Choice at the committed practical
+endpoint, from identical starting weights, iRPROP+ was the fastest of the
+standing panel at 6,000, 25,000 and 100,000 rows and across four weight seeds:
+$1.28\times$ to $2.08\times$ faster than L-BFGS, $11\times$ to $27\times$ faster
+than Shanno, and $1{,}607\times$ faster than canonical descent at 6,000 rows.
+The ranking is workload-dependent and the scope of that claim matters: on
+generated four-input fixtures L-BFGS is about twice as fast, and run to the
+engine's own plateau rule iRPROP+ stops earlier at a worse objective than both
+L-BFGS and Shanno.  A predicted advantage on poorly scaled objectives was tested
+against a well-scaled twin and did not appear.  The measurements, their spread
+and their limitations are in
+\texttt{docs/learning\_research/irprop\_screen\_results.md}.
+
+\subsubsection{Example}
+\begin{verbatim}
+Network& net = fittedNeuralTemplate;
+net.setTrainingType(Network::TRAIN_IRPROP);
+net.setBatchEpoch(true);      // required: refused on-line
+net.setAutoStepSize(false);   // required: it owns its own step
+double objective = net.train();
+if (!Iterative::converged(net.getStopReason())) rejectFit(objective);
+\end{verbatim}
+
+There is no equivalent REST request: iRPROP+ is not publicly selectable.
 
 \subsection{modelfactory and netclone}
 \index{modelfactory}
