@@ -34,17 +34,22 @@ The Manifest and source are authoritative after implementation.
 - Current optimizer research and implementation follows
   `docs/learning_research/optimizer_implementation_plan.md`.  Resume at the
   first incomplete phase, and do not expose a candidate publicly before its
-  matched-endpoint acceptance gate.  **Phase 0 and Phase 3 are complete:
-  Shanno was the incumbent, and the retained L-BFGS implementation
-  (`src/lbfgs.*`) now beats it 8.8x-13.0x to the committed practical endpoint
-  across three row counts and four weight seeds.  Its research gate and public
-  REST integration are complete: `/api/train` selects it with `algorithm=4`
-  and optionally configures `lbfgs_memory`.  The retired CLI menus are not
-  extended; GUI and automatic-selection integration remain deferred until the
-  researched optimizer set is complete.  The next candidate is iRPROP+,
-  measured against the plan's standing panel: L-BFGS as speed leader, Shanno
-  as legacy quasi-Newton control, and canonical as behavioral/matched-objective
-  reference.  L-BFGS is not a winner-takes-all retention gate.  Read
+  matched-endpoint acceptance gate.  **Phases 0, 3 and 4 are complete.  Shanno
+  was the incumbent; the retained L-BFGS implementation (`src/lbfgs.*`) beats it
+  8.8x-13.0x to the committed practical endpoint, and its research gate and
+  public REST integration are both complete (`/api/train` `algorithm=4`, with
+  optional `lbfgs_memory`).  Phase 4 retained **iRPROP+** (`src/irprop.*`,
+  internal `Network::TRAIN_IRPROP`) as **research-only** — no REST field, GUI
+  control, menu token or auto-selection entry — under the plan's PORTFOLIO
+  POLICY, which is the thing to lead with rather than any single speed figure.
+  Neither retained method dominates: iRPROP+ is 1.28x-2.08x faster than L-BFGS
+  on the Civic Choice application benchmark at three row counts and four weight
+  seeds, while L-BFGS is ~2x faster on the generated conditioning fixtures and
+  lands better late-stage, so the best method is workload-dependent and a
+  candidate need NOT beat the leader to be retained.  The plan's predicted
+  iRPROP+ advantage on poorly scaled objectives was tested directly and did NOT
+  appear.  The next candidate is safeguarded Barzilai-Borwein, measured against
+  the now four-arm standing panel.  Read
   `docs/learning_research/neural_optimizer_handoff.md` first.**
   Apply the plan's **large-workload speed scope governor** to every optimizer
   instruction: prioritize implementing and comparing plausible high-impact

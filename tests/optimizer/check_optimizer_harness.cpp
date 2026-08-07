@@ -369,6 +369,44 @@ static void test_function_fingerprint_is_secondary()
 		"...while the SPLIT identity distinguishes the data" );
 }
 
+// --- 2b. the Phase 4 conditioning pair is not a no-op -----------------------
+//
+// THE FIXTURE THIS GUARDS ALMOST DID NOT WORK. The obvious way to build a
+// poorly scaled fixture -- multiply each input column by a different constant --
+// produces a design matrix BIT-IDENTICAL to the well-scaled one, because
+// DataSet::normalize min-max normalizes every input column and exactly cancels
+// any per-column linear rescale. An arm built that way would have reported "no
+// difference on poorly scaled data" from a fixture that was not poorly scaled.
+//
+// So the pair is checked for the one property the whole comparison rests on:
+// that the two fixtures reach training with DIFFERENT data. Sharing the outcome
+// rule and the row count is intended; sharing the split identity would mean the
+// experiment has no independent variable.
+
+static void test_conditioning_pair_differs()
+{
+	cout << "-- the conditioning pair really is two conditionings --" << endl;
+
+	Case a = shortCase( "cond-well", "simpleprop" );
+	a.fixture = "well4";
+	Case b = shortCase( "cond-poor", "simpleprop" );
+	b.fixture = "poor4";
+
+	Row ra = runCase( a, REV );
+	Row rb = runCase( b, REV );
+
+	expect( ra.rows == rb.rows && ra.inputs == rb.inputs
+			&& ra.params == rb.params,
+		"both fixtures present the same shape: rows, inputs and parameters" );
+	expect( ra.inputs == 4,
+		"...and the fixture's own width is read from it, not assumed to be 2" );
+	expect( ra.splitId != rb.splitId,
+		"...while their SPLIT identities differ, so the scaling survived "
+		"normalization and the comparison has an independent variable" );
+	expect( ra.weightStartId == rb.weightStartId,
+		"...from identical starting weights, so only the data differs" );
+}
+
 // --- 3. dataset and split identity -----------------------------------------
 
 static void test_split_identity()
@@ -1238,6 +1276,7 @@ int main()
 	test_backprop_traversal();
 	test_empty_weights_refused();
 	test_function_fingerprint_is_secondary();
+	test_conditioning_pair_differs();
 	test_split_identity();
 	test_iteration_semantics();
 	test_ceiling_is_failure();

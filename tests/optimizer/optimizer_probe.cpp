@@ -34,7 +34,8 @@ using namespace optbench;
 static void usage()
 {
 	fprintf( stderr,
-		"usage: optimizer_probe [--list] [--identity] [--all|--pilot|--step0b|--screen]\n"
+		"usage: optimizer_probe [--list] [--identity]\n"
+		"                       [--all|--pilot|--step0b|--screen|--irprop]\n"
 		"                       [--case NAME] [--rep N] [--rev REV]\n"
 		"                       [--characterize [--ceiling N]]\n"
 		"  --list          print every case name, its group and its axis\n"
@@ -43,6 +44,8 @@ static void usage()
 		"  --pilot         run only the Step 0A mechanics pilot\n"
 		"  --step0b        run only the Step 0B workload matrix\n"
 		"  --screen        run only the Phase 3 candidate screen (L-BFGS vs Shanno)\n"
+		"  --irprop        run only the Phase 4 candidate screen (iRPROP+ vs the\n"
+		"                  standing portfolio panel)\n"
 		"  --case NAME     run one named case (repeatable)\n"
 		"  --workload KEY  characterize a WORKLOAD's canonical control by its\n"
 		"                  endpoint-table key, whether or not it currently has\n"
@@ -65,6 +68,7 @@ int main( int argc, char** argv )
 	string rev = OPTBENCH_GIT_REV;
 	unsigned reps = 1;
 	bool all = false, pilot = false, step0b = false, screen = false;
+	bool irprop = false;
 	bool list = false, identity = false, wantCharacterize = false;
 	unsigned ceiling = 0;   // 0 = the engine's own default (STRICT_CEILING)
 	vector< string > names, workloads;
@@ -79,6 +83,7 @@ int main( int argc, char** argv )
 		else if ( a == "--pilot" ) pilot = true;
 		else if ( a == "--step0b" ) step0b = true;
 		else if ( a == "--screen" ) screen = true;
+		else if ( a == "--irprop" ) irprop = true;
 		else if ( a == "--case" && i + 1 < argc ) names.push_back( argv[ ++i ] );
 		else if ( a == "--workload" && i + 1 < argc ) workloads.push_back( argv[ ++i ] );
 		else if ( a == "--rep" && i + 1 < argc )
@@ -147,6 +152,7 @@ int main( int argc, char** argv )
 		if ( pilot ) shown = pilotCases();
 		else if ( step0b ) shown = step0bCases();
 		else if ( screen ) shown = screenCases();
+		else if ( irprop ) shown = screen4Cases();
 		for ( size_t i = 0; i < shown.size(); i++ )
 			printf( "%-56s group=%-44s axis=%-16s scope=%-9s endpoint=%s\n",
 				shown[ i ].name.c_str(), shown[ i ].group.c_str(),
@@ -182,6 +188,7 @@ int main( int argc, char** argv )
 	else if ( pilot ) selected = pilotCases();
 	else if ( step0b ) selected = step0bCases();
 	else if ( screen ) selected = screenCases();
+	else if ( irprop ) selected = screen4Cases();
 	else
 		for ( size_t i = 0; i < names.size(); i++ )
 		{
@@ -198,7 +205,7 @@ int main( int argc, char** argv )
 	if ( selected.empty() )
 	{
 		fprintf( stderr, "refused -- nothing selected: pass --all, --pilot, "
-			"--step0b, --screen or --case NAME\n" );
+			"--step0b, --screen, --irprop or --case NAME\n" );
 		usage();
 		return 2;
 	}

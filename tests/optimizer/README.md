@@ -4,14 +4,21 @@ Phase 0, Step 0A of `docs/learning_research/optimizer_implementation_plan.md`.
 
 This directory measures neuron's optimizers from identical starting states to a
 fixed objective: canonical gradient descent, conjugate gradient descent, Shanno,
-and — since Phase 3 — the research-only L-BFGS prototype (`src/lbfgs.*`,
-`Network::TRAIN_LBFGS`). The packed weight/objective/gradient boundary the last
-of those needs lives in `src/network.h`, shaped by that one real consumer.
+the L-BFGS implementation retained in Phase 3 (`src/lbfgs.*`,
+`Network::TRAIN_LBFGS`), and — since Phase 4 — the research-only iRPROP+
+prototype (`src/irprop.*`, `Network::TRAIN_IRPROP`). The packed
+weight/objective/gradient boundary both of the last two use lives in
+`src/network.h`, shaped by the first of them as its one real consumer.
 
 **Phase 3 results: `docs/learning_research/lbfgs_screen_results.md`.** The short
 version: L-BFGS reaches the committed practical endpoint 8.8x to 13.0x faster
 than Shanno across three row counts and four weight seeds, in 14-20 full passes
 against 123-210.
+
+**Phase 4 results: `docs/learning_research/irprop_screen_results.md`.** Measured
+against the standing portfolio panel rather than against a single winner — see
+the plan's Phase 5 portfolio policy, which is explicit that benchmark results
+rank recommendations and do not hide a correct, stable, eligible algorithm.
 
 ## What is here
 
@@ -593,6 +600,56 @@ The runner narrows to one half of the table with `--step0b` (the workload
 matrix) or `--pilot` (the Step 0A mechanics, at 3 repetitions — plumbing, not
 evidence). Membership is the probe’s to decide: the runner asks it rather than
 matching a name prefix, so a renamed case cannot silently fall out of a subset.
+
+## Reproducing the Phase 4 screen
+
+```bash
+./tests/optimizer/run_probe.py --irprop --seed 20260807 --timeout 3600 --out irprop.jsonl
+```
+
+`--irprop` is the candidate comparison against the **standing portfolio panel**,
+which is four arms with four roles and not a race with one winner: L-BFGS as the
+current speed leader, Shanno as the legacy quasi-Newton control, canonical as
+the behavioral and matched-objective reference, and iRPROP+ as the candidate.
+Canonical is present here although the Phase 3 screen omitted it — it is the
+source of the endpoint every arm races to, and at 6,000 rows one run is ~18 s.
+CGD is absent: its standing is settled and the plan forbids scaling every
+historical arm.
+
+Beyond the base panel it declares the three predeclared weight seeds (each its
+own group), the late-stage plateau arms (`endpoint: none`), the 25,000- and
+100,000-row scaling groups, and **the conditioning pair** below.
+
+### The conditioning pair, and the fixture that nearly did not work
+
+`well4` and `poor4` are one problem at two conditionings: same rows, same
+outcome rule, same architecture, inputs on scales spanning 1000x. This is the
+poorly scaled fixture Step 0B deliberately deferred to "the phase that has a
+candidate to discriminate", and iRPROP+ is that candidate — a poorly scaled
+objective is exactly where a per-parameter adaptive method is hypothesized to
+earn its place.
+
+**The obvious construction is a no-op, and the harness now gates against it.**
+Multiplying each input column by a different constant produces a design matrix
+*bit-identical* to the well-scaled one: `DataSet::normalize`
+(`src/dataset.cpp:692`) min-max normalizes every input column onto
+`[inLowerLimit, inUpperLimit]`, so any per-column **linear** rescale is exactly
+cancelled before training sees it. That arm would have reported "no difference on
+poorly scaled data" from a fixture that was not poorly scaled.
+
+What survives normalization is *where the bulk of a column sits inside its own
+range*. So each column anchors its min and max at ∓1 and compresses its
+remaining values by `10^-j`: after normalization column 0 spans the full
+`[-0.9, 0.9]` and column 3 occupies about ±0.0009 of it, so input 3's weight
+must be ~1000x input 0's to contribute equally. `optimizer_harness` pins the
+property the whole comparison rests on — that the two fixtures reach training
+with **different split identities from identical starting weights**.
+
+Canonical's own plateau is **21x worse** on the ill-conditioned twin (0.0762
+against 0.00366), which is what establishes the fixture as genuinely harder
+rather than merely different. Neither plateaued at a 40,000-iteration ceiling and
+neither published an endpoint there — the ceiling-is-not-a-floor rule working;
+both were characterized at 400,000.
 
 `tests/optimizer/data/` is generated and not committed; a row identifies its data
 by content (`data_id`), so provenance does not depend on that directory

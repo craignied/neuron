@@ -1,23 +1,29 @@
-# Neural optimizer reboot handoff
+# Neural optimizer handoff
 
-Date: 2026-08-06 (ready for a system reboot)
+Date: 2026-08-07 (Phase 4 complete)
 
-## Reboot snapshot
+## Snapshot
 
 - Repository: `/Users/craign/code/neUROn2++/neuron-3.0`
-- Branch: `main`, synchronized with `origin/main` when this handoff was written.
-- Last substantive commit: `e7a8188 Adopt a portfolio policy for optimizers`.
-- The working tree was clean before this handoff-only update.
+- Branch: `main`, **one commit ahead of `origin/main`** when this handoff was
+  written: the Phase 4 commit was made but not yet pushed.
+- Last substantive commit: the Phase 4 iRPROP+ research prototype, its
+  measurements and its retain decision.
 - L-BFGS implementation, measurement, REST integration, Manifest work, and the
-  portfolio policy are committed and pushed. Nothing from those tasks remains
-  only in the build directory or an untracked file.
-- GitHub Actions did not dispatch for the L-BFGS push during GitHub's 2026-08-06
-  Actions outage. Full local Release verification passed, but three-platform CI
-  must still be confirmed after GitHub recovers. Check the Actions page first;
-  if no run exists for current `main`, retrigger it with an empty commit. A no-op
-  `git push` alone does not reliably create a push event.
+  portfolio policy are committed and pushed. The Phase 4 iRPROP+ prototype, its
+  tests, its harness arms and its evidence are committed and **awaiting a push**.
+  Nothing from either phase remains only in the build directory or an untracked
+  file.
+- `tests/optimizer/data/` is generated and not committed; regenerate it with
+  `python3 tests/optimizer/prepare_data.py` before running a campaign.
+- **CI still needs confirming.** GitHub Actions did not dispatch for the L-BFGS
+  push during GitHub's 2026-08-06 Actions outage, and three-platform CI has not
+  been confirmed since. Full local Release verification passed for both phases.
+  Check the Actions page first; if no run exists for current `main`, retrigger it
+  with an empty commit — a no-op `git push` alone does not reliably create a push
+  event.
 
-Immediately after reboot, run:
+Immediately after a restart, run:
 
 ```sh
 cd /Users/craign/code/neUROn2++/neuron-3.0
@@ -25,15 +31,17 @@ git status -sb
 git log -5 --oneline --decorate
 ```
 
-Expect a clean `main` synchronized with `origin/main`. Do not discard unexpected
-changes; identify their owner before proceeding. Reconfigure or rebuild only if
-the existing `build/` directory is unavailable or invalid.
+Expect a clean `main` **one commit ahead of `origin/main`** if the Phase 4 commit
+has not been pushed, and in sync once it has; either way its CI result must be
+confirmed. Do not discard unexpected changes; identify their owner before
+proceeding. Reconfigure or rebuild only if the existing `build/` directory is
+unavailable or invalid.
 
 ## Read first after restart
 
 1. `CLAUDE.md`
 2. `docs/learning_research/optimizer_implementation_plan.md`, especially the
-   **Large-workload speed scope governor**
+   **Large-workload speed scope governor** and the Phase 5 **portfolio policy**
 3. `docs/learning_research/optimizer_baseline_results.md`
 4. `tests/optimizer/README.md`
 
@@ -65,10 +73,10 @@ neural, batch-only, and requires `autostep=0`. The retired CLI menus deliberatel
 have no L-BFGS entry. GUI selection and automatic selection remain deferred until
 the researched optimizer set is complete.
 
-So the speed bar is now L-BFGS, not Shanno: roughly 15 full passes on a
-4,500-row problem. The next candidate is **iRPROP+**. Start with the cheap
-representative workload and scale only a plausible portfolio candidate, but do
-not use “faster than L-BFGS” as a winner-takes-all retention rule.
+So the speed bar moved off Shanno: roughly 15 full passes on a 4,500-row problem.
+It is **not** a winner-takes-all retention rule, and Phase 4 is the concrete
+demonstration — see below, where iRPROP+ beats L-BFGS on the application
+benchmark and loses to it on the generated fixtures and late-stage.
 
 Two results that must travel with the headline:
 - the held-out differences are **noise** (five of six matched groups favour
@@ -112,35 +120,99 @@ and do not tune it after seeing candidate results.
   and `71b9b34`.
 - The restart/status correction is `6ac2ad7`; the standing portfolio policy is
   `e7a8188`.
+- Phase 4 landed as one commit: `src/irprop.*`, the `Network` composition and
+  absolute-step path, `tests/network/check_irprop.cpp` (ctest `network_irprop`),
+  the harness's iRPROP+ arms and conditioning fixtures, and the evidence
+  documents. It changed no public surface.
 - `CLAUDE.md` and the implementation plan contain the corrected neural-only scope.
 - Re-run the focused gates before committing rather than relying on this handoff;
   never copy a remembered CTest count into a status report.
 
+## Phase 4 is complete: iRPROP+ is retained, research-only
+
+Read `docs/learning_research/irprop_screen_results.md` for the evidence and
+`irprop_source_decision.md` for the algorithm, its sources and every constant.
+
+The implementation is `src/irprop.*` (`IRpropState`), composed by
+`Network::irpropIteration()` through the packed boundary Phase 3 built, applied
+by the new `Network::applyAbsoluteStep()` — the explicit absolute-step path that
+architecture decision 8 requires. `Network::TRAIN_IRPROP = 4` is **internal**:
+no REST field, GUI control, menu token, automatic-selection entry or
+saved-network field produces it. Its research gate is complete; its **public
+integration is not done and is Phase 5 work**.
+
+Decision: **RETAIN under the portfolio policy**, not as a new sole bar. On Civic
+Choice it is the fastest of the panel at 6,000/25,000/100,000 rows and four
+weight seeds — 1.28x to 2.08x faster than L-BFGS, 11x to 27x faster than Shanno,
+1,607x faster than canonical at 6,000 rows — with zero failures in 346 rows.
+
+Three results that must travel with the headline:
+
+- **the ranking flips by workload family.** On the generated 4-input conditioning
+  fixtures L-BFGS is ~2x faster than iRPROP+. iRPROP+ is not the panel's fastest
+  method in general; it is the fastest on the application benchmark. Neither
+  method makes the other redundant, which is exactly the case the portfolio
+  policy exists for;
+- **the poorly-scaled hypothesis failed.** The plan predicted iRPROP+ would excel
+  on poorly scaled objectives. Measured directly against a well-scaled twin, the
+  conditioning penalty is 1.14x for iRPROP+ and 1.23x for L-BFGS — both almost
+  unaffected, and L-BFGS ahead on both. Whatever separates the two workload
+  families, it is not conditioning;
+- **late-stage it is not dominant.** Run to the engine's own plateau rule it is
+  1.85x slower than L-BFGS and lands worse on both training objective and
+  held-out error.
+
+Held-out differences at the matched endpoint are **noise** (seven of eight
+matched groups favour iRPROP+, one favours L-BFGS by a margin comparable to the
+largest of the seven), so this supports *no degradation*, never *better*.
+
+### One gate is deliberately outstanding
+
+`tools/check_manifest_index.py` (and therefore `tests/tools/run_tools.sh`) fails
+with `Manifest index is missing public classes/namespaces: IRpropState`. This is
+**deferred, not overlooked**, and it is the same trade Phase 3 made: `4ced9c2`
+landed `LBFGS` and `LBFGSObjective` with that gate failing, and `71b9b34`
+documented them in the Manifest as part of the public-integration commit. Both
+the plan and the phase brief say no Manifest capability change belongs in a
+research prototype.
+
+Everything else passes: Release build, all 38 CTest cases, golden transcripts,
+oracle verification, every Python tool fixture (the index check runs first in
+`run_tools.sh`, so run the rest by skipping that one line to see them), and
+`git diff --check`.
+
+**Whoever integrates iRPROP+ publicly owns closing it**: a Chapter 2 derivation
+with the Igel & Hüsken citation and every constant, a Chapter 12 ownership
+section for `IRpropState`, the index entries in `tools/check_manifest_index.py`,
+and a PDF rebuild with the affected pages inspected as images.
+
 ## Exact next research step
 
-Prototype **iRPROP+** as a research-only neural optimizer and compare it directly with
-the plan's standing reference panel: **L-BFGS as the current speed leader, Shanno as the
-established legacy quasi-Newton control, and canonical training as the behavioral and
-matched-objective reference**. L-BFGS is a reference, not a winner-takes-all gate:
-iRPROP+ may be retained without beating it when iRPROP+ is correct, stable, reasonably
-competitive, and adds complementary behavior across workloads or failure modes. Do not
-reopen the completed L-BFGS phase or begin another baseline campaign. Follow Phase 4 of
-the implementation plan: pin the published absolute-step contract before coding, prove
-the sign-product and rollback branches with deterministic tests and focused sabotage,
-then screen on the cheap representative workload before scaling a plausible portfolio
-candidate.
+**Safeguarded Barzilai-Borwein**, as the plan's Phase 1 describes it: a low-cost
+candidate and harness control, cited to Barzilai & Borwein (1988) for BB1/BB2 and
+Raydan (1997) for the exact globalization policy, with one exact production
+candidate chosen before measurement. Same staged treatment: pin the published
+contract before coding, fail-prove the mechanism guards by focused sabotage, then
+screen on the cheap representative workload against the standing panel — which is
+now **four** arms, since iRPROP+ joins L-BFGS, Shanno and canonical in it.
 
-No public REST, GUI, Manifest capability, or automatic-selection change belongs in the
-iRPROP+ research prototype. The retired CLI menus are never extended. Public REST
-integration occurs only after the research acceptance gate; GUI and automatic selection
-remain deferred until the researched optimizer set is complete. Eventually every retained
-eligible algorithm belongs in the bounded limited-run selector so the user's actual
-dataset, rather than the synthetic benchmark alone, guides the full-training choice.
+Do not reopen the completed L-BFGS or iRPROP+ phases, and do not begin another
+baseline campaign.
+
+No public REST, GUI, Manifest capability, or automatic-selection change belongs in
+a research prototype. The retired CLI menus are never extended. Public REST
+integration occurs only after the research acceptance gate; GUI and automatic
+selection remain deferred until the researched optimizer set is complete.
+Eventually every retained eligible algorithm belongs in the bounded limited-run
+selector so the user's actual dataset, rather than the synthetic benchmark alone,
+guides the full-training choice — and the Phase 4 ranking flip is the concrete
+argument for that selector, since the best method here is workload-dependent.
 
 ## Subsequent candidate order
 
-1. ~~L-BFGS~~ — done, retained, now the bar
-2. iRPROP+
+1. ~~L-BFGS~~ — done, retained, the speed leader on the small generated fixtures
+   and late-stage
+2. ~~iRPROP+~~ — done, retained, the speed leader on the application benchmark
 3. Safeguarded BB as a low-cost candidate/control
 4. Other neural candidates such as LM or online/noisy-gradient methods only when their
    eligibility matches a measured neural workload
@@ -150,15 +222,40 @@ not end the search for a credible further 10x or 100x improvement.
 
 ## Last completed verification
 
-Before the REST/Manifest integration commit, the completed gates were:
+These are the Phase 4 gates, run before its commit. Counts were **discovered from
+CTest at the time**, not remembered.
 
-- Release build and all 37 discovered CTest cases;
-- `tests/gui/strictparse.sh` (222 checks);
-- `tests/gui/smoke.sh`;
-- golden transcripts, oracle verification, and Python tools;
-- Manifest index coverage and PDF rebuild/visual inspection;
+- Release build and **all 38 discovered CTest cases**, which is 37 plus the new
+  `network_irprop`;
+- golden transcripts — byte-identical, as a research-only optimizer requires;
+- oracle verification — identical;
+- every Python tool fixture (see the outstanding gate below for how to reach
+  them);
 - `git diff --check`.
 
-Treat these as provenance, not permission to skip new verification. The iRPROP+
-phase must add and fail-prove its own mechanism tests, then rerun the relevant
-Release gates before any commit.
+**Fail-proof evidence for `network_irprop`, both sabotages with visible
+recompilation of `src/irprop.cpp` in each direction:**
+
+- **the error-dependent rollback deleted** so the `< 0` branch always reverts —
+  RPROP+ under the iRPROP+ name. Six assertions failed, including the one that
+  names the mechanism. Two controls held: the *rollback* assertions beside them
+  still passed (RPROP+ satisfies those by construction), and so did **every
+  real-model integration test** — which is why the published table is driven by
+  hand rather than inferred from a training run;
+- **the current-gradient zeroing deleted.** Nine assertions failed: three name
+  the zeroing directly, six are the consequences it forces on the next iteration.
+
+No sabotage remains in the tree. The full log is at the foot of
+`tests/network/check_irprop.cpp`.
+
+**One gate is deliberately outstanding and is not a pass.**
+`tools/check_manifest_index.py` fails with `Manifest index is missing public
+classes/namespaces: IRpropState`, and `tests/tools/run_tools.sh` runs that check
+on its line 14 and exits before its own fixtures — so to see the tool fixtures
+pass, run the script with that line skipped. The reasoning and the work that
+closes it are in *One gate is deliberately outstanding* above.
+
+`tests/gui/*` were not re-run: Phase 4 changed no REST, GUI or request-parsing
+surface. Treat all of this as provenance, not permission to skip new
+verification. The BB phase must add and fail-prove its own mechanism tests, then
+rerun the relevant Release gates before any commit.

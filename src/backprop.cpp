@@ -481,6 +481,10 @@ double BackProp::innerTrainSet()
 	if ( trainingType == TRAIN_LBFGS )
 		return lbfgsIteration();
 
+	// And iRPROP+, whose step is absolute rather than a scaled direction.
+	if ( trainingType == TRAIN_IRPROP )
+		return irpropIteration();
+
 	// THE BATCH SEPARATE-GRADIENT PATH is one authoritative evaluation, then
 	//    the optimizer's direction, then the epoch's single update. An early
 	//    return, because an evaluation with an update after it cannot be reused

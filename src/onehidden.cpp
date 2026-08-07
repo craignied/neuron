@@ -312,6 +312,12 @@ double OneHiddenNet::innerTrainSet()
 	if ( trainingType == TRAIN_LBFGS )
 		return lbfgsIteration();
 
+	// iRPROP+ likewise: its step is ABSOLUTE, so it cannot be expressed as a
+	//    gradient transformation followed by `w -= g * eta` either. Research
+	//    only; no menu, GUI control or API field produces this training type.
+	if ( trainingType == TRAIN_IRPROP )
+		return irpropIteration();
+
 	// THE BATCH SEPARATE-GRADIENT PATH is one authoritative evaluation, then
 	//    the selected optimizer's direction, then the epoch's single update.
 	//    Written as an early return rather than as a branch inside the exemplar

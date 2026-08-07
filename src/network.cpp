@@ -475,6 +475,12 @@ void Network::prepareRun()
 	//    quiet run resets exactly as an audible one does. The configured
 	//    memory length survives; it is configuration, not working state.
 	lbfgs.reset();
+
+	// The same rule for iRPROP+, which has no configuration at all to survive:
+	//    every one of its constants is published and fixed, so a run inherits
+	//    nothing -- not a Delta, not a remembered gradient, not a previous
+	//    objective.
+	irprop.reset();
 }
 
 // Utility to output Network specific parameters prior to an Iterative run.
@@ -496,6 +502,9 @@ void Network::runHeader( ostream& outputStream )
 		case TRAIN_LBFGS:
 			outputStream << "Training algorithm is L-BFGS (memory "
 				<< lbfgs.getMemory() << ")" << endl;
+			break;
+		case TRAIN_IRPROP:
+			outputStream << "Training algorithm is iRPROP+" << endl;
 			break;
 	}
 
@@ -537,6 +546,58 @@ void Network::unpackWeights( const vector< double >& )
 double Network::batchObjectiveGradient( vector< double >& )
 {
 	throw NoPackedBoundary();
+}
+
+// THE ONE ABSOLUTE-STEP APPLICATION PATH. `w += step`, the single sign
+//    convention: the step already carries its own sign. See network.h for why
+//    this is named apart from engine()'s direction contract.
+void Network::applyAbsoluteStep( const vector< double >& step )
+{
+	packWeights( packedWeights );
+	packedWeights += step; // refuses a size mismatch rather than truncating
+	unpackWeights( packedWeights );
+}
+
+// ONE iRPROP+ ITERATION. Network composes; IRpropState owns the published
+//    table; Iterative owns stopping. See network.h and irprop.h.
+double Network::irpropIteration()
+{
+	// REFUSALS, stated before any work is done. Each is a configuration under
+	//    which this method would have to become a different method to run.
+	if ( !batchEpochFlag )
+		throw IRpropState::Ineligible( "iRPROP+ requires batch/epoch training: "
+			"the published method compares one full-batch gradient with the "
+			"previous one" );
+
+	if ( automaticStepSizeFlag )
+		throw IRpropState::Ineligible( "iRPROP+ owns its own absolute step and "
+			"cannot run with the automatic step-size search" );
+
+	if ( packedSize() == 0 )
+		throw IRpropState::Ineligible( "this model does not implement the "
+			"packed parameter boundary iRPROP+ needs" );
+
+	// ONE authoritative evaluation at the currently installed weights -- the
+	//    same code the legacy batch path runs, not a second copy of the model
+	//    equations.
+	double setError = batchObjectiveGradient( irpropGrad );
+
+	// THE RAW GRADIENT MAXIMUM, taken BEFORE the published table runs and so
+	//    before its sign-flip zeroing (the plan's architecture decision 7).
+	//    Reading it afterwards would let every coordinate that just flipped
+	//    sign shrink the reported maximum, and a gradient stopping rule would
+	//    call that convergence.
+	currGradMax = maxabs( irpropGrad );
+
+	// The table reads irpropGrad and does not write it, which is what makes the
+	//    line above still true after this one.
+	irprop.computeStep( setError, irpropGrad, irpropStep );
+	applyAbsoluteStep( irpropStep );
+
+	// LEGACY PRE-UPDATE REPORTING: the objective at the point this step
+	//    departed from, which is what every other optimizer here returns and
+	//    what currGradMax describes.
+	return setError;
 }
 
 // ONE L-BFGS OUTER ITERATION. Network composes; LBFGS owns the algorithm;

@@ -128,10 +128,13 @@ STOP_REASONS = {"none", "max_iterations", "min_error", "min_change",
 # Real numbers that MAY be null or -1 ("not applicable here").
 NULLABLE_NUM_FIELDS = ["heldout_error", "cv_auc", "locked_auc"]
 
-# 3 is the RESEARCH-ONLY L-BFGS prototype (Network::TRAIN_LBFGS).  No menu, GUI
-# control, HTTP field or automatic-selection rule produces it; it exists so this
-# harness and tests/network/check_lbfgs.cpp can measure the Phase 3 candidate.
-OPTIMIZER_NAMES = {0: "canonical", 1: "cgd", 2: "shanno", 3: "lbfgs"}
+# 3 is L-BFGS (Network::TRAIN_LBFGS), retained in Phase 3 and REST-selectable as
+# algorithm=4.  4 is the RESEARCH-ONLY iRPROP+ prototype (Network::TRAIN_IRPROP):
+# no menu, GUI control, HTTP field or automatic-selection rule produces it, and
+# it exists so this harness and tests/network/check_irprop.cpp can measure the
+# Phase 4 candidate.
+OPTIMIZER_NAMES = {0: "canonical", 1: "cgd", 2: "shanno", 3: "lbfgs",
+                   4: "irprop"}
 
 # Fields that must be identical across every arm of a comparison group.  The
 # group's declared axis is removed from this list for that group, and nothing
@@ -1453,6 +1456,11 @@ def main():
                     help="restrict to the Phase 3 candidate screen: the L-BFGS "
                          "prototype against the Shanno incumbent, on Civic "
                          "Choice 6k/h4 at the committed practical endpoint")
+    ap.add_argument("--irprop", action="store_true",
+                    help="restrict to the Phase 4 candidate screen: the iRPROP+ "
+                         "prototype against the standing portfolio panel "
+                         "(L-BFGS, Shanno, canonical), on Civic Choice 6k/h4 at "
+                         "the committed practical endpoint")
     ap.add_argument("--timeout", type=float, default=120.0,
                     help="per-arm timeout in seconds (default 120; raise it "
                          "deliberately for a genuinely long Step 0B workload)")
@@ -1475,6 +1483,7 @@ def main():
 
     subset = ("--step0b" if args.step0b
               else "--screen" if args.screen
+              else "--irprop" if args.irprop
               else "--pilot" if args.pilot
               else None)
     available = list_cases(probe, subset)

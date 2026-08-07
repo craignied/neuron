@@ -460,6 +460,7 @@ static inline const char* optimizerName( unsigned t )
 	case 1: return "cgd";
 	case 2: return "shanno";
 	case 3: return "lbfgs";
+	case 4: return "irprop";
 	default: return "unknown";
 	}
 }
@@ -735,8 +736,65 @@ inline WeightIdentity Probe< BackProp >::weightIdentity() const
 // a seed that has no effect is false provenance. Step 0B introduces a real
 // split/data seed together with real holdout splits.
 
+//   well4    a 4-input threshold problem whose inputs all share one scale.
+//   poor4    THE SAME PROBLEM, with the inputs on scales spanning 1000x. Phase
+//            4's poorly-scaled fixture, deferred by Step 0B to "the phase that
+//            has a candidate to discriminate" -- iRPROP+'s hypothesized
+//            advantage is exactly poorly scaled objectives.
+//
+// WHY THE SCALING IS BUILT THIS WAY, and it is not the obvious way. The obvious
+// construction -- multiply each input column by a different constant -- produces
+// a fixture BIT-IDENTICAL to the well-scaled one. DataSet::normalize
+// (src/dataset.cpp:692) min-max normalizes every input column onto
+// [inLowerLimit, inUpperLimit], so a per-column LINEAR rescale of the raw data
+// is exactly cancelled before training ever sees it, and the arm would have
+// reported "no difference on poorly scaled data" from a fixture that was not
+// poorly scaled.
+//
+// What survives that normalization is where the BULK of a column sits inside its
+// own range. So each column keeps anchors at -1 and +1 -- fixing what min-max
+// maps to the endpoints -- while its remaining values are compressed by 10^-j.
+// After normalization column 0 spans the full [-0.9, 0.9] and column 3 occupies
+// about +/-0.0009 of it, so the weight on input 3 must be roughly 1000x the
+// weight on input 0 to contribute equally. That is genuine ill-conditioning, and
+// it is what the two fixtures differ by: same rows, same outcome rule, same
+// count, different conditioning. The pair is checked for non-vacuity by
+// requiring their split identities to differ (check_optimizer_harness.cpp).
 static inline Matrix< double > fixtureMatrix( const string& which, unsigned n )
 {
+	if ( which == "well4" || which == "poor4" )
+	{
+		const bool poor = ( which == "poor4" );
+		const unsigned primes[ 4 ] = { 37, 53, 71, 89 };
+		Matrix< double > raw( n, 5 );
+		for ( unsigned i = 0; i < n; i++ )
+		{
+			// Rows 0 and 1 anchor every column's min and max at -1 and +1, so
+			//    normalization has a fixed range to map and the compression
+			//    below is not undone by it.
+			double base[ 4 ];
+			for ( unsigned j = 0; j < 4; j++ )
+			{
+				if ( i == 0 ) base[ j ] = -1.0;
+				else if ( i == 1 ) base[ j ] = 1.0;
+				else base[ j ] = -1.0
+					+ 2.0 * ( ( i * primes[ j ] ) % 100 ) / 99.0;
+
+				double scale = 1.0;
+				if ( poor && i > 1 )
+					for ( unsigned k = 0; k < j; k++ )
+						scale *= 0.1;
+				raw( i, j ) = base[ j ] * scale;
+			}
+			// THE OUTCOME IS THE SAME FUNCTION OF THE SAME UNDERLYING VALUES in
+			//    both fixtures, so the two arms are solving one problem at two
+			//    conditionings rather than two different problems.
+			raw( i, 4 ) = ( base[ 0 ] + base[ 1 ] + base[ 2 ] + base[ 3 ] > 0.55 )
+				? 1 : 0;
+		}
+		return raw;
+	}
+
 	Matrix< double > raw( n, 3 );
 	for ( unsigned i = 0; i < n; i++ )
 	{
@@ -810,7 +868,10 @@ static inline DataSet makeDataSet( const Case& c, unsigned long long& dataId,
 	if ( c.dataFile.empty() )
 	{
 		Matrix< double > raw = fixtureMatrix( c.fixture, c.rows );
-		d.setInput( 2 );
+		// The FIXTURE decides its input count, read from the matrix it built
+		//    rather than hard-coded here: a four-input fixture declared through a
+		//    two-input constant would train on a design nobody described.
+		d.setInput( raw.cols() - 1 );
 		d.setRawMatrix( raw );
 		dataId = matrixIdentity( raw );
 	}
@@ -946,7 +1007,8 @@ static inline string validate( const Case& c )
 	if ( c.model != "logistic" && c.model != "simpleprop"
 		&& c.model != "bareprop" && c.model != "backprop" )
 		return "model: unknown model '" + c.model + "'";
-	if ( c.dataFile.empty() && c.fixture != "linear2" && c.fixture != "xor2" )
+	if ( c.dataFile.empty() && c.fixture != "linear2" && c.fixture != "xor2"
+		&& c.fixture != "well4" && c.fixture != "poor4" )
 		return "fixture: unknown generated fixture '" + c.fixture + "'";
 	if ( !c.dataFile.empty() && c.inputs < 1 )
 		return "inputs: a file-backed fixture must declare its input count";
@@ -983,9 +1045,9 @@ static inline string validate( const Case& c )
 			+ c.endpoint + "' endpoint";
 	if ( c.workload != "cv" && ( c.cvFolds || c.cvRepeats ) )
 		return "cv_folds/cv_repeats: only a cv workload may set these";
-	if ( c.optimizer > Network::TRAIN_LBFGS )
-		return "optimizer: must be 0 (canonical), 1 (CGD), 2 (Shanno) or "
-			"3 (the research-only L-BFGS prototype)";
+	if ( c.optimizer > Network::TRAIN_IRPROP )
+		return "optimizer: must be 0 (canonical), 1 (CGD), 2 (Shanno), "
+			"3 (L-BFGS) or 4 (the research-only iRPROP+ prototype)";
 	// L-BFGS OWNS ITS OWN STEP AND ITS OWN GRADIENT. It refuses the automatic
 	//    step-size search and on-line mode in the engine; declaring either here
 	//    would produce an arm that throws at its first pass rather than a row
@@ -1000,6 +1062,20 @@ static inline string validate( const Case& c )
 	if ( c.optimizer == Network::TRAIN_LBFGS && c.model == "logistic" )
 		return "model: Logistic does not implement the packed parameter "
 			"boundary L-BFGS needs";
+	// iRPROP+ REFUSES THE SAME THREE CONFIGURATIONS, for its own reasons: its
+	//    step is absolute so a second step rule cannot own the iteration, the
+	//    published method compares one full-batch gradient with the previous
+	//    one, and it reads and writes parameters only through the packed
+	//    boundary. Declared here so a bad case produces a row that says what is
+	//    wrong rather than an arm that throws at its first pass.
+	if ( c.optimizer == Network::TRAIN_IRPROP && c.autoStep )
+		return "auto_step: iRPROP+ owns its own absolute step and cannot run "
+			"with the automatic step-size search";
+	if ( c.optimizer == Network::TRAIN_IRPROP && !c.batch )
+		return "mode: iRPROP+ requires batch/epoch training";
+	if ( c.optimizer == Network::TRAIN_IRPROP && c.model == "logistic" )
+		return "model: Logistic does not implement the packed parameter "
+			"boundary iRPROP+ needs";
 	if ( c.dataFile.empty() && c.rows < 2 )
 		return "rows: must be at least 2";
 	if ( !( c.target > 0.0 && c.target < 1.0 ) )
@@ -2073,6 +2149,23 @@ static const Endpoints ENDPOINT_TABLE[] = {
 	  "canonical did not converge: gradient 3.75e-04 against the engine's 1e-6 rule after 200001 iterations" },
 	{ "simpleprop-25000-16",        0.118096561, 0, 30000, 40000,
 	  "canonical did not converge: gradient 1.67e-03 against the engine's 1e-6 rule after 40001 iterations" },
+	// THE PHASE 4 CONDITIONING PAIR. Written by hand rather than by
+	// fill_targets.py, whose case regex matches Civic names only -- but by
+	// EXACTLY its formulae: practical = practical_objective * (1 + 1e-5), and
+	// ceiling = max(20000, int(practical_iteration * 2.5/10000 + 1) * 10000).
+	// Characterized at ceiling 400,000 against engine_id 4e11285b904cd4f9
+	// (75 src/ files); at 40,000 NEITHER had plateaued and no endpoint was
+	// published, which is the ceiling-is-not-a-floor rule doing its job.
+	//
+	// THE PAIR IS THE MEASUREMENT. Same rows, same outcome rule, same
+	// architecture; only the input conditioning differs -- and canonical's own
+	// plateau is 21x worse on the ill-conditioned twin (0.0762 against 0.00366),
+	// which is what establishes that the fixture is genuinely harder rather than
+	// merely different.
+	{ "well4-simpleprop-6000-4",    0.00365853677, 0, 370000, 400000,
+	  "canonical did not converge: gradient 1.17e-05 against the engine's 1e-6 rule after 400001 iterations" },
+	{ "poor4-simpleprop-6000-4",    0.0761685276, 0, 210000, 400000,
+	  "canonical did not converge: gradient 1.82e-04 against the engine's 1e-6 rule after 400001 iterations" },
 	{ 0, 0, 0, 0, 0, "" }
 };
 
@@ -2100,11 +2193,15 @@ static inline bool endpointAvailable( const string& key, const string& endpoint 
 	return e->practical > 0;
 }
 
+// A GENERATED fixture prefixes its key. Without that, "simpleprop-6000-4" would
+//    name two different workloads -- Civic Choice and a generated one at the same
+//    size and architecture -- and one would silently race to the other's endpoint.
 static inline string endpointKey( const string& model, unsigned rows,
-	unsigned hidden )
+	unsigned hidden, const string& fixture = "" )
 {
 	string archKey = ( model == "logistic" ) ? "linear" : to_string( hidden );
-	return model + "-" + to_string( rows ) + "-" + archKey;
+	return ( fixture.empty() ? "" : fixture + "-" )
+		+ model + "-" + to_string( rows ) + "-" + archKey;
 }
 
 // The Civic Choice workload's fixed facts, in one place.
@@ -2182,6 +2279,67 @@ static inline Case civicCase( const string& model, unsigned rows,
 		+ "-" + endpoint;
 	c.name = c.group + "-"
 		+ optimizerName( optimizer ) + ( autoStep ? "-autostep" : "" );
+	return c;
+}
+
+// ---------------------------------------------------------------------------
+// THE CONDITIONING PAIR (Phase 4): one problem at two conditionings.
+//
+// `well4` and `poor4` differ ONLY in how the same underlying inputs are scaled
+// (see fixtureMatrix). Each is its own comparison group with its own
+// characterized endpoint, and the reading is ACROSS the two groups: what does
+// each method's cost do when the conditioning degrades? That question cannot be
+// answered inside one group, and a single ill-conditioned arm without its
+// well-conditioned twin answers it either.
+static const unsigned COND_ROWS = 6000;
+static const unsigned COND_HIDDEN = 4;
+static const unsigned COND_DATA_SEED = 20260806;
+
+static inline Case conditioningCase( const string& fixture, unsigned optimizer )
+{
+	Case c = baseCase();
+	c.model = "simpleprop";
+	c.fixture = fixture;
+	c.dataFile = "";
+	c.inputs = 0;             // a generated fixture declares its own width
+	c.rows = COND_ROWS;
+	c.dataSeed = COND_DATA_SEED;
+	c.testFraction = 0.25;
+	c.hidden = COND_HIDDEN;
+	c.optimizer = optimizer;
+	c.autoStep = false;
+	c.endpoint = ENDPOINT_PRACTICAL;
+	c.groupAxis = "method";
+
+	// Network's own constructed defaults, as every other neural arm uses.
+	c.eta = 0.05;
+	c.batch = true;
+	c.xentropy = false;
+	c.decayOn = true;
+	c.decay = 5e-5;
+
+	const string key = endpointKey( "simpleprop", COND_ROWS, COND_HIDDEN,
+		fixture );
+	const Endpoints* e = endpointsFor( key );
+	if ( e )
+	{
+		c.target = e->practical;
+		c.ceiling = e->ceiling;
+	}
+	else
+	{
+		// UNCHARACTERIZED, and therefore only a control to characterize WITH.
+		//    The placeholder keeps validate() satisfied so `--characterize
+		//    --case ...` can name this arm; characterize() replaces it. Without
+		//    this the table is a one-way door -- the same reason
+		//    referenceCaseFor() exists.
+		c.target = 0.5;
+		c.ceiling = 40000;
+	}
+
+	c.group = "cond-" + fixture + "-simpleprop-r" + to_string( COND_ROWS )
+		+ "-h" + to_string( COND_HIDDEN ) + "-practical";
+	c.name = c.group + "-" + optimizerName( optimizer );
 	return c;
 }
 
@@ -2493,6 +2651,135 @@ static inline vector< Case > screenCases()
 	return v;
 }
 
+// ---------------------------------------------------------------------------
+// THE PHASE 4 SCREEN: iRPROP+ against the STANDING PORTFOLIO PANEL.
+//
+// The panel is four arms with four distinct roles, and it is not a race with
+// one winner (the plan's Phase 5 portfolio policy):
+//
+//   L-BFGS      the current speed leader, and the primary modern reference --
+//               NOT a requirement every retained method must beat;
+//   Shanno      the established legacy quasi-Newton control, which is what
+//               exposes a regression specific to the newer implementation path;
+//   canonical   the behavioral and matched-objective reference. It is the
+//               source of the committed endpoint every arm here races to, so it
+//               belongs in the panel even though the Phase 3 screen omitted it;
+//               at 6,000 rows one run is ~19 s, which is affordable;
+//   iRPROP+     the candidate.
+//
+// CGD is not a panel member and is not run: its standing is settled (2x slower
+// than canonical) and the plan forbids scaling every historical arm.
+//
+// The workload is the one the panel already lives on -- Civic Choice at 6,000
+// rows, the walkthrough's own four hidden units, the committed 25% stratified
+// holdout and the committed practical objective -- so nothing here is
+// re-characterized and no endpoint is invented for the candidate.
+static inline vector< Case > screen4Cases()
+{
+	vector< Case > v;
+	if ( !endpointAvailable( endpointKey( "simpleprop", 6000, CIVIC_HIDDEN ),
+		ENDPOINT_PRACTICAL ) )
+		return v;
+
+	// THE PANEL, one comparison group. run_probe.py REFUSES the set if anything
+	//    defining the work differs between its members.
+	const unsigned panel[ 4 ] = { 0, 2, Network::TRAIN_LBFGS,
+		Network::TRAIN_IRPROP };
+	for ( int k = 0; k < 4; k++ )
+		v.push_back( civicCase( "simpleprop", 6000, CIVIC_HIDDEN,
+			ENDPOINT_PRACTICAL, panel[ k ], false ) );
+
+	// THE WEIGHT-SEED TEST, at the three seeds Phase 3 predeclared, so the
+	//    candidate is read on the same starts its reference was. Each seed is
+	//    its own comparison group: two arms from different starting weights are
+	//    not racing the same race. Canonical is omitted at the extra seeds --
+	//    it is the endpoint's source, not a per-seed control, and three more
+	//    19-second arms per repetition buys nothing the base group has not
+	//    already established.
+	const unsigned seeds[ 3 ] = { 101, 202, 303 };
+	for ( int i = 0; i < 3; i++ )
+	{
+		const unsigned methods[ 3 ] = { 2, Network::TRAIN_LBFGS,
+			Network::TRAIN_IRPROP };
+		for ( int k = 0; k < 3; k++ )
+		{
+			Case c = civicCase( "simpleprop", 6000, CIVIC_HIDDEN,
+				ENDPOINT_PRACTICAL, methods[ k ], false );
+			c.weightSeed = seeds[ i ];
+			c.group = "civic-seed" + to_string( seeds[ i ] )
+				+ "-simpleprop-r6000-h4-practical";
+			c.name = c.group + "-" + optimizerName( methods[ k ] );
+			v.push_back( c );
+		}
+	}
+
+	// THE LATE-STAGE QUESTION, asked the only way this workload permits. There
+	//    is no canonical strict endpoint on the neural workloads (canonical does
+	//    not converge on them at the engine's 1e-6 rule), so all three run to
+	//    THE ENGINE'S OWN plateau rule instead, identically configured, and the
+	//    row declares endpoint `none` rather than borrowing a name it has not
+	//    earned. WHAT EACH ARM LANDS ON is read beside how fast it got there: a
+	//    method that stops earlier at a worse objective has not won. Phase 3
+	//    found exactly that shape for L-BFGS, so the question is live.
+	const unsigned lateMethods[ 3 ] = { 2, Network::TRAIN_LBFGS,
+		Network::TRAIN_IRPROP };
+	for ( int k = 0; k < 3; k++ )
+	{
+		Case c = civicCase( "simpleprop", 6000, CIVIC_HIDDEN,
+			ENDPOINT_PRACTICAL, lateMethods[ k ], false );
+		c.minStop = false;
+		c.autoStop = true;
+		c.endpoint = ENDPOINT_NONE;
+		c.target = 0.5;  // carried, unused: no objective rule is armed
+		c.group = "civic-latestage-simpleprop-r6000-h4";
+		c.name = c.group + "-" + optimizerName( lateMethods[ k ] );
+		v.push_back( c );
+	}
+
+	// THE CONDITIONING PAIR. iRPROP+'s hypothesized advantage is poorly scaled
+	//    objectives, so this is the arm that could earn it a place in the
+	//    portfolio on a DISTINCT profile rather than on raw speed -- and the
+	//    well-scaled twin is what makes that reading possible. The canonical
+	//    reference of each is declared UNCONDITIONALLY, because it is the arm
+	//    `--characterize` must be able to name before any endpoint exists.
+	const string conds[ 2 ] = { "well4", "poor4" };
+	for ( int i = 0; i < 2; i++ )
+	{
+		const string key = endpointKey( "simpleprop", COND_ROWS, COND_HIDDEN,
+			conds[ i ] );
+		if ( endpointAvailable( key, ENDPOINT_PRACTICAL ) )
+		{
+			const unsigned condPanel[ 4 ] = { 0, 2, Network::TRAIN_LBFGS,
+				Network::TRAIN_IRPROP };
+			for ( int k = 0; k < 4; k++ )
+				v.push_back( conditioningCase( conds[ i ], condPanel[ k ] ) );
+		}
+		else
+			v.push_back( conditioningCase( conds[ i ], 0 ) );
+	}
+
+	// SCALING, added only after the 6,000-row screen was run and left iRPROP+ a
+	//    plausible portfolio candidate -- the plan's staged gate, in that order.
+	//    The candidate and the two quasi-Newton references only; canonical is
+	//    not re-run at these sizes, where one arm costs minutes to re-establish
+	//    a settled reference. Each size is its own comparison group, because an
+	//    endpoint characterized at 6,000 rows is not the endpoint at 100,000.
+	const unsigned sizes[ 2 ] = { 25000, 100000 };
+	for ( int i = 0; i < 2; i++ )
+	{
+		if ( !endpointAvailable( endpointKey( "simpleprop", sizes[ i ],
+			CIVIC_HIDDEN ), ENDPOINT_PRACTICAL ) )
+			continue;
+		const unsigned scaled[ 3 ] = { 2, Network::TRAIN_LBFGS,
+			Network::TRAIN_IRPROP };
+		for ( int k = 0; k < 3; k++ )
+			v.push_back( civicCase( "simpleprop", sizes[ i ], CIVIC_HIDDEN,
+				ENDPOINT_PRACTICAL, scaled[ k ], false ) );
+	}
+
+	return v;
+}
+
 static inline vector< Case > pilotCases()
 {
 	vector< Case > v;
@@ -2683,6 +2970,19 @@ static inline vector< Case > allCases()
 			known = ( v[ j ].name == sc[ i ].name );
 		if ( !known )
 			v.push_back( sc[ i ] );
+	}
+
+	// The Phase 4 panel overlaps both of the above -- its Shanno, canonical,
+	//    L-BFGS and late-stage arms are already declared -- so only the iRPROP+
+	//    arms are new. Appended by name for the same reason.
+	vector< Case > s4 = screen4Cases();
+	for ( size_t i = 0; i < s4.size(); i++ )
+	{
+		bool known = false;
+		for ( size_t j = 0; j < v.size() && !known; j++ )
+			known = ( v[ j ].name == s4[ i ].name );
+		if ( !known )
+			v.push_back( s4[ i ] );
 	}
 	return v;
 }

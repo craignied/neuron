@@ -10,6 +10,7 @@
 #include <iostream>
 #include <iomanip>
 
+#include "irprop.h"
 #include "iterative.h"
 #include "lbfgs.h"
 
@@ -21,6 +22,12 @@ public:
 	//    retired menu token or GUI control is added yet. Automatic selection does
 	//    not probe it, and no saved network records it.
 	static const unsigned TRAIN_LBFGS = 3;
+
+	// RESEARCH ONLY, Phase 4. Reachable from the benchmark harness and the
+	//    deterministic tests and from nothing else: no REST field, no GUI
+	//    control, no retired menu token, no automatic-selection entry and no
+	//    saved-network field produces it. See irprop.h.
+	static const unsigned TRAIN_IRPROP = 4;
 	Network(); // default constructor
 	virtual ~Network(); // destructor
 
@@ -243,6 +250,23 @@ protected:
 	//    (the plan's architecture decision 2).
 	LBFGS lbfgs;
 
+	// --- The iRPROP+ optimizer (research only; see irprop.h) ---------------
+	//
+	//    Composed on the same terms as lbfgs above: IRpropState owns the
+	//    published table and all of its state, Network supplies model
+	//    evaluation through the packed boundary, Iterative keeps stopping. It
+	//    does not go through engine() either -- an absolute step cannot honestly
+	//    fit a contract whose caller applies `w -= g * eta`.
+	IRpropState irprop;
+
+	// PER-RUN SCRATCH for that iteration, so a run allocates once rather than
+	//    once per epoch. Empty until an iRPROP+ run touches them, so no other
+	//    model pays for them; each is sized by its first use and is workspace,
+	//    not state a copy carries.
+	vector< double > irpropGrad,   // the raw packed gradient
+		irpropStep,                // the absolute step
+		packedWeights;             // applyAbsoluteStep's working vector
+
 	// The evaluator LBFGS drives. A LOCAL of one outer iteration holding a
 	//    reference and no state, so no allocation happens per trial. As a
 	//    nested class it reaches Network's protected boundary directly, which
@@ -261,6 +285,37 @@ protected:
 	private:
 		Network& net;
 	};
+
+	// --- A DIRECTION IS NOT A STEP ----------------------------------------
+	//
+	//    Two update contracts exist in this class, and they are named apart
+	//    rather than distinguished by a flag read inside a loop:
+	//
+	//    A DIRECTION is what engine() produces -- a transformed gradient the
+	//       CALLER then scales, applying `w -= g * eta`. Canonical descent, CGD
+	//       and Shanno all work that way, and eta is theirs.
+	//
+	//    AN ABSOLUTE STEP is a displacement already in parameter units, sign
+	//       included, applied by the method below as `w += step`. That is the
+	//       one sign convention: a step-owning optimizer puts its own sign into
+	//       the vector, exactly as iRPROP+'s published dw = -sign(g)*Delta does.
+	//
+	//    An absolute step is NEVER expressed by dividing by eta, by setting eta
+	//    to one, or by leaving the automatic step-size search running (the
+	//    plan's architecture decision 8). Applied once per epoch through the
+	//    packed boundary above, outside every exemplar loop.
+	void applyAbsoluteStep( const vector< double >& step );
+
+	// ONE iRPROP+ ITERATION, called from the concrete model's innerTrainSet()
+	//    when trainingType is TRAIN_IRPROP. Composition only: the eligibility
+	//    refusals, one batchObjectiveGradient() evaluation, currGradMax from
+	//    that RAW gradient before anything transforms it, one call into the
+	//    published table, and one absolute step. IRpropState owns the algorithm
+	//    and Iterative owns stopping (rule 6).
+	//
+	//    REFUSES rather than quietly becoming something else: on-line mode, the
+	//    automatic step-size search, and a model with no packed boundary.
+	double irpropIteration();
 
 	// ONE L-BFGS ITERATION, called from the concrete model's innerTrainSet()
 	//    when trainingType is TRAIN_LBFGS. Returns the objective at the point
