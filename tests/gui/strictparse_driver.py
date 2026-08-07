@@ -307,8 +307,8 @@ def group_train():
     # PIN: the domain refusals that already exist
     refused( "train: maxiter below 1", train( maxiter = "0" ),
         "max iterations must be at least 1" )
-    refused( "train: algorithm out of range", train( algorithm = "5" ),
-        "algorithm must be 1, 2, 3, 4 or auto" )
+    refused( "train: algorithm out of range", train( algorithm = "6" ),
+        "algorithm must be 1, 2, 3, 4, 5 or auto" )
     refused( "train: L-BFGS memory below 1", train( algorithm = "4",
         lbfgs_memory = "0", batch_epoch = "1", autostep = "0" ),
         "lbfgs_memory must be at least 1" )

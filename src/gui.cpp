@@ -1232,7 +1232,8 @@ string runTrainingAndBuildResult( bool continued, const string& autoJson,
 	unsigned trainedType = trainedNet ? trainedNet->getTrainingType() : 0;
 	const char* trainedName = trainedType == 0 ? "Canonical"
 		: trainedType == 1 ? "CGD" : trainedType == 2 ? "Shanno"
-		: trainedType == Network::TRAIN_LBFGS ? "L-BFGS" : "unknown";
+		: trainedType == Network::TRAIN_LBFGS ? "L-BFGS"
+		: trainedType == Network::TRAIN_IRPROP ? "iRPROP+" : "unknown";
 
 	ostringstream msg;
 	msg.precision( 6 );
@@ -1382,8 +1383,8 @@ string handleTrain( const httplib::Request& req )
 
 	if ( !modelPtr )
 		return jsonMsg( false, "create a model first" );
-	if ( algorithm < 1 || algorithm > 4 )
-		return jsonMsg( false, "algorithm must be 1, 2, 3, 4 or auto" );
+	if ( algorithm < 1 || algorithm > 5 )
+		return jsonMsg( false, "algorithm must be 1, 2, 3, 4, 5 or auto" );
 	if ( maxIter < 1 )
 		return jsonMsg( false, "max iterations must be at least 1" );
 
@@ -1488,25 +1489,26 @@ string handleTrain( const httplib::Request& req )
 	if ( given( req, "printcount" ) && printCount < 1 )
 		return jsonMsg( false, "print count must be at least 1" );
 
-	// L-BFGS is a smooth full-batch neural optimizer. Refuse incompatible
+	// L-BFGS and iRPROP+ are full-batch neural optimizers. Refuse incompatible
 	//    configuration before applying any field, rather than starting a run
 	//    that throws only after randomization or another partial mutation.
 	Network* net = dynamic_cast< Network* >( modelPtr.get() );
-	if ( algorithm == 4 )
+	if ( algorithm == 4 || algorithm == 5 )
 	{
+		const char* optimizer = algorithm == 4 ? "L-BFGS" : "iRPROP+";
 		if ( dynamic_cast< Logistic* >( modelPtr.get() ) )
-			return jsonMsg( false,
-				"algorithm=4 (L-BFGS) is available for neural models only" );
+			return jsonMsg( false, string( "algorithm=" ) + to_string( algorithm )
+				+ " (" + optimizer + ") is available for neural models only" );
 		bool effectiveBatch = req.has_param( "batch_epoch" )
 			? batchEpoch : net->getBatchEpoch();
 		bool effectiveAutostep = req.has_param( "autostep" )
 			? haveAutostep : net->getAutoStepSize();
 		if ( !effectiveBatch )
-			return jsonMsg( false,
-				"algorithm=4 (L-BFGS) requires batch_epoch=1" );
+			return jsonMsg( false, string( "algorithm=" ) + to_string( algorithm )
+				+ " (" + optimizer + ") requires batch_epoch=1" );
 		if ( effectiveAutostep )
-			return jsonMsg( false,
-				"algorithm=4 (L-BFGS) requires autostep=0" );
+			return jsonMsg( false, string( "algorithm=" ) + to_string( algorithm )
+				+ " (" + optimizer + ") requires autostep=0" );
 	}
 
 	// Nothing above this line has touched the model. Everything below applies.

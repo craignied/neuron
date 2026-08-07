@@ -38,9 +38,9 @@ The Manifest and source are authoritative after implementation.
   was the incumbent; the retained L-BFGS implementation (`src/lbfgs.*`) beats it
   8.8x-13.0x to the committed practical endpoint, and its research gate and
   public REST integration are both complete (`/api/train` `algorithm=4`, with
-  optional `lbfgs_memory`).  Phase 4 retained **iRPROP+** (`src/irprop.*`,
-  internal `Network::TRAIN_IRPROP`) as **research-only** — no REST field, GUI
-  control, menu token or auto-selection entry — under the plan's PORTFOLIO
+  optional `lbfgs_memory`).  Phase 4 retained **iRPROP+** (`src/irprop.*`), now
+  selectable through REST and the GUI as `algorithm=5`; neither retained method
+  has a legacy-menu entry or automatic-selection entry. This follows the plan's PORTFOLIO
   POLICY, which is the thing to lead with rather than any single speed figure.
   Neither retained method dominates: iRPROP+ is 1.28x-2.08x faster than L-BFGS
   on the Civic Choice application benchmark at three row counts and four weight

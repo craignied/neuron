@@ -1,9 +1,8 @@
 // Header for IRpropState, the iRPROP+ optimizer.
 //
-// RESEARCH ONLY. Phase 4 of docs/learning_research/optimizer_implementation_plan.md.
-// There is no REST field, no GUI control, no menu token, no automatic-selection
-// entry and no saved-network field for it. Its public identifier, if it is
-// retained, is assigned in Phase 5.
+// Retained after Phase 4 of the optimizer plan. REST and GUI select it with
+// algorithm=5; the retired menu, automatic selector and saved-network format
+// deliberately remain unchanged.
 //
 // SOURCES, fixed before any of this was written and recorded in full in
 // docs/learning_research/irprop_source_decision.md:

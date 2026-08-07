@@ -273,6 +273,9 @@ Operational invariants that belong in every GUI session:
 - While a long job owns the engine, other engine-touching endpoints return 409
   with `busy:true`.
 - Training continues from current weights. Randomize explicitly for a fresh start.
+- Direct retained neural optimizers use `/api/train` `algorithm=4` for L-BFGS
+  and `algorithm=5` for iRPROP+. Both require `batch_epoch=1` and `autostep=0`;
+  the GUI enforces those controls. They deliberately have no legacy-menu entry.
 - Present boolean fields use exactly `1` and `0`. Unknown, trailing, overflowing,
   or non-finite numeric text is a field-specific error; omission and an empty
   field retain the endpoint-specific defaults documented in the Manifest.

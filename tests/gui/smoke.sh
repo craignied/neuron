@@ -35,6 +35,9 @@ curl -s "$URL/" | grep -q "<title>neuron</title>" || fail "page not served"
 #    submit it -- a control the page never sends is not parity.
 curl -s "$URL/" > page.html
 grep -q 'id="cv_algorithm"' page.html || fail "CV panel has no optimizer control"
+grep -q '<option value="4">L-BFGS</option>' page.html || fail "Train selector has no L-BFGS"
+grep -q '<option value="5">iRPROP+</option>' page.html || fail "Train selector has no iRPROP+"
+grep -q 'function syncOptimizerControls()' page.html || fail "Optimizer controls are not synchronized"
 for opt in 'value="auto"' 'value="1"' 'value="2"' 'value="3"'; do
     $PY - "$opt" <<'PY' || fail "CV optimizer control is missing an option"
 import re, sys
@@ -1067,8 +1070,8 @@ curl -s -X POST "$URL/api/train" -d "algorithm=1&maxiter=50&batch_epoch=0" \
 curl -s -X POST "$URL/api/train" -d "algorithm=4&maxiter=1&batch_epoch=1&autostep=0" \
     | grep -q 'neural models only' || fail "L-BFGS on logistic must be refused by eligibility"
 
-# L-BFGS is a REST-first neural capability. It has no retired-menu or GUI
-# selector yet, but algorithm=4 must run the real optimizer, report its stable
+# L-BFGS is a REST/GUI neural capability with no retired-menu entry.
+# algorithm=4 must run the real optimizer, report its stable
 # name/configuration, and refuse the two incompatible training modes up front.
 curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=2" > /dev/null
 curl -s -X POST "$URL/api/randomize" -d "seed=42" > /dev/null
@@ -1090,6 +1093,43 @@ curl -s -X POST "$URL/api/train" \
 curl -s -X POST "$URL/api/train" \
     -d "algorithm=4&maxiter=1&batch_epoch=1&autostep=1" \
     | grep -q 'requires autostep=0' || fail "L-BFGS autostep must be refused"
+
+# Retained iRPROP+ is public algorithm 5 and owns an absolute batch step.
+curl -s -X POST "$URL/api/randomize" -d "seed=42" > /dev/null
+curl -s -X POST "$URL/api/train" \
+    -d "algorithm=5&maxiter=2&batch_epoch=1&autostep=0" > irprop_rest.json
+$PY - <<'PY' || fail "REST iRPROP+ selection/result contract"
+import json
+d = json.load(open("irprop_rest.json"))
+assert d["ok"] is True, d
+assert d["algorithm"] == 5, d
+assert d["algorithmName"] == "iRPROP+", d
+assert "Training algorithm is iRPROP+" in d["output"], d["output"][:300]
+PY
+curl -s -X POST "$URL/api/randomize" -d "seed=42" > /dev/null
+curl -s -X POST "$URL/api/train" \
+    -d "algorithm=5&maxiter=2&batch_epoch=1&autostep=0&async=1" \
+    | grep -q '"ok":true' || fail "async iRPROP+ start"
+for i in $(seq 1 50); do
+    curl -s "$URL/api/train/status" > irprop_async.json
+    grep -q '"running":false' irprop_async.json && break
+    sleep 0.1
+done
+$PY - <<'PY' || fail "async iRPROP+ completed-result contract"
+import json
+d = json.load(open("irprop_async.json"))
+assert d["running"] is False, d
+assert d["result"]["ok"] is True, d
+assert d["result"]["algorithm"] == 5, d
+assert d["result"]["algorithmName"] == "iRPROP+", d
+PY
+curl -s -X POST "$URL/api/train" -d "algorithm=5&maxiter=1&batch_epoch=0&autostep=0" \
+    | grep -q 'requires batch_epoch=1' || fail "iRPROP+ online mode must be refused"
+curl -s -X POST "$URL/api/train" -d "algorithm=5&maxiter=1&batch_epoch=1&autostep=1" \
+    | grep -q 'requires autostep=0' || fail "iRPROP+ autostep must be refused"
+curl -s -X POST "$URL/api/train" -d "algorithm=6&maxiter=1" \
+    | grep -q 'algorithm must be 1, 2, 3, 4, 5 or auto' \
+    || fail "out-of-range direct optimizer token must be refused by name"
 
 # --- Discriminant function analysis (GUI/CLI parity, main menu 4) ----------
 # Linear and quadratic DFA on the loaded discrete dataset -> report + ROC +

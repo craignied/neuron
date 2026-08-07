@@ -305,16 +305,14 @@ double OneHiddenNet::batchGradient()
 //    was given.
 double OneHiddenNet::innerTrainSet()
 {
-	// THE L-BFGS PROTOTYPE owns its whole iteration -- direction, line search
+	// L-BFGS owns its whole iteration -- direction, line search
 	//    and update -- so it cannot be expressed as a gradient transformation
-	//    followed by `w -= g * eta`, and does not go through engine(). Research
-	//    only; no menu, GUI control or API field produces this training type.
+	//    followed by `w -= g * eta`, and does not go through engine().
 	if ( trainingType == TRAIN_LBFGS )
 		return lbfgsIteration();
 
 	// iRPROP+ likewise: its step is ABSOLUTE, so it cannot be expressed as a
-	//    gradient transformation followed by `w -= g * eta` either. Research
-	//    only; no menu, GUI control or API field produces this training type.
+	//    gradient transformation followed by `w -= g * eta` either.
 	if ( trainingType == TRAIN_IRPROP )
 		return irpropIteration();
 

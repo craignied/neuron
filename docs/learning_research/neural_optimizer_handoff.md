@@ -5,9 +5,8 @@ Date: 2026-08-07 (Phase 4 complete)
 ## Snapshot
 
 - Repository: `/Users/craign/code/neUROn2++/neuron-3.0`
-- Branch: `main`, **one commit ahead of `origin/main`** when this handoff was
-  written: the Phase 4 prototype (`0388d01`) is pushed, and the commit that
-  synchronizes the Manifest with it is not yet.
+- Branch: `main`; inspect `git status -sb` rather than relying on this snapshot
+  after the iRPROP+ REST/GUI integration work.
 - Last substantive commit: the Phase 4 iRPROP+ research prototype, its
   measurements and its retain decision, followed by its Manifest synchronization.
 - L-BFGS implementation, measurement, REST integration, Manifest work, and the
@@ -73,8 +72,8 @@ line search makes is counted. Decision: **RETAIN** — the measurements justify
 the next phase. Its public REST integration is also complete: `POST /api/train`
 selects it with `algorithm=4`, with optional positive `lbfgs_memory`. It is
 neural, batch-only, and requires `autostep=0`. The retired CLI menus deliberately
-have no L-BFGS entry. GUI selection and automatic selection remain deferred until
-the researched optimizer set is complete.
+have no L-BFGS entry. The GUI includes it; automatic selection remains deferred
+until the researched optimizer set is complete.
 
 So the speed bar moved off Shanno: roughly 15 full passes on a 4,500-row problem.
 It is **not** a winner-takes-all retention rule, and Phase 4 is the concrete
@@ -127,14 +126,14 @@ and do not tune it after seeing candidate results.
   `Network` composition and absolute-step path,
   `tests/network/check_irprop.cpp` (ctest `network_irprop`), the harness's
   iRPROP+ arms and conditioning fixtures, and the evidence documents. The commit
-  after it synchronizes the Manifest, Figure 12.1 and the index guard. Neither
-  changed a public surface: iRPROP+ is still not selectable from any menu, REST
-  field, GUI control or selector.
+  after it synchronizes the Manifest, Figure 12.1 and the index guard. The
+  subsequent integration exposes the retained method through REST and the GUI
+  as `algorithm=5`, without changing the retired menus.
 - `CLAUDE.md` and the implementation plan contain the corrected neural-only scope.
 - Re-run the focused gates before committing rather than relying on this handoff;
   never copy a remembered CTest count into a status report.
 
-## Phase 4 is complete: iRPROP+ is retained, research-only
+## Phase 4 is complete: iRPROP+ is retained and directly selectable
 
 Read `docs/learning_research/irprop_screen_results.md` for the evidence and
 `irprop_source_decision.md` for the algorithm, its sources and every constant.
@@ -142,10 +141,10 @@ Read `docs/learning_research/irprop_screen_results.md` for the evidence and
 The implementation is `src/irprop.*` (`IRpropState`), composed by
 `Network::irpropIteration()` through the packed boundary Phase 3 built, applied
 by the new `Network::applyAbsoluteStep()` — the explicit absolute-step path that
-architecture decision 8 requires. `Network::TRAIN_IRPROP = 4` is **internal**:
-no REST field, GUI control, menu token, automatic-selection entry or
-saved-network field produces it. Its research gate is complete; its **public
-integration is not done and is Phase 5 work**.
+architecture decision 8 requires. `Network::TRAIN_IRPROP = 4` maps to public
+`POST /api/train` `algorithm=5`; the GUI exposes the same choice and locks batch
+training on and automatic step-size search off. No menu token, automatic-selection
+entry or saved-network field produces it.
 
 Decision: **RETAIN under the portfolio policy**, not as a new sole bar. On Civic
 Choice it is the fastest of the panel at 6,000/25,000/100,000 rows and four
@@ -176,9 +175,9 @@ largest of the seven), so this supports *no degradation*, never *better*.
 
 `IRpropState` is documented in Chapter 12 of the Manifest (§12.7.4), indexed,
 added to Figure 12.1 as a `Network API` composition beside `LBFGS`, and covered
-by `tools/check_manifest_index.py`. Documenting it adds **no** public capability:
-iRPROP+ remains unreachable from any menu, REST field, GUI control or selector,
-and the section says so.
+by `tools/check_manifest_index.py`. Its retained direct-training integration is
+REST/GUI-only as `algorithm=5`; the retired menus remain unchanged and automatic
+selection remains deferred until the researched optimizer set is complete.
 
 **Why this is called out.** The prototype was first committed with that gate
 deliberately failing, on the reasoning that Phase 3 had made the same trade —
@@ -210,9 +209,9 @@ Do not reopen the completed L-BFGS or iRPROP+ phases, and do not begin another
 baseline campaign.
 
 No public REST, GUI, Manifest capability, or automatic-selection change belongs in
-a research prototype. The retired CLI menus are never extended. Public REST
-integration occurs only after the research acceptance gate; GUI and automatic
-selection remain deferred until the researched optimizer set is complete.
+a research prototype. The retired CLI menus are never extended. Public REST/GUI
+integration occurs only after the research acceptance gate; automatic selection
+remains deferred until the researched optimizer set is complete.
 Eventually every retained eligible algorithm belongs in the bounded limited-run
 selector so the user's actual dataset, rather than the synthetic benchmark alone,
 guides the full-training choice — and the Phase 4 ranking flip is the concrete

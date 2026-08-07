@@ -161,6 +161,7 @@ PRINCIPAL_METHODS = {
         "sampleTestError", "getCondNum", "getCondMaxEig", "getCondMinEig",
         "packedSize", "packWeights", "unpackWeights", "batchObjectiveGradient",
         "setLBFGSMemory", "getLBFGSMemory", "applyAbsoluteStep",
+        "TRAIN_IRPROP",
     },
     "OneHiddenNet": {"setHidden", "randomize", "save", "load", "pack", "innerTrainSet", "propagate"},
     "SimpleProp": {"growHidden", "removeHidden", "hiddenSaliency"},

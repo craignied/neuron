@@ -2,8 +2,8 @@
 //
 // Retained after Phase 3 of docs/learning_research/optimizer_implementation_plan.md.
 // It is selectable through POST /api/train as algorithm=4. The retired CLI
-// menus are unchanged, the GUI selector and automatic selection do not yet
-// include it, and it is not written to a saved network.
+// menus are unchanged, the GUI selector includes it, automatic selection does
+// not yet include it, and it is not written to a saved network.
 //
 // SOURCES, fixed before any of this was written and recorded in full in
 // docs/learning_research/lbfgs_source_decision.md:

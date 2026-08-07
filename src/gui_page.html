@@ -280,6 +280,8 @@ building a new model &mdash; the saved file's first line carries its type:</span
     <option value="1">Canonical backpropagation</option>
     <option value="2">Conjugate gradient descent</option>
     <option value="3">Shanno's algorithm</option>
+    <option value="4">L-BFGS</option>
+    <option value="5">iRPROP+</option>
     <option value="auto">Auto &mdash; probe all three, adopt the best</option>
   </select></label>
   <label>Max iterations <input class="num" type="number" id="maxiter" value="20000"
@@ -762,6 +764,17 @@ async function randomizeWeights() {
 // with the ROC plot and the statistics panel.
 let training = false;
 const fmtE = v => (v === null || v === undefined) ? "n/a" : Number(v).toExponential(2);
+function syncOptimizerControls() {
+  const ownsStep = $("algo").value === "4" || $("algo").value === "5";
+  if (ownsStep) {
+    $("autostep").checked = false;
+    $("batch_epoch").checked = true;
+  }
+  $("autostep").disabled = ownsStep;
+  $("batch_epoch").disabled = ownsStep;
+}
+$("algo").addEventListener("change", syncOptimizerControls);
+syncOptimizerControls();
 async function train() {
   if (training) { // the button reads "Stop"
     const j = await api("/api/train/stop", {});

@@ -1191,7 +1191,7 @@ claim that the selected optimizer is globally best.
 full-batch neural objectives. It is selectable through
 \texttt{POST /api/train} with \texttt{algorithm=4}; the optional
 \texttt{lbfgs\_memory} field selects $m$. The retired menus are unchanged, the
-GUI and automatic selector do not include it yet, and saved networks contain
+GUI includes it, the automatic selector does not yet, and saved networks contain
 weights and architecture rather than optimizer history. Direct C++ callers use
 \texttt{Network::setTrainingType(Network::TRAIN\_LBFGS)}.
 
@@ -1383,11 +1383,12 @@ algorithm=4&lbfgs_memory=10&batch_epoch=1&autostep=0&maxiter=2000
 \index{IRpropState!NotFinite!what}
 \index{Network!applyAbsoluteStep}
 \index{Network!irpropIteration}
+\index{Network!TRAIN\_IRPROP}
 \texttt{IRpropState} is neuron's iRPROP+ optimizer for full-batch neural
-objectives.  It is a \emph{research} optimizer: it is reached only from C++ by
-\texttt{Network::setTrainingType(Network::TRAIN\_IRPROP)}, and no menu token,
-REST field, GUI control, automatic-selection rule or saved-network field
-produces it.  Its public identifier will be assigned when it is integrated.
+objectives. Direct C++ callers select it with
+\texttt{Network::setTrainingType(Network::TRAIN\_IRPROP)}; REST and the GUI
+select the same retained implementation with \texttt{algorithm=5}. The retired
+menu, automatic-selection rule and saved-network format remain unchanged.
 
 Where a quasi-Newton method builds curvature information, iRPROP+ keeps one
 step magnitude per parameter and adapts it from the \emph{sign} of that
@@ -1398,8 +1399,9 @@ in parameter units, not a learning rate.
 
 \paragraph{Published derivation.}  iRPROP+ is Igel and H\"usken (2000),
 ``Improving the Rprop learning algorithm,'' \emph{Proceedings of the Second
-International ICSC Symposium on Neural Computation}, pp.~115--121, evaluated and
-recommended in Igel and H\"usken (2003), \emph{Neurocomputing}
+International ICSC Symposium on Neural Computation}, pp.~115--121,
+\url{https://researchprofiles.ku.dk/en/publications/improving-the-rprop-learning-algorithm/},
+evaluated and recommended in Igel and H\"usken (2003), \emph{Neurocomputing}
 \textbf{50}:105--123, \url{https://doi.org/10.1016/S0925-2312(01)00700-7}, whose
 pseudocode this implementation transcribes.  The sign-based update and every
 constant come from Riedmiller and Braun (1993), ``A direct adaptive method for
@@ -1492,14 +1494,19 @@ applies ${\bf w} \leftarrow {\bf w} - \eta{\bf g}$.
       first call of a run it sizes $\Delta$ to $\Delta_0$ and the remembered
       gradient to zero, so every sign product is zero and every parameter takes
       the third branch, which is exactly what $\Delta^{(0)} = \Delta_0$ means.
+      Throws \texttt{NotFinite} before mutation for a non-finite objective or
+      gradient, and \texttt{nvec::SizeMismatch} if a started run is handed a
+      different parameter count.
 \item \texttt{const vector<double>\& deltas() const}, \texttt{previousGradient()
       const}, \texttt{previousStep() const}: the working state, read-only, so
       the deterministic tests can assert the table element by element.
 \item \texttt{double previousObjective() const}: $E^{(t-1)}$; positive infinity
       before the first step, where the branch that reads it is unreachable.
-\item \texttt{growths()}, \texttt{shrinks()}, \texttt{rollbacks()},
-      \texttt{heldFlips()}, \texttt{iterations()}: counts, all
-      \texttt{unsigned long long}.  \texttt{rollbacks} and \texttt{heldFlips}
+\item \texttt{unsigned long long growths() const},
+      \texttt{shrinks() const}, \texttt{rollbacks() const},
+      \texttt{heldFlips() const}, and \texttt{iterations() const}: counts with
+      the same \texttt{unsigned long long} return type. \texttt{rollbacks} and
+      \texttt{heldFlips}
       separate the two halves of the second branch, which is how a report can
       show that the error-dependent rule actually fired.
 \end{itemize}
@@ -1515,6 +1522,8 @@ applies ${\bf w} \leftarrow {\bf w} - \eta{\bf g}$.
       and carries its own sign, so the single convention here is
       ${\bf w} \leftarrow {\bf w} + \mathrm{step}$.  An absolute step is never
       expressed by dividing by \texttt{eta} or by setting \texttt{eta} to one.
+      Throws \texttt{nvec::SizeMismatch} before installation when the step and
+      packed-weight dimensions differ.
 \item \texttt{double irpropIteration()}: one iteration --- the eligibility
       refusals, one \texttt{batchObjectiveGradient()} evaluation,
       \texttt{currGradMax} from that raw gradient, one call into the table and
@@ -1560,7 +1569,12 @@ double objective = net.train();
 if (!Iterative::converged(net.getStopReason())) rejectFit(objective);
 \end{verbatim}
 
-There is no equivalent REST request: iRPROP+ is not publicly selectable.
+The equivalent REST request is:
+\begin{verbatim}
+POST /api/train
+algorithm=5&batch_epoch=1&autostep=0&maxiter=2000
+\end{verbatim}
+It is refused for Logistic, on-line training, or automatic step-size search.
 
 \subsection{modelfactory and netclone}
 \index{modelfactory}

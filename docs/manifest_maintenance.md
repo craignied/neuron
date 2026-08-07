@@ -361,6 +361,44 @@ When adding or changing an endpoint:
 The audit that produced this guide caught a documented `repeats` field that did
 not exist in `/api/cv`. Source inspection must precede publication.
 
+### Training-algorithm documentation rule
+
+Adding or retaining a training algorithm is a cross-cutting architecture and
+public-contract change, even when the numerical implementation is small. Before
+the change is complete:
+
+1. Give the algorithm a named explanation in the Manifest: its update rule or
+   equations, owned state, primary literature citation with DOI or stable URL,
+   repository-specific adaptations, failure behavior, and complete public
+   object/method contract.
+2. Update Chapter 4's `/api/train` documentation with the public algorithm token,
+   model and batch/online eligibility, interactions with `eta`, `autostep`, and
+   algorithm-specific fields, `auto` participation or deliberate exclusion,
+   selection guidance, and a verified request example. A token in the
+   `algorithm` field list is not sufficient API documentation.
+3. If the algorithm is directly selectable, expose it REST-first and add or
+   update the GUI control where appropriate. Keep `docs/gui_cli_parity.md`
+   synchronized. Do not extend the frozen legacy menus.
+4. Keep retention, default ranking, and automatic-selection membership as
+   separate decisions. Report workload-dependent evidence before speed ratios,
+   and do not turn one benchmark family into a universal recommendation.
+5. Document every new public class, state/result type, enum value, and principal
+   method in Chapter 12. Update Figure 12.1 only when a major object/service or
+   dependency changes. Give the algorithm both its derivation/implementation
+   index entries and a hierarchical `Algorithm name!REST API` entry at the
+   Chapter 4 discussion; a Chapter 12 pointer alone is incomplete. Update
+   `tools/check_manifest_index.py` inventory in the same change when the public
+   vocabulary grows.
+6. Test direct REST selection in both blocking and asynchronous forms, all
+   eligibility refusals, stable response names/identifiers, and the GUI control.
+   Make the new selection test fail against the old boundary before accepting
+   it as evidence.
+
+Research prototypes may deliberately remain C++-only while evidence is being
+collected. The research handoff must name that boundary. Once the method is
+retained and publicly integrated, Chapter 4 and the interface contracts above
+must be closed before the next candidate begins.
+
 ### Helper-tool documentation rule
 
 There are currently two user-facing programs in `tools/`:
@@ -557,6 +595,12 @@ Text extraction is not a substitute for visual inspection.
       against source, retain the full-page landscape layout, and inspect every
       label at normal page scale.
 - [ ] Update the REST chapter if routes or parameters changed.
+- [ ] For a new or changed training algorithm, apply the training-algorithm
+      documentation rule: explain every public choice in Chapter 4, document
+      eligibility and optimizer-field interactions, state `auto` membership,
+      include verified requests, add an `Algorithm name!REST API` index pointer
+      in Chapter 4 as well as the derivation/implementation pointers, and keep
+      retention separate from ranking.
 - [ ] Update the CLI chapter and `docs/gui_cli_parity.md` if parity is involved.
 - [ ] Update the tooling chapter for a new or changed user-facing helper.
 - [ ] Include reproducibility, mutation, failure, and artifact behavior.

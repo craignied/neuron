@@ -103,7 +103,7 @@ statistical/trapezoidal, 2 minimum data, 3 return); the GUI dropped the
 | 4 Batch/epoch on/off (forced ON for logistic, as the CLI forces it) | Batch/epoch toggle | `POST /api/train` `batch_epoch=` | ✅ |
 | 5 Weight decay (on/off + λ) | Weight-decay toggle + λ field | `POST /api/train` `weight_decay=`,`decay=` | ✅ |
 | 6 Print counter (log / linear) | Print-counter select + count | `POST /api/train` `logprint=`,`printcount=` | ✅ (presentation only — see note) |
-| (train-time) Algorithm (GD/CGD/Shanno/auto) | Algorithm select | `POST /api/train` `algorithm=` | ✅ |
+| (train-time) Algorithm (GD/CGD/Shanno plus REST-era L-BFGS/iRPROP+/auto) | Algorithm select | `POST /api/train` `algorithm=` | ✅ |
 | 7 Train model | Train button | `POST /api/train` | ✅ |
 | 7/8 Save network + guesses after training | § Session files → Network / guesses | `GET /api/save/{network,train_guesses,test_guesses}` | ✅ |
 | 9 Stepwise regression | § Stepwise regression panel (+ persistent results pane, live progress, Stop) | `POST /api/regress` (+ `async=1`, `GET /api/train/status` → `stepwise`, `POST /api/train/stop`) | ✅ (GUI beyond CLI: async + progress + Stop) |
@@ -137,7 +137,7 @@ with a GUI control where a human-facing control is appropriate.
 | Feature | GUI control | API | CLI |
 |---|---|---|---|
 | Automatic training-algorithm selection | Algorithm → "Auto" | `POST /api/train` `algorithm=auto` | — n/a (menus frozen) |
-| Direct L-BFGS training (GUI selection deferred until the researched optimizer set is complete) | — deferred | `POST /api/train` `algorithm=4`, optional `lbfgs_memory=`; neural, batch-only, `autostep=0` | — n/a (menus retired) |
+| Direct retained neural optimizers | Algorithm → "L-BFGS" or "iRPROP+"; either selection forces and locks Batch/epoch on and Automatic learning rate off | `POST /api/train` `algorithm=4` for L-BFGS (optional `lbfgs_memory=`) or `algorithm=5` for iRPROP+; both neural, batch-only, `autostep=0` | — n/a (menus retired) |
 | Plateau auto-stop | "Auto-stop on plateau" + tol/window | `POST /api/train` `autostop=` | — n/a (menus frozen) |
 | Realtime error-vs-iteration chart | Training-error chart | `GET /api/train/status` series | — n/a (menus frozen) |
 | DFA graded ROC AUC | DFA ROC/stats panels | `POST /api/dfa` (ROC in the response) | — n/a (menus frozen) |

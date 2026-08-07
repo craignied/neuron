@@ -18,15 +18,13 @@ class Network : public Iterative {
 public:
 	// TRAINING TYPES. 0, 1 and 2 are the frozen menu tokens -- canonical
 	//    backpropagation, conjugate gradient descent, Shanno -- and are not
-	//    changed here. TRAIN_LBFGS is REST-selectable as algorithm=4, but no
-	//    retired menu token or GUI control is added yet. Automatic selection does
+	//    changed here. TRAIN_LBFGS is REST/GUI-selectable as algorithm=4, but no
+	//    retired menu token is added. Automatic selection does
 	//    not probe it, and no saved network records it.
 	static const unsigned TRAIN_LBFGS = 3;
 
-	// RESEARCH ONLY, Phase 4. Reachable from the benchmark harness and the
-	//    deterministic tests and from nothing else: no REST field, no GUI
-	//    control, no retired menu token, no automatic-selection entry and no
-	//    saved-network field produces it. See irprop.h.
+	// Retained iRPROP+, selectable as REST/GUI algorithm=5. The retired menu,
+	//    automatic selector and saved-network format remain unchanged.
 	static const unsigned TRAIN_IRPROP = 4;
 	Network(); // default constructor
 	virtual ~Network(); // destructor

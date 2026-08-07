@@ -265,13 +265,16 @@ weights; repeated calls to \texttt{/api/train} do not randomize
 implicitly.
 
 \section{Training: POST /api/train}
+\index{REST API!optimizer selection}
+\index{Training algorithms!REST API}
 
 \begin{description}
 \item[\texttt{algorithm}] \texttt{1} for canonical gradient descent,
 \texttt{2} for conjugate gradient, \texttt{3} for Shanno, \texttt{4} for
-L-BFGS, or \texttt{auto} to probe canonical, conjugate gradient, and Shanno.
-L-BFGS is neural-only, requires \texttt{batch\_epoch=1} and
-\texttt{autostep=0}, and is not yet part of \texttt{auto}.
+L-BFGS, \texttt{5} for iRPROP+, or \texttt{auto} to probe canonical,
+conjugate gradient, and Shanno. L-BFGS and iRPROP+ are neural-only, require
+\texttt{batch\_epoch=1} and \texttt{autostep=0}, and are not yet part of
+\texttt{auto}.
 \item[\texttt{lbfgs\_memory}] Optional positive L-BFGS history length $m$;
 accepted only with \texttt{algorithm=4}. Omission retains the current
 configuration (five on a new model). Working history resets at each run.
@@ -294,6 +297,97 @@ moving-window width.
 \item[\texttt{logprint}, \texttt{printcount}] Iteration-table
 presentation only.  These fields never change the fitted endpoint.
 \end{description}
+
+\subsection{Choosing a training algorithm}
+\index{Canonical gradient descent!REST API}
+\index{Conjugate gradient descent!REST API}
+\index{Shanno algorithm!REST API}
+\index{L-BFGS!REST API}
+\index{iRPROP+!REST API}
+\index{Automatic algorithm selection!REST API}
+
+The \texttt{algorithm} field selects the rule that converts the current
+objective gradient into a weight update. It does not select a model, change the
+data split, or randomize the weights. Use \texttt{/api/randomize} explicitly
+before a request when a fresh, reproducible start is required.
+
+\begin{description}
+\item[\texttt{algorithm=1}: canonical gradient descent]
+      Applies the negative gradient using the configured learning rate
+      \texttt{eta}. It is the simplest baseline, supports neural and logistic
+      models, and is the direct choice when the caller wants ordinary gradient
+      descent or on-line neural updates. The optional automatic step-size search
+      is controlled separately by \texttt{autostep}; it is not the same feature
+      as \texttt{algorithm=auto}.
+\item[\texttt{algorithm=2}: conjugate gradient descent (CGD)]
+      Uses the current and previous full-gradient directions to construct a
+      conjugate search direction. It is intended for batch/epoch training; an
+      on-line request does not provide the objective-level history the method
+      assumes. Its mathematical derivation and the state carried by
+      \texttt{Network} are documented in the Network specification in
+      Chapter~12.
+\item[\texttt{algorithm=3}: Shanno]
+      Uses Shanno's variable-metric conjugate-gradient recurrence, again from
+      successive full gradients. It is intended for batch/epoch training. The
+      full recurrence and its primary literature citation are in the Network
+      specification in Chapter~12.
+\item[\texttt{algorithm=4}: L-BFGS]
+      Builds a bounded history of curvature pairs and applies a limited-memory
+      quasi-Newton direction. It is available only for neural models and
+      requires \texttt{batch\_epoch=1} and \texttt{autostep=0}; L-BFGS owns its
+      step construction, so the separate automatic step search cannot be
+      layered onto it. \texttt{lbfgs\_memory} controls the positive history
+      length. The algorithm, ownership boundary, methods, and literature are in
+      Section~\ref{training_control_objects}.
+\item[\texttt{algorithm=5}: iRPROP+]
+      Keeps one positive step magnitude per parameter, grows or shrinks it from
+      successive gradient signs, and performs the published error-dependent
+      rollback after a harmful sign reversal. It is available only for neural
+      models and requires \texttt{batch\_epoch=1} and \texttt{autostep=0}; its
+      absolute per-parameter steps replace both \texttt{eta} and the automatic
+      step search. The algorithm, complete \texttt{IRpropState} contract, and
+      primary literature are in Section~\ref{training_control_objects}.
+\item[\texttt{algorithm=auto}: bounded selector]
+      Probes canonical, CGD, and Shanno from identical starting weights, then
+      adopts the best finite probe endpoint for the real run. It deliberately
+      does not probe L-BFGS or iRPROP+. Those retained methods have
+      workload-dependent strengths, and extending the selector to them requires
+      the separately planned bounded portfolio policy rather than an inference
+      from one benchmark family.
+\end{description}
+
+No retained method is the universal default. Application benchmarks made
+iRPROP+ faster than L-BFGS, while generated conditioning fixtures favored
+L-BFGS and its later endpoints. That finding supports explicit workload choice
+and the future bounded selector; it does not establish conditioning as the
+driver. When comparing methods, randomize once, preserve the starting weights,
+and give each method the same stopping and evaluation policy.
+
+\subsection{Training request examples}
+
+Canonical gradient descent with an explicit learning rate:
+\begin{verbatim}
+curl -s -X POST "$URL/api/train" \
+  -d "algorithm=1&eta=0.1&maxiter=2000&batch_epoch=1"
+\end{verbatim}
+
+CGD and Shanno use the same contract with \texttt{algorithm=2} or
+\texttt{algorithm=3}. Direct retained-optimizer requests are:
+\begin{verbatim}
+curl -s -X POST "$URL/api/train" \
+  -d "algorithm=4" -d "lbfgs_memory=5" -d "batch_epoch=1" \
+  -d "autostep=0" -d "maxiter=2000"
+
+curl -s -X POST "$URL/api/train" \
+  -d "algorithm=5" -d "batch_epoch=1" -d "autostep=0" \
+  -d "maxiter=2000"
+\end{verbatim}
+
+For an asynchronous run, append \texttt{async=1}, poll
+\texttt{GET /api/train/status}, and cancel if necessary with
+\texttt{POST /api/train/stop}. An incompatible model or mode is refused before
+any supplied training field is applied; for example, iRPROP+ on Logistic names
+\texttt{algorithm=5} and the neural-only requirement in its error response.
 
 A blocking call returns the complete report, ROC series, and structured
 statistics.  An asynchronous call returns acceptance immediately; the
