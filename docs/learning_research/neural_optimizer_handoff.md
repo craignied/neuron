@@ -9,6 +9,10 @@ Date: 2026-08-08 (Phase 1 complete: BB rejected)
 - Last substantive commit before this phase: `7f17e5a`. Phase 1 (BB) then landed
   as a documentation-only commit: the candidate was screened and rejected, so its
   prototype was removed and no engine source changed.
+- The exact rejected pre-removal tree is preserved outside `main` by annotated
+  tag `research/bb-prototype-2026-08-08`. It is historical evidence only. The BB
+  source decision records the post-screen negative-infinity acceptance defect
+  that must be fixed before any new measurement.
 - L-BFGS and iRPROP+ implementation, measurement, retain decisions, public REST
   integration, GUI controls, Manifest work, and the portfolio policy are
   committed and pushed. The Phase 4 tests, harness arms and evidence are included.
@@ -133,7 +137,9 @@ and do not tune it after seeing candidate results.
 - Phase 1 (safeguarded BB) landed as a single documentation-only commit. Its
   prototype (`src/gbb.*`, `Network::TRAIN_GBB`, `tests/network/check_bb.cpp` and
   the harness BB arms) existed only within that phase's working tree and was
-  removed on rejection, so no engine source differs from `7f17e5a`.
+  removed on rejection, so no engine source differs from `7f17e5a`. The exact
+  pre-removal tree is durably archived under annotated tag
+  `research/bb-prototype-2026-08-08`, not on a supported branch.
 - `CLAUDE.md` and the implementation plan contain the corrected neural-only scope.
 - Re-run the focused gates before committing rather than relying on this handoff;
   never copy a remembered CTest count into a status report.
@@ -237,6 +243,13 @@ implementation under the declared safeguarding policy**, on these workloads. It
 is not a result about Barzilai-Borwein methods generally, and it does not carry
 to BB2, cyclic or adaptive BB, or a different globalization.
 
+**Post-screen audit correction.** The archived acceptance comparison rejects
+NaN and positive infinity but would accept negative infinity. The declared
+policy requires all non-finite trial objectives to be rejected, and the test did
+not include the negative-infinity case. Every measured row was finite, so the
+screen and rejection are unaffected; the defect and required correction are
+recorded in `bb_source_decision.md` and the archive tag annotation.
+
 Three further results that must travel with it:
 
 - **it is fastest on nothing.** Third of five at the base seed, third of four at
@@ -290,9 +303,9 @@ Two things Phase 1 established that should shape that choice:
 
 - **the seed panel is a first-class acceptance axis, not a robustness footnote.**
   It is what rejected BB, and it costs almost nothing to run;
-- **a method with no per-parameter scaling should be expected to fail the
-  conditioning pair.** That pair now has a demonstrated dynamic range of two
-  orders of magnitude, so it is worth running early rather than last.
+- **absence of per-parameter scaling is now a concrete conditioning-risk
+  hypothesis, not a presumed failure.** The conditioning pair has demonstrated
+  two orders of magnitude of dynamic range, so run it early rather than last.
 
 Do not reopen the completed L-BFGS or iRPROP+ phases, and do not begin another
 baseline campaign.

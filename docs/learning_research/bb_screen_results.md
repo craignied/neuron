@@ -10,9 +10,10 @@ run**. Nothing below was changed after results became visible.
 
 ## Decision: REJECT
 
-**BB is rejected as a portfolio candidate.** It is correct, it always converges,
-and it never fails — and it has no bounded, predictable role, because its cost on
-one fixed workload varies by **670x** across four starting weight vectors.
+**BB is rejected as a portfolio candidate.** On every declared measured arm and
+repetition it converges, remains finite and reaches its required endpoint — and
+it has no bounded, predictable role, because its cost on one fixed workload
+varies by **670x** across four starting weight vectors.
 
 The decision is led by that stability finding, not by a speed ratio. BB's
 base-seed result is genuinely good (639x faster than canonical descent, third of
@@ -225,11 +226,11 @@ remains for the Manifest to be out of sync with.
 whole life: no REST token, no GUI control, no legacy-menu entry, no
 saved-network field, no `auto` membership, and no Chapter 12 object contract.
 
-Kept as the record: this document and `bb_source_decision.md`. Between them they
-specify the algorithm, every constant, the neuron policy for the three values the
-paper leaves free, the ownership map, the nineteen declared tests and both
-sabotage targets — enough to rebuild the prototype exactly if a future workload
-makes the question live again.
+Kept as the record: this document, `bb_source_decision.md`, and the annotated
+tree tag `research/bb-prototype-2026-08-08`. The documents specify the algorithm,
+policy and decision; the tag preserves the exact implementation, tests, wiring
+and harness arms. The source decision records one post-screen non-finite-trial
+defect that must be corrected before any new measurement.
 
 ## 6. Correctness evidence, preserved because it outlives the code
 

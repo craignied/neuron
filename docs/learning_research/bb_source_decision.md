@@ -341,3 +341,27 @@ iterations completed, fallback and interpolation counts, line-search failures,
 held-out error at the endpoint, and every failure row. Traversals and iterations
 are reported side by side because the difference between them is the prediction
 in section 6.
+
+## 9. Durable prototype archive and post-screen audit
+
+The rejected prototype is absent from active source, tests and build files. Its
+exact pre-removal working tree is preserved by the annotated Git tag
+`research/bb-prototype-2026-08-08`, based on production commit `7f17e5a`. Inspect
+or reconstruct it without changing `main`:
+
+```sh
+git diff 7f17e5a research/bb-prototype-2026-08-08
+git archive research/bb-prototype-2026-08-08 | tar -x -C /path/to/scratch
+```
+
+The archive is historical experimental evidence, not a supported branch or a
+public BB capability. It preserves the implementation, model-free tests,
+Network/CMake composition and benchmark arms that produced the screen.
+
+**Audit correction.** The archived `accepts()` comparison rejects NaN and
+positive infinity, but negative infinity satisfies its ordinary `<=` test. The
+declared policy above requires every non-finite trial objective to be rejected.
+The test covered NaN and positive infinity, not negative infinity. No measured
+row produced a non-finite objective or gradient, so this defect does not change
+the screen or rejection; any reconstruction intended for new measurement must
+add an explicit `isfinite(trialF)` refusal and fail-prove all three cases.

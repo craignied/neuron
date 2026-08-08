@@ -31,45 +31,18 @@ The Manifest and source are authoritative after implementation.
 - The behavior-preserving engine refactor and ROADMAP 4 are complete.
 - Release builds and tests are the normal gate.  Current test count is discovered
   from CTest; never copy a remembered count into a status report.
-- Current optimizer research and implementation follows
-  `docs/learning_research/optimizer_implementation_plan.md`.  Resume at the
-  first incomplete phase, and do not expose a candidate publicly before its
-  matched-endpoint acceptance gate.  **Phases 0, 1, 3 and 4 are complete.  Shanno
-  was the incumbent; the retained L-BFGS implementation (`src/lbfgs.*`) beats it
-  8.8x-13.0x to the committed practical endpoint, and its research gate and
-  public REST integration are both complete (`/api/train` `algorithm=4`, with
-  optional `lbfgs_memory`).  Phase 4 retained **iRPROP+** (`src/irprop.*`), now
-  selectable through REST and the GUI as `algorithm=5`; neither retained method
-  has a legacy-menu entry or automatic-selection entry. This follows the plan's PORTFOLIO
-  POLICY, which is the thing to lead with rather than any single speed figure.
-  Neither retained method dominates: iRPROP+ is 1.28x-2.08x faster than L-BFGS
-  on the Civic Choice application benchmark at three row counts and four weight
-  seeds, while L-BFGS is ~2x faster on the generated conditioning fixtures and
-  lands better late-stage, so the best method is workload-dependent and a
-  candidate need NOT beat the leader to be retained.  The plan's predicted
-  iRPROP+ advantage on poorly scaled objectives was tested directly and did NOT
-  appear.  Phase 1 screened **safeguarded Barzilai-Borwein** (Raydan's Algorithm
-  GBB) against the four-arm panel and **REJECTED** it: correct and always
-  convergent, but the declared implementation's cost on one workload varied 670x
-  across four weight seeds and 153x between the conditioning twins, with no
-  predictor established, and it was fastest on nothing.  The
-  prototype was removed, which is what a rejected candidate gets.  That decision
-  shows the portfolio policy is a real filter and not a ratchet.  The next
-  candidate is a new neural method chosen under the same staged protocol; the
-  seed panel and the conditioning pair are now first-class acceptance axes.  Read
-  `docs/learning_research/neural_optimizer_handoff.md` first.**
-  Apply the plan's **large-workload speed scope governor** to every optimizer
-  instruction: prioritize implementing and comparing plausible high-impact
-  algorithms on representative scaled workloads. Existing methods establish
-  honest baselines and canonical defines matched endpoints, but neither a fast
-  pilot nor merely tractable training ends the search for material 10x--100x
-  gains. The active program is neural computation: do not spend its budget on
-  Logistic, DFA, or exhaustive baseline/workflow timing. Shanno is the incumbent
-  neural speed baseline; move to novel neural candidate prototypes and use only
-  the measurements needed to accept, reject, or scale them. Do not let timing
-  minutiae displace candidate investigation.
-  `docs/optimizer_research.md` remains the governing research protocol; no
-  published formula may be altered merely to share code.
+- Optimizer research is neural-only and follows `docs/optimizer_research.md` and
+  `docs/learning_research/optimizer_implementation_plan.md`. For optimizer work,
+  read `docs/learning_research/neural_optimizer_handoff.md` first; it owns phase
+  status, measurements, the standing panel and the exact next step. The durable
+  session triggers are: apply the large-workload speed governor; lead with the
+  portfolio policy rather than one speed figure; treat seed stability and the
+  conditioning pair as first-class acceptance axes; expose nothing publicly
+  before retention; and never alter a published formula merely to share code.
+  Current public retained methods are L-BFGS (`algorithm=4`) and iRPROP+
+  (`algorithm=5`), neither in the retired menus or automatic selector. BB was
+  screened, rejected and removed. Do not spend this program on Logistic, DFA,
+  exhaustive baseline timing or timing minutiae.
 - The Design Manifest is normative and must stay synchronized with every public
   class, major object, principal method, algorithm, failure contract, and index entry.
 
@@ -131,23 +104,6 @@ latexmk -pdf manifest.tex
 
 Inspect affected PDF pages as images, not only the LaTeX log.  The complete
 workflow and cleanup commands are in `docs/manifest_maintenance.md`.
-
-## Source and ownership map
-
-- `src/matrix.h`, `vector_ops.*`, `population.*`: numerical vocabulary.
-- `src/dataset.*`, `twoset.*`: data ownership, partitions, metrics and ROC.
-- `src/model.*`, `iterative.*`, `network.*`: model/training abstractions.
-- `src/onehidden.*`, `simpleprop.*`, `bareprop.*`, `backprop.*`, `logistic.*`:
-  neural and logistic models.
-- `src/dfa.*`, `ldfa.*`, `qdfa.*`: discriminant analysis.
-- `src/regressnet.*`: stepwise analysis over cloned networks.
-- `src/nsplit.*`, `evaldesign.*`: partition planning and typed design policy.
-- `src/crossval.*`, `cvadapters.*`, `cvreport.*`: repetition, model-family
-  adaptation, and reporting.
-- `src/auccov.*`, `delong.*`, `clustered_auc.*`: paired AUC algebra and covariance.
-- `src/obd.*`, `autoalgo.*`, `plateau.h`: architecture and training control.
-- `src/modelfactory.*`, `netclone.*`: cold-path construction and cloning.
-- `src/asyncjob.*`, `procguard.*`, `gui.cpp`: process/thread boundaries and GUI.
 
 ## Repository hygiene
 

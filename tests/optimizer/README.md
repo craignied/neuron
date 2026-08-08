@@ -659,8 +659,9 @@ surviving.
 
 **There is no `--bb` subset and no BB arm, deliberately.** Raydan's Algorithm GBB
 was implemented, fail-proven and screened against the standing panel on this
-harness, and **rejected**: it always converged and never failed, but its cost on
-one fixed workload varied **670x** across the four predeclared weight seeds
+harness, and **rejected**: every declared measured arm converged and remained
+finite, but its cost on one fixed workload varied **670x** across the four
+predeclared weight seeds
 (17 to 11,398 traversals), and it degraded **153x** between the `well4` and
 `poor4` conditioning twins where L-BFGS degrades 1.23x and iRPROP+ 1.11x. It was
 never the fastest arm on any workload family. The prototype and its public roots
@@ -668,8 +669,11 @@ were then removed, as the plan requires for a rejected candidate.
 
 The evidence is `docs/learning_research/bb_screen_results.md`, and the algorithm,
 its citations, every constant and the declared tests are in
-`bb_source_decision.md` — together enough to rebuild the prototype exactly if a
-future workload makes the question live again.
+`bb_source_decision.md`. The exact rejected working tree is preserved separately
+under the annotated Git tag `research/bb-prototype-2026-08-08`; it is historical
+evidence, not an active harness subset or supported engine capability. The source
+decision records a post-screen non-finite-trial audit correction required before
+any new measurement.
 
 Two results from that phase outlive the code and are worth knowing here:
 

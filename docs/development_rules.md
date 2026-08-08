@@ -98,3 +98,23 @@ mutation, return/failure behavior, example, notes, and a verifiable citation for
 named published methods. Distinguish published mathematics from neuron-specific
 policy. Add method-level index entries and extend
 `tools/check_manifest_index.py`. Follow `docs/manifest_maintenance.md` in full.
+
+## Source and ownership map
+
+This map is conditional engine context and therefore lives here rather than in
+the always-loaded `CLAUDE.md`:
+
+- `matrix.h`, `vector_ops.*`, `population.*`: numerical vocabulary.
+- `dataset.*`, `twoset.*`: data ownership, partitions, metrics and ROC.
+- `model.*`, `iterative.*`, `network.*`: model/training abstractions.
+- `onehidden.*`, `simpleprop.*`, `bareprop.*`, `backprop.*`, `logistic.*`:
+  neural and logistic models.
+- `dfa.*`, `ldfa.*`, `qdfa.*`: discriminant model hierarchy.
+- `regressnet.*`: stepwise analysis over cloned networks.
+- `nsplit.*`, `evaldesign.*`: partition planning and typed design policy.
+- `crossval.*`, `cvadapters.*`, `cvreport.*`: repetition, model-family
+  adaptation, reporting and artifacts.
+- `auccov.*`, `delong.*`, `clustered_auc.*`: paired AUC algebra and covariance.
+- `obd.*`, `autoalgo.*`, `plateau.h`: architecture and training control.
+- `modelfactory.*`, `netclone.*`: cold-path construction and cloning.
+- `asyncjob.*`, `procguard.*`, `gui.cpp`: process/thread and GUI boundaries.

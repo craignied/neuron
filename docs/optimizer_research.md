@@ -43,6 +43,12 @@ question. They are not prerequisite reading.
    controls; report run-to-run spread.
 6. Decide explicitly: reject, retain as research-only, or propose production
    integration. A negative result is complete work and belongs in HISTORY.
+   Remove a rejected prototype from active source and tests. When the conclusion
+   depends on the exact tested implementation, preserve that complete working
+   tree under a documented annotated `research/` Git tag before removal; record
+   its base commit, known defects and reconstruction command in the evidence.
+   An archival tree is not a supported capability, is never merged into
+   `main`, and does not excuse a red gate on `main`.
 7. Before integration, write characterization that passes on the old engine and
    a new guard proven by fresh-compilation sabotage. Preserve CLI/GUI parity if
    the optimizer becomes selectable.
