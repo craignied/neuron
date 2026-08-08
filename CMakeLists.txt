@@ -680,6 +680,24 @@ target_compile_definitions(optimizer_probe PRIVATE
     OPTBENCH_ENGINE_COUNT=${OPTBENCH_ENGINE_COUNT}
     OPTBENCH_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/optimizer/data")
 
+# STEP L0 of the Levenberg-Marquardt phase: the measured per-traversal cost ratio
+# that authorized the LM implementation. Built so it cannot rot, and deliberately
+# NOT registered with add_test, because wall time is machine-dependent and a
+# timing assertion in the suite is a flake generator. Run it deliberately:
+#   ./build/lm_step0
+add_executable(lm_step0 tests/optimizer/lm_step0.cpp)
+target_link_libraries(lm_step0 PRIVATE neuron_eval)
+target_include_directories(lm_step0 PRIVATE tests/optimizer)
+target_compile_definitions(lm_step0 PRIVATE
+    OPTBENCH_GIT_REV="${OPTBENCH_REV}"
+    OPTBENCH_GIT_DIRTY=${OPTBENCH_DIRTY}
+    OPTBENCH_SOURCE_ID="${OPTBENCH_SOURCE_ID}"
+    OPTBENCH_SOURCE_COUNT=${OPTBENCH_SOURCE_COUNT}
+    OPTBENCH_BUILD_TYPE="${CMAKE_BUILD_TYPE}"
+    OPTBENCH_ENGINE_ID="${OPTBENCH_ENGINE_ID}"
+    OPTBENCH_ENGINE_COUNT=${OPTBENCH_ENGINE_COUNT}
+    OPTBENCH_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/optimizer/data")
+
 # The MECHANICS, asserted deterministically and with no timing assertion at all:
 # identical starts, the non-vacuity of that identity, split identity, the
 # ceiling-is-not-convergence contract, the matched-target verdict, the full-pass
