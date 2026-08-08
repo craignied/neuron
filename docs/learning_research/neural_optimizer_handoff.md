@@ -1,13 +1,14 @@
 # Neural optimizer handoff
 
-Date: 2026-08-07 (Phase 4 complete)
+Date: 2026-08-08 (Phase 1 complete: BB rejected)
 
 ## Snapshot
 
 - Repository: `/Users/craign/code/neUROn2++/neuron-3.0`
 - Branch: `main`; inspect `git status -sb` rather than relying on this snapshot.
-- Last substantive commit: `d712d30`, which integrates retained iRPROP+ through
-  REST and the GUI and closes its Manifest, index and maintenance contracts.
+- Last substantive commit before this phase: `7f17e5a`. Phase 1 (BB) then landed
+  as a documentation-only commit: the candidate was screened and rejected, so its
+  prototype was removed and no engine source changed.
 - L-BFGS and iRPROP+ implementation, measurement, retain decisions, public REST
   integration, GUI controls, Manifest work, and the portfolio policy are
   committed and pushed. The Phase 4 tests, harness arms and evidence are included.
@@ -32,9 +33,9 @@ git status -sb
 git log -5 --oneline --decorate
 ```
 
-Expect a clean `main` **one commit ahead of `origin/main`** if the Manifest
-commit has not been pushed, and in sync once it has; either way its CI result
-must be confirmed. Do not discard unexpected changes; identify their owner before
+Expect a clean `main` **one commit ahead of `origin/main`** until the Phase 1
+commit is pushed, and in sync once it has been; either way its CI result must be
+confirmed. Do not discard unexpected changes; identify their owner before
 proceeding. Reconfigure or rebuild only if the existing `build/` directory is
 unavailable or invalid.
 
@@ -129,6 +130,10 @@ and do not tune it after seeing candidate results.
   subsequent `d712d30` integration exposes the retained method through REST and
   the GUI as `algorithm=5`, without changing the retired menus, and closes the
   Chapter 4 optimizer-selection and maintenance contracts.
+- Phase 1 (safeguarded BB) landed as a single documentation-only commit. Its
+  prototype (`src/gbb.*`, `Network::TRAIN_GBB`, `tests/network/check_bb.cpp` and
+  the harness BB arms) existed only within that phase's working tree and was
+  removed on rejection, so no engine source differs from `7f17e5a`.
 - `CLAUDE.md` and the implementation plan contain the corrected neural-only scope.
 - Re-run the focused gates before committing rather than relying on this handoff;
   never copy a remembered CTest count into a status report.
@@ -195,15 +200,99 @@ The general rule: **a gate deferred by precedent is still a gate, and "the last
 phase did it too" is not evidence that it was acceptable — check whether that
 precedent was ever actually exercised.**
 
+## Phase 1 is complete: safeguarded BB was screened and REJECTED
+
+Read `docs/learning_research/bb_screen_results.md` for the evidence and
+`bb_source_decision.md` for the algorithm, its citations and every constant.
+
+The candidate was **Raydan's Algorithm GBB** -- BB1 plus the
+Grippo-Lampariello-Lucidi nonmonotone line search with safeguarded quadratic
+interpolation -- declared in full before any code was written. It was
+implemented, both of its declared sabotages were fail-proven, and it was screened
+against the five-arm panel on Civic Choice 6,000 rows at the committed practical
+endpoint.
+
+Decision: **REJECT**, and the prototype and its public roots have been removed.
+`src/gbb.*`, `Network::TRAIN_GBB`, the dispatch, `tests/network/check_bb.cpp` and
+the harness's BB arms are all gone; `tools/check_manifest_index.py` is green and
+no Manifest entry was ever written, because BB never had a public token.
+
+**Lead with the stability finding, not a speed ratio.** BB reached every
+endpoint, on every arm, on every repetition, and never produced a non-finite or
+failed row. But on ONE workload from four predeclared starting weight vectors it
+took 25, 17, **11,398** and **4,690** full traversals -- a 670x spread, where
+L-BFGS spans 1.43x, iRPROP+ 1.43x and Shanno 1.33x. And between the `well4` and
+`poor4` conditioning twins it degrades **153x**, against L-BFGS's 1.23x and
+iRPROP+'s 1.11x.
+
+The long runs were tested for exactly the two things that would have made them an
+artifact, and are neither: across interleaved repetitions every arm produced a
+**bit-identical** traversal count, iteration count, achieved objective and end
+weight fingerprint, with wall-clock p10-p90 inside 3% of the median; and every
+matched-endpoint row stopped on `min_error` having passed its target, with
+`converged: true`. So the long runs are reproducible.
+
+Scope, stated exactly: this is the behaviour of **the declared neuron GBB
+implementation under the declared safeguarding policy**, on these workloads. It
+is not a result about Barzilai-Borwein methods generally, and it does not carry
+to BB2, cyclic or adaptive BB, or a different globalization.
+
+Three further results that must travel with it:
+
+- **it is fastest on nothing.** Third of five at the base seed, third of four at
+  seed 101, second on `well4`. Its best placing anywhere is second;
+- **late-stage it stops earliest of the three fast methods and lands worst**, on
+  both training objective and held-out error;
+- **a pre-declared prediction was falsified in BB's favour and is recorded as
+  such**: the source decision predicted the line search's trial points would
+  dominate the cost. Measured, the search backtracked fifteen times in 11,383
+  iterations. The cost is the spectral step itself.
+
+**Neither pre-declared falsification criterion fired, and the rejection is
+still pre-declared.** The two candidate-specific criteria were early rejection
+gates, not sufficient retention conditions; BB passed them -- it beats canonical
+640x at the base seed and reaches every endpoint -- and then failed the
+**pre-existing portfolio admission rule** that predates this phase and governed
+Phase 4's retention of iRPROP+. It added no winning workload and introduced
+extreme, unexplained screening-cost variance. No standard was written or altered
+after results became visible. Rejected under the portfolio policy, then: there is no workload a user should be told to pick it for, and
+**no predictor was established from the measured workload and
+starting-point diagnostics** for which starting weights cost 17 traversals and
+which cost 11,398. Four starts justify the rejection; they do not prove that
+prediction is impossible. That is the policy doing real work in the opposite direction from
+Phase 4, where it retained a method that loses two of three workload families.
+
+**The sabotage result is the one to carry forward.** Deleting the nonmonotone
+maximum turned GBB into monotone Armijo BB -- a different published method -- and
+`checkNonmonotone()`, the test that asserts nonmonotone acceptance BY NAME, still
+passed, because it drove the pieces directly and the sabotage was in the wiring
+between them. So did every real-model integration test on all three
+architectures. This is Phase 4's iRPROP+/RPROP+ result reproduced one phase
+later in a different algorithm: **an assertion that names a mechanism is not
+automatically a test of it, and a descending objective proves nothing about which
+algorithm produced it.**
+
 ## Exact next research step
 
-**Safeguarded Barzilai-Borwein**, as the plan's Phase 1 describes it: a low-cost
-candidate and harness control, cited to Barzilai & Borwein (1988) for BB1/BB2 and
-Raydan (1997) for the exact globalization policy, with one exact production
-candidate chosen before measurement. Same staged treatment: pin the published
-contract before coding, fail-prove the mechanism guards by focused sabotage, then
-screen on the cheap representative workload against the standing panel — which is
-now **four** arms, since iRPROP+ joins L-BFGS, Shanno and canonical in it.
+The panel stands at four arms: canonical, Shanno, L-BFGS and iRPROP+. Phases 0,
+1, 3 and 4 are complete; Phase 2 (corrected IRLS/Newton for Logistic) is out of
+scope under the program boundary above, which is neural-only.
+
+So the next step is a **new neural candidate**, chosen and declared under the
+same staged protocol: pin the published contract and every constant before
+coding, fail-prove the mechanism guards by focused sabotage against a
+hand-driven, model-free port, then screen on the cheap representative workload
+against the four-arm panel. Levenberg-Marquardt and the online/noisy-gradient
+methods are the plan's remaining named options, each admissible only when its
+eligibility matches a measured neural workload.
+
+Two things Phase 1 established that should shape that choice:
+
+- **the seed panel is a first-class acceptance axis, not a robustness footnote.**
+  It is what rejected BB, and it costs almost nothing to run;
+- **a method with no per-parameter scaling should be expected to fail the
+  conditioning pair.** That pair now has a demonstrated dynamic range of two
+  orders of magnitude, so it is worth running early rather than last.
 
 Do not reopen the completed L-BFGS or iRPROP+ phases, and do not begin another
 baseline campaign.
@@ -214,7 +303,7 @@ integration occurs only after the research acceptance gate; automatic selection
 remains deferred until the researched optimizer set is complete.
 Eventually every retained eligible algorithm belongs in the bounded limited-run
 selector so the user's actual dataset, rather than the synthetic benchmark alone,
-guides the full-training choice — and the Phase 4 ranking flip is the concrete
+guides the full-training choice -- and the Phase 4 ranking flip is the concrete
 argument for that selector, since the best method here is workload-dependent.
 
 ## Subsequent candidate order
@@ -222,7 +311,9 @@ argument for that selector, since the best method here is workload-dependent.
 1. ~~L-BFGS~~ — done, retained, the speed leader on the small generated fixtures
    and late-stage
 2. ~~iRPROP+~~ — done, retained, the speed leader on the application benchmark
-3. Safeguarded BB as a low-cost candidate/control
+3. ~~Safeguarded BB~~ -- done, REJECTED and removed: correct and always
+   convergent, but 670x seed-dependent and 153x conditioning-sensitive, and
+   fastest on nothing
 4. Other neural candidates such as LM or online/noisy-gradient methods only when their
    eligibility matches a measured neural workload
 
@@ -231,35 +322,49 @@ not end the search for a credible further 10x or 100x improvement.
 
 ## Last completed verification
 
-These are the Phase 4 gates, run before its commit. Counts were **discovered from
+These are the Phase 1 gates, run before its commit. Counts were **discovered from
 CTest at the time**, not remembered.
 
-- Release build and **all 38 discovered CTest cases**, which is 37 plus the new
-  `network_irprop`;
-- golden transcripts — byte-identical, as a research-only optimizer requires;
-- oracle verification — identical;
-- `tests/tools/run_tools.sh` in full, including the Manifest index gate;
-- `python3 tools/check_manifest_index.py`, the Graphviz figure regeneration and a
-  clean `latexmk` build, with §12.7.4, the corrected packed-boundary page,
-  Figure 12.1 and the index pages inspected as rendered images;
+- Release build and **all 38 discovered CTest cases** -- back to the Phase 4
+  count, because `network_bb` was added and then removed with its prototype;
+- golden transcripts -- byte-identical;
+- oracle verification -- identical;
+- `tests/tools/run_tools.sh` in full;
+- `python3 tools/check_manifest_index.py`: **green**, 45 public roots. This was
+  RED while the prototype existed (`GBB`, `GBBObjective`) and was deliberately
+  not committed in that state -- the Phase 4 lesson below, applied;
 - `git diff --check`.
 
-**Fail-proof evidence for `network_irprop`, both sabotages with visible
-recompilation of `src/irprop.cpp` in each direction:**
+`tests/gui/*` were not re-run: Phase 1 changed no REST, GUI or request-parsing
+surface, and its final tree changes no engine source at all.
 
-- **the error-dependent rollback deleted** so the `< 0` branch always reverts —
-  RPROP+ under the iRPROP+ name. Six assertions failed, including the one that
-  names the mechanism. Two controls held: the *rollback* assertions beside them
-  still passed (RPROP+ satisfies those by construction), and so did **every
-  real-model integration test** — which is why the published table is driven by
-  hand rather than inferred from a training run;
-- **the current-gradient zeroing deleted.** Nine assertions failed: three name
-  the zeroing directly, six are the consequences it forces on the next iteration.
+**Fail-proof evidence for the BB prototype**, recorded here because the code it
+guarded no longer exists. Both sabotages applied to `src/gbb.cpp`, rebuilt with
+visible recompilation in each direction, and restored:
 
-No sabotage remains in the tree. The full log is at the foot of
-`tests/network/check_irprop.cpp`.
+- **the nonmonotone maximum deleted**, making it monotone Armijo BB. Two
+  assertions failed, both naming the wiring. Two controls held, and they are the
+  finding: the assertion that names nonmonotone acceptance still passed, and so
+  did every real-model integration test on all three architectures;
+- **the interpolation bracket removed.** Five assertions failed, three naming the
+  safeguard directly.
 
-`tests/gui/*` were not re-run: Phase 4 changed no REST, GUI or request-parsing
-surface. Treat all of this as provenance, not permission to skip new
-verification. The BB phase must add and fail-prove its own mechanism tests, then
-rerun the relevant Release gates before any commit.
+### The Manifest gate, second time asked and answered correctly
+
+Phase 4 recorded the rule: *a gate deferred by precedent is still a gate, and
+"the last phase did it too" is not evidence that it was acceptable.* Phase 1 is
+the first phase to face that rule prospectively. Adding `src/gbb.h` turned
+`check_manifest_index.py` red on two new public roots, and the phase was **not
+committed in that state**. The gate was resolved by the retain/reject decision
+itself rather than by documenting a method the project had decided against, or by
+exempting it: rejection removed the public roots, and the gate returned green on
+its own.
+
+What that establishes for the next candidate: **a research prototype that adds a
+class to `src/` owes the Manifest an entry the moment it is retained, and owes
+the tree its removal the moment it is rejected.** There is no third state in
+which the gate may sit red.
+
+Treat all of this as provenance, not permission to skip new verification. The
+next candidate must add and fail-prove its own mechanism tests, then rerun the
+relevant Release gates before any commit.

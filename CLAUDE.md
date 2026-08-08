@@ -34,7 +34,7 @@ The Manifest and source are authoritative after implementation.
 - Current optimizer research and implementation follows
   `docs/learning_research/optimizer_implementation_plan.md`.  Resume at the
   first incomplete phase, and do not expose a candidate publicly before its
-  matched-endpoint acceptance gate.  **Phases 0, 3 and 4 are complete.  Shanno
+  matched-endpoint acceptance gate.  **Phases 0, 1, 3 and 4 are complete.  Shanno
   was the incumbent; the retained L-BFGS implementation (`src/lbfgs.*`) beats it
   8.8x-13.0x to the committed practical endpoint, and its research gate and
   public REST integration are both complete (`/api/train` `algorithm=4`, with
@@ -48,8 +48,15 @@ The Manifest and source are authoritative after implementation.
   lands better late-stage, so the best method is workload-dependent and a
   candidate need NOT beat the leader to be retained.  The plan's predicted
   iRPROP+ advantage on poorly scaled objectives was tested directly and did NOT
-  appear.  The next candidate is safeguarded Barzilai-Borwein, measured against
-  the now four-arm standing panel.  Read
+  appear.  Phase 1 screened **safeguarded Barzilai-Borwein** (Raydan's Algorithm
+  GBB) against the four-arm panel and **REJECTED** it: correct and always
+  convergent, but the declared implementation's cost on one workload varied 670x
+  across four weight seeds and 153x between the conditioning twins, with no
+  predictor established, and it was fastest on nothing.  The
+  prototype was removed, which is what a rejected candidate gets.  That decision
+  shows the portfolio policy is a real filter and not a ratchet.  The next
+  candidate is a new neural method chosen under the same staged protocol; the
+  seed panel and the conditioning pair are now first-class acceptance axes.  Read
   `docs/learning_research/neural_optimizer_handoff.md` first.**
   Apply the plan's **large-workload speed scope governor** to every optimizer
   instruction: prioritize implementing and comparing plausible high-impact

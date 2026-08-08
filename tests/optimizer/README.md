@@ -655,6 +655,32 @@ both were characterized at 400,000.
 by content (`data_id`), so provenance does not depend on that directory
 surviving.
 
+## Phase 1 (safeguarded Barzilai-Borwein): screened, rejected, removed
+
+**There is no `--bb` subset and no BB arm, deliberately.** Raydan's Algorithm GBB
+was implemented, fail-proven and screened against the standing panel on this
+harness, and **rejected**: it always converged and never failed, but its cost on
+one fixed workload varied **670x** across the four predeclared weight seeds
+(17 to 11,398 traversals), and it degraded **153x** between the `well4` and
+`poor4` conditioning twins where L-BFGS degrades 1.23x and iRPROP+ 1.11x. It was
+never the fastest arm on any workload family. The prototype and its public roots
+were then removed, as the plan requires for a rejected candidate.
+
+The evidence is `docs/learning_research/bb_screen_results.md`, and the algorithm,
+its citations, every constant and the declared tests are in
+`bb_source_decision.md` — together enough to rebuild the prototype exactly if a
+future workload makes the question live again.
+
+Two results from that phase outlive the code and are worth knowing here:
+
+- **the conditioning pair earned its keep.** `well4`/`poor4` was built in Phase 4
+  to test a predicted iRPROP+ advantage that did not appear; it separated BB from
+  the panel by two orders of magnitude;
+- **the traversal/iteration split answered a question the other way round.** BB's
+  nonmonotone line search backtracked fifteen times in eleven thousand
+  iterations, so its cost was the spectral step itself and not the globalization
+  — the opposite of what was predicted before the run.
+
 ## Results
 
 `docs/learning_research/optimizer_baseline_results.md`.  The short version:

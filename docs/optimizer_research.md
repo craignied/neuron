@@ -46,6 +46,20 @@ question. They are not prerequisite reading.
 7. Before integration, write characterization that passes on the old engine and
    a new guard proven by fresh-compilation sabotage. Preserve CLI/GUI parity if
    the optimizer becomes selectable.
+
+   **Sabotage must cross the production wiring, not only the components.**
+   Testing a mechanism's component operations is insufficient: sabotage the code
+   path that *composes* them, and carry a control proving the behavioral
+   distinction the sabotage removes. Measured twice, in two different
+   algorithms. Deleting iRPROP+'s error-dependent rollback turned it into RPROP+
+   and every real-model integration test still passed. Deleting the nonmonotone
+   maximum from BB's line search turned it into monotone Armijo BB, and the
+   assertion that named nonmonotone acceptance *still passed* — it drove
+   `accepts()` and the window directly, and the sabotage sat between them. A
+   descending objective proves nothing about which algorithm produced it, and an
+   assertion that names a mechanism is not automatically a test of it. When a
+   sabotage fails a file, read WHICH assertions failed; if the one naming the
+   sabotaged mechanism is not among them, it is decoration.
 8. Update the Manifest with the published derivation and citation, neuron's
    adaptation, configuration/state, failure and stopping semantics, performance
    evidence, example, index entries, and object figure if ownership changes.
