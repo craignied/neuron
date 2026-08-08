@@ -133,6 +133,10 @@ PRINCIPAL_METHODS = {
         "random", "loadfile", "savefile", "resize", "clear", "fill",
         "colsums", "squared", "maxabs", "rowindex", "toVector", "toMatrix", "covariance",
         "inverse", "determinant", "eigenvalues",
+        # The symmetric positive-definite normal-equations primitives. Listed
+        # because a reader searching the index wants the operation, and because
+        # the three share ONE storage contract that only the Manifest states.
+        "addOuterUpper", "symmetrize", "solveSPD",
     },
     "Population": {"mean", "var", "std", "skew", "kurtosis"},
     "Funct": {"mnbrak", "brent", "zbrent"},

@@ -3093,6 +3093,148 @@ Col$, where $Col$ is the number of columns in the Matrix. If the
 Matrix to be populated with the result is passed as an argument, it's
 dimensions must be the same as the Matrix object.
 
+\subsection{Symmetric positive-definite normal equations}
+\index{Matrix!addOuterUpper}\index{Matrix!symmetrize}\index{Matrix!solveSPD}
+\index{Cholesky factorization}\index{normal equations}
+\index{Madsen, Kaj|(}\index{Nielsen, Hans Bruun|(}\index{Tingleff, Ole|(}
+
+A Gauss-Newton method forms the {\em normal equations} of a nonlinear
+least-squares problem: it accumulates ${\bf A} = {\bf J}^t{\bf J}$ and
+${\bf g} = {\bf J}^t{\bf f}$ over the exemplars, then solves
+$({\bf A} + \mu{\bf I}){\bf h} = -{\bf g}$ for the step ${\bf h}$.  Three
+methods support that, and they share {\em one storage contract} which is stated
+here once because a caller cannot safely infer it from any one of them.
+
+\begin{itemize}
+\item $M$.addOuterUpper( const vector$<$ T $>$\& $v$ ): adds the outer product
+      $\vec{v}\vec{v}^t$ to Matrix $M$, {\bf writing only the upper triangle}
+      ($i \le j$, diagonal included), and returns a reference to $M$.  Every
+      element below the diagonal is left exactly as it was found.  This method
+      does {\bf not} claim the result is symmetric, and its name says which half
+      it touched
+\item $M$.symmetrize(): mirrors the upper triangle of $M$ onto the lower one, so
+      that $M(i,j) = M(j,i)$ for every pair, and returns a reference to $M$.
+      The diagonal is untouched.  {\bf This is the operation that makes the
+      object symmetric}, and the only one that says so
+\item $M$.solveSPD( const vector$<$ double $>$\& $rhs$, vector$<$ double $>$\&
+      $solution$ ): solves $M\vec{x} = {\bf rhs}$ for a symmetric
+      positive-definite $M$, populating $solution$ and returning a reference to
+      it.  It {\bf reads only the upper triangle} of $M$, and therefore returns
+      the same answer for an upper-populated Matrix as for a symmetrized one
+\end{itemize}
+
+The reason for a triangle at all is speed, and it is architectural rather than
+incidental.  The accumulation ${\bf A} \mathrel{+}= \vec{a}\vec{a}^t$ runs once
+per exemplar --- it is the hot loop of a Gauss-Newton training method --- and
+half of its $P^2$ work is redundant by symmetry.  The contract above is what
+allows that half to be skipped {\em without} any operation ever handing a caller
+a half-populated Matrix while calling itself symmetric, which would silently read
+zero below the diagonal with nothing in the type to say so.
+
+\subsubsection{Published derivation}
+
+$M$.solveSPD factors $M = {\bf C}^t{\bf C}$ with ${\bf C}$ upper triangular by
+the Cholesky algorithm, then solves by forward and back substitution.  The
+transcription is Algorithm A.4 of Madsen, Nielsen and
+Tingleff,\footnote{K. Madsen, H. B. Nielsen and O. Tingleff, {\em Methods for
+Non-Linear Least Squares Problems}, 2nd edition, Informatics and Mathematical
+Modelling, Technical University of Denmark, Lyngby, 2004, Appendix
+A.}\index{Methods for Non-Linear Least Squares Problems} which includes its own
+test for positive definiteness:
+
+\[
+d = a_{kk} - \sum_{i<k} c_{ik}^2
+\]
+
+\[
+c_{kk} = \sqrt{d}, \qquad
+c_{kj} = \frac{a_{kj} - \sum_{i<k} c_{ik}c_{ij}}{c_{kk}}, \quad j > k
+\]
+
+evaluated for $k = 1 \ldots n$, with the factorization abandoned the moment
+$d > 0$ fails.  The system is then solved in two substitutions,
+${\bf C}^t\vec{z} = {\bf rhs}$ followed by ${\bf C}\vec{x} = \vec{z}$.  The
+source costs the factorization at about $n^3/3$ floating-point operations and
+each substitution at about $n^2$.
+
+{\bf No inverse is formed.}  That is the whole point of providing this method
+beside {\em inverse}: an explicit inverse costs more, is less accurate, and is
+not what solving a system requires.
+
+\subsubsection{Failure behavior}
+
+$M$.addOuterUpper and $M$.symmetrize throw Matrix$<$ T $>$::BadSize on an empty
+Matrix and Matrix$<$ T $>$::DimensionMismatch when $M$ is not square, and
+addOuterUpper also throws DimensionMismatch when $M$'s order is not $v$.size().
+$M$.solveSPD throws the same two for an empty or non-square $M$ and for an
+$rhs$ whose length is not $M$'s order.
+
+When Algorithm A.4's positive-definiteness test fails, $M$.solveSPD throws
+Matrix$<$ double $>$::Singular\& $e$, with $e$.what() ``singular Matrix'' ---
+the same numerical outcome the inverse family reports, and for the same reason:
+the Matrix is well formed and simply is not positive definite.
+
+{\em \bf Non-finite input is the caller's to exclude, and the two cases differ.}
+A NaN fails $d > 0$, because every comparison against NaN is false, and so
+reports Singular.  An infinity does {\bf not}: an infinite diagonal element makes
+$d$ infinite, which {\em is} greater than zero, so the factorization proceeds and
+can return an entirely finite-looking solution.  This method is the published
+algorithm and deliberately adds no finiteness scan the source does not have, so a
+caller that cannot guarantee finite input must check it first.  Both cases are
+pinned by tests/matrix/check\_spd.cpp.
+
+\subsubsection{Example}
+\begin{verbatim}
+#include "matrix.h"
+
+// Accumulate the normal equations over the exemplars. Only the upper
+//    triangle is written, which is where half the work is saved.
+Matrix< double > A( P, P, 0.0 );
+vector< double > g( P, 0.0 ), a( P );
+
+for ( unsigned k = 0; k < nTrain; k++ )
+{
+   fillJacobianRow( k, a );      // the model's business
+   A.addOuterUpper( a );
+   axpy( residual( k ), a, g );
+}
+
+// The damping term, on the diagonal only
+for ( unsigned i = 0; i < P; i++ )
+   A( i, i ) += mu;
+
+// Solve without symmetrizing: solveSPD reads the upper triangle only
+vector< double > step, minusG = g * -1.0;
+try
+{
+   A.solveSPD( minusG, step );
+}
+catch ( Matrix< double >::Singular& e )
+{
+   // Not positive definite at this damping: raise mu and retry
+}
+
+// Only a caller that hands A to something expecting a symmetric
+//    Matrix needs this
+A.symmetrize();
+\end{verbatim}
+
+\subsubsection{Notes}
+
+{\bf Use a try block with solveSPD to catch the Singular exception}, exactly as
+with the inverse family.  solveSPD is only coded for Matrices of type $<$ double
+$>$; addOuterUpper and symmetrize are available for any $T$ whose arithmetic
+supports them.
+
+solveSPD leaves the coefficient Matrix unchanged --- it is a const method, and
+the factorization is built in scratch --- so the same Matrix may be solved
+repeatedly, as a damped method retrying at a larger $\mu$ does.  It allocates one
+order-by-order factor and one order-length work vector per call.  That is once
+per {\em solve}, and a Gauss-Newton method solves once per iteration rather than
+once per exemplar, so the allocation is outside every hot loop.
+
+\index{Madsen, Kaj|)}\index{Nielsen, Hans Bruun|)}\index{Tingleff, Ole|)}
+
 \subsection{Eigenvalues}\index{Matrix!eigenvalues}
 
 The calculation of the eigenvalues of a symmetric matrix is the only

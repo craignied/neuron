@@ -299,6 +299,87 @@ public:
 				{ return "singular Matrix"; }
 	};
 
+	// --- SYMMETRIC POSITIVE-DEFINITE NORMAL EQUATIONS ----------------------
+	//
+	//    Three operations with ONE storage contract, stated here once so that no
+	//    caller has to infer it from an implementation:
+	//
+	//      addOuterUpper  WRITES the upper triangle only (i <= j, diagonal
+	//                     included) and leaves every element below the diagonal
+	//                     exactly as it found it. It does NOT claim the result is
+	//                     symmetric, and its name says which half it touched.
+	//      symmetrize     MIRRORS the upper triangle onto the lower one. This is
+	//                     the operation that MAKES the object symmetric, and it
+	//                     is the only one that says so.
+	//      solveSPD       READS the upper triangle only. It is therefore correct
+	//                     on an upper-populated matrix and on a symmetrized one,
+	//                     and gives the same answer for both.
+	//
+	//    Why a triangle at all: a normal-equations accumulation A += a a' over N
+	//    exemplars is the hot loop of a Gauss-Newton method, and half of its
+	//    P^2 work is redundant by symmetry. The contract above is what lets that
+	//    half be skipped WITHOUT any operation ever handing a caller a matrix
+	//    that is half populated while calling itself symmetric -- which would
+	//    silently read zero below the diagonal, and nothing in the type would
+	//    say so.
+
+	// A += v v', UPPER TRIANGLE ONLY. Requires a square Matrix whose order is
+	//    v.size(). Destination-taking and allocation-free: this is intended to
+	//    be called once per exemplar, so it must not construct a temporary the
+	//    way `A += scratch.outprod( v, v )` does (rule 7).
+	//
+	//    Throws BadSize if this Matrix is empty and DimensionMismatch if it is
+	//    not square or its order is not v.size() -- the same division of labour
+	//    the inverse family uses: an invalid intrinsic size against two shapes
+	//    that do not fit.
+	Matrix< T >& addOuterUpper( const vector< T >& v );
+
+	// Mirror the upper triangle onto the lower one, so that ( i, j ) == ( j, i )
+	//    for every pair. The diagonal is untouched. AFTER this the object is
+	//    symmetric; before it, nothing promised that.
+	//
+	//    Throws BadSize if empty, DimensionMismatch if not square.
+	Matrix< T >& symmetrize();
+
+	// Solve A x = rhs for a SYMMETRIC POSITIVE-DEFINITE A, by the Cholesky
+	//    factorization A = C'C with C upper triangular, then forward and back
+	//    substitution -- Madsen, Nielsen & Tingleff (2004), Algorithm A.4.
+	//
+	//    DESTINATION-TAKING, and NO INVERSE IS FORMED: an explicit inverse costs
+	//    more, is less accurate, and is not what solving a system needs.
+	//
+	//    READS ONLY THE UPPER TRIANGLE of this Matrix (see the contract above),
+	//    so a caller that accumulated with addOuterUpper need not symmetrize
+	//    first. `solution` is resized to the order and is the return value.
+	//
+	//    Throws BadSize if this Matrix is empty, DimensionMismatch if it is not
+	//    square or rhs.size() is not its order, and Singular when Algorithm
+	//    A.4's positive-definiteness test fails -- which is a NUMERICAL outcome,
+	//    exactly as it is for inverse(): the matrix is well formed and simply is
+	//    not positive definite.
+	//
+	//    NON-FINITE INPUT IS THE CALLER'S TO EXCLUDE, and the two cases differ:
+	//
+	//      NaN       fails `d > 0` (every comparison against NaN is false), so
+	//                it reports Singular;
+	//      infinity  does NOT. An infinite diagonal element makes `d` infinite,
+	//                which IS greater than zero, so the factorization proceeds
+	//                and can return an entirely finite-looking solution.
+	//
+	//    That asymmetry is stated because it would otherwise be discovered: a
+	//    sentence saying "a non-finite element reports Singular" would be true of
+	//    one member of the category and false of the other. This routine is the
+	//    published algorithm and does not add a scan the source does not have;
+	//    A CALLER THAT CANNOT GUARANTEE FINITE INPUT MUST CHECK IT FIRST. Both
+	//    cases are pinned by tests/matrix/check_spd.cpp.
+	//
+	//    It allocates one order-by-order factor and one order-length work
+	//    vector per call. That is once per SOLVE -- a Gauss-Newton method solves
+	//    once per iteration, never per exemplar -- so it is outside every hot
+	//    loop rule 7 governs.
+	vector< double >& solveSPD( const vector< double >& rhs,
+		vector< double >& solution ) const;
+
 	// Sets the output header flag
 	Matrix< T >& setHeader( const bool );
 
@@ -1757,6 +1838,56 @@ Matrix< T > Matrix< T >::dotprod( const Matrix< T >& B ) const
 	this->dotprod( B, result );
 
 	return result; // enables use in Matrix formulae
+}
+
+// A += v v', UPPER TRIANGLE ONLY. See the storage contract in the declaration:
+//    this deliberately leaves every element below the diagonal alone, and does
+//    not claim the result is symmetric -- symmetrize() is what does that.
+//
+//    The row-major block is walked directly rather than through operator()(i,j).
+//    That is not a micro-optimization dressed up: this runs once per exemplar in
+//    a normal-equations accumulation, and a bounds check per element would make
+//    the P(P+1)/2 inner loop measure the check instead of the arithmetic
+//    (rule 7). The two entry checks below cover the whole traversal, which is
+//    exactly where a contract check belongs.
+template < class T >
+Matrix< T >& Matrix< T >::addOuterUpper( const vector< T >& v )
+{
+	if ( nrows_ == 0 || ncols_ == 0 )
+		throw BadSize();
+	if ( nrows_ != ncols_ || ( size_t ) nrows_ != v.size() )
+		throw DimensionMismatch();
+
+	const T* pv = &v[ 0 ];
+
+	for ( unsigned i = 0; i < nrows_; i++ )
+	{
+		const T vi = pv[ i ];
+		T* dst = data_ + ( size_t ) i * ncols_ + i;
+		const T* src = pv + i;
+		for ( unsigned j = i; j < ncols_; j++ )
+			*dst++ += vi * *src++;
+	}
+
+	return *this; // enables use in Matrix formulae
+}
+
+// Mirror the upper triangle onto the lower one. AFTER this the Matrix is
+//    symmetric; before it, nothing promised that -- which is the whole point of
+//    naming the two operations apart.
+template < class T >
+Matrix< T >& Matrix< T >::symmetrize()
+{
+	if ( nrows_ == 0 || ncols_ == 0 )
+		throw BadSize();
+	if ( nrows_ != ncols_ )
+		throw DimensionMismatch();
+
+	for ( unsigned i = 0; i < nrows_; i++ )
+		for ( unsigned j = i + 1; j < ncols_; j++ )
+			data_[ ( size_t ) j * ncols_ + i ] = data_[ ( size_t ) i * ncols_ + j ];
+
+	return *this; // enables use in Matrix formulae
 }
 
 // Fills a matrix with the outer product of 2 vectors, by convention if

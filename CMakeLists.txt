@@ -126,6 +126,17 @@ add_executable(check_matrix
 target_link_libraries(check_matrix PRIVATE neuron_core)
 add_test(NAME matrix_gather COMMAND check_matrix)
 
+# Unit test: the symmetric positive-definite normal-equations primitives --
+# addOuterUpper / symmetrize / solveSPD -- and above all the STORAGE CONTRACT
+# between them: that addOuterUpper leaves the lower triangle untouched, that
+# symmetrize is what makes the object symmetric, and that solveSPD reads the
+# upper triangle only (proven by corrupting the lower one and requiring the
+# solution not to move). No GSL needed.
+add_executable(check_spd
+    tests/matrix/check_spd.cpp)
+target_link_libraries(check_spd PRIVATE neuron_core)
+add_test(NAME matrix_spd COMMAND check_spd)
+
 # Regression test: Hosmer-Lemeshow on datasets past 10,000 rows (fixed-size
 # stack arrays segfaulted there until 2026-07-16). No GSL needed.
 add_executable(check_hl

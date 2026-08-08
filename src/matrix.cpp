@@ -633,3 +633,95 @@ template <> Matrix< double > Matrix< double >::inverse( unsigned choice ) const
 	return this->inverse( I, choice ); // use previously coded inverse method
 }
 
+
+// Solve A x = rhs for a SYMMETRIC POSITIVE-DEFINITE A. See the storage contract
+//    and the failure contract in matrix.h.
+//
+// THE PUBLISHED ALGORITHM is Madsen, K., Nielsen, H.B. & Tingleff, O. (2004),
+//    "Methods for Non-Linear Least Squares Problems", 2nd ed., Informatics and
+//    Mathematical Modelling, Technical University of Denmark -- Appendix B,
+//    Algorithm A.4, the Cholesky factorization with its positive-definiteness
+//    test built in:
+//
+//        for k = 1 .. n
+//            d := a_kk - sum_{i<k} c_ik^2
+//            if d > 0
+//                c_kk := sqrt( d )
+//                for j = k+1 .. n
+//                    c_kj := ( a_kj - sum_{i<k} c_ik c_ij ) / c_kk
+//            else
+//                posdef := false
+//
+//    giving A = C'C with C upper triangular, after which the system is solved by
+//    C' z = rhs (forward substitution) and C x = z (back substitution). The
+//    notes cost the factorization at about n^3/3 flops and each substitution at
+//    about n^2.
+//
+// NO INVERSE IS FORMED. That is the point of having this at all: an explicit
+//    inverse costs more and is less accurate than the factorization the solve
+//    actually needs.
+//
+// THE POSITIVE-DEFINITENESS TEST IS THE ALGORITHM'S OWN, not an addition. `d > 0`
+//    is false for a non-positive-definite matrix AND for a NaN, so a non-finite
+//    element reports Singular too; matrix.h says so, and a caller that must tell
+//    those apart checks finiteness first.
+
+template <> vector< double >& Matrix< double >::solveSPD(
+	const vector< double >& rhs, vector< double >& solution ) const
+{
+	if ( nrows_ == 0 || ncols_ == 0 )
+		throw BadSize();
+	if ( nrows_ != ncols_ || rhs.size() != ( size_t ) nrows_ )
+		throw DimensionMismatch();
+
+	const unsigned n = nrows_;
+
+	// The factor C, and the intermediate z. Allocated once per SOLVE -- a
+	//    Gauss-Newton method solves once per iteration, never per exemplar.
+	Matrix< double > C( n, n, 0.0 );
+	vector< double > z( n, 0.0 );
+
+	// --- Algorithm A.4. ONLY THE UPPER TRIANGLE OF *this IS READ -----------
+	for ( unsigned k = 0; k < n; k++ )
+	{
+		double d = ( *this )( k, k );
+		for ( unsigned i = 0; i < k; i++ )
+			d -= C( i, k ) * C( i, k );
+
+		if ( !( d > 0.0 ) ) // false for a non-positive d AND for a NaN
+			throw Singular();
+
+		C( k, k ) = sqrt( d );
+
+		for ( unsigned j = k + 1; j < n; j++ )
+		{
+			double s = ( *this )( k, j ); // upper triangle: k < j
+			for ( unsigned i = 0; i < k; i++ )
+				s -= C( i, k ) * C( i, j );
+			C( k, j ) = s / C( k, k );
+		}
+	}
+
+	// --- Forward substitution, C' z = rhs ----------------------------------
+	//     C' is lower triangular with ( C' )( i, k ) = C( k, i ).
+	for ( unsigned i = 0; i < n; i++ )
+	{
+		double s = rhs[ i ];
+		for ( unsigned k = 0; k < i; k++ )
+			s -= C( k, i ) * z[ k ];
+		z[ i ] = s / C( i, i );
+	}
+
+	// --- Back substitution, C x = z ----------------------------------------
+	solution.assign( n, 0.0 );
+	for ( unsigned ii = n; ii > 0; ii-- )
+	{
+		const unsigned i = ii - 1;
+		double s = z[ i ];
+		for ( unsigned j = i + 1; j < n; j++ )
+			s -= C( i, j ) * solution[ j ];
+		solution[ i ] = s / C( i, i );
+	}
+
+	return solution; // destination-taking, and the destination is the result
+}
