@@ -196,9 +196,11 @@ the design-matrix condition number.
 using the Wilks likelihood-ratio test.
 \end{description}
 
-Training supports canonical gradient descent, conjugate gradient
-descent, and Shanno's method.  The automatic selector probes all three
-from cloned starting weights for a short wall-clock budget, adopts the
+Training supports canonical gradient descent, conjugate gradient descent,
+Shanno's method, L-BFGS, iRPROP+, and, through the C++ layer, LM for eligible
+small full-batch LMS networks.  The REST/GUI surface currently exposes L-BFGS
+and iRPROP+ but not LM.  The automatic selector probes only canonical, CGD, and
+Shanno from cloned starting weights for a short wall-clock budget, adopts the
 lowest-error probe, and continues from the progress it made.
 
 Stopping conditions are evaluated every iteration, independently of
@@ -326,6 +328,12 @@ Grow-and-prune hidden-layer selection. \\ \hline
 \texttt{plateau.h} &
 Optimizer probing and plateau detection shared by training
 workflows. \\ \hline
+\texttt{lbfgs.*},
+\texttt{irprop.*},
+\texttt{lm.*} &
+Retained neural optimizer mechanisms: limited-memory BFGS, iRPROP+, and
+Levenberg-Marquardt.  \texttt{Network} composes each service without moving
+its published update rule into the model layer. \\ \hline
 \texttt{evaldesign.*} &
 Typed partition, sampling-unit, and inference policy metadata. \\ \hline
 \texttt{auccov.*},

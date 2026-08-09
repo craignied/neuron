@@ -232,6 +232,7 @@ skip source inspection.
 | `split.h`, `evaldesign.h` | Chapter 12, partition planning and typed evaluation design |
 | `auccov.h`, `delong.h`, `clustered_auc.h` | Chapter 12, common AUC algebra and sampling-unit-specific covariance |
 | `plateau.h`, `autoalgo.h`, `modelfactory.h`, `netclone.h` | Chapter 12, training-control and construction services |
+| `lbfgs.h`, `irprop.h`, `lm.h` | Chapter 12, retained optimizer algorithms, objective adapters, state, eligibility, failures, and evidence |
 | `obd.h` | Chapter 12, architecture selection |
 | `crossval.h`, `cvadapters.h`, `cvreport.h` | Chapter 12, repetition, model-family adapters, reporting, and artifacts |
 | `regressnet.h` | Chapter 12 hierarchy/current contract and Chapter 13 workflow |
@@ -393,6 +394,16 @@ the change is complete:
    eligibility refusals, stable response names/identifiers, and the GUI control.
    Make the new selection test fail against the old boundary before accepting
    it as evidence.
+7. Update the consolidated optimizer comparison table in Chapter 12 after every
+   completed candidate decision, including a rejected or research-only result.
+   Give the exact tested variant, eligibility and public-access status, one
+   representative matched-workload result with elapsed time and full traversals,
+   seed stability, conditioning and late-stage behavior, the retain/reject
+   decision, and a pointer to the detailed evidence. Preserve unresolved
+   orderings and workload limits explicitly; never convert one benchmark into a
+   universal ranking. If a rejected prototype is removed, keep its table row as
+   research history and label it unavailable rather than documenting it as a
+   current capability.
 
 Research prototypes may deliberately remain C++-only while evidence is being
 collected. The research handoff must name that boundary. Once the method is
@@ -601,6 +612,10 @@ Text extraction is not a substitute for visual inspection.
       include verified requests, add an `Algorithm name!REST API` index pointer
       in Chapter 4 as well as the derivation/implementation pointers, and keep
       retention separate from ranking.
+- [ ] After every optimizer retain, research-only, or reject decision, update
+      Chapter 12's consolidated optimizer comparison table with scoped evidence,
+      stability, conditioning, late-stage behavior, availability, and the
+      evidence-document pointer.
 - [ ] Update the CLI chapter and `docs/gui_cli_parity.md` if parity is involved.
 - [ ] Update the tooling chapter for a new or changed user-facing helper.
 - [ ] Include reproducibility, mutation, failure, and artifact behavior.

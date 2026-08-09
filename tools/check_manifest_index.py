@@ -165,9 +165,13 @@ PRINCIPAL_METHODS = {
         "sampleTestError", "getCondNum", "getCondMaxEig", "getCondMinEig",
         "packedSize", "packWeights", "unpackWeights", "batchObjectiveGradient",
         "setLBFGSMemory", "getLBFGSMemory", "applyAbsoluteStep",
-        "TRAIN_IRPROP",
+        "normalEquationsAvailable", "batchNormalEquations", "lmIteration",
+        "stepConverged", "TRAIN_IRPROP", "TRAIN_LM", "NormalEvaluator",
     },
-    "OneHiddenNet": {"setHidden", "randomize", "save", "load", "pack", "innerTrainSet", "propagate"},
+    "OneHiddenNet": {
+        "setHidden", "randomize", "save", "load", "pack", "innerTrainSet",
+        "propagate", "batchNormalEquations",
+    },
     "SimpleProp": {"growHidden", "removeHidden", "hiddenSaliency"},
     "Logistic": {"getBetas", "getBetaSE", "getWaldP"},
     "DFA": {"train", "fitDiscriminant"},
@@ -195,7 +199,7 @@ PRINCIPAL_METHODS = {
         "applyInverseHessian", "scaling", "pushPair", "resetHistory",
         "copyConfigurationFrom",
     },
-    # iRPROP+ (research only; Network::TRAIN_IRPROP). Listed by method for the
+    # iRPROP+ (retained; Network::TRAIN_IRPROP). Listed by method for the
     # same reason LBFGS is: a reader searching the index wants the operation,
     # and computeStep IS the published table.
     # Levenberg-Marquardt (Network::TRAIN_LM). Listed by method for the same

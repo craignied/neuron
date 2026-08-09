@@ -304,6 +304,8 @@ presentation only.  These fields never change the fitted endpoint.
 \index{Shanno algorithm!REST API}
 \index{L-BFGS!REST API}
 \index{iRPROP+!REST API}
+\index{Levenberg-Marquardt!REST API status}
+\index{LM!REST API status}
 \index{Automatic algorithm selection!REST API}
 
 The \texttt{algorithm} field selects the rule that converts the current
@@ -355,6 +357,15 @@ before a request when a fresh, reproducible start is required.
       the separately planned bounded portfolio policy rather than an inference
       from one benchmark family.
 \end{description}
+
+\paragraph{Retained C++ method not yet exposed through REST.}
+Levenberg-Marquardt (LM) is retained in the engine for small, full-batch LMS
+neural models, but \texttt{POST /api/train} has no LM token in the current
+contract.  In particular, \texttt{algorithm=6} is \emph{not} accepted today.
+The C++ implementation and evidence are documented in
+Section~\ref{training_control_objects}; REST-first integration, eligibility
+errors, and a corresponding GUI control must be implemented and verified before
+this field list may add LM.  LM is also absent from \texttt{algorithm=auto}.
 
 No retained method is the universal default. Application benchmarks made
 iRPROP+ faster than L-BFGS, while generated conditioning fixtures favored

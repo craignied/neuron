@@ -1088,6 +1088,45 @@ are not an independent test sample for either locked-test contrast.
 
 \section{Training-control services}\label{training_control_objects}
 
+\subsection{Measured optimizer portfolio}\label{optimizer_comparison}
+\index{Optimizer!benchmark comparison}
+\index{Training algorithms!benchmark comparison}
+
+Optimizer choice is workload-dependent.  Table~\ref{tab:optimizer-comparison}
+summarizes the retained research evidence; it is a navigation table, not a
+universal ranking.  Times are Release-build medians on Apple Silicon, measured
+from identical starting weights to a shared, predeclared training objective.
+``Traversals'' counts every complete pass over the training set, including trial
+evaluations.  Held-out differences at the matched endpoints were within the
+observed seed-to-seed noise, so the table supports speed and stability decisions,
+not claims of better prediction.
+
+\small
+\begin{longtable}{|>{\raggedright\arraybackslash}p{0.72in}|>{\raggedright\arraybackslash}p{1.15in}|>{\raggedright\arraybackslash}p{1.72in}|>{\raggedright\arraybackslash}p{1.72in}|}
+\caption{Measured neural optimizer portfolio and decisions.\label{tab:optimizer-comparison}}\\
+\hline
+\textbf{Method} & \textbf{Eligibility / status} & \textbf{Representative matched-endpoint evidence} & \textbf{Stability, conditioning, and late stage} \\ \hline
+\endfirsthead
+\hline
+\textbf{Method} & \textbf{Eligibility / status} & \textbf{Representative matched-endpoint evidence} & \textbf{Stability, conditioning, and late stage} \\ \hline
+\endhead
+Canonical & Neural and Logistic; on-line or batch. Public REST token 1; behavioral reference. & Civic Choice 6,000: 17,402.3 ms / 15,971 traversals. It defines the practical matched endpoint but is not the speed reference. & Does not reach the shipped neural gradient threshold on the measured application workload. Retained legacy baseline. \\ \hline
+Shanno & Legacy batch neural control; public REST token 3 and part of \texttt{auto}. & Civic Choice 6,000: 214.1 ms / 194 traversals, about 81 times faster than canonical in the baseline campaign. & Seed traversal spread 1.33 times. Best measured late-stage training and held-out objectives, but slower than retained modern methods. \\ \hline
+L-BFGS & Smooth full-batch neural objectives; public REST token 4; not in \texttt{auto}. & Civic Choice: 14--20 traversals and 8.8--13.0 times faster than Shanno across 6,000--100,000 rows. & Seed spread 1.43 times; fastest on \texttt{well4}; faster than iRPROP+ late-stage. Retained. \\ \hline
+iRPROP+ & Full-batch neural objectives; public REST token 5; not in \texttt{auto}. & Civic Choice 6,000: 10.9 ms / 10 traversals; fastest application arm, and 1.28--2.08 times faster than L-BFGS across the measured groups. & Seed spread 1.43 times. Little conditioning penalty, but slower and worse than L-BFGS late-stage. Retained. \\ \hline
+GBB (BB1)\index{Barzilai-Borwein!rejected research candidate} & Raydan Algorithm GBB research prototype; rejected, removed, and unavailable. & Civic Choice base seed: 28.1 ms / 25 traversals; fastest on no measured workload. & Extreme 670-fold seed spread and 153-fold conditioning penalty; worst late-stage endpoint of the fast methods. Rejected. \\ \hline
+LM & Small ($P\leq512$), full-batch LMS \texttt{OneHiddenNet}; retained C++ method, no REST token yet. & \texttt{poor4}: 10.8 ms / 15 traversals versus L-BFGS 26.8 / 32 and iRPROP+ 49.9 / 59. iRPROP+ remains faster on every Civic arm; LM versus L-BFGS there is unresolved. & Seed traversal spread 1.5 times. Fastest only on the severely ill-conditioned twin, worst on \texttt{well4}; late stage converges by the published small-step rule but lands behind Shanno and L-BFGS. Retained. \\ \hline
+\end{longtable}
+\normalsize
+
+Detailed distributions, endpoints, limitations, and reconstruction information
+are in \path{docs/learning_research/optimizer_baseline_results.md},
+\path{docs/learning_research/lbfgs_screen_results.md},
+\path{docs/learning_research/irprop_screen_results.md},
+\path{docs/learning_research/bb_screen_results.md}, and
+\path{docs/learning_research/lm_screen_results.md}.  A rejected row records a
+measured decision; it does not advertise a supported implementation.
+
 \subsection{PlateauDetector}
 \index{PlateauDetector}
 \index{Early stopping!plateau}
@@ -1392,6 +1431,18 @@ algorithm=4&lbfgs_memory=10&batch_epoch=1&autostep=0&maxiter=2000
 \index{LMObjective!install}
 \index{LMObjective!evaluateNormal}
 \index{LMObjective!cancelled}
+\index{Network!TRAIN\_LM}
+\index{Network!lmIteration}
+\index{Network!NormalEvaluator}
+\index{Network!NormalEvaluator!constructor}
+\index{Network!NormalEvaluator!currentPoint}
+\index{Network!NormalEvaluator!install}
+\index{Network!NormalEvaluator!evaluateNormal}
+\index{Network!NormalEvaluator!cancelled}
+\index{Network!normalEquationsAvailable}
+\index{Network!batchNormalEquations}
+\index{Network!stepConverged}
+\index{OneHiddenNet!batchNormalEquations}
 
 \texttt{LM} is neuron's Levenberg-Marquardt optimizer for small full-batch
 least-squares neural models.  Where a quasi-Newton method builds curvature from
@@ -1401,13 +1452,16 @@ problem directly and solves a damped system for its step.
 \paragraph{Published derivation.}  The variant implemented is Algorithm 3.16 of
 Madsen, Nielsen and Tingleff,\footnote{K. Madsen, H. B. Nielsen and O. Tingleff,
 {\em Methods for Non-Linear Least Squares Problems}, 2nd edition, Informatics and
-Mathematical Modelling, Technical University of Denmark, Lyngby,
-2004.}\index{Methods for Non-Linear Least Squares Problems} which is Levenberg's
+Mathematical Modelling, Technical University of Denmark, Lyngby, 2004,
+\url{http://www2.imm.dtu.dk/pubdb/edoc/imm3215.pdf}.}
+\index{Methods for Non-Linear Least Squares Problems} which is Levenberg's
 damped Gauss-Newton method\footnote{K. Levenberg (1944), {\em A Method for the
 Solution of Certain Problems in Least Squares}, Quart. Appl. Math. {\bf 2}, pp
-164--168.} as developed by Marquardt\footnote{D. Marquardt (1963), {\em An
+164--168, \url{https://doi.org/10.1090/qam/10666}.} as developed by
+Marquardt\footnote{D. Marquardt (1963), {\em An
 Algorithm for Least Squares Estimation on Nonlinear Parameters}, SIAM J. Appl.
-Math. {\bf 11}, pp 431--441.} with the damping update of
+Math. {\bf 11}, pp 431--441,
+\url{https://doi.org/10.1137/0111030}.} with the damping update of
 Nielsen.\footnote{H. B. Nielsen (1999), {\em Damping Parameter in Marquardt's
 Method}, IMM, DTU, Report IMM-REP-1999-05.}  The step solves
 
@@ -1512,9 +1566,116 @@ bounds consecutive rejections at 20; with (3.15b) restored the damping growth
 drives the step below the small-step threshold first, so this backstop is not
 reached by any declared construction.
 
-\paragraph{Performance evidence, and its scope.}  See
-\texttt{docs/learning\_research/lm\_screen\_results.md} and the consolidated
-comparison in Chapter~\ref{obj_chap}.  {\bf Retained under the portfolio policy}:
+\paragraph{LMObjective contract.}  This abstract interface has no public data.
+It supplies exactly the model operations that \texttt{LM} needs:
+
+\begin{itemize}
+\item \texttt{virtual $\sim$LMObjective()}: permits destruction through the
+      interface.
+\item \texttt{virtual void currentPoint(vector<double>\& weights) const = 0}:
+      writes the currently installed parameters in the packed layout used by
+      the normal-equations gradient.
+\item \texttt{virtual void install(const vector<double>\& weights) = 0}:
+      installs one packed point; implementations validate its dimension before
+      changing weights.
+\item \texttt{virtual double evaluateNormal(Matrix<double>\& normal,
+      vector<double>\& gradient) = 0}: evaluates the installed point without
+      training, returns $F$, writes the fully symmetric
+      ${\bf A}={\bf J}^t{\bf J}$ including penalty curvature, and writes
+      ${\bf g}={\bf J}^t{\bf f}=\nabla F$. It changes no weight, optimizer
+      state, iteration state, report, or cached statistic.
+\item \texttt{virtual bool cancelled() const = 0}: reports an external stop
+      request between trial evaluations.
+\end{itemize}
+
+\paragraph{LM public specification.}  \texttt{LM} exposes no writable public
+state. Its constants and observations are read-only:
+
+\begin{itemize}
+\item \texttt{LM()}: constructs clean per-run state by calling \texttt{reset()}.
+\item \texttt{static const double TAU, NU\_INIT, MU\_FLOOR, EPS\_STEP}:
+      respectively $10^{-3}$, $2$, $1/3$, and $10^{-12}$, with the meanings
+      given above.
+\item \texttt{static const unsigned MAX\_PARAMETERS, MAX\_REJECTIONS}:
+      the neuron-specific bounds 512 and 20.
+\item \texttt{void reset()}: clears the accepted point, normal equations,
+      gradient, damping, rejection multiplier, convergence fact, and counters.
+      It does not change model weights.
+\item \texttt{bool started() const}: whether the initial point has been
+      evaluated since the last reset.
+\item \texttt{double iterate(LMObjective\& objective)}: performs one outer
+      Algorithm 3.16 iteration and returns the objective at the accepted point
+      from which it departed. An accepted trial remains installed. Cancellation
+      and failure restore the last accepted point.
+\item \texttt{double gradMax() const}: maximum absolute raw-gradient component
+      at the point described by the last returned objective.
+\item \texttt{bool stepConverged() const}: whether criterion (3.15b) fired
+      before a trial. This reports a fact; \texttt{Iterative}, not \texttt{LM},
+      turns it into \texttt{STOP\_SMALL\_STEP}.
+\item \texttt{double damping() const} and
+      \texttt{double rejectionMultiplier() const}: current $\mu$ and $\nu$.
+\item \texttt{double acceptedObjective() const},
+      \texttt{const vector<double>\& acceptedPoint() const},
+      \texttt{const vector<double>\& gradient() const},
+      \texttt{const vector<double>\& lastStep() const}, and
+      \texttt{const Matrix<double>\& normalMatrix() const}: read-only views of
+      the accepted state and most recently solved step for deterministic audit.
+\item \texttt{unsigned long long iterations() const},
+      \texttt{acceptances() const}, \texttt{rejections() const},
+      \texttt{factorizationFailures() const},
+      \texttt{nonFiniteTrials() const}, and \texttt{cancellations() const}:
+      per-run research counters, reset together.
+\end{itemize}
+
+The nested exceptions expose \texttt{const char* what() const}.
+\texttt{Ineligible} additionally has
+\texttt{explicit Ineligible(const char* why)} so the composing layer can name
+the refused condition. \texttt{NotFinite} and \texttt{StepRejected} return
+fixed explanations.
+
+\paragraph{Network and model composition.}  These protected operations are
+part of the current class contract:
+
+\begin{itemize}
+\item \texttt{TRAIN\_LM}: the internal \texttt{Network} training-type value
+      selecting LM. It is not a REST token and is not written to saved models.
+\item \texttt{virtual bool normalEquationsAvailable() const}: returns false in
+      \texttt{Network}; \texttt{OneHiddenNet} returns true. It is checked before
+      training so an unavailable boundary cannot masquerade as an empty problem.
+\item \texttt{virtual double batchNormalEquations(Matrix<double>\& normal,
+      vector<double>\& gradient)}: the default refuses;
+      \texttt{OneHiddenNet} performs the one-pass accumulation stated above and
+      returns the matching objective without changing weights or training state.
+\item \texttt{double lmIteration()}: validates LMS loss, batch mode,
+      \texttt{autostep=0}, both model boundaries, and the parameter ceiling;
+      then adapts the network through \texttt{NormalEvaluator}, delegates the
+      algorithm to \texttt{LM::iterate()}, and records \texttt{currGradMax} from
+      the departing raw gradient.
+\item \texttt{virtual bool stepConverged() const}: reports true only when
+      \texttt{TRAIN\_LM} is selected and LM has observed its small-step
+      criterion. Every other optimizer returns false.
+\end{itemize}
+
+\texttt{Network::NormalEvaluator} is a non-owning adapter. It owns no optimizer
+or model state and provides:
+
+\begin{itemize}
+\item \texttt{explicit NormalEvaluator(Network\& network)}: stores the network
+      reference for the lifetime of one outer iteration.
+\item \texttt{void currentPoint(vector<double>\& weights) const}: forwards to
+      \texttt{packWeights()}.
+\item \texttt{void install(const vector<double>\& weights)}: forwards to
+      \texttt{unpackWeights()}.
+\item \texttt{double evaluateNormal(Matrix<double>\& normal,
+      vector<double>\& gradient)}: forwards to
+      \texttt{batchNormalEquations()} and returns its objective.
+\item \texttt{bool cancelled() const}: asks the current observer, returning
+      false when no observer is installed.
+\end{itemize}
+
+\paragraph{Performance evidence, and its scope.}  Detailed evidence is in the
+LM screen results under \path{docs/learning_research}; the consolidated
+comparison is in Chapter~\ref{obj_chap}.  {\bf Retained under the portfolio policy}:
 LM is the recommended method for the measured severely ill-conditioned small-LMS
 workload, where it reaches the matched endpoint in 10.8~ms against L-BFGS's
 26.8~ms and iRPROP+'s 49.9~ms.  It is {\em not} the application-benchmark
@@ -1523,6 +1684,24 @@ Choice is {\bf ordering not established} and is deliberately left unresolved.  L
 is {\em worst} on the well-conditioned twin, so conditioning behaviour must not be
 generalized beyond the measured pair.  Held-out differences are descriptive and
 are not evidence of predictive superiority.
+
+\subsubsection{Example and notes}
+\begin{verbatim}
+SimpleProp& net = fittedSmallLmsNetwork;
+net.setLMSerror();             // required least-squares objective
+net.setTrainingType(Network::TRAIN_LM);
+net.setBatchEpoch(true);       // required
+net.setAutoStepSize(false);    // required: LM owns its step
+double objective = net.train();
+if (!Iterative::converged(net.getStopReason()))
+   rejectFit(objective);
+\end{verbatim}
+
+There is intentionally no equivalent REST request yet; Chapter 4 records that
+boundary. A subsequent \texttt{train()} starts a new LM run, recomputes
+$\mu_0$ from the new point, and preserves only the network's weights and ordinary
+training configuration. The $O(P^2)$ accumulation and state make the method
+appropriate only within its declared small-network ceiling.
 
 \subsection{IRpropState}
 \index{IRpropState}

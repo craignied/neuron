@@ -67,6 +67,8 @@ digraph neuron_objects {
     LBFGS [label="LBFGS"];
     LBFGSObjective [label="LBFGSObjective"];
     IRprop [label="IRpropState"];
+    LM [label="LM"];
+    LMObjective [label="LMObjective"];
 
     ModelApi [label="Model API"];
     IterativeApi [label="Iterative API"];
@@ -110,5 +112,7 @@ digraph neuron_objects {
     NetworkApi -> LBFGS [label="composes"];
     LBFGS -> LBFGSObjective [label="evaluates through"];
     NetworkApi -> IRprop [label="composes"];
+    NetworkApi -> LM [label="composes"];
+    LM -> LMObjective [label="evaluates through"];
   }
 }
