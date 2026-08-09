@@ -120,6 +120,12 @@ STAGES = {"none", "refused", "setup", "training"}
 STOP_REASONS = {"none", "max_iterations", "min_error", "min_change",
                 "error_window", "grad_max", "plateau", "cancelled",
                 "validation_early_stop", "probe_budget",
+                # Levenberg-Marquardt's published criterion (3.15b): the
+                # optimizer's own step became numerically negligible against the
+                # parameters.  It IS convergence -- Iterative::converged() is
+                # true for it -- and it exists because omitting it once made a
+                # converged run report a failure.
+                "small_step",
                 # Not engine stop reasons: a cv arm ran k*r+1 fits and has no
                 # single one.  Named distinctly so nothing can read a workflow
                 # outcome as an Iterative::StopReason.
@@ -133,8 +139,11 @@ NULLABLE_NUM_FIELDS = ["heldout_error", "cv_auc", "locked_auc"]
 # no menu, GUI control, HTTP field or automatic-selection rule produces it, and
 # it exists so this harness and tests/network/check_irprop.cpp can measure the
 # Phase 4 candidate.
+# 5 is the RESEARCH-ONLY Levenberg-Marquardt prototype (Network::TRAIN_LM),
+# the Phase 6 candidate, on the same terms: no menu, GUI control, HTTP field or
+# automatic-selection rule produces it.
 OPTIMIZER_NAMES = {0: "canonical", 1: "cgd", 2: "shanno", 3: "lbfgs",
-                   4: "irprop"}
+                   4: "irprop", 5: "lm"}
 
 # Fields that must be identical across every arm of a comparison group.  The
 # group's declared axis is removed from this list for that group, and nothing
@@ -1461,6 +1470,12 @@ def main():
                          "prototype against the standing portfolio panel "
                          "(L-BFGS, Shanno, canonical), on Civic Choice 6k/h4 at "
                          "the committed practical endpoint")
+    ap.add_argument("--lm", action="store_true",
+                    help="restrict to the Phase 6 candidate screen: the "
+                         "Levenberg-Marquardt prototype against the five-arm "
+                         "standing panel (canonical, Shanno, L-BFGS, iRPROP+), "
+                         "with the four-seed panel and the well4/poor4 "
+                         "conditioning pair inside the screen rather than after it")
     ap.add_argument("--timeout", type=float, default=120.0,
                     help="per-arm timeout in seconds (default 120; raise it "
                          "deliberately for a genuinely long Step 0B workload)")
@@ -1484,6 +1499,7 @@ def main():
     subset = ("--step0b" if args.step0b
               else "--screen" if args.screen
               else "--irprop" if args.irprop
+              else "--lm" if args.lm
               else "--pilot" if args.pilot
               else None)
     available = list_cases(probe, subset)

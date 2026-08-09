@@ -485,6 +485,16 @@ double BackProp::innerTrainSet()
 	if ( trainingType == TRAIN_IRPROP )
 		return irpropIteration();
 
+	// And Levenberg-Marquardt, WHICH THIS MODEL CANNOT RUN. The dispatch is
+	//    here precisely so that lmIteration() can REFUSE BY NAME: this class
+	//    implements no normal-equations boundary, and without this line the
+	//    selection would fall through to the batch path below and silently
+	//    train by plain gradient descent under another method's name. A
+	//    trainingType nothing dispatches is not an unsupported option, it is a
+	//    wrong answer.
+	if ( trainingType == TRAIN_LM )
+		return lmIteration();
+
 	// THE BATCH SEPARATE-GRADIENT PATH is one authoritative evaluation, then
 	//    the optimizer's direction, then the epoch's single update. An early
 	//    return, because an evaluation with an update after it cannot be reused

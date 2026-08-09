@@ -1357,6 +1357,173 @@ POST /api/train
 algorithm=4&lbfgs_memory=10&batch_epoch=1&autostep=0&maxiter=2000
 \end{verbatim}
 
+\subsection{LM}
+\index{LM}
+\index{Optimizer!Levenberg-Marquardt}
+\index{Levenberg-Marquardt}
+\index{LM!constructor}
+\index{LM!published constants}
+\index{LM!reset}
+\index{LM!started}
+\index{LM!iterate}
+\index{LM!gradMax}
+\index{LM!stepConverged}
+\index{LM!damping}
+\index{LM!rejectionMultiplier}
+\index{LM!acceptedObjective}
+\index{LM!acceptedPoint}
+\index{LM!gradient}
+\index{LM!lastStep}
+\index{LM!normalMatrix}
+\index{LM!iterations}
+\index{LM!acceptances}
+\index{LM!rejections}
+\index{LM!factorizationFailures}
+\index{LM!nonFiniteTrials}
+\index{LM!cancellations}
+\index{LM!Ineligible}
+\index{LM!Ineligible!what}
+\index{LM!NotFinite}
+\index{LM!NotFinite!what}
+\index{LM!StepRejected}
+\index{LM!StepRejected!what}
+\index{LMObjective}
+\index{LMObjective!currentPoint}
+\index{LMObjective!install}
+\index{LMObjective!evaluateNormal}
+\index{LMObjective!cancelled}
+
+\texttt{LM} is neuron's Levenberg-Marquardt optimizer for small full-batch
+least-squares neural models.  Where a quasi-Newton method builds curvature from
+successive gradients, LM forms the {\em normal equations} of the least-squares
+problem directly and solves a damped system for its step.
+
+\paragraph{Published derivation.}  The variant implemented is Algorithm 3.16 of
+Madsen, Nielsen and Tingleff,\footnote{K. Madsen, H. B. Nielsen and O. Tingleff,
+{\em Methods for Non-Linear Least Squares Problems}, 2nd edition, Informatics and
+Mathematical Modelling, Technical University of Denmark, Lyngby,
+2004.}\index{Methods for Non-Linear Least Squares Problems} which is Levenberg's
+damped Gauss-Newton method\footnote{K. Levenberg (1944), {\em A Method for the
+Solution of Certain Problems in Least Squares}, Quart. Appl. Math. {\bf 2}, pp
+164--168.} as developed by Marquardt\footnote{D. Marquardt (1963), {\em An
+Algorithm for Least Squares Estimation on Nonlinear Parameters}, SIAM J. Appl.
+Math. {\bf 11}, pp 431--441.} with the damping update of
+Nielsen.\footnote{H. B. Nielsen (1999), {\em Damping Parameter in Marquardt's
+Method}, IMM, DTU, Report IMM-REP-1999-05.}  The step solves
+
+\[
+( {\bf J}^t{\bf J} + \mu{\bf I} )\, {\bf h}_{lm} = -{\bf g},
+\qquad {\bf g} = {\bf J}^t{\bf f}
+\]
+
+with the initial damping $\mu_0 = \tau \cdot \max_i\{a_{ii}\}$, and after each
+iteration $\mu$ is controlled by the gain ratio
+
+\[
+\varrho = \frac{F({\bf x}) - F({\bf x}+{\bf h}_{lm})}{L({\bf 0}) - L({\bf h}_{lm})},
+\qquad
+L({\bf 0}) - L({\bf h}_{lm}) = \frac{1}{2}{\bf h}_{lm}^t(\mu{\bf h}_{lm} - {\bf g})
+\]
+
+accepting the step when $\varrho > 0$ and then setting
+$\mu := \mu \cdot \max\{\frac{1}{3}, 1-(2\varrho-1)^3\}$ with $\nu := 2$, and
+otherwise restoring the point and setting $\mu := \mu\nu$, $\nu := 2\nu$.
+
+{\bf One named algorithm.}  Levenberg's $\mu{\bf I}$ damping, Marquardt's
+$\mu\,\mathrm{diag}({\bf J}^t{\bf J})$ and Mor\'e's trust-region scaling are
+three different published methods.  This is Algorithm 3.16, with $\mu{\bf I}$.
+No flag, mode or configuration value turns it into any of the others.
+
+\paragraph{The constants, none of them configurable.}
+$\tau = 10^{-3}$, $\nu_0 = 2$, the damping floor $\frac{1}{3}$, and
+$\epsilon_2 = 10^{-12}$ for the small-step criterion.  Neuron adds a bounded
+rejection backstop of 20 trials per iteration and a parameter ceiling of 512.
+A tunable convergence tolerance or initial damping would let a measurement
+describe the tuning rather than the method, so none is exposed.
+
+\paragraph{Neuron's objective, expressed as a sum of squares.}  Under LMS with
+weight decay the objective is
+$F({\bf w}) = \frac{1}{N}\sum_k \frac{1}{2}(o_k - y_k)^2 + \frac{\lambda}{2}\|{\bf w}\|^2$,
+which is exactly $\frac{1}{2}{\bf f}^t{\bf f}$ for an augmented residual whose
+data rows are $r_k/\sqrt{N}$ and whose penalty rows are
+$\sqrt{\lambda}\,w_p$.  Hence
+
+\[
+{\bf A} = \frac{1}{N}\sum_k {\bf a}_k{\bf a}_k^t + \lambda{\bf I},
+\qquad
+{\bf g} = \frac{1}{N}\sum_k r_k{\bf a}_k + \lambda{\bf w} = \nabla F
+\]
+
+with ${\bf a}_k = \partial o_k / \partial {\bf w}$, the sensitivity of the
+{\em output} rather than of the error.  {\bf The $N\times P$ Jacobian is never
+materialized}: both quantities are sums over exemplars, so storage is $O(P^2)$
+and flat in the row count.  The penalty rows are linear in ${\bf w}$, so the
+$\lambda{\bf I}$ block is the {\em exact} Hessian of the ridge penalty --- the
+Gauss-Newton approximation drops nothing from that term.
+
+\paragraph{Stopping, and a defect worth recording.}  Algorithm 3.16 has three
+criteria, and neuron divides them without moving ownership:
+(3.15a) $\|{\bf g}\|_\infty \le \epsilon_1$ is \texttt{Iterative}'s existing
+\texttt{STOP\_GRADMAX}; (3.15c) is \texttt{maxIterations}; and
+(3.15b) $\|{\bf h}_{lm}\| \le \epsilon_2(\|{\bf x}\| + \epsilon_2)$ is computed
+here, in its published position immediately after the solve and before any trial,
+and {\em reported} through \texttt{stepConverged()} so that \texttt{Iterative}
+ends the run as \texttt{STOP\_SMALL\_STEP}.
+
+The first implementation omitted (3.15b) entirely, on the reasoning that stopping
+belonged to \texttt{Iterative}.  {\em \bf That was a correctness defect, not a
+clean separation.}  With no channel to report convergence, a converged run's only
+available exit was its rejection backstop: measured, it raised
+\texttt{StepRejected} at a gradient maximum of $2.22\times10^{-10}$ with trial
+objectives bit-identical to the accepted one and a step norm of
+$6.45\times10^{-72}$.  An optimizer that reports failure after numerical
+convergence is operationally unsafe, and the fix restores the published criterion
+without giving the optimizer any authority over stopping.
+
+\paragraph{Ownership.}  \texttt{LM} owns Algorithm 3.16's entire control flow ---
+$\mu_0$, the damped solve, the gain ratio, the acceptance test, both $\mu$
+updates, the $\nu$ schedule, the rejection loop and its bound, exact restoration,
+the finiteness policy, the per-run reset and the research counters.  It has {\bf
+no model dependency}: it is handed a way to evaluate $F$, ${\bf A}$ and ${\bf g}$
+at a point through \texttt{LMObjective}, which is exactly what lets
+\texttt{tests/network/check\_lm.cpp} drive the published algorithm by hand
+against analytic problems with no network present.  \texttt{Network} composes it,
+supplies model evaluation through \texttt{batchNormalEquations()}, and applies the
+step through \texttt{applyAbsoluteStep()}: the LM step is absolute, so it never
+passes through \texttt{engine()} and never reads or writes \texttt{eta}.
+
+Working state resets in \texttt{Network::prepareRun()} beside
+\texttt{lbfgs.reset()} and \texttt{irprop.reset()}.  There is no persistent LM
+configuration --- every constant is published or declared and fixed --- so
+\texttt{Network::copy} carries nothing and a copied model starts a clean run.
+
+\paragraph{Failure contract.}  \texttt{LM::Ineligible} is raised, before any
+configuration changes, for cross-entropy loss (Levenberg-Marquardt minimizes a
+sum of squares and no residual Jacobian represents cross-entropy), on-line mode,
+the automatic step-size search, a model with no packed or normal-equations
+boundary, and a parameter count above the ceiling.  \texttt{LM::NotFinite} is
+raised for a non-finite starting objective, gradient or normal matrix, or an
+initial damping that cannot be formed, with nothing modified.  A non-finite
+{\em trial} --- NaN, $+\infty$ {\em or} $-\infty$ --- is a rejection rather than
+a failure, tested before the gain ratio: a bare $\varrho > 0$ would accept
+$-\infty$ as an infinitely good improvement.  A failed Cholesky factorization is
+likewise a rejection, and the damping is increased.  \texttt{LM::StepRejected}
+bounds consecutive rejections at 20; with (3.15b) restored the damping growth
+drives the step below the small-step threshold first, so this backstop is not
+reached by any declared construction.
+
+\paragraph{Performance evidence, and its scope.}  See
+\texttt{docs/learning\_research/lm\_screen\_results.md} and the consolidated
+comparison in Chapter~\ref{obj_chap}.  {\bf Retained under the portfolio policy}:
+LM is the recommended method for the measured severely ill-conditioned small-LMS
+workload, where it reaches the matched endpoint in 10.8~ms against L-BFGS's
+26.8~ms and iRPROP+'s 49.9~ms.  It is {\em not} the application-benchmark
+default: iRPROP+ beats it on every Civic Choice arm.  LM against L-BFGS on Civic
+Choice is {\bf ordering not established} and is deliberately left unresolved.  LM
+is {\em worst} on the well-conditioned twin, so conditioning behaviour must not be
+generalized beyond the measured pair.  Held-out differences are descriptive and
+are not evidence of predictive superiority.
+
 \subsection{IRpropState}
 \index{IRpropState}
 \index{Optimizer!iRPROP+}

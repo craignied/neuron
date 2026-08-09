@@ -13,6 +13,7 @@
 #include "irprop.h"
 #include "iterative.h"
 #include "lbfgs.h"
+#include "lm.h"
 
 class Network : public Iterative {
 public:
@@ -26,6 +27,12 @@ public:
 	// Retained iRPROP+, selectable as REST/GUI algorithm=5. The retired menu,
 	//    automatic selector and saved-network format remain unchanged.
 	static const unsigned TRAIN_IRPROP = 4;
+
+	// RESEARCH ONLY: Levenberg-Marquardt (see lm.h). No REST field, GUI
+	//    control, menu token, automatic-selection entry or saved-network field
+	//    produces it; the public identifier, if it is ever retained, is
+	//    assigned in the plan's Phase 5.
+	static const unsigned TRAIN_LM = 5;
 	Network(); // default constructor
 	virtual ~Network(); // destructor
 
@@ -218,6 +225,37 @@ protected:
 	// Install packed weights. The size is validated ONCE, here, at entry.
 	virtual void unpackWeights( const vector< double >& source );
 
+	// Does this model implement the NORMAL-EQUATIONS boundary below? False by
+	//    default, exactly as packedSize() reports 0 by default: a model that
+	//    does not implement it REFUSES rather than returning something
+	//    plausible. Only OneHiddenNet does, which is the eligible model set the
+	//    LM research phase declared -- SimpleProp and BareProp.
+	virtual bool normalEquationsAvailable() const { return false; }
+
+	// EVALUATE THE NORMAL EQUATIONS at the currently installed weights, in ONE
+	//    traversal: returns the objective, and writes
+	//
+	//        normal   = A = J'J  including the weight-decay curvature
+	//        gradient = g = J'f, which IS the raw gradient of that objective
+	//
+	//    where J is the Jacobian of the RESIDUAL, not of the error. It is a
+	//    different quantity from batchObjectiveGradient()'s gradient and cannot
+	//    be obtained from it without dividing by the residual, which is
+	//    unacceptable as the residual goes to zero.
+	//
+	//    THE N-BY-P JACOBIAN IS NEVER MATERIALIZED. Both outputs are sums over
+	//    exemplars of per-exemplar quantities, so storage is O(P^2) and flat in
+	//    the row count.
+	//
+	//    `normal` is FULLY SYMMETRIC on return. The accumulation writes the
+	//    upper triangle only -- that is where half of its P^2 work is saved --
+	//    and completes the symmetry once per traversal, so no caller ever
+	//    receives a half-populated Matrix (see Matrix::addOuterUpper).
+	//
+	//    Like batchObjectiveGradient() it evaluates and does not train.
+	virtual double batchNormalEquations( Matrix< double >& normal,
+		vector< double >& gradient );
+
 	// EVALUATE, do not train. Returns the mean batch objective at the
 	//    CURRENTLY INSTALLED weights, including the current weight-decay
 	//    policy, and writes the RAW mean gradient of that same objective --
@@ -256,6 +294,21 @@ protected:
 	//    does not go through engine() either -- an absolute step cannot honestly
 	//    fit a contract whose caller applies `w -= g * eta`.
 	IRpropState irprop;
+
+	// --- The Levenberg-Marquardt optimizer (research only; see lm.h) -------
+	//
+	//    Composed on the same terms: LM owns Algorithm 3.16 entirely, Network
+	//    supplies model evaluation through the normal-equations boundary, and
+	//    Iterative keeps stopping. It does not go through engine() either -- an
+	//    absolute step chosen by a damped solve cannot honestly fit a contract
+	//    whose caller applies `w -= g * eta`.
+	LM lm;
+
+	// PER-RUN SCRATCH for that iteration. Empty until an LM run touches them,
+	//    so no other model pays for them.
+	Matrix< double > lmNormal;    // A = J'J, handed to LM
+	vector< double > lmGradient;  // g = J'f
+	vector< double > lmWeights;   // the packed weights LM installs and reads
 
 	// PER-RUN SCRATCH for that iteration, so a run allocates once rather than
 	//    once per epoch. Empty until an iRPROP+ run touches them, so no other
@@ -326,8 +379,50 @@ protected:
 	//    packed boundary.
 	double lbfgsIteration();
 
+	// ONE LEVENBERG-MARQUARDT ITERATION, called from the concrete model's
+	//    innerTrainSet() when trainingType is TRAIN_LM. Composition only: the
+	//    eligibility refusals, one LM::iterate() call, and currGradMax from the
+	//    RAW gradient at the point the step departed from. LM owns the
+	//    algorithm and Iterative owns stopping (rule 6).
+	//
+	//    REFUSES rather than quietly becoming something else: cross-entropy
+	//    loss (LM minimizes a SUM OF SQUARES, and there is no residual vector
+	//    whose 0.5 f'f is the cross-entropy objective -- this is the strict LMS
+	//    gate), on-line mode, the automatic step-size search, a model with no
+	//    packed boundary, a model with no normal-equations boundary, and a
+	//    parameter count above LM::MAX_PARAMETERS.
+	double lmIteration();
+
+	// The evaluator LM drives. A LOCAL of one outer iteration holding a
+	//    reference and no state. Separate from Evaluator above rather than a
+	//    second base of it: the two optimizers need different evaluations, and
+	//    one class implementing two unrelated interfaces would make every
+	//    future reader check which method belonged to which.
+	class NormalEvaluator : public LMObjective {
+	public:
+		explicit NormalEvaluator( Network& n ) : net( n ) { }
+		virtual void currentPoint( vector< double >& weights ) const
+		{ net.packWeights( weights ); }
+		virtual void install( const vector< double >& weights )
+		{ net.unpackWeights( weights ); }
+		virtual double evaluateNormal( Matrix< double >& normal,
+			vector< double >& gradient )
+		{ return net.batchNormalEquations( normal, gradient ); }
+		virtual bool cancelled() const
+		{ return net.observerPtr && net.observerPtr->cancelled(); }
+	private:
+		Network& net;
+	};
+
 	// Returns maximum gradient of a Network object
 	virtual double getGradMax();
+
+	// Report the optimizer's own small-step convergence to Iterative, which
+	//    owns stopping and decides what to do with it. Only Levenberg-Marquardt
+	//    has such a criterion, so this is false for every other training type
+	//    and every run that does not use it is bit-identical to before.
+	virtual bool stepConverged() const
+	{ return trainingType == TRAIN_LM && lm.stepConverged(); }
 
 	// The master training engine
 	void engine( unsigned type, unsigned t );

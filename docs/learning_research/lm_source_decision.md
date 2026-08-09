@@ -1008,6 +1008,62 @@ such.
 
 ---
 
+## 12a. What implementation revealed, recorded after the fact
+
+Everything here was discovered while writing the code and the tests, **after**
+sections 1-12 were declared. **No constant was changed and no rule was
+loosened.** These are refinements and consequences, marked as such so no reader
+mistakes one for a pre-declared decision.
+
+1. **The non-finite trial policy extends to `A` and `g`, not only the
+   objective.** Adaptation 6 named the trial *objective*; the same evaluation
+   also produces a normal matrix and a gradient, and a non-finite element in
+   either is refused the same way — as a **rejected step**, weights restored.
+   The alternative, throwing, would mean throwing after the weights had already
+   moved to the trial point, which contradicts "no weight moves on failure".
+   Non-finite at the **starting** point remains `NotFinite`, thrown before
+   anything moves.
+
+2. **LM raises `StepRejected` near a minimum, and the claim must be stated
+   narrowly.** The **observed** fact is only this: twenty consecutive trials
+   failed the acceptance rule `rho > 0`, so the declared bound fired. It is
+   **not** established that no damping could have improved `F` — that would be a
+   claim about every `mu`, and twenty declared trials are not every `mu`. An
+   earlier draft of this note said "once `F` cannot be improved", which promoted
+   a bounded observation into a general one; the correction is recorded rather
+   than quietly made.
+
+   What is established: LM cannot distinguish "already optimal" from "cannot
+   accept under this schedule", and the convergence contract forbids it from
+   reporting a convergence it did not observe, so it refuses. In a run with an
+   objective target `Iterative` stops first; on the late-stage arm, where only
+   the plateau rule is armed, it did not. Pinned by test 1, and characterized
+   without being fixed by `tests/optimizer/lm_latestage.cpp`.
+
+3. **`BackProp` needed a dispatch line for its refusal to be reachable at all.**
+   `BackProp::innerTrainSet()` dispatched `TRAIN_LBFGS` and `TRAIN_IRPROP` but
+   would have fallen through for `TRAIN_LM` to the ordinary batch path — so
+   selecting LM on a `BackProp` would have **silently trained by plain gradient
+   descent under another method's name**. The dispatch exists so
+   `lmIteration()` can refuse by name. A `trainingType` nothing dispatches is
+   not an unsupported option; it is a wrong answer.
+
+4. **Test 23 was added, and the sabotage plan required it.** The declared
+   sabotage (c) hands LM a stale `A` while every component stays correct. Run
+   against the originally declared test list, **nothing failed**: the model-free
+   tests supply their own `A`, and the real-model integration tests only check
+   that the objective descends — which it still does. So a test was added that
+   can see it: after an iteration, LM's held normal matrix and gradient must
+   equal a fresh traversal at the installed weights, bit for bit. That is the
+   assertion sabotage (c) fails, and it is the only one.
+
+5. **The `packedSize() == 0` refusal is unreachable through any existing
+   model**, because it is checked before the normal-equations refusal and every
+   model implementing the latter has a packed boundary. It stays as a guard for
+   a future model and is **deliberately not claimed as tested** — a test for a
+   branch nothing can reach is the decoration this project has been caught by
+   before.
+
 ## 13. What is authorized, and what is settled
 
 **Step L0 has run and passed** (section 0; evidence in

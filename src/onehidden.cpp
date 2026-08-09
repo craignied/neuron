@@ -316,6 +316,11 @@ double OneHiddenNet::innerTrainSet()
 	if ( trainingType == TRAIN_IRPROP )
 		return irpropIteration();
 
+	// Levenberg-Marquardt likewise: its step comes from a damped solve of the
+	//    normal equations and is absolute.
+	if ( trainingType == TRAIN_LM )
+		return lmIteration();
+
 	// THE BATCH SEPARATE-GRADIENT PATH is one authoritative evaluation, then
 	//    the selected optimizer's direction, then the epoch's single update.
 	//    Written as an early return rather than as a branch inside the exemplar
@@ -536,4 +541,136 @@ double OneHiddenNet::batchObjectiveGradient( vector< double >& packedRawGradient
 	double setError = batchGradient();
 	packPair( hG, oG, packedRawGradient );
 	return setError;
+}
+
+double OneHiddenNet::batchNormalEquations( Matrix< double >& normal,
+	vector< double >& gradient )
+{
+	return jacobianNormalEquations( normal, gradient );
+}
+
+// THE JACOBIAN TRAVERSAL. See the declaration in onehidden.h for why this
+//    computes its own sensitivities rather than reusing o_err and h_err.
+//
+// THE OBJECTIVE, written as a sum of squares. Under LMS this model minimizes
+//
+//     F(w) = (1/N) sum_k 0.5 ( o_k - y_k )^2  +  (decay/2) ||w||^2
+//
+//    which is exactly 0.5 f'f for the AUGMENTED residual vector
+//
+//        f_k     = r_k / sqrt(N)        k = 1..N     (the data rows)
+//        f_(N+p) = sqrt(decay) w_p      p = 1..P     (the penalty rows)
+//
+//    Its Jacobian has rows a_k / sqrt(N) and sqrt(decay) I, giving
+//
+//        A = J'J = (1/N) sum_k a_k a_k' + decay I
+//        g = J'f = (1/N) sum_k r_k a_k  + decay w   =  grad F
+//
+//    No square root is ever taken and no (N+P)-element residual is ever formed:
+//    the sqrt(N) and sqrt(decay) are a derivation device, and what the code does
+//    is accumulate, divide by N, and add the decay terms once.
+//
+//    THE PENALTY ROWS ARE LINEAR IN w, so their second derivative is exactly
+//    zero: the `decay I` block of A is the EXACT Hessian of the ridge penalty,
+//    and the Gauss-Newton approximation drops nothing from that term. Only the
+//    data rows are approximated.
+//
+// THE JACOBIAN ROW, differentiating the model's own forward equations
+//    (propagate(), Methodology equations 2.2-2.5) with respect to each weight.
+//    With s = f'(x) = o(1-o) the output sensitivity:
+//
+//        d o / d oW_j     = s hO_j                    every element of oW
+//        d o / d hW(j,i)  = s oW_j hO_j(1-hO_j) I_i   j = 0 .. nHidden-1
+//
+//    packed in the ONE layout packPair() defines: hW row by row, then oW.
+double OneHiddenNet::jacobianNormalEquations( Matrix< double >& normal,
+	vector< double >& gradient )
+{
+	unsigned nTrain = theData.getNumTrain(); // examples in training set
+
+	const unsigned hRows = hW.rows(), hCols = hW.cols();
+	const unsigned oSize = ( unsigned ) oW.size();
+	const unsigned P = ( hRows * hCols ) + oSize;
+
+	// Sized on first use and reused for every iteration of a run, so no
+	//    allocation happens inside the exemplar loop (rule 7).
+	if ( normal.rows() != P || normal.cols() != P )
+		normal.resize( P, P );
+	normal.fill( 0.0 );
+
+	if ( gradient.size() != P ) gradient.resize( P );
+	fill( gradient.begin(), gradient.end(), 0.0 );
+
+	if ( jacobianRow.size() != P ) jacobianRow.resize( P );
+	if ( hiddenSensitivity.size() != nHidden ) hiddenSensitivity.resize( nHidden );
+
+	double setError = 0; // initialize the set error
+
+	// Loop through all exemplars in the set
+	for ( unsigned example = 0; example < nTrain; example++ )
+	{
+		// The same forward propagation every other path in this class runs: it
+		//    reads the exemplar into I, pins the bias slot if this model has
+		//    one, and leaves hO, x and o set.
+		forward( Train, example );
+
+		const double residual = o - y[ example ];
+		setError += 0.5 * residual * residual;
+
+		// The output sensitivity, d_sigmoidal()( o ) -- the sigmoid derivative
+		//    written on its OUTPUT, as function_defs.h defines it.
+		const double s = o * ( 1.0 - o );
+
+		// The hidden sensitivities. Elements 0 .. nHidden - 1 are the hidden
+		//    units; a biased model's hO carries the pinned bias slot after
+		//    them, and it has no sensitivity of its own.
+		for ( unsigned j = 0; j < nHidden; j++ )
+			hiddenSensitivity[ j ] = s * oW[ j ] * hO[ j ] * ( 1.0 - hO[ j ] );
+
+		// The packed Jacobian row
+		double* a = &jacobianRow[ 0 ];
+		for ( unsigned j = 0; j < hRows; j++ )
+		{
+			const double hj = hiddenSensitivity[ j ];
+			for ( unsigned i = 0; i < hCols; i++ )
+				*a++ = hj * I[ i ];
+		}
+		for ( unsigned j = 0; j < oSize; j++ )
+			*a++ = s * hO[ j ];
+
+		// A += a a' (upper triangle -- half the work), and g += r a
+		normal.addOuterUpper( jacobianRow );
+		axpy( residual, jacobianRow, gradient );
+	}
+
+	// $1/N$, applied to the populated triangle only
+	const double invN = 1.0 / ( double ) nTrain;
+	for ( unsigned i = 0; i < P; i++ )
+		for ( unsigned j = i; j < P; j++ )
+			normal( i, j ) *= invN;
+
+	gradient *= invN;
+	setError *= invN;
+
+	// The decay terms, added ONCE rather than per exemplar: in this formulation
+	//    they are not per-exemplar quantities. (The legacy batch path adds them
+	//    per exemplar and divides by N, which is the same value by a different
+	//    association -- which is why the two gradients agree to tolerance and
+	//    not bit for bit.)
+	if ( weightDecayFlag )
+	{
+		for ( unsigned i = 0; i < P; i++ )
+			normal( i, i ) += decay;
+
+		packWeights( packedForDecay );
+		axpy( decay, packedForDecay, gradient );
+
+		setError += regularizer * ( hW.squared() + squared( oW ) );
+	}
+
+	// COMPLETE THE SYMMETRY once per traversal, so no caller ever receives a
+	//    half-populated Matrix while being told it is symmetric.
+	normal.symmetrize();
+
+	return setError; // the calculated set error
 }

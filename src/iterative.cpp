@@ -78,7 +78,8 @@ const char* Iterative::stopReasonToken( StopReason r )
 	case STOP_PLATEAU: return "plateau";
 	case STOP_CANCELLED: return "cancelled";
 	case STOP_EARLY_STOP: return "validation_early_stop";
-	case STOP_PROBE_BUDGET: return "probe_budget";
+	case STOP_SMALL_STEP: return "small_step";
+		case STOP_PROBE_BUDGET: return "probe_budget";
 	default: return "none";
 	}
 }
@@ -93,6 +94,7 @@ bool Iterative::converged( StopReason r )
 	case STOP_GRADMAX:
 	case STOP_PLATEAU:
 	case STOP_EARLY_STOP:
+	case STOP_SMALL_STEP:
 		return true;
 	default: // MAX_ITERATIONS, CANCELLED, PROBE_BUDGET, NONE
 		return false;
@@ -476,6 +478,32 @@ double Iterative::train()
 				announceStop( STOP_GRADMAX, screenStream, fileStream );
 				break;
 			}
+		}
+
+		// Exit if the optimizer's own step became numerically negligible.
+		//
+		//    This class asks; the optimizer only answers (see stepConverged()).
+		//    It is the SIBLING of the gradient rule above: both are published
+		//    convergence criteria of Levenberg-Marquardt's Algorithm 3.16 --
+		//    (3.15a) is the gradient one and has always lived here, and this is
+		//    (3.15b). Omitting it once made a converged Levenberg-Marquardt run
+		//    report a failure, because a vanished step left the optimizer no
+		//    exit but its rejection bound.
+		//
+		//    NO FLAG GUARDS IT, and none is wanted: unlike the rules above it
+		//    cannot fire unless an optimizer reports the condition, and the
+		//    default is false for every model. So a run that has no such
+		//    optimizer is bit-identical to one from before this existed.
+		if ( stepConverged() )
+		{
+			screenStream.str( "" ); // reset screen stream
+
+			// Prepare line for printing to screen
+			screenStream << "The optimizer's step became numerically negligible "
+				<< "against the parameters." << endl;
+
+			announceStop( STOP_SMALL_STEP, screenStream, fileStream );
+			break;
 		}
 
 		// Exit if the error has plateaued (stopped improving). The detector

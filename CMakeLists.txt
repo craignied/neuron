@@ -70,7 +70,7 @@ target_link_libraries(neuron_infer PUBLIC neuron_core)
 # the first that passes it on. PUBLIC because a caller linking the engine links
 # GSL transitively; that is the boundary, stated once.
 add_library(neuron_engine STATIC
-    src/model.cpp src/iterative.cpp src/network.cpp src/lbfgs.cpp src/irprop.cpp
+    src/model.cpp src/iterative.cpp src/network.cpp src/lbfgs.cpp src/irprop.cpp src/lm.cpp
     src/onehidden.cpp src/simpleprop.cpp src/bareprop.cpp
     src/backprop.cpp src/logistic.cpp
     src/dfa.cpp src/ldfa.cpp src/qdfa.cpp
@@ -136,6 +136,16 @@ add_executable(check_spd
     tests/matrix/check_spd.cpp)
 target_link_libraries(check_spd PRIVATE neuron_core)
 add_test(NAME matrix_spd COMMAND check_spd)
+
+# Unit test: Levenberg-Marquardt (Madsen/Nielsen/Tingleff Algorithm 3.16).
+# Two layers: 1-13 drive the published algorithm BY HAND through a model-free
+# LMObjective over analytic problems, 14-26 exercise the real composition path
+# through Network::lmIteration(). A sabotage in the wiring fails only the
+# second; a sabotage in the table fails only the first.
+add_executable(check_lm
+    tests/network/check_lm.cpp)
+target_link_libraries(check_lm PRIVATE neuron_engine)
+add_test(NAME network_lm COMMAND check_lm)
 
 # Regression test: Hosmer-Lemeshow on datasets past 10,000 rows (fixed-size
 # stack arrays segfaulted there until 2026-07-16). No GSL needed.
@@ -700,6 +710,23 @@ add_executable(lm_step0 tests/optimizer/lm_step0.cpp)
 target_link_libraries(lm_step0 PRIVATE neuron_eval)
 target_include_directories(lm_step0 PRIVATE tests/optimizer)
 target_compile_definitions(lm_step0 PRIVATE
+    OPTBENCH_GIT_REV="${OPTBENCH_REV}"
+    OPTBENCH_GIT_DIRTY=${OPTBENCH_DIRTY}
+    OPTBENCH_SOURCE_ID="${OPTBENCH_SOURCE_ID}"
+    OPTBENCH_SOURCE_COUNT=${OPTBENCH_SOURCE_COUNT}
+    OPTBENCH_BUILD_TYPE="${CMAKE_BUILD_TYPE}"
+    OPTBENCH_ENGINE_ID="${OPTBENCH_ENGINE_ID}"
+    OPTBENCH_ENGINE_COUNT=${OPTBENCH_ENGINE_COUNT}
+    OPTBENCH_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/optimizer/data")
+
+# CHARACTERIZATION of the Levenberg-Marquardt late-stage failure. It fixes
+# nothing and changes no constant: it drives LM through a logging wrapper so
+# every trial objective, gain-ratio numerator and denominator of the failing
+# iteration is visible. Not an add_test: it is an investigation, not a gate.
+add_executable(lm_latestage tests/optimizer/lm_latestage.cpp)
+target_link_libraries(lm_latestage PRIVATE neuron_eval)
+target_include_directories(lm_latestage PRIVATE tests/optimizer)
+target_compile_definitions(lm_latestage PRIVATE
     OPTBENCH_GIT_REV="${OPTBENCH_REV}"
     OPTBENCH_GIT_DIRTY=${OPTBENCH_DIRTY}
     OPTBENCH_SOURCE_ID="${OPTBENCH_SOURCE_ID}"

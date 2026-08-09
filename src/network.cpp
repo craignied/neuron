@@ -481,6 +481,12 @@ void Network::prepareRun()
 	//    nothing -- not a Delta, not a remembered gradient, not a previous
 	//    objective.
 	irprop.reset();
+
+	// And for Levenberg-Marquardt, which likewise has no configuration to
+	//    survive: tau, the nu schedule and both bounds are published or
+	//    declared and fixed, so a run inherits nothing -- not a damping, not an
+	//    accepted point, not a normal matrix.
+	lm.reset();
 }
 
 // Utility to output Network specific parameters prior to an Iterative run.
@@ -505,6 +511,9 @@ void Network::runHeader( ostream& outputStream )
 			break;
 		case TRAIN_IRPROP:
 			outputStream << "Training algorithm is iRPROP+" << endl;
+			break;
+		case TRAIN_LM:
+			outputStream << "Training algorithm is Levenberg-Marquardt" << endl;
 			break;
 	}
 
@@ -544,6 +553,15 @@ void Network::unpackWeights( const vector< double >& )
 }
 
 double Network::batchObjectiveGradient( vector< double >& )
+{
+	throw NoPackedBoundary();
+}
+
+// A model that does not implement the normal-equations boundary reports
+//    normalEquationsAvailable() == false and REFUSES this, for the same reason
+//    the packed boundary refuses: an empty Matrix and a zero objective are
+//    values a caller would act on.
+double Network::batchNormalEquations( Matrix< double >&, vector< double >& )
 {
 	throw NoPackedBoundary();
 }
@@ -626,6 +644,56 @@ double Network::lbfgsIteration()
 	//    (the plan's architecture decision 7), and getGradMax() returns it
 	//    unchanged because trainingType is not 0 here.
 	currGradMax = lbfgs.gradMax();
+
+	return setError;
+}
+
+// ONE LEVENBERG-MARQUARDT ITERATION. Network composes; LM owns Algorithm 3.16;
+//    Iterative owns stopping. See network.h and lm.h.
+double Network::lmIteration()
+{
+	// REFUSALS, stated before any work is done. Each is a configuration under
+	//    which this method would have to become a different method to run.
+
+	// THE STRICT LMS GATE. Levenberg-Marquardt minimizes a SUM OF SQUARES:
+	//    its whole structure is J'J as an approximation to the Hessian of
+	//    0.5 f'f. Cross-entropy is not a sum of squares and there is no
+	//    residual vector whose 0.5 f'f is that objective, so there is no
+	//    cross-entropy analogy to be had -- only a different method wearing
+	//    this one's name.
+	if ( getXEerror() )
+		throw LM::Ineligible( "Levenberg-Marquardt requires least-squares "
+			"error: cross-entropy is not a sum of squares, and no residual "
+			"Jacobian represents it" );
+
+	if ( !batchEpochFlag )
+		throw LM::Ineligible( "Levenberg-Marquardt requires batch/epoch "
+			"training: the normal equations are full-batch quantities and a "
+			"per-exemplar update has no objective to compare a trial against" );
+
+	if ( automaticStepSizeFlag )
+		throw LM::Ineligible( "Levenberg-Marquardt chooses its own step by a "
+			"damped solve and cannot run with the automatic step-size search" );
+
+	if ( packedSize() == 0 )
+		throw LM::Ineligible( "this model does not implement the packed "
+			"parameter boundary Levenberg-Marquardt needs" );
+
+	if ( !normalEquationsAvailable() )
+		throw LM::Ineligible( "this model does not implement the "
+			"normal-equations boundary Levenberg-Marquardt needs" );
+
+	if ( packedSize() > LM::MAX_PARAMETERS )
+		throw LM::Ineligible( "Levenberg-Marquardt is limited to small "
+			"least-squares networks: this model has more parameters than the "
+			"declared ceiling" );
+
+	NormalEvaluator evaluator( *this );
+	double setError = lm.iterate( evaluator );
+
+	// The RAW gradient at the point the step departed from -- the same point
+	//    the returned objective describes (the plan's architecture decision 7).
+	currGradMax = lm.gradMax();
 
 	return setError;
 }

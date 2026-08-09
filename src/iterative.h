@@ -36,8 +36,17 @@ public:
 		STOP_PLATEAU, // the error stopped improving (auto-stop, ROADMAP 2 Ph3)
 		STOP_CANCELLED, // an outside request stopped the run (GUI/CV cancel)
 		STOP_EARLY_STOP, // held-out error deteriorated (OBD validation early stop)
-		STOP_PROBE_BUDGET // an autoalgo probe's time budget expired: a bounded
+		STOP_PROBE_BUDGET, // an autoalgo probe's time budget expired: a bounded
 		                  //    experiment, never a claim of convergence
+		STOP_SMALL_STEP   // the optimizer's own step became numerically
+		                  //    negligible against the parameters -- CONVERGENCE,
+		                  //    and a stopping rule that fired. It is Algorithm
+		                  //    3.16's criterion (3.15b) for Levenberg-Marquardt,
+		                  //    the sibling of the gradient rule above, which is
+		                  //    that algorithm's (3.15a) and has always lived
+		                  //    here. Only an optimizer that reports it can reach
+		                  //    it; every other model leaves stepConverged()
+		                  //    false, so no existing run changes.
 	};
 
 	// Observer of a training run. onIteration() is called at the BOTTOM of
@@ -87,7 +96,8 @@ public:
 	//    predicate for the whole engine: the training report, OBD's trial
 	//    eligibility, and the CV adapters all ask it, so "converged" cannot come
 	//    to mean different things in different layers.
-	//    True for MIN_ERROR / CHANGE / WINDOW / GRADMAX / PLATEAU / EARLY_STOP.
+	//    True for MIN_ERROR / CHANGE / WINDOW / GRADMAX / PLATEAU / EARLY_STOP /
+	//    SMALL_STEP.
 	//    False for MAX_ITERATIONS (a safety ceiling, not a stopping rule -- the
 	//    weights are wherever the run happened to be), CANCELLED, PROBE_BUDGET
 	//    and NONE. A caller that must also reject a non-finite loss checks that
@@ -273,6 +283,24 @@ protected:
 
 	// Returns maximum gradient of derived object
 	virtual double getGradMax() = 0; // pure virtual
+
+	// HAS THE OPTIMIZER'S OWN STEP BECOME NUMERICALLY NEGLIGIBLE?
+	//
+	//    A QUESTION, never an instruction -- exactly like getGradMax() above,
+	//    which reports the other published convergence measure and lets this
+	//    class decide what to do about it. An optimizer answering true does not
+	//    stop anything by itself; train() below owns that decision and records
+	//    the reason, so stopping keeps ONE owner (rule 6).
+	//
+	//    It exists because an optimizer whose step has vanished has CONVERGED,
+	//    and without a channel to say so its only available exit is a failure.
+	//    That was a real defect: Levenberg-Marquardt reported StepRejected at a
+	//    gradient maximum of 2.2e-10 with bit-identical trial objectives,
+	//    because it had converged and could not say so.
+	//
+	//    DEFAULT FALSE, so every existing model and every existing run is
+	//    bit-identical to before (the goldens' rule).
+	virtual bool stepConverged() const { return false; }
 };
 
 #endif

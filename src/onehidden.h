@@ -96,6 +96,14 @@ protected:
 
 	double o_err; // output error term
 
+	// PER-RUN SCRATCH for the Jacobian traversal, so a run allocates once
+	//    rather than once per epoch. Empty until an LM run touches them, so no
+	//    other model pays for them; each is sized by its first use and is
+	//    workspace, not state a copy carries.
+	vector< double > jacobianRow,     // a_k, the packed Jacobian row
+		hiddenSensitivity,            // d o / d net_j for the hidden units
+		packedForDecay;               // the packed weights, for the decay term
+
 	// The weights Network::searchStepSize puts back after its trial passes.
 	//    Constructed as a LOCAL of the search, so this model never carries a
 	//    second copy of its weights between calls, and nothing is copied at all
@@ -132,6 +140,42 @@ protected:
 	virtual void packWeights( vector< double >& destination ) const;
 	virtual void unpackWeights( const vector< double >& source );
 	virtual double batchObjectiveGradient( vector< double >& packedRawGradient );
+
+	// --- The normal-equations boundary (see network.h) --------------------
+	//
+	//    THE ELIGIBLE MODEL SET for the Levenberg-Marquardt research phase is
+	//    exactly this class's two concrete types. BackProp and Logistic are
+	//    deliberately out of scope, so they inherit Network's refusal.
+	virtual bool normalEquationsAvailable() const { return true; }
+	virtual double batchNormalEquations( Matrix< double >& normal,
+		vector< double >& gradient );
+
+	// THE JACOBIAN TRAVERSAL. One traversal of the training set at the
+	//    currently installed weights, accumulating
+	//
+	//        A = (1/N) sum_k a_k a_k'  +  decay I
+	//        g = (1/N) sum_k r_k a_k   +  decay w
+	//
+	//    where r_k = o_k - y_k is the residual and a_k = d o_k / d w is the
+	//    packed Jacobian ROW -- the sensitivity of the OUTPUT, not of the error.
+	//
+	//    WHY THIS IS NOT batchGradient() WITH EXTRA STEPS, and why the backward
+	//    chain rule therefore appears twice in this class: a_k and the gradient
+	//    contribution g_k satisfy g_k = r_k a_k exactly, so a_k could only be
+	//    recovered from the existing terms by DIVIDING BY r_k, which is
+	//    unacceptable as r_k goes to zero. The two are different quantities
+	//    computed by the same published chain rule.
+	//
+	//    The duplication is deliberate and is GUARDED rather than removed:
+	//    expressing batchGradient() as r_k a_k would reassociate its arithmetic
+	//    and move every golden, which rule 8 forbids folding into an optimizer
+	//    change. tests/network/check_lm.cpp requires the two gradients to agree,
+	//    and requires A to match a finite-difference Gauss-Newton oracle.
+	//
+	//    Non-virtual and called directly by batchNormalEquations(): this runs
+	//    an exemplar loop and may not acquire an indirect call (rule 7).
+	double jacobianNormalEquations( Matrix< double >& normal,
+		vector< double >& gradient );
 
 	// THE AUTHORITATIVE BATCH PASS. One traversal of the training set at the
 	//    currently installed weights: returns the mean objective and leaves hG

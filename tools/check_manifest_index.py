@@ -198,6 +198,17 @@ PRINCIPAL_METHODS = {
     # iRPROP+ (research only; Network::TRAIN_IRPROP). Listed by method for the
     # same reason LBFGS is: a reader searching the index wants the operation,
     # and computeStep IS the published table.
+    # Levenberg-Marquardt (Network::TRAIN_LM). Listed by method for the same
+    # reason LBFGS and IRpropState are: a reader searching the index wants the
+    # operation, and iterate() IS Algorithm 3.16.
+    "LMObjective": {"currentPoint", "install", "evaluateNormal", "cancelled"},
+    "LM": {
+        "constructor", "published constants", "reset", "started", "iterate",
+        "gradMax", "stepConverged", "damping", "rejectionMultiplier",
+        "acceptedObjective", "acceptedPoint", "gradient", "lastStep",
+        "normalMatrix", "iterations", "acceptances", "rejections",
+        "factorizationFailures", "nonFiniteTrials", "cancellations",
+    },
     "IRpropState": {
         "constructor", "published constants", "reset", "started", "computeStep",
         "deltas", "previousGradient", "previousStep", "previousObjective",

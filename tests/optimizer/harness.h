@@ -461,6 +461,7 @@ static inline const char* optimizerName( unsigned t )
 	case 2: return "shanno";
 	case 3: return "lbfgs";
 	case 4: return "irprop";
+	case 5: return "lm";
 	default: return "unknown";
 	}
 }
@@ -643,6 +644,22 @@ public:
 	{
 		evaluationCalls++;
 		return NET::batchObjectiveGradient( g );
+	}
+
+	// AND EVERY NORMAL-EQUATIONS TRAVERSAL, into the SAME counter.
+	//
+	//    A traversal is a traversal regardless of which boundary method made
+	//    it. Levenberg-Marquardt does not call batchObjectiveGradient() at all
+	//    -- it goes through batchNormalEquations() -- so without this override
+	//    it would report ZERO passes and appear to win because its work was
+	//    invisible. That is precisely the failure the counter above exists to
+	//    prevent, and the plan is explicit that a lower outer-iteration count
+	//    is not a win. REJECTED TRIALS COUNT TOO: a damping retry traverses the
+	//    training set exactly as an accepted one does.
+	double batchNormalEquations( Matrix< double >& A, vector< double >& g ) override
+	{
+		evaluationCalls++;
+		return NET::batchNormalEquations( A, g );
 	}
 
 	// The one L-BFGS knob the screen varies. lbfgs is Network's protected
@@ -1045,9 +1062,10 @@ static inline string validate( const Case& c )
 			+ c.endpoint + "' endpoint";
 	if ( c.workload != "cv" && ( c.cvFolds || c.cvRepeats ) )
 		return "cv_folds/cv_repeats: only a cv workload may set these";
-	if ( c.optimizer > Network::TRAIN_IRPROP )
+	if ( c.optimizer > Network::TRAIN_LM )
 		return "optimizer: must be 0 (canonical), 1 (CGD), 2 (Shanno), "
-			"3 (L-BFGS) or 4 (the research-only iRPROP+ prototype)";
+			"3 (L-BFGS), 4 (iRPROP+) or 5 (the research-only "
+			"Levenberg-Marquardt prototype)";
 	// L-BFGS OWNS ITS OWN STEP AND ITS OWN GRADIENT. It refuses the automatic
 	//    step-size search and on-line mode in the engine; declaring either here
 	//    would produce an arm that throws at its first pass rather than a row
@@ -1076,6 +1094,24 @@ static inline string validate( const Case& c )
 	if ( c.optimizer == Network::TRAIN_IRPROP && c.model == "logistic" )
 		return "model: Logistic does not implement the packed parameter "
 			"boundary iRPROP+ needs";
+	// LEVENBERG-MARQUARDT'S REFUSALS, and the first is the one that matters:
+	//    it minimizes a SUM OF SQUARES, so cross-entropy is not a configuration
+	//    it can run -- there is no residual vector whose 0.5 f'f is that
+	//    objective. Declared here so a bad case produces a row saying what is
+	//    wrong rather than an arm that throws at its first pass.
+	if ( c.optimizer == Network::TRAIN_LM && c.xentropy )
+		return "loss: Levenberg-Marquardt requires least-squares error; "
+			"cross-entropy is not a sum of squares";
+	if ( c.optimizer == Network::TRAIN_LM && c.autoStep )
+		return "auto_step: Levenberg-Marquardt chooses its own step by a damped "
+			"solve and cannot run with the automatic step-size search";
+	if ( c.optimizer == Network::TRAIN_LM && !c.batch )
+		return "mode: Levenberg-Marquardt requires batch/epoch training";
+	if ( c.optimizer == Network::TRAIN_LM
+		&& ( c.model == "logistic" || c.model == "backprop" ) )
+		return "model: only the one-hidden-layer models implement the "
+			"normal-equations boundary Levenberg-Marquardt needs";
+
 	if ( c.dataFile.empty() && c.rows < 2 )
 		return "rows: must be at least 2";
 	if ( !( c.target > 0.0 && c.target < 1.0 ) )
@@ -2780,6 +2816,129 @@ static inline vector< Case > screen4Cases()
 	return v;
 }
 
+// ---------------------------------------------------------------------------
+// THE PHASE 6 CANDIDATE SCREEN: Levenberg-Marquardt against the standing
+// portfolio panel, which is now FIVE arms with five roles and not a race with
+// one winner:
+//
+//   canonical   the behavioral and matched-objective reference, and the source
+//               of the endpoint every arm here races to;
+//   Shanno      the established legacy quasi-Newton control;
+//   L-BFGS      the speed leader on the generated fixtures and late-stage;
+//   iRPROP+     the speed leader on this application benchmark;
+//   LM          the candidate.
+//
+// CGD is not a panel member and is not run: its standing is settled.
+//
+// THE SEED PANEL AND THE CONDITIONING PAIR ARE IN THE SCREEN, not after it.
+// Phase 1 established both as first-class acceptance axes -- the seed panel is
+// what rejected BB, and the conditioning pair separated it from the panel by two
+// orders of magnitude -- and both cost almost nothing to run.
+//
+// Step L0 measured LM's traversal at 1.8x the production traversal at P = 65 and
+// 0.87x at P = 25, so its budgets here are about 5.5 traversals against iRPROP+
+// on Civic Choice and 30-37 against L-BFGS on the conditioning pair.
+static inline vector< Case > screen6Cases()
+{
+	vector< Case > v;
+	if ( !endpointAvailable( endpointKey( "simpleprop", 6000, CIVIC_HIDDEN ),
+		ENDPOINT_PRACTICAL ) )
+		return v;
+
+	// THE PANEL, one comparison group.
+	const unsigned panel[ 5 ] = { 0, 2, Network::TRAIN_LBFGS,
+		Network::TRAIN_IRPROP, Network::TRAIN_LM };
+	for ( int k = 0; k < 5; k++ )
+		v.push_back( civicCase( "simpleprop", 6000, CIVIC_HIDDEN,
+			ENDPOINT_PRACTICAL, panel[ k ], false ) );
+
+	// THE WEIGHT-SEED PANEL, at the three seeds Phase 3 predeclared. Each seed
+	//    is its own comparison group: two arms from different starting weights
+	//    are not racing the same race. Canonical is omitted at the extra seeds,
+	//    as in Phase 4 -- it is the endpoint's source, not a per-seed control.
+	const unsigned seeds[ 3 ] = { 101, 202, 303 };
+	for ( int i = 0; i < 3; i++ )
+	{
+		const unsigned methods[ 4 ] = { 2, Network::TRAIN_LBFGS,
+			Network::TRAIN_IRPROP, Network::TRAIN_LM };
+		for ( int k = 0; k < 4; k++ )
+		{
+			Case c = civicCase( "simpleprop", 6000, CIVIC_HIDDEN,
+				ENDPOINT_PRACTICAL, methods[ k ], false );
+			c.weightSeed = seeds[ i ];
+			c.group = "civic-seed" + to_string( seeds[ i ] )
+				+ "-simpleprop-r6000-h4-practical";
+			c.name = c.group + "-" + optimizerName( methods[ k ] );
+			v.push_back( c );
+		}
+	}
+
+	// THE LATE-STAGE QUESTION, asked the only way this workload permits: there
+	//    is no canonical strict endpoint on the neural workloads, so every arm
+	//    runs to THE ENGINE'S OWN plateau rule and the row declares endpoint
+	//    `none`. Where each lands is read beside how fast it got there.
+	const unsigned lateMethods[ 4 ] = { 2, Network::TRAIN_LBFGS,
+		Network::TRAIN_IRPROP, Network::TRAIN_LM };
+	for ( int k = 0; k < 4; k++ )
+	{
+		Case c = civicCase( "simpleprop", 6000, CIVIC_HIDDEN,
+			ENDPOINT_PRACTICAL, lateMethods[ k ], false );
+		c.minStop = false;
+		c.autoStop = true;
+		c.endpoint = ENDPOINT_NONE;
+		c.target = 0.5;  // carried, unused: no objective rule is armed
+		c.group = "civic-latestage-simpleprop-r6000-h4";
+		c.name = c.group + "-" + optimizerName( lateMethods[ k ] );
+		v.push_back( c );
+	}
+
+	// THE CONDITIONING PAIR. P = 25 here, where Step L0 measured LM's traversal
+	//    as CHEAPER than the production one, so this is where its budget is
+	//    widest -- and where a damped Gauss-Newton method has its strongest
+	//    theoretical claim, since mu adapts the step to curvature directly.
+	const string conds[ 2 ] = { "well4", "poor4" };
+	for ( int i = 0; i < 2; i++ )
+	{
+		const string key = endpointKey( "simpleprop", COND_ROWS, COND_HIDDEN,
+			conds[ i ] );
+		if ( endpointAvailable( key, ENDPOINT_PRACTICAL ) )
+		{
+			const unsigned condPanel[ 5 ] = { 0, 2, Network::TRAIN_LBFGS,
+				Network::TRAIN_IRPROP, Network::TRAIN_LM };
+			for ( int k = 0; k < 5; k++ )
+				v.push_back( conditioningCase( conds[ i ], condPanel[ k ] ) );
+		}
+		else
+			v.push_back( conditioningCase( conds[ i ], 0 ) );
+	}
+
+	// SCALING, added only AFTER the 6,000-row screen passed the declared gate --
+	//    the plan's staged order, in that order. LM proved correct, stable
+	//    across the four seeds, reached every matched endpoint with bit-identical
+	//    end weights across repetitions, and is the sole winner on poor4, which
+	//    is the defensible workload advantage the gate asks for.
+	//
+	//    THE CANDIDATE AND THE TWO MODERN REFERENCES ONLY. Shanno and canonical
+	//    are not re-run at these sizes: their standing is settled and one
+	//    canonical arm costs minutes to re-establish a known number. Each size
+	//    is its own comparison group, because an endpoint characterized at 6,000
+	//    rows is not the endpoint at 100,000.
+	const unsigned sizes[ 2 ] = { 25000, 100000 };
+	for ( int i = 0; i < 2; i++ )
+	{
+		if ( !endpointAvailable( endpointKey( "simpleprop", sizes[ i ],
+			CIVIC_HIDDEN ), ENDPOINT_PRACTICAL ) )
+			continue;
+		const unsigned scaled[ 3 ] = { Network::TRAIN_LBFGS,
+			Network::TRAIN_IRPROP, Network::TRAIN_LM };
+		for ( int k = 0; k < 3; k++ )
+			v.push_back( civicCase( "simpleprop", sizes[ i ], CIVIC_HIDDEN,
+				ENDPOINT_PRACTICAL, scaled[ k ], false ) );
+	}
+
+	return v;
+}
+
 static inline vector< Case > pilotCases()
 {
 	vector< Case > v;
@@ -2983,6 +3142,20 @@ static inline vector< Case > allCases()
 			known = ( v[ j ].name == s4[ i ].name );
 		if ( !known )
 			v.push_back( s4[ i ] );
+	}
+
+	// The Phase 6 panel overlaps both again -- only its Levenberg-Marquardt
+	//    arms are new. Appended by name for the same reason: --case must be
+	//    unambiguous, and the runner names every arm INDIVIDUALLY, so a case
+	//    absent from this table is a case the campaign cannot run.
+	vector< Case > s6 = screen6Cases();
+	for ( size_t i = 0; i < s6.size(); i++ )
+	{
+		bool known = false;
+		for ( size_t j = 0; j < v.size() && !known; j++ )
+			known = ( v[ j ].name == s6[ i ].name );
+		if ( !known )
+			v.push_back( s6[ i ] );
 	}
 	return v;
 }
