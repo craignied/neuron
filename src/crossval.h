@@ -155,7 +155,7 @@ RunResult run( DataSet& data, const vector< unsigned >& foldId, Procedure proc,
 //    ineligible fold is represented, and the report must never fill it in.
 struct FoldSelection {
 	unsigned hidden = 0;       // hidden units selected inside the fold
-	int algorithm = -1;        // optimizer trainingType actually used (0/1/2)
+	int algorithm = -1;        // optimizer trainingType actually used; -1 = none
 	bool autoSelected = false; // true when an auto probe chose that optimizer
 
 	// Value equality, so reproducibility checks can compare whole selection

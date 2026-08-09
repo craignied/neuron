@@ -87,9 +87,14 @@ Operational invariants that belong in every GUI session:
 - While a long job owns the engine, other engine-touching endpoints return 409
   with `busy:true`.
 - Training continues from current weights. Randomize explicitly for a fresh start.
-- Direct retained neural optimizers use `/api/train` `algorithm=4` for L-BFGS
-  and `algorithm=5` for iRPROP+. Both require `batch_epoch=1` and `autostep=0`;
-  the GUI enforces those controls. They deliberately have no legacy-menu entry.
+- Direct retained neural optimizers use `/api/train` `algorithm=4` for L-BFGS,
+  `algorithm=5` for iRPROP+, and `algorithm=6` for Levenberg--Marquardt. All
+  require `batch_epoch=1` and `autostep=0`; the GUI enforces those controls. LM
+  additionally requires LMS, a single-hidden-layer `SimpleProp`/`BareProp`, and
+  at most 512 packed parameters. A validation split and weight decay are allowed.
+  `algorithm=auto` considers every eligible retained optimizer under one shared
+  2250 ms total probe budget and reports ineligible omissions. These methods
+  deliberately have no legacy-menu entry.
 - Present boolean fields use exactly `1` and `0`. Unknown, trailing, overflowing,
   or non-finite numeric text is a field-specific error; omission and an empty
   field retain the endpoint-specific defaults documented in the Manifest.

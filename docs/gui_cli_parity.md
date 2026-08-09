@@ -103,7 +103,7 @@ statistical/trapezoidal, 2 minimum data, 3 return); the GUI dropped the
 | 4 Batch/epoch on/off (forced ON for logistic, as the CLI forces it) | Batch/epoch toggle | `POST /api/train` `batch_epoch=` | ✅ |
 | 5 Weight decay (on/off + λ) | Weight-decay toggle + λ field | `POST /api/train` `weight_decay=`,`decay=` | ✅ |
 | 6 Print counter (log / linear) | Print-counter select + count | `POST /api/train` `logprint=`,`printcount=` | ✅ (presentation only — see note) |
-| (train-time) Algorithm (GD/CGD/Shanno plus REST-era L-BFGS/iRPROP+/auto) | Algorithm select | `POST /api/train` `algorithm=` | ✅ |
+| (train-time) Algorithm (GD/CGD/Shanno plus REST-era L-BFGS/iRPROP+/LM/auto) | Algorithm select | `POST /api/train` `algorithm=` | ✅ |
 | 7 Train model | Train button | `POST /api/train` | ✅ |
 | 7/8 Save network + guesses after training | § Session files → Network / guesses | `GET /api/save/{network,train_guesses,test_guesses}` | ✅ |
 | 9 Stepwise regression | § Stepwise regression panel (+ persistent results pane, live progress, Stop) | `POST /api/regress` (+ `async=1`, `GET /api/train/status` → `stepwise`, `POST /api/train/stop`) | ✅ (GUI beyond CLI: async + progress + Stop) |
@@ -136,8 +136,8 @@ with a GUI control where a human-facing control is appropriate.
 
 | Feature | GUI control | API | CLI |
 |---|---|---|---|
-| Automatic training-algorithm selection | Algorithm → "Auto" | `POST /api/train` `algorithm=auto` | — n/a (menus frozen) |
-| Direct retained neural optimizers | Algorithm → "L-BFGS" or "iRPROP+"; either selection forces and locks Batch/epoch on and Automatic learning rate off | `POST /api/train` `algorithm=4` for L-BFGS (optional `lbfgs_memory=`) or `algorithm=5` for iRPROP+; both neural, batch-only, `autostep=0` | — n/a (menus retired) |
+| Automatic training-algorithm selection | Algorithm → "Auto" | `POST /api/train` `algorithm=auto`; probes every eligible method from canonical, CGD, Shanno, L-BFGS, iRPROP+, and LM under one shared 2250 ms total budget; returns probes, omissions, and equal per-candidate share | — n/a (menus frozen) |
+| Direct retained neural optimizers | Algorithm → "L-BFGS", "iRPROP+", or "Levenberg–Marquardt"; any selection forces and locks Batch/epoch on and Automatic learning rate off | `POST /api/train` `algorithm=4` for L-BFGS (optional `lbfgs_memory=`), `algorithm=5` for iRPROP+, or `algorithm=6` for LM. All are neural, batch-only, `autostep=0`; LM additionally requires LMS, `SimpleProp`/`BareProp`, and at most 512 packed parameters. Validation and weight decay are allowed | — n/a (menus retired) |
 | Plateau auto-stop | "Auto-stop on plateau" + tol/window | `POST /api/train` `autostop=` | — n/a (menus frozen) |
 | Realtime error-vs-iteration chart | Training-error chart | `GET /api/train/status` series | — n/a (menus frozen) |
 | DFA graded ROC AUC | DFA ROC/stats panels | `POST /api/dfa` (ROC in the response) | — n/a (menus frozen) |
@@ -176,9 +176,10 @@ logistic / fixed-architecture neural), procedure flags `logistic`/`ldfa`/`qdfa`/
 auto**, same encoding and validation as `/api/obd`), `autostop_tol`/
 `autostop_window` (the per-size train-plateau backstop), `inner_val` (share of
 each fold's training rows held out as the inner validation set OBD monitors).
-`auto` is a procedure for CHOOSING an optimizer, not an optimizer: it probes once
-inside each fold on that fold's inner training data, keeps the choice for that
-fold's whole grow-and-prune search, and probes independently again for the
+`auto` is a procedure for CHOOSING an optimizer, not an optimizer: it considers
+all six training methods, omits any that are ineligible for the fold and planned
+maximum architecture, shares one 2250 ms total budget equally among those left,
+keeps the winner for that fold's whole grow-and-prune search, and probes independently again for the
 locked-development refit — no fold reuses another fold's choice, the standalone
 panel's, or a previous run's. Async-only, shares the training job (status + stop). It is a
 standalone analysis — it does NOT touch the current model. The result carries the

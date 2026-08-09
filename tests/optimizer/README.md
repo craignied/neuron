@@ -5,9 +5,10 @@ Phase 0, Step 0A of `docs/learning_research/optimizer_implementation_plan.md`.
 This directory measures neuron's optimizers from identical starting states to a
 fixed objective: canonical gradient descent, conjugate gradient descent, Shanno,
 the L-BFGS implementation retained in Phase 3 (`src/lbfgs.*`,
-`Network::TRAIN_LBFGS`), and — since Phase 4 — the research-only iRPROP+
-prototype (`src/irprop.*`, `Network::TRAIN_IRPROP`). The packed
-weight/objective/gradient boundary both of the last two use lives in
+`Network::TRAIN_LBFGS`), retained iRPROP+ (`src/irprop.*`,
+`Network::TRAIN_IRPROP`), and retained LM (`src/lm.*`,
+`Network::TRAIN_LM`). The packed weight/objective/gradient boundary used by
+the retained modern methods lives in
 `src/network.h`, shaped by the first of them as its one real consumer.
 
 **Phase 3 results: `docs/learning_research/lbfgs_screen_results.md`.** The short

@@ -662,9 +662,9 @@ public:
 		return NET::batchNormalEquations( A, g );
 	}
 
-	// The one L-BFGS knob the screen varies. lbfgs is Network's protected
-	//    member, so a subclass reaches it -- no public setter is added to the
-	//    engine for a research-only comparison.
+	// The one L-BFGS knob the screen varies. The probe subclass reaches the
+	//    protected state directly; production callers use Network's public
+	//    configuration setter.
 	void setLBFGSMemory( const unsigned m ) { this->lbfgs.setMemory( m ); }
 
 	unsigned innerCalls, outerCalls;
@@ -1064,8 +1064,7 @@ static inline string validate( const Case& c )
 		return "cv_folds/cv_repeats: only a cv workload may set these";
 	if ( c.optimizer > Network::TRAIN_LM )
 		return "optimizer: must be 0 (canonical), 1 (CGD), 2 (Shanno), "
-			"3 (L-BFGS), 4 (iRPROP+) or 5 (the research-only "
-			"Levenberg-Marquardt prototype)";
+			"3 (L-BFGS), 4 (iRPROP+) or 5 (Levenberg-Marquardt)";
 	// L-BFGS OWNS ITS OWN STEP AND ITS OWN GRADIENT. It refuses the automatic
 	//    step-size search and on-line mode in the engine; declaring either here
 	//    would produce an arm that throws at its first pass rather than a row

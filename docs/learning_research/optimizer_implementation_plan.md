@@ -51,19 +51,19 @@ finding the first future-tense paragraph below.
   converged point. LM-v2 restored Algorithm 3.16 criterion (3.15b), was re-screened, and
   was retained in commit `6352979`. The Matrix normal-equations primitives landed first
   in `bc19dec`.
-- LM is currently a retained **engine-only** method. It is strict-LMS, batch-only,
-  `autostep=0`, limited to `OneHiddenNet` with at most 512 packed parameters, and has no
-  public REST token, GUI control, menu entry, or automatic-selection entry yet.
+- LM is retained and publicly integrated as REST/GUI `algorithm=6`. It is strict-LMS,
+  batch-only, `autostep=0`, limited to `OneHiddenNet` with at most 512 packed parameters,
+  and participates in automatic selection only when its declared restrictions are
+  satisfied. Validation and weight decay are not restrictions.
 - Commit `7e6ee88` completed the consolidated Chapter 12 benchmark table, LM/LMObjective
   and Matrix documentation, Figure 12.1, index, and the maintenance rule requiring every
-  future optimizer to update that table. Chapter 4 accurately records that REST does not
-  yet accept `algorithm=6`.
+  future optimizer to update that table. The subsequent public-surface integration adds
+  Chapter 4's `algorithm=6` and bounded family-aware automatic-selection contracts.
 
-The next work is therefore a **public-surface decision and integration boundary**, not a
-new optimizer candidate: design and verify LM's REST contract before adding its GUI
-control, then update GUI/REST parity and operational documentation in the same commit.
-Automatic selection remains deferred. Do not resume optimizer research until that
-boundary is explicitly settled.
+The LM phase is complete only with its public surface: REST/GUI `algorithm=6`, the exact
+eligibility refusals, and the bounded family-aware selector are now part of the
+contract. Do not reopen LM or begin another candidate merely because this plan retains
+its original future-tense declarations; consult the handoff for the next authorized work.
 
 ## Large-workload speed scope governor
 
@@ -967,9 +967,10 @@ neural candidate is measured against a stable reference panel with distinct role
 - **Canonical training is the behavioral and matched-objective reference.** It defines
   legacy training semantics and a numerical endpoint where it can reach that endpoint;
   it is not presumed to be the speed competitor.
-- **Eventually, all retained algorithms enter the bounded limited-run selector.** Their
-  performance on the user's actual dataset, under identical starts and declared budgets,
-  guides the full-training choice.
+- **All retained algorithms now enter the bounded limited-run selector when eligible.**
+  Their performance on the user's actual dataset, under identical starts and an equal
+  share of one fixed total budget, guides the full-training choice; omissions and reasons
+  remain machine-readable.
 
 Benchmark results rank recommendations and defaults; they do not hide a correct, stable,
 eligible algorithm merely because another method is faster on the synthetic dataset.
@@ -1021,9 +1022,10 @@ Define and test explicitly:
 - L-BFGS: eligible smooth full-batch model families measured successfully.
 - iRPROP+: full-batch eligible models measured successfully.
 - BB: full-batch eligible models if retained.
-- LM: retained engine-only; LMS-only, batch-only, automatic step-size off,
+- LM: retained and public as `algorithm=6`; LMS-only, batch-only, automatic step-size off,
   `OneHiddenNet` only, and at most 512 packed parameters. Public integration must
-  preserve all six field-specific refusals declared in `lm_source_decision.md`.
+  preserve the six engine refusals declared in `lm_source_decision.md` plus the
+  public surface's shared neural-model gate.
 - stochastic methods: only modes actually measured.
 
 Ineligible selections are refused by name before changing model configuration. Nothing
@@ -1207,8 +1209,8 @@ The program is complete when:
 - every candidate actually entered in the neural program has an explicit
   retain/research-only/reject decision supported by matched-endpoint evidence;
 - disposable rejected implementations are removed;
-- retained methods are fully integrated with bounded family-aware auto-selection once
-  that separately deferred selector phase is authorized;
+- retained production methods are fully integrated with bounded family-aware automatic
+  selection, or explicitly classified research-only with the reason recorded;
 - existing defaults and numeric optimizer tokens remain compatible unless a separately
   authorized change says otherwise;
 - all required tests, parity docs, Manifest sections, index gates, and rendered PDF checks

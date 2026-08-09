@@ -99,6 +99,13 @@ named published methods. Distinguish published mathematics from neuron-specific
 policy. Add method-level index entries and extend
 `tools/check_manifest_index.py`. Follow `docs/manifest_maintenance.md` in full.
 
+A learning algorithm retained for production is not complete at engine
+retention. Before another candidate begins, finish its REST-first selection,
+appropriate synchronized GUI control, automatic-selection decision, Chapter 4
+and Chapter 12 contracts, operational/parity documentation, and public-surface
+tests. Otherwise record an explicit research-only decision; rejected candidates
+are removed.
+
 ## Source and ownership map
 
 This map is conditional engine context and therefore lives here rather than in

@@ -134,14 +134,9 @@ STOP_REASONS = {"none", "max_iterations", "min_error", "min_change",
 # Real numbers that MAY be null or -1 ("not applicable here").
 NULLABLE_NUM_FIELDS = ["heldout_error", "cv_auc", "locked_auc"]
 
-# 3 is L-BFGS (Network::TRAIN_LBFGS), retained in Phase 3 and REST-selectable as
-# algorithm=4.  4 is the RESEARCH-ONLY iRPROP+ prototype (Network::TRAIN_IRPROP):
-# no menu, GUI control, HTTP field or automatic-selection rule produces it, and
-# it exists so this harness and tests/network/check_irprop.cpp can measure the
-# Phase 4 candidate.
-# 5 is the RESEARCH-ONLY Levenberg-Marquardt prototype (Network::TRAIN_LM),
-# the Phase 6 candidate, on the same terms: no menu, GUI control, HTTP field or
-# automatic-selection rule produces it.
+# 3, 4, and 5 are the retained modern methods L-BFGS, iRPROP+, and LM. Their
+# REST/GUI tokens are the internal value plus one; all participate in automatic
+# selection when eligible. The frozen legacy menu still exposes none of them.
 OPTIMIZER_NAMES = {0: "canonical", 1: "cgd", 2: "shanno", 3: "lbfgs",
                    4: "irprop", 5: "lm"}
 

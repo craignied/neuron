@@ -29,6 +29,7 @@
 #include <sstream>
 #include <vector>
 
+#include "autoalgo.h" // the ONE eligibility rule the size search's probe consults
 #include "simpleprop.h"
 #include "dataset.h"
 #include "utility.h"
@@ -676,6 +677,75 @@ static void test_validation_monitor()
 		"validation forwards exactly like test, and setDataSet preserves the fit" );
 }
 
+// AUTOMATIC SELECTION INSIDE THE SIZE SEARCH. Two facts, and they pull in
+//    opposite directions, so both need asserting:
+//
+//    - the curated candidate list is not the legacy three any more, and
+//      Levenberg-Marquardt is ELIGIBLE here (an early-stopping search is not
+//      one of LM's six declared restrictions);
+//    - but the optimizer is chosen ONCE, at hStart, and then the model grows.
+//      The parameter ceiling therefore has to be judged at hMax. A search whose
+//      largest architecture is past the ceiling must never adopt LM, because
+//      obd::run has no handler between LM::Ineligible and its caller.
+static void test_auto_selection_candidates()
+{
+	util::set_seed( 7 );
+	DataSet d = makeData( 150, 45 );
+
+	obd::Config cfg;
+	cfg.hStart = 2; cfg.hMax = 5; cfg.iterBudget = 300; cfg.sampleEvery = 10;
+	cfg.earlyStopPatience = 2; cfg.growPatience = 1;
+	cfg.plateauTol = 1e-2;
+	cfg.algorithm = -1; // auto
+
+	obd::Result r = obd::run( d, cfg, nullptr, nullptr );
+	expect( r.ok && r.autoSelected,
+		"an auto search completes and records that it chose" );
+	expect( r.algorithm >= 0 && r.algorithm < ( int ) Network::TRAINING_TYPES,
+		string( "and the choice comes from the whole eligible portfolio (" )
+			+ Network::algorithmLabel( ( unsigned ) r.algorithm ) + ")" );
+
+	// LM MUST BE AVAILABLE TO THIS SEARCH. Asserted through the same rule the
+	//    driver consults rather than by hoping LM wins a wall-clock race:
+	//    at hMax this net packs far fewer than MAX_PARAMETERS weights.
+	SimpleProp largest;
+	largest.setDataSet( d );
+	largest.setHidden( cfg.hMax );
+	largest.randomize();
+	autoalgo::Settings at = autoalgo::Settings::of( largest );
+	expect( !autoalgo::ineligible( largest, Network::TRAIN_LM, at ),
+		"CONTROL: Levenberg-Marquardt IS eligible at this search's largest size" );
+
+	// ...and the guard, on a search that would grow past the ceiling. 5 inputs,
+	//    so P = 6h + 1: h = 100 packs 601 weights.
+	autoalgo::Settings grown = at;
+	grown.parameters = LM::MAX_PARAMETERS + 1;
+	expect( autoalgo::ineligible( largest, Network::TRAIN_LM, grown )
+		&& !autoalgo::ineligible( largest, Network::TRAIN_LBFGS, grown ),
+		"a search that will grow past the ceiling drops LM and nothing else" );
+
+	// A FIXED token still reaches the search unchanged -- the automatic path
+	//    widened, the direct one did not. Whether that optimizer then finishes
+	//    the search on this fixture is a DIFFERENT question (canonical and CGD
+	//    both hit the ceiling here), so the routing is asserted separately from
+	//    the outcome; conflating them would let a token that never reached the
+	//    search hide behind a refusal.
+	unsigned completed = 0;
+	for ( int fixed = 0; fixed <= 2; fixed++ )
+	{
+		obd::Config f = cfg;
+		f.algorithm = fixed;
+		util::set_seed( 7 );
+		obd::Result fr = obd::run( d, f, nullptr, nullptr );
+		expect( fr.algorithm == fixed && !fr.autoSelected,
+			string( "a fixed optimizer (" ) + to_string( fixed + 1 )
+			+ ") still reaches the search unchanged, with no probe" );
+		if ( fr.ok ) completed++;
+	}
+	expect( completed >= 1, "CONTROL: at least one fixed token completed a real "
+		"search, so the routing above was not asserted on refusals alone" );
+}
+
 int main()
 {
 	// The engine's training reports go to util::screen(); this test reads none
@@ -689,6 +759,7 @@ int main()
 	test_saliency();
 	test_train_after_ops();
 	test_driver();
+	test_auto_selection_candidates();
 	test_early_stop_fires();
 	test_cancel_and_early_stop_are_distinguishable();
 	test_eligibility_classification();

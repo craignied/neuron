@@ -313,7 +313,7 @@ obd::Result obd::run( DataSet& data, const Config& cfg,
 	if ( cfg.algorithm < 0 ) // auto
 	{
 		// Say that the probe is happening. It is a wall-clock-budgeted experiment
-		//    per candidate optimizer, so on a nested run it can dominate the fold's
+		//    fixed-total experiment, so on a nested run it can dominate the fold's
 		//    whole elapsed time -- and it reported nothing, leaving a long search
 		//    looking idle (measured 2026-07-29: ~11 s of a 13 s five-fold nested
 		//    run was silent probing). The phase belongs to OBD, which owns its
@@ -321,10 +321,25 @@ obd::Result obd::run( DataSet& data, const Config& cfg,
 		//    yet, so the numeric fields say "not sampled" (-1) rather than 0.
 		if ( progress )
 			progress( "probing optimizers", cfg.hStart, 0, -1, -1 );
+		// THE OPTIMIZER IS CHOSEN ONCE AND THEN THE MODEL GROWS. Every parameter-
+		//    count restriction must therefore be judged against the LARGEST net
+		//    the search may build, not against the starting one: a probe at
+		//    hStart could otherwise adopt an optimizer that refuses the model at
+		//    hMax, and this function has no handler between that refusal and the
+		//    worker thread. Asked of a throwaway copy sized to hMax rather than
+		//    computed from a weight-layout formula, which OneHiddenNet owns.
+		unsigned plannedParameters;
+		{
+			SimpleProp largest( *net );
+			largest.setHidden( cfg.hMax );
+			plannedParameters = largest.packedSize();
+		}
+
 		autoalgo::Result pick;
 		{
 			util::ScreenCapture quiet;
-			pick = autoalgo::pick( *net, 750, cancel );
+			pick = autoalgo::pick( *net, plannedParameters,
+				autoalgo::DEFAULT_TOTAL_BUDGET_MS, cancel );
 		}
 		if ( pick.cancelled )
 		{

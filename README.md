@@ -39,8 +39,10 @@ research orientation: statistical output is part of the model, not an afterthoug
 
 ### Training
 
-- Canonical gradient descent, conjugate gradient descent, and Shanno's algorithm
-- Automatic optimizer selection by short, reproducible probes
+- Canonical gradient descent, conjugate gradient descent, Shanno's algorithm,
+  L-BFGS, iRPROP+, and Levenberg--Marquardt for eligible least-squares networks
+- Family-aware automatic optimizer selection by equal-share probes under one
+  fixed total budget, with ineligible methods reported rather than attempted
 - Batch/epoch and per-exemplar training where mathematically appropriate
 - Learning-rate control, weight decay, configurable stopping conditions, and
   plateau-based automatic stopping

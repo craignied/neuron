@@ -1,4 +1,4 @@
-// check_irprop.cpp : the research-only iRPROP+ prototype (src/irprop.*).
+// check_irprop.cpp : the retained iRPROP+ optimizer (src/irprop.*).
 //
 // THE PUBLISHED TABLE IS DRIVEN BY HAND. IRpropState has no model dependency --
 // it is handed an objective and a raw gradient and produces an absolute step --

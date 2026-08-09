@@ -489,32 +489,54 @@ void Network::prepareRun()
 	lm.reset();
 }
 
+// THE TWO NAMING TABLES, and the only copies of these strings in the engine.
+//    The prose names below are what the training report has always written; the
+//    first three are pinned by the goldens, which is why they are lowercase and
+//    why "Shanno" is not "Shanno's algorithm" here.
+const char* Network::algorithmName( unsigned trainingType )
+{
+	switch ( trainingType )
+	{
+		case 0: return "canonical backpropagation";
+		case 1: return "conjugate gradient descent";
+		case 2: return "Shanno";
+		case TRAIN_LBFGS: return "L-BFGS";
+		case TRAIN_IRPROP: return "iRPROP+";
+		case TRAIN_LM: return "Levenberg-Marquardt";
+	}
+	return "unknown";
+}
+
+// The compact machine-facing label. The first five are the shipped JSON
+//    vocabulary and may not be reworded; Levenberg-Marquardt is spelled in full
+//    for the same reason L-BFGS and iRPROP+ are -- it is the published name.
+const char* Network::algorithmLabel( unsigned trainingType )
+{
+	switch ( trainingType )
+	{
+		case 0: return "Canonical";
+		case 1: return "CGD";
+		case 2: return "Shanno";
+		case TRAIN_LBFGS: return "L-BFGS";
+		case TRAIN_IRPROP: return "iRPROP+";
+		case TRAIN_LM: return "Levenberg-Marquardt";
+	}
+	return "unknown";
+}
+
 // Utility to output Network specific parameters prior to an Iterative run.
 //    REPORTING ONLY -- the decay constants it used to derive now live in
 //    prepareRun(), because the training math reads them.
 void Network::runHeader( ostream& outputStream )
 {
-	switch ( trainingType ) // the training algorithm
+	// One name, from the one table. L-BFGS additionally reports the memory
+	//    length, because that is configuration the run depended on.
+	if ( trainingType < TRAINING_TYPES )
 	{
-		case 0:
-			outputStream << "Training algorithm is canonical backpropagation" << endl;
-			break;
-		case 1:
-			outputStream << "Training algorithm is conjugate gradient descent" << endl;
-			break;
-		case 2:
-			outputStream << "Training algorithm is Shanno" << endl;
-			break;
-		case TRAIN_LBFGS:
-			outputStream << "Training algorithm is L-BFGS (memory "
-				<< lbfgs.getMemory() << ")" << endl;
-			break;
-		case TRAIN_IRPROP:
-			outputStream << "Training algorithm is iRPROP+" << endl;
-			break;
-		case TRAIN_LM:
-			outputStream << "Training algorithm is Levenberg-Marquardt" << endl;
-			break;
+		outputStream << "Training algorithm is " << algorithmName( trainingType );
+		if ( trainingType == TRAIN_LBFGS )
+			outputStream << " (memory " << lbfgs.getMemory() << ")";
+		outputStream << endl;
 	}
 
 	if ( batchEpochFlag ) // batch/epoch learning

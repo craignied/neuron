@@ -1,4 +1,4 @@
-// check_lbfgs.cpp : the research-only L-BFGS prototype (src/lbfgs.*).
+// check_lbfgs.cpp : the retained L-BFGS optimizer (src/lbfgs.*).
 //
 // The published pieces are checked against INDEPENDENT constructions, not
 // against the same code run twice:

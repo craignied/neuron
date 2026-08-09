@@ -37,6 +37,19 @@ curl -s "$URL/" > page.html
 grep -q 'id="cv_algorithm"' page.html || fail "CV panel has no optimizer control"
 grep -q '<option value="4">L-BFGS</option>' page.html || fail "Train selector has no L-BFGS"
 grep -q '<option value="5">iRPROP+</option>' page.html || fail "Train selector has no iRPROP+"
+grep -q '<option value="6"' page.html || fail "Train selector has no Levenberg-Marquardt"
+grep -q 'Levenberg&ndash;Marquardt</option>' page.html \
+    || fail "Levenberg-Marquardt is not named in the Train selector"
+grep -q 'automatic learning rate off, at most 512 weights' page.html \
+    || fail "Levenberg-Marquardt tooltip does not state its current restrictions"
+if grep -q 'no validation split' page.html; then
+    fail "Levenberg-Marquardt tooltip still invents a validation restriction"
+fi
+# The controls whose required value is unambiguous are forced AND locked for
+# every optimizer that owns its own absolute step -- LM included, or the page
+# would compose a request the server refuses.
+grep -q 'a === "4" || a === "5" || a === "6"' page.html \
+    || fail "the optimizer control lock does not cover algorithm 6"
 grep -q 'function syncOptimizerControls()' page.html || fail "Optimizer controls are not synchronized"
 for opt in 'value="auto"' 'value="1"' 'value="2"' 'value="3"'; do
     $PY - "$opt" <<'PY' || fail "CV optimizer control is missing an option"
@@ -759,7 +772,7 @@ grep -q '"logistic":' logi.json || fail "no logistic stats block"
 grep -q '"waldP":' logi.json || fail "no Wald p-values in logistic stats"
 grep -q '"condNumber":' logi.json || fail "no condition number in logistic stats"
 
-# Auto algorithm selection (ROADMAP 2 Phase 2): probe all three optimizers
+# Auto algorithm selection (ROADMAP 2 Phase 2): probe every ELIGIBLE optimizer
 #    from identical weights, adopt the winner, continue training to maxiter.
 #    The result carries the structured selection and the report carries the
 #    human-readable decision summary.
@@ -767,6 +780,23 @@ curl -s -X POST "$URL/api/train" -d "algorithm=auto&maxiter=2000&seed=42" > auto
 grep -q '"ok":true' auto.json || fail "algorithm=auto train"
 grep -q '"autoAlgo":{"selected":' auto.json || fail "no autoAlgo selection block"
 [ $(grep -o '"algorithm":' auto.json | wc -l) -ge 3 ] || fail "want 3 probes in autoAlgo"
+# This model is a logistic regression, so the curated list is exactly the legacy
+#    three and the modern three are OMITTED WITH A REASON -- never probed and
+#    reported as divergence, which is what a missing eligibility rule looks like.
+$PY - <<'PY' || fail "auto on logistic must omit the modern optimizers with reasons"
+import json
+a = json.load(open("auto.json"))["autoAlgo"]
+assert sorted(p["algorithm"] for p in a["probes"]) == [1, 2, 3], a["probes"]
+omitted = { o["algorithm"]: o["reason"] for o in a["omitted"] }
+assert sorted(omitted) == [4, 5, 6], omitted
+assert all(r == "is available for neural models only" for r in omitted.values()), omitted
+# THE TOTAL IS FIXED AND SHARED. Three eligible candidates here, six in the LM
+# block below: the total is identical in both and only the share moves. That is
+# what stops each retained algorithm from making every automatic selection --
+# and every OBD search, and every nested CV fold -- linearly slower.
+assert a["totalBudgetMs"] == 2250, a
+assert a["perCandidateBudgetMs"] == 750, a
+PY
 grep -q 'Auto algorithm selection' auto.json || fail "no probe summary in the report"
 grep -q 'Selected: ' auto.json || fail "no decision line in the report"
 # The user-visible message must name the winner (the page shows the message,
@@ -1127,8 +1157,126 @@ curl -s -X POST "$URL/api/train" -d "algorithm=5&maxiter=1&batch_epoch=0&autoste
     | grep -q 'requires batch_epoch=1' || fail "iRPROP+ online mode must be refused"
 curl -s -X POST "$URL/api/train" -d "algorithm=5&maxiter=1&batch_epoch=1&autostep=1" \
     | grep -q 'requires autostep=0' || fail "iRPROP+ autostep must be refused"
+# Retained Levenberg-Marquardt is public algorithm 6. Its eligibility is the
+# narrowest of the six, so the block below proves BOTH halves: that the token
+# really dispatches to the LM path (not merely that a label appears), and that
+# every one of its restrictions refuses by name before anything is applied.
+#
+# THE DISPATCH IS PROVEN BY DIFFERENCE, not by the label. Two runs from the same
+# seed and the same iteration count: if algorithm=6 fell through to canonical
+# backpropagation, the two final errors would be BIT-IDENTICAL. They are not.
+# And the "Training algorithm is ..." line comes from the ENGINE's own run
+# header, reading trainingType -- so a token wired to the wrong optimizer is
+# caught there rather than by the JSON field the handler echoes.
+curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=2&errfunc=lms" >/dev/null
+curl -s -X POST "$URL/api/randomize" -d "seed=42" > /dev/null
+curl -s -X POST "$URL/api/train" \
+    -d "algorithm=6&maxiter=5&batch_epoch=1&autostep=0" > lm_rest.json
+curl -s -X POST "$URL/api/randomize" -d "seed=42" > /dev/null
+curl -s -X POST "$URL/api/train" \
+    -d "algorithm=1&maxiter=5&batch_epoch=1&autostep=0" > lm_control.json
+$PY - <<'PY' || fail "REST Levenberg-Marquardt selection/result contract"
+import json, re
+def finalError(p):
+    d = json.load(open(p))
+    assert d["ok"] is True, d
+    m = re.search(r"final error ([0-9eE.+-]+)", d["message"])
+    assert m, d["message"]
+    return float(m.group(1))
+lm = json.load(open("lm_rest.json"))
+ctl = json.load(open("lm_control.json"))
+assert lm["algorithm"] == 6, lm
+assert lm["algorithmName"] == "Levenberg-Marquardt", lm
+assert "Training algorithm is Levenberg-Marquardt" in lm["output"], lm["output"][:300]
+assert "lbfgsMemory" not in lm, lm            # not L-BFGS wearing the name
+assert ctl["algorithmName"] == "Canonical", ctl
+e_lm, e_ctl = finalError("lm_rest.json"), finalError("lm_control.json")
+assert e_lm == e_lm and e_lm >= 0, e_lm       # finite, a real fit
+assert e_lm != e_ctl, ("algorithm=6 produced canonical's exact result", e_lm, e_ctl)
+PY
+# Async lifecycle: the completed result names it through the status door too.
+curl -s -X POST "$URL/api/randomize" -d "seed=42" > /dev/null
+curl -s -X POST "$URL/api/train" \
+    -d "algorithm=6&maxiter=5&batch_epoch=1&autostep=0&async=1" \
+    | grep -q '"ok":true' || fail "async Levenberg-Marquardt start"
+for i in $(seq 1 50); do
+    curl -s "$URL/api/train/status" > lm_async.json
+    grep -q '"running":false' lm_async.json && break
+    sleep 0.1
+done
+$PY - <<'PY' || fail "async Levenberg-Marquardt completed-result contract"
+import json
+d = json.load(open("lm_async.json"))
+assert d["running"] is False, d
+assert d["result"]["ok"] is True, d
+assert d["result"]["algorithm"] == 6, d
+assert d["result"]["algorithmName"] == "Levenberg-Marquardt", d
+assert "Training algorithm is Levenberg-Marquardt" in d["result"]["output"], d
+PY
+# The two restrictions the GUI can express as locked controls...
+curl -s -X POST "$URL/api/train" -d "algorithm=6&maxiter=1&batch_epoch=0&autostep=0" \
+    | grep -q 'requires batch_epoch=1' || fail "LM online mode must be refused"
+curl -s -X POST "$URL/api/train" -d "algorithm=6&maxiter=1&batch_epoch=1&autostep=1" \
+    | grep -q 'requires autostep=0' || fail "LM autostep must be refused"
+# ...and the four it cannot, which are therefore REST refusals by name.
+curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=2&errfunc=xentropy" >/dev/null
 curl -s -X POST "$URL/api/train" -d "algorithm=6&maxiter=1" \
-    | grep -q 'algorithm must be 1, 2, 3, 4, 5 or auto' \
+    | grep -q 'least-squares' || fail "LM under cross-entropy must be refused"
+curl -s -X POST "$URL/api/train" -d "algorithm=5&maxiter=1" \
+    | grep -q '"ok":true' || fail "CONTROL: iRPROP+ still runs under cross-entropy"
+curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=4,2&errfunc=lms" >/dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=6&maxiter=1" \
+    | grep -q 'single-hidden-layer' || fail "LM on a multi-layer BackProp must be refused"
+curl -s -X POST "$URL/api/train" -d "algorithm=4&maxiter=1" \
+    | grep -q '"ok":true' || fail "CONTROL: L-BFGS still runs on a BackProp"
+# 5 inputs, so P = 7*hidden + 1: hidden=74 packs 519 weights, past the 512 ceiling
+curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=74&errfunc=lms" >/dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=6&maxiter=1" \
+    | grep -q 'ceiling' || fail "LM past the parameter ceiling must be refused"
+curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=73&errfunc=lms" >/dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=6&maxiter=1" \
+    | grep -q '"ok":true' || fail "CONTROL: LM at 512 weights or fewer still runs"
+curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=6&maxiter=1" \
+    | grep -q 'neural models only' || fail "LM on logistic must be refused"
+
+# A VALIDATION SPLIT IS NOT ONE OF LM'S RESTRICTIONS, and this asserts it in
+# the positive direction. lm_source_decision.md section 9 declares six refusals
+# and a held-out split is not among them: it changes neither LM's objective nor
+# Algorithm 3.16, and Iterative still owns stopping and can still monitor the
+# split. A restriction that was never declared can only be guarded by requiring
+# the method to SURVIVE it.
+curl -s -X POST "$URL/api/load" \
+    -d "mode=raw&path=lowbwt2-2train.txt&fraction=0.2&val_fraction=0.2" \
+    | grep -q 'validation' || fail "three-way split should report a validation set"
+curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=2&errfunc=lms" >/dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=6&maxiter=3" > lm_split.json
+$PY - <<'PY' || fail "LM must still run under a validation split"
+import json
+d = json.load(open("lm_split.json"))
+assert d["ok"] is True, d
+assert d["algorithmName"] == "Levenberg-Marquardt", d
+assert "Training algorithm is Levenberg-Marquardt" in d["output"], d["output"][:300]
+assert d["monitor"] == "validation", d      # the split really is in play
+PY
+# ...and algorithm=auto probes it there rather than omitting it
+curl -s -X POST "$URL/api/train" -d "algorithm=auto&maxiter=50&seed=42" > lm_auto_split.json
+$PY - <<'PY' || fail "auto must still probe Levenberg-Marquardt under a validation split"
+import json
+a = json.load(open("lm_auto_split.json"))["autoAlgo"]
+probed = sorted(p["algorithm"] for p in a["probes"])
+assert probed == [1, 2, 3, 4, 5, 6], probed
+assert a["omitted"] == [], a["omitted"]
+assert a["selected"] in probed, a
+# THE BOUNDED BUDGET on the shipped default: six eligible candidates share the
+# same 2250 ms the original three-arm selection spent, 375 ms each.
+assert a["totalBudgetMs"] == 2250, a
+assert a["perCandidateBudgetMs"] == 375, a
+assert a["perCandidateBudgetMs"] * len(probed) <= a["totalBudgetMs"], a
+PY
+
+curl -s -X POST "$URL/api/train" -d "algorithm=7&maxiter=1" \
+    | grep -q 'algorithm must be 1, 2, 3, 4, 5, 6 or auto' \
     || fail "out-of-range direct optimizer token must be refused by name"
 
 # --- Discriminant function analysis (GUI/CLI parity, main menu 4) ----------

@@ -20,19 +20,65 @@ public:
 	// TRAINING TYPES. 0, 1 and 2 are the frozen menu tokens -- canonical
 	//    backpropagation, conjugate gradient descent, Shanno -- and are not
 	//    changed here. TRAIN_LBFGS is REST/GUI-selectable as algorithm=4, but no
-	//    retired menu token is added. Automatic selection does
-	//    not probe it, and no saved network records it.
+	//    retired menu token is added, and no saved network records it.
 	static const unsigned TRAIN_LBFGS = 3;
 
-	// Retained iRPROP+, selectable as REST/GUI algorithm=5. The retired menu,
-	//    automatic selector and saved-network format remain unchanged.
+	// Retained iRPROP+, selectable as REST/GUI algorithm=5. The retired menu
+	//    and the saved-network format remain unchanged.
 	static const unsigned TRAIN_IRPROP = 4;
 
-	// RESEARCH ONLY: Levenberg-Marquardt (see lm.h). No REST field, GUI
-	//    control, menu token, automatic-selection entry or saved-network field
-	//    produces it; the public identifier, if it is ever retained, is
-	//    assigned in the plan's Phase 5.
+	// Retained Levenberg-Marquardt (see lm.h), selectable as REST/GUI
+	//    algorithm=6. The retired menu and the saved-network format remain
+	//    unchanged. Its eligibility is the narrowest of the six -- see
+	//    autoalgo::ineligible(), which is the ONE place that rule lives.
 	static const unsigned TRAIN_LM = 5;
+
+	// The number of training types this engine has. Not a public token: the
+	//    REST/GUI token is `trainingType + 1`, which is the only arithmetic
+	//    relating the two, stated here rather than repeated at each call site.
+	static const unsigned TRAINING_TYPES = 6;
+
+	// THE OPTIMIZER NAMING OWNER (rule 6). Every place that emits an optimizer's
+	//    name -- the engine's run header, the automatic-selection summary, a REST
+	//    refusal, a JSON result, an OBD report -- reads one of these two, so a
+	//    name cannot be added in one vocabulary and forgotten in the other.
+	//
+	//    There are exactly two vocabularies, and they are different on purpose:
+	//
+	//    algorithmName()  the PROSE name, as the engine's own training report has
+	//                     always written it: "canonical backpropagation",
+	//                     lowercase, mid-sentence. Changing any of the first
+	//                     three strings changes the goldens.
+	//    algorithmLabel() the COMPACT label a machine reads: the JSON
+	//                     `algorithmName` field and OBD's `optimizer` field.
+	//
+	//    Both return "unknown" for a value outside the enumeration rather than
+	//    indexing past the table.
+	static const char* algorithmName( unsigned trainingType );
+	static const char* algorithmLabel( unsigned trainingType );
+
+	// --- THE TWO ELIGIBILITY QUESTIONS -------------------------------------
+	//
+	//    PUBLIC, while every operation of both boundaries below stays protected.
+	//    The split is the point: asking whether a model can be optimized a
+	//    particular way is a question the REST surface must answer BEFORE it
+	//    applies a request, and autoalgo::ineligible() is the one caller that
+	//    asks it; moving a parameter vector in or out of a model remains an
+	//    engine-internal operation with exactly the consumers it always had.
+	//
+	//    Both answer "no" by default rather than returning something plausible:
+	//    a zero-length packed vector reported as convergence is the false-
+	//    convergence shape maxabs() was changed to refuse.
+
+	// How many doubles a packed parameter vector holds. 0 MEANS THE PACKED
+	//    BOUNDARY IS UNAVAILABLE; see the boundary comment below.
+	virtual unsigned packedSize() const { return 0; }
+
+	// Does this model implement the NORMAL-EQUATIONS boundary? Only OneHiddenNet
+	//    does -- SimpleProp and BareProp -- which is exactly the model set the
+	//    Levenberg-Marquardt evidence was measured on.
+	virtual bool normalEquationsAvailable() const { return false; }
+
 	Network(); // default constructor
 	virtual ~Network(); // destructor
 
@@ -200,9 +246,10 @@ protected:
 	//    src/lbfgs.*, and the three methods below are what it needs. There is
 	//    no descriptor, no std::function, and no registration.
 	//
-	//    NOT EVERY MODEL IMPLEMENTS IT. packedSize() returns 0 for a model that
-	//    does not, and a caller must ask before it packs; the other three then
-	//    refuse rather than returning something plausible. Logistic keeps its
+	//    NOT EVERY MODEL IMPLEMENTS IT. packedSize() -- public above, because it
+	//    is the eligibility question -- returns 0 for a model that does not, and
+	//    a caller must ask before it packs; the operations here then refuse
+	//    rather than returning something plausible. Logistic keeps its
 	//    own IRLS-shaped future and is deliberately left unimplemented here:
 	//    the neural program has no use for it, and an unused implementation is
 	//    an untested one.
@@ -211,10 +258,6 @@ protected:
 		virtual const char* what() const throw()
 		{ return "this model does not implement the packed parameter boundary"; }
 	};
-
-	// How many doubles a packed parameter vector holds. 0 MEANS THE BOUNDARY
-	//    IS UNAVAILABLE -- it is the eligibility question, asked before a run.
-	virtual unsigned packedSize() const { return 0; }
 
 	// The current weights, in ONE layout that packWeights, unpackWeights and
 	//    batchObjectiveGradient all share. Same layout as the gradient the
@@ -225,13 +268,11 @@ protected:
 	// Install packed weights. The size is validated ONCE, here, at entry.
 	virtual void unpackWeights( const vector< double >& source );
 
-	// Does this model implement the NORMAL-EQUATIONS boundary below? False by
-	//    default, exactly as packedSize() reports 0 by default: a model that
-	//    does not implement it REFUSES rather than returning something
-	//    plausible. Only OneHiddenNet does, which is the eligible model set the
-	//    LM research phase declared -- SimpleProp and BareProp.
-	virtual bool normalEquationsAvailable() const { return false; }
-
+	// --- THE NORMAL-EQUATIONS BOUNDARY ------------------------------------
+	//
+	//    Its eligibility question, normalEquationsAvailable(), is public above
+	//    for the same reason packedSize() is; the operation itself is here.
+	//
 	// EVALUATE THE NORMAL EQUATIONS at the currently installed weights, in ONE
 	//    traversal: returns the objective, and writes
 	//
@@ -286,7 +327,7 @@ protected:
 	//    (the plan's architecture decision 2).
 	LBFGS lbfgs;
 
-	// --- The iRPROP+ optimizer (research only; see irprop.h) ---------------
+	// --- Retained iRPROP+ (REST/GUI algorithm=5; see irprop.h) --------------
 	//
 	//    Composed on the same terms as lbfgs above: IRpropState owns the
 	//    published table and all of its state, Network supplies model
@@ -295,7 +336,7 @@ protected:
 	//    fit a contract whose caller applies `w -= g * eta`.
 	IRpropState irprop;
 
-	// --- The Levenberg-Marquardt optimizer (research only; see lm.h) -------
+	// --- Retained Levenberg-Marquardt (REST/GUI algorithm=6; see lm.h) ------
 	//
 	//    Composed on the same terms: LM owns Algorithm 3.16 entirely, Network
 	//    supplies model evaluation through the normal-equations boundary, and

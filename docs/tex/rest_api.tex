@@ -271,10 +271,11 @@ implicitly.
 \begin{description}
 \item[\texttt{algorithm}] \texttt{1} for canonical gradient descent,
 \texttt{2} for conjugate gradient, \texttt{3} for Shanno, \texttt{4} for
-L-BFGS, \texttt{5} for iRPROP+, or \texttt{auto} to probe canonical,
-conjugate gradient, and Shanno. L-BFGS and iRPROP+ are neural-only, require
-\texttt{batch\_epoch=1} and \texttt{autostep=0}, and are not yet part of
-\texttt{auto}.
+L-BFGS, \texttt{5} for iRPROP+, \texttt{6} for Levenberg-Marquardt, or
+\texttt{auto} to probe every eligible method in that six-method portfolio.
+The three modern methods are neural-only and require
+\texttt{batch\_epoch=1} and \texttt{autostep=0}; LM has the additional
+least-squares, model-boundary, and 512-parameter restrictions described below.
 \item[\texttt{lbfgs\_memory}] Optional positive L-BFGS history length $m$;
 accepted only with \texttt{algorithm=4}. Omission retains the current
 configuration (five on a new model). Working history resets at each run.
@@ -304,8 +305,8 @@ presentation only.  These fields never change the fitted endpoint.
 \index{Shanno algorithm!REST API}
 \index{L-BFGS!REST API}
 \index{iRPROP+!REST API}
-\index{Levenberg-Marquardt!REST API status}
-\index{LM!REST API status}
+\index{Levenberg-Marquardt!REST API}
+\index{LM!REST API}
 \index{Automatic algorithm selection!REST API}
 
 The \texttt{algorithm} field selects the rule that converts the current
@@ -349,23 +350,32 @@ before a request when a fresh, reproducible start is required.
       absolute per-parameter steps replace both \texttt{eta} and the automatic
       step search. The algorithm, complete \texttt{IRpropState} contract, and
       primary literature are in Section~\ref{training_control_objects}.
+\item[\texttt{algorithm=6}: Levenberg-Marquardt (LM)]
+      Solves the damped Gauss-Newton normal equations for one exact published
+      least-squares method. It is neural-only and requires LMS error, a
+      single-hidden-layer \texttt{SimpleProp} or \texttt{BareProp},
+      \texttt{batch\_epoch=1}, \texttt{autostep=0}, a nonempty packed
+      parameter boundary, and at most 512 packed parameters. A validation split
+      and weight decay are allowed. LM owns its absolute step, so \texttt{eta}
+      is retained for later methods but does not scale the LM step. Every
+      incompatibility is refused by name before any request field is applied.
+      The published algorithm, normal-equations accumulation, stopping and
+      failure semantics, and measured scope are in
+      Section~\ref{training_control_objects}.
 \item[\texttt{algorithm=auto}: bounded selector]
-      Probes canonical, CGD, and Shanno from identical starting weights, then
-      adopts the best finite probe endpoint for the real run. It deliberately
-      does not probe L-BFGS or iRPROP+. Those retained methods have
-      workload-dependent strengths, and extending the selector to them requires
-      the separately planned bounded portfolio policy rather than an inference
-      from one benchmark family.
+      Builds a curated list from canonical, CGD, Shanno, L-BFGS, iRPROP+, and
+      LM, omitting each method that is ineligible for the actual model and
+      configuration with a machine-readable reason. Every eligible method starts
+      from identical weights and receives an equal share of one fixed 2250 ms
+      total budget; integer remainder is left unspent so earlier candidates do
+      not receive a longer trial. The lowest finite training error wins, its
+      trained clone is adopted, and the real run continues from that progress.
+      The response's \texttt{autoAlgo} object contains \texttt{probes},
+      \texttt{omitted}, \texttt{selected}, \texttt{selectedName},
+      \texttt{totalBudgetMs}, and \texttt{perCandidateBudgetMs}. This is a
+      bounded selection procedure on the caller's data, not an optimizer or a
+      universal performance claim.
 \end{description}
-
-\paragraph{Retained C++ method not yet exposed through REST.}
-Levenberg-Marquardt (LM) is retained in the engine for small, full-batch LMS
-neural models, but \texttt{POST /api/train} has no LM token in the current
-contract.  In particular, \texttt{algorithm=6} is \emph{not} accepted today.
-The C++ implementation and evidence are documented in
-Section~\ref{training_control_objects}; REST-first integration, eligibility
-errors, and a corresponding GUI control must be implemented and verified before
-this field list may add LM.  LM is also absent from \texttt{algorithm=auto}.
 
 No retained method is the universal default. Application benchmarks made
 iRPROP+ faster than L-BFGS, while generated conditioning fixtures favored
@@ -392,13 +402,19 @@ curl -s -X POST "$URL/api/train" \
 curl -s -X POST "$URL/api/train" \
   -d "algorithm=5" -d "batch_epoch=1" -d "autostep=0" \
   -d "maxiter=2000"
+
+curl -s -X POST "$URL/api/train" \
+  -d "algorithm=6" -d "batch_epoch=1" -d "autostep=0" \
+  -d "maxiter=2000"
 \end{verbatim}
 
 For an asynchronous run, append \texttt{async=1}, poll
 \texttt{GET /api/train/status}, and cancel if necessary with
 \texttt{POST /api/train/stop}. An incompatible model or mode is refused before
-any supplied training field is applied; for example, iRPROP+ on Logistic names
-\texttt{algorithm=5} and the neural-only requirement in its error response.
+any supplied training field is applied; for example, LM under cross-entropy
+names \texttt{algorithm=6}, Levenberg-Marquardt, and the least-squares
+requirement in its error response. Both blocking and asynchronous forms return
+the same stable algorithm token and name.
 
 A blocking call returns the complete report, ROC series, and structured
 statistics.  An asynchronous call returns acceptance immediately; the
@@ -480,7 +496,8 @@ rules.
 \item[\texttt{autostop\_tol}, \texttt{autostop\_window}] Per-size
 training plateau backstop.
 \item[\texttt{algorithm}] \texttt{1}, \texttt{2}, \texttt{3}, or
-\texttt{auto}.
+\texttt{auto}. Fixed OBD choices deliberately remain the legacy three;
+\texttt{auto} may resolve to any eligible retained optimizer.
 \item[\texttt{seed}] Reproducibility seed.
 \end{description}
 
@@ -488,6 +505,10 @@ OBD is asynchronous-only and requires a discrete, single-output
 dataset with a held-out monitoring set.  Its result names that set as
 \texttt{validation} or \texttt{test}, records every size trial, and
 replaces the current model only after a successful search.
+Automatic selection runs once for the whole search, shares the fixed 2250 ms
+total budget, and keeps the winner through growth and pruning. LM eligibility is
+judged against \texttt{hidden\_max}, not only the starting size, so a selected
+method cannot become ineligible midway through growth.
 
 \subsection{POST /api/cv}
 
@@ -501,7 +522,8 @@ fixed neural size.
 \item[\texttt{maxiter}, \texttt{hidden\_max},
 \texttt{iter\_budget}] Ordinary-fit and nested-search ceilings.
 \item[\texttt{algorithm}] Nested OBD optimizer, including
-\texttt{auto}.
+\texttt{auto}; fixed values remain \texttt{1}, \texttt{2}, or \texttt{3},
+while an automatic fold may resolve to any eligible retained optimizer.
 \item[\texttt{autostop\_tol}, \texttt{autostop\_window},
 \texttt{inner\_val}] Nested-fit plateau rule and inner validation
 share.

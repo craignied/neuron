@@ -1,8 +1,8 @@
 // Header for IRpropState, the iRPROP+ optimizer.
 //
 // Retained after Phase 4 of the optimizer plan. REST and GUI select it with
-// algorithm=5; the retired menu, automatic selector and saved-network format
-// deliberately remain unchanged.
+// algorithm=5; automatic selection includes it when eligible, while the
+// retired menu and saved-network format deliberately remain unchanged.
 //
 // SOURCES, fixed before any of this was written and recorded in full in
 // docs/learning_research/irprop_source_decision.md:

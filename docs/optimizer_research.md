@@ -41,7 +41,7 @@ question. They are not prerequisite reading.
    objective, predictions/weights as appropriate, iterations, stop reason,
    wall-clock distribution, and numerical failures. Interleave candidates and
    controls; report run-to-run spread.
-6. Decide explicitly: reject, retain as research-only, or propose production
+6. Decide explicitly: reject, retain as research-only, or retain for production
    integration. A negative result is complete work and belongs in HISTORY.
    Remove a rejected prototype from active source and tests. When the conclusion
    depends on the exact tested implementation, preserve that complete working
@@ -49,7 +49,13 @@ question. They are not prerequisite reading.
    its base commit, known defects and reconstruction command in the evidence.
    An archival tree is not a supported capability, is never merged into
    `main`, and does not excuse a red gate on `main`.
-7. Before integration, write characterization that passes on the old engine and
+7. A production-retained algorithm is not complete when its engine code is
+   retained. Before another candidate begins, finish its REST-first selection,
+   synchronized GUI control where appropriate, automatic-selection decision,
+   Chapter 4 and Chapter 12 Manifest contracts, operational/parity docs, and
+   public-surface tests. A deliberately research-only method must say why it is
+   not public and remain excluded by design.
+8. Before integration, write characterization that passes on the old engine and
    a new guard proven by fresh-compilation sabotage. Preserve CLI/GUI parity if
    the optimizer becomes selectable.
 
@@ -66,7 +72,7 @@ question. They are not prerequisite reading.
    assertion that names a mechanism is not automatically a test of it. When a
    sabotage fails a file, read WHICH assertions failed; if the one naming the
    sabotaged mechanism is not among them, it is decoration.
-8. Update the Manifest with the published derivation and citation, neuron's
+9. Update the Manifest with the published derivation and citation, neuron's
    adaptation, configuration/state, failure and stopping semantics, performance
    evidence, example, index entries, and object figure if ownership changes.
 

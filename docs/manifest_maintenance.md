@@ -406,9 +406,14 @@ the change is complete:
    current capability.
 
 Research prototypes may deliberately remain C++-only while evidence is being
-collected. The research handoff must name that boundary. Once the method is
-retained and publicly integrated, Chapter 4 and the interface contracts above
-must be closed before the next candidate begins.
+collected. The research handoff must name that boundary. A method retained for
+production is **not complete at engine retention**: its REST-first selection,
+appropriate synchronized GUI control, automatic-selection membership decision,
+Chapter 4 and Chapter 12 contracts, index, parity/operational documentation, and
+public-surface tests must all close in the same integration phase before the
+next candidate begins. The only alternatives are an explicit research-only
+decision or rejection and removal; an indefinitely retained but inaccessible
+engine option is not a completed learning-algorithm phase.
 
 ### Helper-tool documentation rule
 
@@ -612,6 +617,10 @@ Text extraction is not a substitute for visual inspection.
       include verified requests, add an `Algorithm name!REST API` index pointer
       in Chapter 4 as well as the derivation/implementation pointers, and keep
       retention separate from ranking.
+- [ ] Do not mark a production-retained learning algorithm or its phase complete
+      until REST selection, the appropriate GUI control, automatic-selection
+      policy, Chapter 4/12 contracts, parity/operational docs, and public-surface
+      tests are all synchronized. Otherwise classify it explicitly research-only.
 - [ ] After every optimizer retain, research-only, or reject decision, update
       Chapter 12's consolidated optimizer comparison table with scoped evidence,
       stability, conditioning, late-stage behavior, availability, and the

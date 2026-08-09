@@ -40,9 +40,10 @@ The Manifest and source are authoritative after implementation.
   conditioning pair as first-class acceptance axes; expose nothing publicly
   before retention; and never alter a published formula merely to share code.
   Retained neural methods are L-BFGS, iRPROP+, and Levenberg--Marquardt (LM-v2).
-  L-BFGS (`algorithm=4`) and iRPROP+ (`algorithm=5`) are public through REST and
-  the GUI; LM is retained engine capability only and has **no REST/GUI token
-  yet**. None is in the retired menus or automatic selector. BB was screened,
+  L-BFGS (`algorithm=4`), iRPROP+ (`algorithm=5`), and LM (`algorithm=6`) are
+  public through REST and the GUI. The bounded automatic selector considers all
+  retained optimizers that are eligible for the actual model and configuration;
+  it reports omissions by name. None is in the retired menus. BB was screened,
   rejected and removed; its exact historical tree is the annotated
   `research/bb-prototype-2026-08-08` tag. The completed LM evidence is
   `lm_source_decision.md`, `lm_v2_source_decision.md`, `lm_step0_results.md`,
@@ -79,6 +80,12 @@ session-level triggers:
 9. Manifest additions are explanatory contracts, not symbol inventories.  Follow
    the full Chapter 7 pattern and `docs/manifest_maintenance.md`; update the index
    gate and rebuild/inspect the PDF in the same commit.
+10. A retained learning algorithm is not complete at engine retention. Before
+    another candidate begins, expose it REST-first, add the synchronized GUI
+    control where appropriate, decide and document automatic-selection
+    membership, update Chapter 4 and Chapter 12 of the Manifest plus operational
+    and parity docs, and pass the public-surface gates. Rejected candidates are
+    removed instead; research-only status must be explicit.
 
 ## Build and verification
 

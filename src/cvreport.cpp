@@ -12,6 +12,7 @@
 #include <set>
 #include <sstream>
 
+#include "network.h" // Network::algorithmLabel -- the one optimizer-naming owner
 #include "version.h"
 
 using namespace std;
@@ -232,10 +233,13 @@ ArchInfo archInfo( const vector< crossval::FoldSelection >& sel )
 	return a;
 }
 
-// The optimizer names the report uses, matching the CLI/GUI menu terminology.
+// The optimizer name the report uses. Delegated to the ONE naming owner rather
+//    than restated: a fold's auto probe now chooses from a curated candidate
+//    list, so a local three-way conditional would print "unknown 3/5 folds" the
+//    first time a fold resolved to a retained modern optimizer.
 const char* algorithmName( int a )
 {
-	return a == 0 ? "Canonical" : a == 1 ? "CGD" : a == 2 ? "Shanno" : "unknown";
+	return a < 0 ? "unknown" : Network::algorithmLabel( ( unsigned ) a );
 }
 
 // "CGD 3/5 folds, Shanno 2/5" -- how often each optimizer was chosen, in

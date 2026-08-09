@@ -282,7 +282,10 @@ building a new model &mdash; the saved file's first line carries its type:</span
     <option value="3">Shanno's algorithm</option>
     <option value="4">L-BFGS</option>
     <option value="5">iRPROP+</option>
-    <option value="auto">Auto &mdash; probe all three, adopt the best</option>
+    <option value="6"
+      title="Levenberg-Marquardt: single-hidden-layer least-squares networks only, batch/epoch, automatic learning rate off, at most 512 weights"
+      >Levenberg&ndash;Marquardt</option>
+    <option value="auto">Auto &mdash; probe every eligible method, adopt the best</option>
   </select></label>
   <label>Max iterations <input class="num" type="number" id="maxiter" value="20000"
     min="1"></label>
@@ -764,8 +767,19 @@ async function randomizeWeights() {
 // with the ROC plot and the statistics panel.
 let training = false;
 const fmtE = v => (v === null || v === undefined) ? "n/a" : Number(v).toExponential(2);
+// The retained modern optimizers (L-BFGS, iRPROP+, Levenberg-Marquardt) each
+// own their own absolute step and are full-batch, so those two controls have
+// exactly one admissible value and the page forces and locks them rather than
+// letting the user compose a request the server will refuse.
+//
+// Their OTHER restrictions have no unambiguous control to lock — the error
+// function belongs to the model, the model family is fixed at creation, and the
+// weight count is derived — so those stay REST refusals, reported in the status
+// line. A validation split is allowed: Iterative still owns its monitoring and
+// stopping, and it does not change LM's training objective.
 function syncOptimizerControls() {
-  const ownsStep = $("algo").value === "4" || $("algo").value === "5";
+  const a = $("algo").value;
+  const ownsStep = a === "4" || a === "5" || a === "6";
   if (ownsStep) {
     $("autostep").checked = false;
     $("batch_epoch").checked = true;

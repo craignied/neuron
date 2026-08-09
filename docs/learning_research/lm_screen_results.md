@@ -106,3 +106,19 @@ LM is all of these:
 It is **not** the recommended Civic Choice default: iRPROP+ beats it there
 consistently. Retention and default ranking are two separate decisions, as the
 portfolio policy requires.
+
+## 6. Public integration after retention
+
+The retained method is now selectable through `/api/train` and the GUI as
+`algorithm=6`, without a legacy-menu entry. Direct requests are refused before
+mutation unless the model is neural, LMS, batch/epoch, `autostep=0`, implements
+the packed and normal-equations boundaries, and has at most 512 packed
+parameters. Validation and weight decay are allowed.
+
+The bounded automatic selector considers LM together with canonical, CGD,
+Shanno, L-BFGS, and iRPROP+ whenever those same restrictions pass. Eligible
+methods share one fixed 2250 ms total budget equally; omitted methods and reasons
+are reported. OBD applies the parameter ceiling to its planned maximum
+architecture rather than only its starting size. The normative public contract
+is Manifest Chapter 4 and the current `autoalgo`/`Network` specifications in
+Chapter 12; the source-decision documents remain the pre-code historical record.

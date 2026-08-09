@@ -147,6 +147,17 @@ add_executable(check_lm
 target_link_libraries(check_lm PRIVATE neuron_engine)
 add_test(NAME network_lm COMMAND check_lm)
 
+# Unit test: the ONE eligibility rule (autoalgo::ineligible), the curated
+# candidate list it produces, and the automatic selector that probes it. Every
+# refusal is asserted beside a control that differs in exactly the offending
+# field, because a rule that refused everything would satisfy a suite of
+# refusals alone. It trains real networks through the selector, so it links the
+# engine.
+add_executable(check_autoalgo
+    tests/network/check_autoalgo.cpp)
+target_link_libraries(check_autoalgo PRIVATE neuron_engine)
+add_test(NAME auto_algorithm_selection COMMAND check_autoalgo)
+
 # Regression test: Hosmer-Lemeshow on datasets past 10,000 rows (fixed-size
 # stack arrays segfaulted there until 2026-07-16). No GSL needed.
 add_executable(check_hl
@@ -236,7 +247,7 @@ add_executable(check_packedboundary
 target_link_libraries(check_packedboundary PRIVATE neuron_engine)
 add_test(NAME network_packed_boundary COMMAND check_packedboundary)
 
-# Unit test: the research-only L-BFGS prototype (src/lbfgs.*). The two-loop
+# Unit test: the retained L-BFGS optimizer (src/lbfgs.*). The two-loop
 # recursion is checked against an INDEPENDENT dense inverse-BFGS matrix built
 # in the test from the defining update, over m=1/5/20 with partially filled and
 # rolled-over histories; both strong-Wolfe conditions are checked from outside
@@ -252,7 +263,7 @@ add_executable(check_lbfgs
 target_link_libraries(check_lbfgs PRIVATE neuron_engine)
 add_test(NAME network_lbfgs COMMAND check_lbfgs)
 
-# Unit test: the research-only iRPROP+ prototype (src/irprop.*). The published
+# Unit test: the retained iRPROP+ optimizer (src/irprop.*). The published
 # table is driven BY HAND -- IRpropState has no model dependency, so every
 # branch is asserted against hand-computed Delta, step and weight values rather
 # than inferred from a training run. Covers all three sign products in one

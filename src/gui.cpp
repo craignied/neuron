@@ -1230,10 +1230,7 @@ string runTrainingAndBuildResult( bool continued, const string& autoJson,
 	string stopReason = iter ? stopReasonName( iter->getStopReason() ) : "none";
 	Network* trainedNet = dynamic_cast< Network* >( modelPtr.get() );
 	unsigned trainedType = trainedNet ? trainedNet->getTrainingType() : 0;
-	const char* trainedName = trainedType == 0 ? "Canonical"
-		: trainedType == 1 ? "CGD" : trainedType == 2 ? "Shanno"
-		: trainedType == Network::TRAIN_LBFGS ? "L-BFGS"
-		: trainedType == Network::TRAIN_IRPROP ? "iRPROP+" : "unknown";
+	const char* trainedName = Network::algorithmLabel( trainedType );
 
 	ostringstream msg;
 	msg.precision( 6 );
@@ -1290,7 +1287,14 @@ string jsonAutoAlgo( const autoalgo::Result& r )
 	out.precision( 6 );
 	out << "{\"selected\":" << r.selected << ",\"selectedName\":\""
 		<< jsonEscape( r.selectedName ) << "\",\"cancelled\":"
-		<< ( r.cancelled ? "true" : "false" ) << ",\"probes\":[";
+		<< ( r.cancelled ? "true" : "false" )
+		// BOTH halves of the budget: the total is the ceiling the whole
+		//    selection honours, the per-candidate figure is what each attempted
+		//    one actually got. Retaining another algorithm moves the second and
+		//    never the first.
+		<< ",\"totalBudgetMs\":" << r.totalBudgetMs
+		<< ",\"perCandidateBudgetMs\":" << r.perCandidateBudgetMs
+		<< ",\"probes\":[";
 	for ( unsigned i = 0; i < r.probes.size(); i++ )
 	{
 		const autoalgo::Probe& p = r.probes[ i ];
@@ -1300,13 +1304,24 @@ string jsonAutoAlgo( const autoalgo::Result& r )
 			<< ",\"iterations\":" << p.iterations
 			<< ",\"stopReason\":\"" << stopReasonName( p.stop ) << "\"}";
 	}
+	// WHAT WAS NOT PROBED, AND WHY. Machine-readable for the same reason the
+	//    probes are: a caller comparing two runs must be able to see that a
+	//    method is absent BECAUSE it was ineligible, not because it lost.
+	out << "],\"omitted\":[";
+	for ( unsigned i = 0; i < r.omitted.size(); i++ )
+	{
+		const autoalgo::Omission& o = r.omitted[ i ];
+		out << ( i ? "," : "" ) << "{\"algorithm\":" << o.algorithm
+			<< ",\"name\":\"" << jsonEscape( o.name )
+			<< "\",\"reason\":\"" << jsonEscape( o.reason ) << "\"}";
+	}
 	out << "]}";
 	return out.str();
 }
 
-// The whole training job: optional auto algorithm selection (probe all
-//    three from identical weights, adopt the winner -- which REPLACES
-//    modelPtr, so every pointer is re-derived after it), then the real
+// The whole training job: optional auto algorithm selection (probe every
+//    ELIGIBLE candidate from identical weights, adopt the winner -- which
+//    REPLACES modelPtr, so every pointer is re-derived after it), then the real
 //    training run, observed for the GUI's realtime chart when asked. The
 //    caller must own the engine (see runTrainingAndBuildResult).
 string runTrainJob( bool continued, bool autoSelect, unsigned maxIter,
@@ -1320,7 +1335,12 @@ string runTrainJob( bool continued, bool autoSelect, unsigned maxIter,
 
 		// The probe summary is captured separately so it can lead the report
 		Capture probeCap;
-		autoalgo::Result r = autoalgo::pick( *net, 750,
+		// A plain training run does not resize the model, so the parameter
+		//    ceiling is judged against the model's own count (0 = its own). The
+		//    total budget is the shipped compatibility figure, shared across
+		//    however many candidates turn out to be eligible.
+		autoalgo::Result r = autoalgo::pick( *net, 0,
+			autoalgo::DEFAULT_TOTAL_BUDGET_MS,
 			observed ? job.cancelLatch() : nullptr );
 		preamble = probeCap.text.str();
 
@@ -1383,8 +1403,8 @@ string handleTrain( const httplib::Request& req )
 
 	if ( !modelPtr )
 		return jsonMsg( false, "create a model first" );
-	if ( algorithm < 1 || algorithm > 5 )
-		return jsonMsg( false, "algorithm must be 1, 2, 3, 4, 5 or auto" );
+	if ( algorithm < 1 || algorithm > Network::TRAINING_TYPES )
+		return jsonMsg( false, "algorithm must be 1, 2, 3, 4, 5, 6 or auto" );
 	if ( maxIter < 1 )
 		return jsonMsg( false, "max iterations must be at least 1" );
 
@@ -1489,26 +1509,24 @@ string handleTrain( const httplib::Request& req )
 	if ( given( req, "printcount" ) && printCount < 1 )
 		return jsonMsg( false, "print count must be at least 1" );
 
-	// L-BFGS and iRPROP+ are full-batch neural optimizers. Refuse incompatible
-	//    configuration before applying any field, rather than starting a run
-	//    that throws only after randomization or another partial mutation.
+	// THE ELIGIBILITY REFUSAL, asked of the one rule (autoalgo::ineligible) and
+	//    asked about the configuration this request WOULD produce -- the model's
+	//    current settings overlaid with the fields present in the call. Refused
+	//    before any field is applied, rather than starting a run that throws only
+	//    after randomization or another partial mutation.
+	//
+	//    The same rule decides which methods algorithm=auto probes, so a method
+	//    refused here is omitted there with the same sentence.
 	Network* net = dynamic_cast< Network* >( modelPtr.get() );
-	if ( algorithm == 4 || algorithm == 5 )
+	if ( !autoSelect )
 	{
-		const char* optimizer = algorithm == 4 ? "L-BFGS" : "iRPROP+";
-		if ( dynamic_cast< Logistic* >( modelPtr.get() ) )
+		autoalgo::Settings effective = autoalgo::Settings::of( *net );
+		if ( req.has_param( "batch_epoch" ) ) effective.batchEpoch = batchEpoch;
+		if ( req.has_param( "autostep" ) ) effective.autoStep = haveAutostep;
+		const char* why = autoalgo::ineligible( *net, algorithm - 1, effective );
+		if ( why )
 			return jsonMsg( false, string( "algorithm=" ) + to_string( algorithm )
-				+ " (" + optimizer + ") is available for neural models only" );
-		bool effectiveBatch = req.has_param( "batch_epoch" )
-			? batchEpoch : net->getBatchEpoch();
-		bool effectiveAutostep = req.has_param( "autostep" )
-			? haveAutostep : net->getAutoStepSize();
-		if ( !effectiveBatch )
-			return jsonMsg( false, string( "algorithm=" ) + to_string( algorithm )
-				+ " (" + optimizer + ") requires batch_epoch=1" );
-		if ( effectiveAutostep )
-			return jsonMsg( false, string( "algorithm=" ) + to_string( algorithm )
-				+ " (" + optimizer + ") requires autostep=0" );
+				+ " (" + Network::algorithmLabel( algorithm - 1 ) + ") " + why );
 	}
 
 	// Nothing above this line has touched the model. Everything below applies.
@@ -1798,8 +1816,10 @@ string runObdJob( const obd::Config& cfg )
 	return string( "{\"ok\":true,\"message\":\"" ) + jsonEscape( msg.str() )
 		+ "\",\"cancelled\":" + ( r.cancelled ? "true" : "false" )
 		+ ",\"selectedHidden\":" + to_string( r.selectedHidden )
-		+ ",\"optimizer\":\"" + ( r.algorithm == 0 ? "Canonical"
-			: r.algorithm == 1 ? "CGD" : r.algorithm == 2 ? "Shanno" : "unknown" )
+		// Named by the one naming owner, so a search that auto-selects a
+		//    retained modern optimizer cannot be reported as "unknown"
+		+ ",\"optimizer\":\"" + ( r.algorithm < 0 ? "none"
+			: Network::algorithmLabel( ( unsigned ) r.algorithm ) )
 		+ "\",\"optimizerAuto\":" + ( r.autoSelected ? "true" : "false" )
 		// The held-out set the search actually scored on, from the engine's rule
 		//    -- the size-search chart's legend is drawn from this, so it can never

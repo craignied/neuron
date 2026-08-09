@@ -307,8 +307,8 @@ def group_train():
     # PIN: the domain refusals that already exist
     refused( "train: maxiter below 1", train( maxiter = "0" ),
         "max iterations must be at least 1" )
-    refused( "train: algorithm out of range", train( algorithm = "6" ),
-        "algorithm must be 1, 2, 3, 4, 5 or auto" )
+    refused( "train: algorithm out of range", train( algorithm = "7" ),
+        "algorithm must be 1, 2, 3, 4, 5, 6 or auto" )
     refused( "train: L-BFGS memory below 1", train( algorithm = "4",
         lbfgs_memory = "0", batch_epoch = "1", autostep = "0" ),
         "lbfgs_memory must be at least 1" )
@@ -388,6 +388,7 @@ def group_train():
             and "Learning rate eta: 0.75" not in str( r.get( "output", "" ) ),
         "eta from a refused request survived into the model" )
 
+
     # And the same for a DOMAIN fault in a later field, which is a different
     #    path: a syntax fault is refused by the reader at the top of the
     #    handler whatever the ordering, so only this case can tell whether the
@@ -402,6 +403,31 @@ def group_train():
         "Learning rate eta: 0.25" in str( r.get( "output", "" ) )
             and "Learning rate eta: 0.6" not in str( r.get( "output", "" ) ),
         "eta from a domain-refused request survived into the model" )
+
+    # --- algorithm=6, and the eligibility refusal that is NOT a syntax fault ---
+    #    The XOR fixture is discrete, so the default error function is
+    #    cross-entropy and Levenberg-Marquardt is refused on the STRICT LMS GATE
+    #    -- which is worth pinning on its own before switching to an LMS model.
+    check( "train: LM is refused under the default cross-entropy fixture",
+        "least-squares" in str( train( algorithm = "6", batch_epoch = "1",
+            autostep = "0" ).get( "message", "" ) ),
+        "cross-entropy did not refuse Levenberg-Marquardt" )
+    post( "/api/model", { "type": "simpleprop", "hidden": "2", "errfunc": "lms" } )
+    accepted( "train: Levenberg-Marquardt on an LMS model",
+        train( algorithm = "6", batch_epoch = "1", autostep = "0" ) )
+    refused( "train: Levenberg-Marquardt on-line", train( algorithm = "6",
+        batch_epoch = "0", autostep = "0" ),
+        "algorithm=6 (Levenberg-Marquardt) requires batch_epoch=1" )
+    refused( "train: Levenberg-Marquardt with the step search",
+        train( algorithm = "6", batch_epoch = "1", autostep = "1" ),
+        "algorithm=6 (Levenberg-Marquardt) requires autostep=0" )
+    # An eligibility refusal must leave the model UNCONFIGURED, exactly as a
+    #    syntax fault does: batch_epoch=0 was in that refused request.
+    r = train( algorithm = "1", autostep = "0" )
+    accepted( "train: after the eligibility refusal", r )
+    check( "train: a refused ELIGIBILITY fault applied nothing either",
+        "batch/epoch is on" in str( r.get( "output", "" ) ),
+        "batch_epoch=0 from a refused request survived into the model" )
 
     # PIN: async=1 really is asynchronous
     r = train( maxiter = "20000", **{ "async": "1" } )

@@ -89,7 +89,14 @@ struct Config {
 	unsigned earlyStopPatience = 3; // samples above min+tol before a size stops
 	unsigned growPatience = 2;  // sizes without a min-test improvement before growth stops
 	double pruneTol = 0.02;     // how much worse than best a pruned net may be and still be kept
-	int algorithm = 0;          // 0/1/2 = trainingType; -1 = auto (probe once, keep the choice)
+	// A FIXED optimizer is one of the three legacy trainingType values; -1 is
+	//    auto (probe once, keep the choice). Auto's candidate list is not these
+	//    three -- autoalgo curates it from what is eligible here, so the
+	//    RESOLVED optimizer below can be a retained modern one this field cannot
+	//    name, Levenberg-Marquardt included. The parameter ceiling is judged at
+	//    hMax rather than hStart, because the chosen optimizer must survive the
+	//    whole growth range (see run()).
+	int algorithm = 0;
 	// TRAIN-error plateau backstop (the engine's auto-stop, forced on for every
 	//    size): a size that converges flat never trips the test-error rise, so
 	//    without this it would burn the whole budget. Same semantics as
@@ -112,9 +119,10 @@ struct Result {
 	bool ceilingExhausted = false;
 	// Which optimizer the search actually ran on, so a caller can observe the
 	//    choice instead of parsing the report for it. algorithm is the resolved
-	//    trainingType (0 canonical / 1 CGD / 2 Shanno), -1 only when the search
-	//    never got as far as picking one; autoSelected records whether an auto
-	//    probe made that choice (Config::algorithm < 0) or the caller fixed it.
+	//    trainingType -- name it with Network::algorithmLabel, never a local
+	//    switch -- and is -1 only when the search never got as far as picking
+	//    one; autoSelected records whether an auto probe made that choice
+	//    (Config::algorithm < 0) or the caller fixed it.
 	int algorithm = -1;
 	bool autoSelected = false;
 };

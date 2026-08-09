@@ -1,6 +1,6 @@
 # Neural optimizer handoff
 
-Date: 2026-08-09 (LM-v2 retained; Manifest synchronized; public LM surface pending)
+Date: 2026-08-09 (LM-v2 retained and publicly integrated; Manifest synchronized)
 
 This is the live optimizer-program handoff. The implementation plan preserves the
 declarations under which each phase was run; this file owns current status and the exact
@@ -16,8 +16,9 @@ git status -sb
 git log -6 --oneline --decorate
 ```
 
-At this handoff, `main` is clean and synchronized with `origin/main` at `7e6ee88`.
-Confirm rather than assuming that remains true. Do not discard unexpected changes.
+At this handoff, the LM public-surface integration follows `a4e65e1`; inspect the current
+HEAD and synchronization state rather than relying on a copied hash. Confirm rather than
+assuming the tree is clean. Do not discard unexpected changes.
 
 The relevant completed commits are:
 
@@ -27,6 +28,9 @@ The relevant completed commits are:
 - `6352979` — retained LM-v2 engine implementation, tests, harness, and evidence;
 - `7e6ee88` — complete optimizer Manifest audit, consolidated comparison table,
   maintenance rule, Figure 12.1, and index synchronization.
+- the commit containing this handoff — REST/GUI `algorithm=6`, family-aware bounded
+  automatic selection, full public contracts, and the rule that production retention is
+  incomplete until those surfaces and the Manifest close.
 
 Discover the current test count from CTest. Do not copy a remembered count into a status
 report.
@@ -75,9 +79,9 @@ measured Civic Choice arm at 6,000, 25,000, and 100,000 rows.
 
 ### Levenberg--Marquardt (LM-v2)
 
-Retained as engine capability in `6352979`, but **not public yet**. There is no accepted
-REST `algorithm=6`, GUI choice, menu entry, automatic-selection entry, or public recipe.
-Chapter 4 states this explicitly. Do not describe engine retention as public access.
+Retained in `6352979` and now public as REST/GUI `algorithm=6`. It also participates in
+`algorithm=auto` whenever eligible. There is deliberately no legacy-menu entry or saved
+optimizer state.
 
 LM implements Madsen, Nielsen & Tingleff (2004) Algorithm 3.16 with `mu*I` damping,
 Nielsen's `nu` update, `tau=1e-3`, and restored small-step criterion (3.15b) at
@@ -90,8 +94,10 @@ Eligibility is deliberately narrow:
 - LMS only; cross-entropy is refused;
 - batch mode only;
 - automatic step-size search off;
-- no validation/early-stopping split;
 - at most 512 packed parameters.
+
+Validation/early stopping and weight decay are explicitly allowed: neither changes LM's
+training objective or its published iteration, and `Iterative` continues to own stopping.
 
 The implementation accumulates `J'J` and `J'r` per exemplar; it never forms an `N x P`
 Jacobian. Storage is flat in row count and bounded by the parameter ceiling.
@@ -150,29 +156,25 @@ The Manifest and its maintenance authority are current through LM:
   iRPROP+, rejected BB, and LM;
 - `docs/manifest_maintenance.md` requires every future optimizer, retained or rejected,
   to update that table in the same decision commit;
-- Chapter 4 accurately records the current public REST algorithms and explicitly says
-  that retained C++ LM has no REST token yet.
+- Chapter 4 records public LM token 6, its exact refusals, verified blocking/asynchronous
+  request examples, and its automatic-selection participation.
 
-`AGENTS.md` and `docs/gui_cli_parity.md` correctly remain unchanged for LM while it has no
-public surface. Update both in the same commit that adds REST/GUI access.
+`AGENTS.md` and `docs/gui_cli_parity.md` record the same public surface and the permanently
+frozen legacy menus.
 
 ## Exact next boundary
 
-The next task is **not another candidate** and is **not automatic selection**. First make
-the public-surface decision for retained LM, REST-first:
+The optimizer research and LM public-surface phase are complete. Do not reopen them and
+do not start another candidate. The user intends to discuss the next broader GUI update;
+await that design direction. The LM choice already present in the training selector is
+the synchronized client of its completed REST contract, not a legacy-menu change.
 
-1. append `/api/train` `algorithm=6` without renumbering existing tokens;
-2. enforce the six LM eligibility refusals by field/name before applying any request;
-3. synchronize optimizer naming, blocking and asynchronous training, action logging,
-   cloning/continuation, OBD/CV eligibility, and strict parsing;
-4. only then add the matching GUI choice and lock incompatible controls;
-5. update `docs/gui_cli_parity.md`, `AGENTS.md`, and Manifest Chapter 4 in the same commit;
-6. run focused tests plus GUI smoke, async lifecycle, strict parsing, the full Release
-   gate, index gate, and rendered Manifest inspection.
-
-The user has explicitly paused before GUI work to discuss preparatory work. Therefore do
-not start these changes merely because they are listed here. Await the public-surface
-design decision. Automatic selection stays deferred until separately authorized.
+Automatic selection now considers canonical, CGD, Shanno, L-BFGS, iRPROP+, and LM when
+eligible. The eligible list is settled before probing, all candidates share one fixed
+2250 ms total budget equally, and every omission is returned with its reason. OBD judges
+LM's 512-parameter ceiling against its planned maximum architecture, so it cannot select
+LM at a small starting size and fail after growing past the ceiling. Fixed OBD/CV tokens
+remain `1|2|3|auto`; an `auto` result may resolve to any eligible retained optimizer.
 
 ## Verification discipline
 

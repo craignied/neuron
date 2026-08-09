@@ -421,14 +421,20 @@ int main()
 	util::set_seed( 7 );
 	crossval::run( data, foldId,
 		cvadapters::nestedObdProcedure( acfg, 0.25, &asel ) );
+	// The resolved optimizer is whatever autoalgo's CURATED CANDIDATE LIST left
+	// eligible for the fold's own net, which is no longer the legacy three: a
+	// fold may legitimately resolve to L-BFGS, iRPROP+ or Levenberg-Marquardt.
+	// LM is eligible here -- these folds are small LMS SimpleProps well under
+	// the parameter ceiling even at hMax -- and the nested search's early
+	// stopping is NOT a restriction on it.
 	bool autoEveryFold = ( asel.size() == 5 );
 	for ( unsigned i = 0; i < asel.size(); i++ )
 		if ( !asel[ i ].autoSelected || asel[ i ].algorithm < 0
-			|| asel[ i ].algorithm > 2 )
+			|| asel[ i ].algorithm >= ( int ) Network::TRAINING_TYPES )
 			autoEveryFold = false;
 	expect( autoEveryFold,
 		"auto reaches every nested-OBD fold as auto: each fold probes and records "
-		"its own optimizer choice" );
+		"its own optimizer choice, from the whole eligible portfolio" );
 
 	// Auto selects ONCE PER SEARCH, and that choice governs the fold's whole
 	// grow-and-prune run -- one record per fold, never one per trial.

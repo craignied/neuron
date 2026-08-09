@@ -2,6 +2,12 @@
 
 Date: 2026-08-03
 
+> **Historical comparison.** This document records the shortlist before the
+> measured prototype phases. Current outcomes supersede its forward-looking
+> recommendations: BB was rejected; L-BFGS, iRPROP+, and LM were retained; LM
+> is now public as REST/GUI token 6 and participates in automatic selection
+> when eligible. The legacy menu is frozen and is not an integration target.
+
 Documents compared:
 
 - `research_sol.md` (Sol)
@@ -46,7 +52,7 @@ optimizer boundary, stronger benchmark design, and more cautious performance cla
 | 4 | LM | BB | Sol ranks LM by possible niche speed; Fable ranks BB higher by implementation simplicity and breadth. BB is the better first harness prototype; LM may still be faster within its eligible niche. |
 | 5 | Nesterov momentum | Adam | Both target online/stochastic training later. Fable chooses original Adam; Sol avoids it in favor of AMSGrad because of Adam's known convergence counterexample. |
 | 6 | SVRG | Momentum/Nesterov | Sol uniquely covers a variance-reduced large-data method; Fable uniquely treats classical heavy-ball momentum explicitly. |
-| 7 | AMSGrad | LM | Both retain LM as specialized/research-only in practice despite the numerical rank difference. |
+| 7 | AMSGrad | LM | Both originally scoped LM as a specialized research candidate; the later measured phase retained it for its small-LMS niche. |
 
 Fable also separates **expected-speed ranking** from **implementation order**: it proposes
 building the harness with BB before implementing its first-ranked IRLS. That is sensible.

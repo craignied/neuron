@@ -73,6 +73,13 @@ public:
 	//    at that line in onehidden.cpp.
 	virtual double innerTrainSet(); // returns set error
 
+	// The two eligibility questions, public exactly as they are on Network:
+	//    asking whether this model can be optimized a particular way is a
+	//    question the public surface answers before it applies a request. The
+	//    boundary OPERATIONS both belong to stay protected below.
+	virtual unsigned packedSize() const;
+	virtual bool normalEquationsAvailable() const { return true; }
+
 protected:
 	// Forward propagation from the exemplar ALREADY IN I, with the hidden bias
 	//    slot ALREADY PINNED if this model has one. Each concrete forward()
@@ -136,7 +143,7 @@ protected:
 	//    Shared by both architectures with no flag: every width comes from
 	//    hW's own dimensions, which setHidden() already fixed from the bias
 	//    architecture. Nothing here reads biasFlag (see the note at the top).
-	virtual unsigned packedSize() const;
+	//    packedSize() -- its eligibility question -- is declared public above.
 	virtual void packWeights( vector< double >& destination ) const;
 	virtual void unpackWeights( const vector< double >& source );
 	virtual double batchObjectiveGradient( vector< double >& packedRawGradient );
@@ -146,7 +153,8 @@ protected:
 	//    THE ELIGIBLE MODEL SET for the Levenberg-Marquardt research phase is
 	//    exactly this class's two concrete types. BackProp and Logistic are
 	//    deliberately out of scope, so they inherit Network's refusal.
-	virtual bool normalEquationsAvailable() const { return true; }
+	//    normalEquationsAvailable() is declared public above, beside the other
+	//    eligibility question.
 	virtual double batchNormalEquations( Matrix< double >& normal,
 		vector< double >& gradient );
 

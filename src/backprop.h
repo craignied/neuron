@@ -55,6 +55,12 @@ public:
 	// Remove input nodes from this network
 	virtual void removeInputs( const vector< unsigned >& );
 
+	// The packed boundary's eligibility question, public exactly as it is on
+	//    Network. BackProp implements the packed boundary and NOT the
+	//    normal-equations one, so it inherits Network's refusal of the second --
+	//    which is what puts it outside Levenberg-Marquardt's eligible family.
+	virtual unsigned packedSize() const;
+
 protected:
 	// READ-ONLY OBSERVATION OF THE FITTED PARAMETERS, and nothing else.
 	//
@@ -83,8 +89,8 @@ protected:
 	//    This model's layout is its vector-of-Matrix: Weights[0] flattened row
 	//    by row, then Weights[1], and so on through the output layer -- the
 	//    same order pack() uses for Gradient, so weights and gradient are one
-	//    layout.
-	virtual unsigned packedSize() const;
+	//    layout. packedSize() -- its eligibility question -- is public below,
+	//    exactly as it is on Network and OneHiddenNet.
 	virtual void packWeights( vector< double >& destination ) const;
 	virtual void unpackWeights( const vector< double >& source );
 	virtual double batchObjectiveGradient( vector< double >& packedRawGradient );
