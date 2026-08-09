@@ -39,10 +39,15 @@ The Manifest and source are authoritative after implementation.
   portfolio policy rather than one speed figure; treat seed stability and the
   conditioning pair as first-class acceptance axes; expose nothing publicly
   before retention; and never alter a published formula merely to share code.
-  Current public retained methods are L-BFGS (`algorithm=4`) and iRPROP+
-  (`algorithm=5`), neither in the retired menus or automatic selector. BB was
-  screened, rejected and removed. Do not spend this program on Logistic, DFA,
-  exhaustive baseline timing or timing minutiae.
+  Retained neural methods are L-BFGS, iRPROP+, and Levenberg--Marquardt (LM-v2).
+  L-BFGS (`algorithm=4`) and iRPROP+ (`algorithm=5`) are public through REST and
+  the GUI; LM is retained engine capability only and has **no REST/GUI token
+  yet**. None is in the retired menus or automatic selector. BB was screened,
+  rejected and removed; its exact historical tree is the annotated
+  `research/bb-prototype-2026-08-08` tag. The completed LM evidence is
+  `lm_source_decision.md`, `lm_v2_source_decision.md`, `lm_step0_results.md`,
+  and `lm_screen_results.md`. Do not reopen completed candidates or spend this
+  program on Logistic, DFA, exhaustive baseline timing or timing minutiae.
 - The Design Manifest is normative and must stay synchronized with every public
   class, major object, principal method, algorithm, failure contract, and index entry.
 

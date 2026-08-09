@@ -1,8 +1,8 @@
 # Optimizer implementation and measurement plan
 
-Status: **authoritative current-work plan**
+Status: **authoritative program plan; phases through LM retention are complete**
 
-Date: 2026-08-03
+Date: 2026-08-09 (status synchronized after LM-v2 retention)
 
 Intended reader: a fresh implementation agent (likely Claude Opus) working in this
 repository. This document is designed to be referenced directly from `CLAUDE.md` while
@@ -35,6 +35,35 @@ The execution order is:
 
 This is an implementation-and-research program, not authorization to ship every named
 algorithm.
+
+## Current status (2026-08-09)
+
+This plan preserves the declarations under which the experiments were run. Read
+`neural_optimizer_handoff.md` for the exact live boundary; do not infer current work by
+finding the first future-tense paragraph below.
+
+- Phase 0 established the benchmark harness and incumbent evidence.
+- L-BFGS and iRPROP+ were retained and integrated as REST/GUI algorithms 4 and 5.
+- Safeguarded GBB was rejected and removed. Its exact historical tree is archived under
+  annotated tag `research/bb-prototype-2026-08-08`; the negative-infinity audit defect is
+  documented in `bb_source_decision.md`.
+- LM-v1 was rejected as an adaptation after it reported failure at a numerically
+  converged point. LM-v2 restored Algorithm 3.16 criterion (3.15b), was re-screened, and
+  was retained in commit `6352979`. The Matrix normal-equations primitives landed first
+  in `bc19dec`.
+- LM is currently a retained **engine-only** method. It is strict-LMS, batch-only,
+  `autostep=0`, limited to `OneHiddenNet` with at most 512 packed parameters, and has no
+  public REST token, GUI control, menu entry, or automatic-selection entry yet.
+- Commit `7e6ee88` completed the consolidated Chapter 12 benchmark table, LM/LMObjective
+  and Matrix documentation, Figure 12.1, index, and the maintenance rule requiring every
+  future optimizer to update that table. Chapter 4 accurately records that REST does not
+  yet accept `algorithm=6`.
+
+The next work is therefore a **public-surface decision and integration boundary**, not a
+new optimizer candidate: design and verify LM's REST contract before adding its GUI
+control, then update GUI/REST parity and operational documentation in the same commit.
+Automatic selection remains deferred. Do not resume optimizer research until that
+boundary is explicitly settled.
 
 ## Large-workload speed scope governor
 
@@ -929,8 +958,9 @@ stability, endpoint, or redundancy failure under the portfolio policy below.
 Do not turn the latest benchmark winner into the sole gate for the next candidate. Every
 neural candidate is measured against a stable reference panel with distinct roles:
 
-- **L-BFGS is the current speed leader.** It is the primary modern wall-clock and
-  full-pass reference, not a requirement that every retained method must beat.
+- **L-BFGS is the generated well-conditioned-fixture leader.** It is a principal
+  modern wall-clock and full-pass reference, not a requirement that every retained
+  method must beat.
 - **Shanno is the established legacy quasi-Newton control.** It preserves continuity
   with the historical optimizer evidence and exposes regressions specific to the newer
   implementation path.
@@ -991,7 +1021,9 @@ Define and test explicitly:
 - L-BFGS: eligible smooth full-batch model families measured successfully.
 - iRPROP+: full-batch eligible models measured successfully.
 - BB: full-batch eligible models if retained.
-- LM: LMS-only and size-limited if ever retained.
+- LM: retained engine-only; LMS-only, batch-only, automatic step-size off,
+  `OneHiddenNet` only, and at most 512 packed parameters. Public integration must
+  preserve all six field-specific refusals declared in `lm_source_decision.md`.
 - stochastic methods: only modes actually measured.
 
 Ineligible selections are refused by name before changing model configuration. Nothing
@@ -1111,12 +1143,23 @@ measured remaining bottleneck.
 
 ### Levenberg-Marquardt
 
-Trigger: small LMS networks remain a major wall-clock consumer after accepted batch
-optimizers.
+**Completed and retained as LM-v2.** Step L0 falsified the initial arithmetic cost model,
+the full candidate was screened, v1's omitted small-step convergence criterion was
+characterized and corrected, and the complete v2 screen was rerun. Read
+`lm_source_decision.md`, `lm_v2_source_decision.md`, `lm_step0_results.md`, and
+`lm_screen_results.md`; do not reinterpret this original trigger as permission to reopen
+the phase.
 
 Scope: `OneHiddenNet` first, strict LMS eligibility, measured parameter/Jacobian-memory
 ceiling, direct solve through Matrix, no cross-entropy analogy. Benchmark row and parameter
 crossover. Preserve per-exemplar equations in the model layer.
+
+Measured decision: recommend LM for the measured severely ill-conditioned small-LMS
+`poor4` workload (10.8 ms / 15 traversals, versus L-BFGS 26.8 / 32 and iRPROP+ 49.9 /
+59). iRPROP+ remains the Civic Choice leader at every measured size; LM is worst on the
+well-conditioned twin. LM versus L-BFGS on Civic Choice is **ORDERING NOT ESTABLISHED**.
+These workload-scoped conclusions, not a general claim about conditioning, govern its
+portfolio position.
 
 ### Adam versus AMSGrad versus Nesterov
 
@@ -1161,10 +1204,11 @@ A candidate may become public only if all are true:
 The program is complete when:
 
 - baseline evidence is reproducible;
-- BB, corrected IRLS, L-BFGS, and iRPROP+ each have an explicit retain/research-only/reject
-  decision supported by matched-endpoint timing distributions;
+- every candidate actually entered in the neural program has an explicit
+  retain/research-only/reject decision supported by matched-endpoint evidence;
 - disposable rejected implementations are removed;
-- measured winners, if any, are fully integrated with bounded family-aware auto-selection;
+- retained methods are fully integrated with bounded family-aware auto-selection once
+  that separately deferred selector phase is authorized;
 - existing defaults and numeric optimizer tokens remain compatible unless a separately
   authorized change says otherwise;
 - all required tests, parity docs, Manifest sections, index gates, and rendered PDF checks
