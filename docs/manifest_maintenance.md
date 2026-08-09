@@ -503,6 +503,13 @@ module or materially changing ownership.
 
 ## Building the PDF
 
+Before every Manifest build associated with a source edit, compare the title
+page's `Revised Month YYYY` line in `docs/tex/manifest.tex` with the month and
+year of the current revision. If they differ, update the title-page line in the
+same change. This check applies whenever the Manifest is touched, even when the
+edit is elsewhere in the document; a successful PDF build does not detect a
+stale revision date.
+
 Build from `docs/tex/`:
 
 ```sh
@@ -630,6 +637,8 @@ Text extraction is not a substitute for visual inspection.
 - [ ] Include reproducibility, mutation, failure, and artifact behavior.
 - [ ] Run `python3 tools/check_manifest_index.py`; extend its principal-object
       and method inventory when the public vocabulary grows.
+- [ ] Confirm the title page's `Revised Month YYYY` matches the month and year
+      of this Manifest revision; update it whenever they differ.
 - [ ] Build the PDF from a clean LaTeX state.
 - [ ] Extract and search its text.
 - [ ] Render and inspect all changed pages.
