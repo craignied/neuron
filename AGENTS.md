@@ -205,6 +205,7 @@ so none of them changes. Writing a new endpoint or parameter means using
 | `docs/roc_theory.md` | What the ROC statistics mean and how to cite them |
 | `docs/manifest.pdf` | The complete manual (menu-by-menu) |
 | `CLAUDE.md` | Standing rules, current state, settled decisions, roadmap (for working **on** neuron rather than **with** it) |
+| `SOL_HANDOFF.md` | Sol/Codex continuity note: current audit boundary and restart context; read it when resuming Sol's repository research, GUI/API, or Manifest work |
 | `docs/HISTORY.md` | The dated development record — read on demand for the reasoning behind a decision |
 
 Maintainers: keep this file and `docs/agent_data_workflows.md` synchronized when
