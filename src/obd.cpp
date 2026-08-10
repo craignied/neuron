@@ -338,8 +338,11 @@ obd::Result obd::run( DataSet& data, const Config& cfg,
 		autoalgo::Result pick;
 		{
 			util::ScreenCapture quiet;
-			pick = autoalgo::pick( *net, plannedParameters,
-				autoalgo::DEFAULT_TOTAL_BUDGET_MS, cancel );
+			// OBD's auto means the WHOLE curated portfolio (an empty request).
+			//    Narrowing the field is a training-panel control; this search
+			//    has one algorithm token and no way to express a subset.
+			pick = autoalgo::pick( *net, std::vector< unsigned >(),
+				plannedParameters, autoalgo::DEFAULT_TOTAL_BUDGET_MS, cancel );
 		}
 		if ( pick.cancelled )
 		{

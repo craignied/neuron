@@ -16,6 +16,9 @@ input[type=text] { width: 22rem; } input.num { width: 5.5rem; }
 input.cols { width: 8rem; }
 button { padding: .35rem .9rem; cursor: pointer; }
 .status { margin-left: .8rem; font-size: .9rem; color: #777; }
+/* A method that cannot run on this model: the box is disabled, and the
+   label has to say so too, or only the tiny checkbox carries it. */
+#algoset label.unavailable { color: #999; }
 .status.ok { color: #1a7f37; } .status.err { color: #b91c1c; }
 /* Succeeded as an operation, but the fit is not valid: no stopping rule fired,
    whether from ceiling exhaustion or cancellation. Prominent enough not to be
@@ -276,17 +279,24 @@ building a new model &mdash; the saved file's first line carries its type:</span
 <fieldset>
 <legend>3 &mdash; Train</legend>
 <div class="row">
-  <label><select id="algo">
-    <option value="1">Canonical backpropagation</option>
-    <option value="2">Conjugate gradient descent</option>
-    <option value="3">Shanno's algorithm</option>
-    <option value="4">L-BFGS</option>
-    <option value="5">iRPROP+</option>
-    <option value="6"
-      title="Levenberg-Marquardt: single-hidden-layer least-squares networks only, batch/epoch, automatic learning rate off, at most 512 weights"
-      >Levenberg&ndash;Marquardt</option>
-    <option value="auto">Auto &mdash; probe every eligible method, adopt the best</option>
-  </select></label>
+  <span class="status">Algorithm &mdash; tick <b>one</b> to train with it, or
+  <b>several</b> to have them compete for the same fixed probe budget and train
+  on with the winner:</span>
+</div>
+<div class="row" id="algoset">
+  <label><input type="checkbox" class="algo" value="1" checked> Canonical
+    backpropagation</label>
+  <label><input type="checkbox" class="algo" value="2"> Conjugate gradient
+    descent</label>
+  <label><input type="checkbox" class="algo" value="3"> Shanno's algorithm</label>
+  <label><input type="checkbox" class="algo" value="4"> L-BFGS</label>
+  <label><input type="checkbox" class="algo" value="5"> iRPROP+</label>
+  <label><input type="checkbox" class="algo" value="6"
+    title="Levenberg-Marquardt: single-hidden-layer least-squares networks only, batch/epoch, automatic learning rate off, at most 512 weights"
+    > Levenberg&ndash;Marquardt</label>
+</div>
+<div class="row"><span class="status" id="algostatus"></span></div>
+<div class="row">
   <label>Max iterations <input class="num" type="number" id="maxiter" value="20000"
     min="1"></label>
   <label>Seed <input class="num" type="number" id="seed" placeholder="clock"></label>
@@ -736,6 +746,8 @@ async function setModel() {
     log_lastop: $("log_lastop").checked ? 1 : 0,
     log_history: $("log_history").checked ? 1 : 0 });
   setStatus("mstatus", j.ok, j.message);
+  // The model decides which optimizers can run: a new one re-asks the server.
+  if (j.ok) refreshEligibility();
 }
 // Load a saved network from a file (uploads its content; the server reads the
 // network type from the file's first line).
@@ -753,6 +765,7 @@ async function loadNetwork() {
   const r = await fetch("/api/model", { method: "POST", body: fd });
   const j = await r.json();
   setStatus("mstatus", j.ok, j.message);
+  if (j.ok) refreshEligibility();
 }
 async function randomizeWeights() {
   $("randbtn").disabled = true;
@@ -777,9 +790,23 @@ const fmtE = v => (v === null || v === undefined) ? "n/a" : Number(v).toExponent
 // weight count is derived — so those stay REST refusals, reported in the status
 // line. A validation split is allowed: Iterative still owns its monitoring and
 // stopping, and it does not change LM's training objective.
+// A COMPETITION IS DECIDED BY WHAT SURVIVES, NOT BY WHAT IS TICKED. The boxes
+// name a set; the server resolves it against the model and only then counts. One
+// survivor means that method trains directly with no probe budget spent, so
+// ticking a method that cannot run here costs nothing and changes nothing.
+function algoBoxes() {
+  return Array.prototype.slice.call(document.querySelectorAll("#algoset .algo"));
+}
+function checkedAlgos() {
+  return algoBoxes().filter(b => b.checked && !b.disabled).map(b => b.value);
+}
 function syncOptimizerControls() {
-  const a = $("algo").value;
-  const ownsStep = a === "4" || a === "5" || a === "6";
+  // The locked values are the UNION of what the ticked methods require: all
+  // three modern optimizers own an absolute step and are full-batch, so ticking
+  // any one of them fixes both controls for the whole set. Locking is what makes
+  // an explicit tick mean something -- left free, the two settings would make
+  // that method ineligible and it would quietly sit out the competition.
+  const ownsStep = checkedAlgos().some(v => v === "4" || v === "5" || v === "6");
   if (ownsStep) {
     $("autostep").checked = false;
     $("batch_epoch").checked = true;
@@ -787,7 +814,58 @@ function syncOptimizerControls() {
   $("autostep").disabled = ownsStep;
   $("batch_epoch").disabled = ownsStep;
 }
-$("algo").addEventListener("change", syncOptimizerControls);
+
+// WHICH METHODS CAN RUN ON THE MODEL THAT IS LOADED, asked of the server. The
+// page owns no copy of the eligibility rule: it renders the answer of the one
+// rule (autoalgo::ineligible) for the settings the user is composing, so a box
+// is greyed out with the server's own sentence beside it. Advisory only —
+// /api/train asks the same rule again and refuses on its own authority.
+let eligibilityBusy = false;
+async function refreshEligibility() {
+  if (eligibilityBusy) return;
+  eligibilityBusy = true;
+  try {
+    // ASKED ABOUT THE CONFIGURATION A TICK WOULD PRODUCE, not the one showing.
+    // Batch/epoch and the automatic step search are the two restrictions this
+    // panel can satisfy by itself: ticking a method that owns its step forces
+    // them (syncOptimizerControls above). Asking about the LIVE values instead
+    // would grey out L-BFGS, iRPROP+ and LM whenever Automatic learning rate
+    // happened to be on -- a dead end, since the control the user would have to
+    // change first is the one the tick was going to change for them. What is
+    // left greyed out is therefore only what a tick CANNOT fix: the model
+    // family, the error function, and the parameter ceiling.
+    const r = await fetch("/api/algorithms?batch_epoch=1&autostep=0");
+    const j = await r.json();
+    if (!j.ok) { $("algostatus").textContent = ""; return; }
+    const why = [];
+    j.algorithms.forEach(a => {
+      const box = algoBoxes().find(b => b.value === String(a.algorithm));
+      if (!box) return;
+      box.disabled = !a.eligible;
+      if (box.parentElement)
+        box.parentElement.classList.toggle("unavailable", !a.eligible);
+      if (!a.eligible) {
+        // Left ticked it would look like a competitor, and the run would come
+        // back having quietly ignored it.
+        box.checked = false;
+        why.push(a.label + " " + a.reason);
+      }
+    });
+    // Never leave the panel with nothing to train: fall back to the method that
+    // runs on every model this engine has.
+    if (checkedAlgos().length === 0) {
+      const first = algoBoxes().find(b => !b.disabled);
+      if (first) first.checked = true;
+    }
+    $("algostatus").textContent = why.length
+      ? "Not available for this model: " + why.join("; ") : "";
+    syncOptimizerControls();
+  } catch (e) { /* advisory: leave the boxes as they are */ }
+  finally { eligibilityBusy = false; }
+}
+// Only the ticked set moves the locks. The eligibility answer cannot change
+// when the two step controls move, because it is not asked about them.
+algoBoxes().forEach(b => b.addEventListener("change", syncOptimizerControls));
 syncOptimizerControls();
 async function train() {
   if (training) { // the button reads "Stop"
@@ -795,7 +873,12 @@ async function train() {
     setStatus("tstatus", j.ok, j.message);
     return;
   }
-  const p = { algorithm: $("algo").value, maxiter: $("maxiter").value,
+  const picked = checkedAlgos();
+  if (picked.length === 0) {
+    setStatus("tstatus", false, "tick at least one algorithm");
+    return;
+  }
+  const p = { algorithm: picked.join(","), maxiter: $("maxiter").value,
     seed: $("seed").value, async: 1 };
   // Learning rate / regularization
   p.autostep = $("autostep").checked ? 1 : 0;

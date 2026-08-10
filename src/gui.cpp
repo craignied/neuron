@@ -14,6 +14,7 @@
 
 #include "stdafx.h" // For MSVC, must be first among the engine headers!
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -1288,6 +1289,11 @@ string jsonAutoAlgo( const autoalgo::Result& r )
 	out << "{\"selected\":" << r.selected << ",\"selectedName\":\""
 		<< jsonEscape( r.selectedName ) << "\",\"cancelled\":"
 		<< ( r.cancelled ? "true" : "false" )
+		// WHETHER ANYTHING WAS ACTUALLY COMPARED. False when only one requested
+		//    method could run here: the budget figures below are then zero and
+		//    the probe list empty, and a caller must be able to tell that apart
+		//    from a competition that was cancelled before its first probe.
+		<< ",\"competed\":" << ( r.competed ? "true" : "false" )
 		// BOTH halves of the budget: the total is the ceiling the whole
 		//    selection honours, the per-candidate figure is what each attempted
 		//    one actually got. Retaining another algorithm moves the second and
@@ -1319,17 +1325,17 @@ string jsonAutoAlgo( const autoalgo::Result& r )
 	return out.str();
 }
 
-// The whole training job: optional auto algorithm selection (probe every
-//    ELIGIBLE candidate from identical weights, adopt the winner -- which
-//    REPLACES modelPtr, so every pointer is re-derived after it), then the real
-//    training run, observed for the GUI's realtime chart when asked. The
+// The whole training job: optional algorithm selection over the REQUESTED set
+//    (probe every eligible member from identical weights, adopt the winner --
+//    which REPLACES modelPtr, so every pointer is re-derived after it), then the
+//    real training run, observed for the GUI's realtime chart when asked. The
 //    caller must own the engine (see runTrainingAndBuildResult).
-string runTrainJob( bool continued, bool autoSelect, unsigned maxIter,
-	bool observed )
+string runTrainJob( bool continued, const vector< unsigned >& requested,
+	bool selecting, unsigned maxIter, bool observed )
 {
 	string autoJson, preamble, autoNote;
 
-	if ( autoSelect )
+	if ( selecting )
 	{
 		Network* net = dynamic_cast< Network* >( modelPtr.get() );
 
@@ -1338,15 +1344,20 @@ string runTrainJob( bool continued, bool autoSelect, unsigned maxIter,
 		// A plain training run does not resize the model, so the parameter
 		//    ceiling is judged against the model's own count (0 = its own). The
 		//    total budget is the shipped compatibility figure, shared across
-		//    however many candidates turn out to be eligible.
-		autoalgo::Result r = autoalgo::pick( *net, 0,
+		//    however many of the REQUESTED candidates turn out to be eligible --
+		//    asking for fewer methods buys each survivor a longer probe, it
+		//    never shortens the selection.
+		autoalgo::Result r = autoalgo::pick( *net, requested, 0,
 			autoalgo::DEFAULT_TOTAL_BUDGET_MS,
 			observed ? job.cancelLatch() : nullptr );
 		preamble = probeCap.text.str();
 
 		autoJson = jsonAutoAlgo( r );
-		if ( r.selected ) // name the winner where the user actually looks
-			autoNote = "auto selected " + r.selectedName + "; ";
+		if ( r.selected ) // name the choice where the user actually looks
+			autoNote = r.competed
+				? "auto selected " + r.selectedName + "; "
+				: r.selectedName + " was the only method requested that can run "
+					"here, so no competition was needed; ";
 
 		if ( r.winner ) // adopt the winning clone, probe progress kept
 		{
@@ -1354,6 +1365,14 @@ string runTrainJob( bool continued, bool autoSelect, unsigned maxIter,
 			dynamic_cast< Iterative* >( modelPtr.get() )
 				->setMaxIterations( maxIter );
 		}
+		// NO COMPETITION, NO CLONE: the lone survivor is installed on the
+		//    caller's own model, which is what keeps "tick one box" and "tick
+		//    three, two impossible here" the same run. An empty resolution
+		//    cannot reach this -- handleTrain refused it before applying a
+		//    single field -- so a selection that names nothing leaves the
+		//    configured algorithm alone rather than guessing at one.
+		else if ( r.selected )
+			net->setTrainingType( r.selected - 1 );
 	}
 
 	if ( !observed )
@@ -1373,10 +1392,136 @@ string runTrainJob( bool continued, bool autoSelect, unsigned maxIter,
 	return result;
 }
 
+// What the caller may write in the `algorithm` field, and the message every
+//    refusal of it uses. Kept in one place because the page, the strict-parsing
+//    driver and three refusal sites all quote it.
+static const char* ALGORITHM_FIELD_HELP =
+	"algorithm must be 1, 2, 3, 4, 5, 6 or auto";
+
+// THE TRAINING-ALGORITHM FIELD, which names ONE method or a SET of them:
+//
+//        algorithm=5            iRPROP+, and nothing else is considered
+//        algorithm=1,4,5        these three compete; the best is adopted
+//        algorithm=auto         every eligible method competes
+//
+//    `types` comes back as trainingTypes (the token minus one) in the order
+//    written; `set` says the caller named a set rather than a single method, and
+//    is what decides whether a selection runs at all. auto is the set of
+//    everything, spelled as an empty list -- see autoalgo::plan.
+//
+//    STRICTER THAN parseColumnList, deliberately. That parser skips a blank
+//    token because a trailing comma in a list of column numbers is a typing
+//    accident with no effect on meaning. Here a silently dropped token is a
+//    METHOD that does not compete, and the run that follows may adopt a
+//    different optimizer because of it -- so every token must parse, and no
+//    method may be named twice.
+static string readAlgorithmSet( const httplib::Request& req,
+	vector< unsigned >& types, bool& set )
+{
+	types.clear();
+	set = false;
+	const string text = param( req, "algorithm" );
+	if ( !given( req, "algorithm" ) )
+		return ""; // absent: the caller reports the empty selection
+
+	if ( text == "auto" )
+	{
+		set = true; // the whole curated list, resolved against the model
+		return "";
+	}
+
+	stringstream ss( text );
+	string tok;
+	unsigned tokens = 0;
+	while ( getline( ss, tok, ',' ) )
+	{
+		tokens++;
+		unsigned v = 0;
+		util::ParseStatus st = util::parseUnsigned( tok, v );
+		if ( st != util::ParseStatus::Ok )
+			return util::unsignedError( "algorithm", tok, st );
+		if ( v < 1 || v > Network::TRAINING_TYPES )
+			return ALGORITHM_FIELD_HELP;
+		if ( find( types.begin(), types.end(), v - 1 ) != types.end() )
+			return string( "algorithm names " )
+				+ Network::algorithmLabel( v - 1 ) + " twice";
+		types.push_back( v - 1 );
+	}
+	// A text ending in ',' loses its final empty field to getline, so the count
+	//    is what catches it rather than an empty token that never arrives.
+	if ( tokens != ( unsigned ) count( text.begin(), text.end(), ',' ) + 1 )
+		return "algorithm must not end with a comma";
+	set = ( types.size() > 1 );
+	return "";
+}
+
+// Every method the request named that cannot run here, as one refusal sentence
+//    per method. With a single method named this is exactly the message the
+//    single-token refusal has always produced.
+static string algorithmRefusal( const vector< autoalgo::Omission >& omitted )
+{
+	string msg;
+	for ( vector< autoalgo::Omission >::const_iterator o = omitted.begin();
+		o != omitted.end(); o++ )
+	{
+		if ( !msg.empty() ) msg += "; ";
+		msg += "algorithm=" + to_string( o->algorithm ) + " ("
+			+ Network::algorithmLabel( o->algorithm - 1 ) + ") " + o->reason;
+	}
+	return msg;
+}
+
+// WHICH METHODS CAN RUN ON THE MODEL THAT IS LOADED, and why each of the others
+//    cannot. Every field is the answer of autoalgo::ineligible -- the page does
+//    not own a second copy of the rule, it asks for it, which is why a control
+//    can be greyed out without the browser knowing anything about error
+//    functions, model families or parameter ceilings.
+//
+//    The page needs this because a checkbox is a claim about what is possible,
+//    and the two settings that decide eligibility (batch/epoch and the automatic
+//    step size) are controls the user is moving at the same time. Both may be
+//    supplied here so the answer describes the configuration the user is
+//    composing rather than the one currently installed; both default to the
+//    model's own. THIS IS ADVISORY. /api/train asks the same rule again, of the
+//    request as it finally arrives, and refuses on its own authority.
+string handleAlgorithms( const httplib::Request& req )
+{
+	if ( !modelPtr )
+		return jsonMsg( false, "create a model first" );
+	Network* net = dynamic_cast< Network* >( modelPtr.get() );
+	if ( !net )
+		return jsonMsg( false, "create a model first" );
+
+	string bad;
+	autoalgo::Settings s = autoalgo::Settings::of( *net );
+	bool flag = false;
+	if ( !( bad = readBool( req, "batch_epoch", flag ) ).empty() )
+		return jsonMsg( false, bad );
+	if ( req.has_param( "batch_epoch" ) ) s.batchEpoch = flag;
+	flag = false;
+	if ( !( bad = readBool( req, "autostep", flag ) ).empty() )
+		return jsonMsg( false, bad );
+	if ( req.has_param( "autostep" ) ) s.autoStep = flag;
+
+	ostringstream out;
+	out << "{\"ok\":true,\"algorithms\":[";
+	for ( unsigned t = 0; t < Network::TRAINING_TYPES; t++ )
+	{
+		const char* why = autoalgo::ineligible( *net, t, s );
+		out << ( t ? "," : "" ) << "{\"algorithm\":" << t + 1
+			<< ",\"name\":\"" << jsonEscape( Network::algorithmName( t ) )
+			<< "\",\"label\":\"" << jsonEscape( Network::algorithmLabel( t ) )
+			<< "\",\"eligible\":" << ( why ? "false" : "true" )
+			<< ",\"reason\":\"" << ( why ? jsonEscape( why ) : "" ) << "\"}";
+	}
+	out << "]}";
+	return out.str();
+}
+
 string handleTrain( const httplib::Request& req )
 {
 	logAction( req, "train" );
-	string algoStr = param( req, "algorithm" ), bad;
+	string bad;
 
 	// Every field is read into a local BEFORE anything is applied to the model
 	//    (the applying starts at "Apply the parity controls" below). A request
@@ -1393,18 +1538,21 @@ string handleTrain( const httplib::Request& req )
 	if ( !( bad = readBool( req, "async", async ) ).empty() )
 		return jsonMsg( false, bad );
 
-	// algorithm=auto probes the established automatic set from identical weights and
-	//    adopts the winner (autoalgo.h) before the real run
-	bool autoSelect = ( algoStr == "auto" );
-	unsigned algorithm = 0;
-	if ( !autoSelect && !( bad = readUnsigned( req, "algorithm", algorithm ) ).empty() )
+	// ONE METHOD, OR A SET OF THEM. A set of two or more competes -- every
+	//    eligible member is probed from identical weights and the winner is
+	//    adopted (autoalgo.h) -- and algorithm=auto is the set of everything.
+	//    Whether a competition happens is decided by how many members turn out to
+	//    be ELIGIBLE, not by how many were named; that resolution is below, once
+	//    the model and the settings this request would install are both known.
+	vector< unsigned > requestedTypes;
+	bool namedSet = false;
+	if ( !( bad = readAlgorithmSet( req, requestedTypes, namedSet ) ).empty() )
 		return jsonMsg( false, bad );
-	if ( autoSelect ) algorithm = 1;
 
 	if ( !modelPtr )
 		return jsonMsg( false, "create a model first" );
-	if ( algorithm < 1 || algorithm > Network::TRAINING_TYPES )
-		return jsonMsg( false, "algorithm must be 1, 2, 3, 4, 5, 6 or auto" );
+	if ( requestedTypes.empty() && !namedSet )
+		return jsonMsg( false, ALGORITHM_FIELD_HELP );
 	if ( maxIter < 1 )
 		return jsonMsg( false, "max iterations must be at least 1" );
 
@@ -1414,7 +1562,11 @@ string handleTrain( const httplib::Request& req )
 		return jsonMsg( false, bad );
 	if ( haveLbfgsMemory && lbfgsMemory < 1 )
 		return jsonMsg( false, "lbfgs_memory must be at least 1" );
-	if ( haveLbfgsMemory && algorithm != 4 )
+	// Unchanged: the memory length belongs to L-BFGS ALONE, so it is valid only
+	//    when L-BFGS is the one method named. Sent with a competition it would
+	//    configure one contestant and not the others, which is not a fair probe.
+	if ( haveLbfgsMemory && !( !namedSet && requestedTypes.size() == 1
+		&& requestedTypes[ 0 ] == Network::TRAIN_LBFGS ) )
 		return jsonMsg( false, "lbfgs_memory is only valid with algorithm=4" );
 
 	// The CLI's hard constraint: logistic regression is batch/epoch by
@@ -1515,19 +1667,27 @@ string handleTrain( const httplib::Request& req )
 	//    before any field is applied, rather than starting a run that throws only
 	//    after randomization or another partial mutation.
 	//
-	//    The same rule decides which methods algorithm=auto probes, so a method
+	//    The same rule decides which methods a competition probes, so a method
 	//    refused here is omitted there with the same sentence.
+	//
+	//    ELIGIBILITY IS RESOLVED BEFORE THE COUNT IS READ, which is what makes
+	//    "one box ticked" and "three ticked, two of them impossible here" behave
+	//    identically: both name a single runnable method, so both train on it
+	//    directly and neither spends a probe budget. Only two or more SURVIVORS
+	//    make a competition.
 	Network* net = dynamic_cast< Network* >( modelPtr.get() );
-	if ( !autoSelect )
-	{
-		autoalgo::Settings effective = autoalgo::Settings::of( *net );
-		if ( req.has_param( "batch_epoch" ) ) effective.batchEpoch = batchEpoch;
-		if ( req.has_param( "autostep" ) ) effective.autoStep = haveAutostep;
-		const char* why = autoalgo::ineligible( *net, algorithm - 1, effective );
-		if ( why )
-			return jsonMsg( false, string( "algorithm=" ) + to_string( algorithm )
-				+ " (" + Network::algorithmLabel( algorithm - 1 ) + ") " + why );
-	}
+	autoalgo::Settings effective = autoalgo::Settings::of( *net );
+	if ( req.has_param( "batch_epoch" ) ) effective.batchEpoch = batchEpoch;
+	if ( req.has_param( "autostep" ) ) effective.autoStep = haveAutostep;
+	const autoalgo::Plan resolved
+		= autoalgo::plan( *net, requestedTypes, effective );
+	if ( resolved.competitors.empty() )
+		return jsonMsg( false, algorithmRefusal( resolved.omitted ) );
+
+	// A selection RUNS when the request named a set; what it does with that set
+	//    (compete, or name the lone survivor) is autoalgo::pick's decision, made
+	//    again inside the job so the reported omissions come from the one rule.
+	const bool selecting = namedSet;
 
 	// Nothing above this line has touched the model. Everything below applies.
 	if ( seeded )
@@ -1597,11 +1757,14 @@ string handleTrain( const httplib::Request& req )
 	if ( haveLbfgsMemory )
 		net->setLBFGSMemory( lbfgsMemory );
 
-	if ( !autoSelect ) // auto: each probe sets its own; the winner's sticks
-		net->setTrainingType( algorithm - 1 );
+	// A selection sets its own: each probe configures its clone, the winner's
+	//    setting comes with the adopted clone, and a lone survivor is installed
+	//    by the job from the same resolution the omissions were reported from.
+	if ( !selecting )
+		net->setTrainingType( requestedTypes[ 0 ] );
 
 	if ( !async ) // the original blocking contract, unchanged
-		return runTrainJob( continued, autoSelect, maxIter, false );
+		return runTrainJob( continued, requestedTypes, selecting, maxIter, false );
 
 	// Async: hand the engine to a worker thread and return at once. The
 	//    caller holds engineMutex here; the job marks itself running before
@@ -1612,12 +1775,16 @@ string handleTrain( const httplib::Request& req )
 	//    REPLACE modelPtr with the winning clone, so nothing dereferencable
 	//    is captured here. Its screen starts at cout (thread_local); the
 	//    Captures inside runTrainJob redirect it for the run.
-	if ( !job.start( [ continued, autoSelect, maxIter ]
-		{ return runTrainJob( continued, autoSelect, maxIter, true ); } ) )
+	if ( !job.start( [ continued, requestedTypes, selecting, maxIter ]
+		{ return runTrainJob( continued, requestedTypes, selecting, maxIter,
+			true ); } ) )
 		return jsonMsg( false, "could not start a worker thread" );
 
-	return jsonMsg( true, autoSelect
-		? "probing algorithms, then training" : "training started" );
+	// A set of two or more MAY still resolve to one method (the rest ineligible),
+	//    so the acknowledgement says what is about to be attempted rather than
+	//    promising probes that the resolution may find nothing to run.
+	return jsonMsg( true, selecting
+		? "selecting an algorithm, then training" : "training started" );
 }
 
 // Progress of the async run: the decimated error series while it runs, plus
@@ -3347,6 +3514,16 @@ int run_gui( bool openBrowser )
 		lock_guard< mutex > lock( engineMutex );
 		if ( busyGate( res ) ) return;
 		res.set_content( handleModel( req ), "application/json" );
+	} );
+
+	// Read-only, and asked whenever the user moves a control that could change
+	//    the answer -- so it takes the engine lock like every other handler but
+	//    is not logged as an action: it changes nothing to record.
+	svr.Get( "/api/algorithms", []( const httplib::Request& req, httplib::Response& res )
+	{
+		lock_guard< mutex > lock( engineMutex );
+		if ( busyGate( res ) ) return;
+		res.set_content( handleAlgorithms( req ), "application/json" );
 	} );
 
 	svr.Post( "/api/randomize", []( const httplib::Request& req, httplib::Response& res )

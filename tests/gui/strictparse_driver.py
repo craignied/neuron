@@ -335,6 +335,38 @@ def group_train():
         "maxiter: '1junk' is not a whole number" )
     refused( "train: algorithm=1x", train( algorithm = "1x" ),
         "algorithm: '1x' is not a whole number" )
+
+    # --- THE ALGORITHM FIELD NAMES ONE METHOD OR A SET OF THEM ----------------
+    #    Stricter than the column lists elsewhere on this API, on purpose: a
+    #    silently dropped token there is a column that does not stratify, and
+    #    here it is a METHOD that does not compete -- which can change the
+    #    optimizer the run ends up training with. So every token must parse, no
+    #    method may be named twice, and a trailing comma is a fault rather than a
+    #    typing convenience.
+    accepted( "train: a set of two competes", train( algorithm = "2,3" ) )
+    refused( "train: empty algorithm", train( algorithm = "" ),
+        "algorithm must be 1, 2, 3, 4, 5, 6 or auto" )
+    refused( "train: algorithm=1,,2", train( algorithm = "1,,2" ),
+        "algorithm is empty" )
+    refused( "train: algorithm=,1", train( algorithm = ",1" ),
+        "algorithm is empty" )
+    refused( "train: a trailing comma", train( algorithm = "1," ),
+        "algorithm must not end with a comma" )
+    refused( "train: a repeated method", train( algorithm = "1,2,1" ),
+        "algorithm names Canonical twice" )
+    refused( "train: an out-of-range member", train( algorithm = "1,7" ),
+        "algorithm must be 1, 2, 3, 4, 5, 6 or auto" )
+    refused( "train: a zero member", train( algorithm = "1,0" ),
+        "algorithm must be 1, 2, 3, 4, 5, 6 or auto" )
+    refused( "train: auto is not a set member", train( algorithm = "auto,1" ),
+        "algorithm: 'auto' is not a whole number" )
+    refused( "train: a negative member", train( algorithm = "1,-2" ),
+        "algorithm: '-2' cannot be negative" )
+    # lbfgs_memory belongs to L-BFGS ALONE, so a set is not where it can apply:
+    #    it would configure one contestant and not the others.
+    refused( "train: L-BFGS memory with a set", train( algorithm = "4,5",
+        lbfgs_memory = "10", batch_epoch = "1", autostep = "0" ),
+        "lbfgs_memory is only valid with algorithm=4" )
     refused( "train: lbfgs_memory=10x", train( algorithm = "4",
         lbfgs_memory = "10x", batch_epoch = "1", autostep = "0" ),
         "lbfgs_memory: '10x' is not a whole number" )

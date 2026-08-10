@@ -8,6 +8,14 @@ testing.
 
 The REST API is authoritative for every new interactive capability. The GUI is
 its primary human client and receives a visible control when one is appropriate.
+
+**A GUI control is not verified until it has been clicked.** `tests/gui/smoke.sh`
+greps the served page for the controls a feature must carry; it cannot see the
+page run, and a control can be present, correctly named and correctly handled
+and still be unreachable because of what the other controls are doing. Run
+`./tests/gui/browser.sh` (real Chrome, via Playwright — no extension or bridge
+needed) whenever this file's GUI column changes. `tests/gui/README.md` explains
+the division of labor and records the defect that made it necessary.
 A GUI/REST surface change updates this file in the same commit. The tables below
 retain the completed menu-to-GUI mapping as historical compatibility evidence;
 they do not authorize or require further work in `src/neuron.cpp`.
@@ -136,8 +144,10 @@ with a GUI control where a human-facing control is appropriate.
 
 | Feature | GUI control | API | CLI |
 |---|---|---|---|
-| Automatic training-algorithm selection | Algorithm → "Auto" | `POST /api/train` `algorithm=auto`; probes every eligible method from canonical, CGD, Shanno, L-BFGS, iRPROP+, and LM under one shared 2250 ms total budget; returns probes, omissions, and equal per-candidate share | — n/a (menus frozen) |
-| Direct retained neural optimizers | Algorithm → "L-BFGS", "iRPROP+", or "Levenberg–Marquardt"; any selection forces and locks Batch/epoch on and Automatic learning rate off | `POST /api/train` `algorithm=4` for L-BFGS (optional `lbfgs_memory=`), `algorithm=5` for iRPROP+, or `algorithm=6` for LM. All are neural, batch-only, `autostep=0`; LM additionally requires LMS, `SimpleProp`/`BareProp`, and at most 512 packed parameters. Validation and weight decay are allowed | — n/a (menus retired) |
+| Choosing the training algorithm, singly or as a competing set | Algorithm — one checkbox per method. One ticked trains with it; several ticked compete | `POST /api/train` `algorithm=5` (one method), `algorithm=1,4,5` (a set), or `algorithm=auto` (the set of everything). Set syntax is strict: every token must parse, no method twice, no trailing comma | — n/a (menus frozen) |
+| Automatic selection among the ticked methods | Automatic whenever more than one box is ticked; there is no separate "Auto" choice | Eligibility is resolved first and the survivors are counted: none is a refusal naming every method with its reason, one trains directly with no probe and `competed:false`, two or more compete under one shared 2250 ms total budget divided equally. Returns `probes`, `omitted`, `competed`, `totalBudgetMs`, `perCandidateBudgetMs` | — n/a (menus frozen) |
+| Which methods can run on the loaded model | Ineligible checkboxes are greyed out, their labels dimmed, and the server's reason shown beneath them. The page asks about the configuration a tick would *produce* (`batch_epoch=1&autostep=0`), never the live control values — the two settings a tick forces must not be what disables the box | `GET /api/algorithms` (optional `batch_epoch=`, `autostep=` to ask about a configuration that is not installed yet); one row per method with `eligible` and `reason`. Advisory — `/api/train` asks the same rule again and refuses on its own authority | — n/a (menus frozen) |
+| Direct retained neural optimizers | Algorithm → "L-BFGS", "iRPROP+", or "Levenberg–Marquardt"; ticking any of them forces and locks Batch/epoch on and Automatic learning rate off | `POST /api/train` `algorithm=4` for L-BFGS (optional `lbfgs_memory=`, valid only when L-BFGS is the one method named), `algorithm=5` for iRPROP+, or `algorithm=6` for LM. All are neural, batch-only, `autostep=0`; LM additionally requires LMS, `SimpleProp`/`BareProp`, and at most 512 packed parameters. Validation and weight decay are allowed | — n/a (menus retired) |
 | Plateau auto-stop | "Auto-stop on plateau" + tol/window | `POST /api/train` `autostop=` | — n/a (menus frozen) |
 | Realtime error-vs-iteration chart | Training-error chart | `GET /api/train/status` series | — n/a (menus frozen) |
 | DFA graded ROC AUC | DFA ROC/stats panels | `POST /api/dfa` (ROC in the response) | — n/a (menus frozen) |

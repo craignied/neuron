@@ -41,8 +41,10 @@ research orientation: statistical output is part of the model, not an afterthoug
 
 - Canonical gradient descent, conjugate gradient descent, Shanno's algorithm,
   L-BFGS, iRPROP+, and Levenberg--Marquardt for eligible least-squares networks
-- Family-aware automatic optimizer selection by equal-share probes under one
-  fixed total budget, with ineligible methods reported rather than attempted
+- Any subset of those methods may be selected at once: one trains with it,
+  several compete for one fixed total probe budget and the winner trains on
+- Family-aware selection, with methods that cannot run on the loaded model
+  reported by name and reason rather than attempted
 - Batch/epoch and per-exemplar training where mathematically appropriate
 - Learning-rate control, weight decay, configurable stopping conditions, and
   plateau-based automatic stopping

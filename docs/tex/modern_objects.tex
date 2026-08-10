@@ -1186,6 +1186,8 @@ following methods are available:
 \index{autoalgo!Result}
 \index{autoalgo!ineligible}
 \index{autoalgo!candidates}
+\index{autoalgo!Plan}
+\index{autoalgo!plan}
 \index{autoalgo!pick}
 \index{autoalgo!DEFAULT\_TOTAL\_BUDGET\_MS}
 \index{Optimizer!probe budget}
@@ -1199,6 +1201,17 @@ ranked by the finite training error it reached; the winning clone, including its
 probe progress, continues the real fit. This is an engineering choice on the
 caller's data under a time budget, not a claim that the selected method is
 globally best.
+
+A caller may name a \emph{subset} of the universe rather than all of it; an
+empty request means the whole curated list, which is what
+\texttt{algorithm=auto} asks for. The request is resolved before its size is
+read, so the count that governs behavior is the number of \emph{eligible}
+members, never the number named. No eligible member leaves the decision to the
+caller, which refuses; exactly one is selected without probing, because a
+competition of one compares nothing and would only replace the caller's weights
+with a probe's; two or more compete. Because the total is fixed rather than
+per candidate, a narrower request buys each survivor a larger share of the same
+budget instead of shortening the selection.
 
 \texttt{autoalgo::Settings} describes the configuration a candidate would run
 under:
@@ -1234,14 +1247,29 @@ under:
       the method was omitted; omission is never reported as divergence.
 \end{itemize}
 
+\texttt{autoalgo::Plan} contains the resolution of a requested set:
+
+\begin{itemize}
+\item \texttt{vector<unsigned> competitors}: the requested internal training
+      types that can run here, ascending.
+\item \texttt{vector<Omission> omitted}: the requested types that cannot, each
+      with the sentence explaining why.
+\end{itemize}
+
 \texttt{autoalgo::Result} contains:
 
 \begin{itemize}
 \item \texttt{int selected} and \texttt{string selectedName}: winning
       algorithm and display name.
 \item \texttt{vector<Probe> probes}: complete attempted-candidate audit.
-\item \texttt{vector<Omission> omitted}: every curated method not attempted and
-      its reason.
+\item \texttt{vector<Omission> omitted}: every \emph{requested} method not
+      attempted and its reason. An empty request names them all, so
+      \texttt{algorithm=auto} still accounts for the whole universe.
+\item \texttt{bool competed}: whether methods were actually compared. False
+      when a single eligible method was named: \texttt{selected} identifies it,
+      no probe ran, the budget figures are zero and there is no winner to adopt.
+      This cannot be inferred from an empty probe list, which a cancelled
+      selection also produces.
 \item \texttt{unsigned totalBudgetMs}: declared total selection budget.
 \item \texttt{unsigned perCandidateBudgetMs}: equal allowance given to every
       attempted method.
@@ -1257,19 +1285,32 @@ The service functions are:
       const Settings\& settings)}: returns null when the internal training type
       can run, otherwise a stable actionable sentence. It does not mutate the
       model. Types outside \texttt{Network::TRAINING\_TYPES} are refused.
+\item \texttt{Plan plan(const Network\& model,const vector<unsigned>\&
+      requested,const Settings\& settings)}: resolves a requested set into the
+      \texttt{competitors} that can run and the \texttt{omitted} entries that
+      cannot, each with its reason. An empty request means the whole curated
+      list. Competitors are returned in ascending internal training-type order
+      whatever order the caller wrote, because that order is the tie policy and
+      a set of methods carries no meaningful caller order; resolving this way
+      also makes a repeated token harmless. Only requested methods are reported
+      as omitted, and a token outside \texttt{Network::TRAINING\_TYPES} is
+      reported rather than dropped, so no named method can vanish silently.
 \item \texttt{vector<unsigned> candidates(const Network\& model,const Settings\&
-      settings)}: returns every eligible internal training type in ascending
-      order. That order is also the deterministic tie policy because
-      \texttt{pick()} replaces a winner only on a strictly lower error.
-\item \texttt{Result pick(const Network\& start,unsigned plannedParameters,
-      unsigned totalBudgetMs,const atomic<bool>* cancel)}: clones the start,
-      settles eligibility before probing, divides the total equally by integer
-      division, leaves the remainder unspent, and returns the lowest-error
-      usable clone. Zero \texttt{plannedParameters} means the current model's
-      own count; a larger supplied value is used as a maximum. Cancellation
-      returns no winner. If a nonempty candidate list cannot receive at least
-      1 ms each, it throws \texttt{std::invalid\_argument} rather than spending
-      more than the declared total.
+      settings)}: the competitors of an empty request --- every eligible
+      internal training type in ascending order.
+\item \texttt{Result pick(const Network\& start,const vector<unsigned>\&
+      requested,unsigned plannedParameters,unsigned totalBudgetMs,
+      const atomic<bool>* cancel)}: clones the start, resolves the request
+      before probing, divides the total equally by integer division among the
+      competitors, leaves the remainder unspent, and returns the lowest-error
+      usable clone. A single competitor is named without being probed
+      (\texttt{competed} false, no winner, zero per-candidate budget); no
+      competitor returns an unselected result the caller reports as a refusal.
+      Zero \texttt{plannedParameters} means the current model's own count; a
+      larger supplied value is used as a maximum. Cancellation returns no
+      winner. If a competing list cannot receive at least 1 ms each, it throws
+      \texttt{std::invalid\_argument} rather than spending more than the
+      declared total.
 \end{itemize}
 
 \texttt{DEFAULT\_TOTAL\_BUDGET\_MS} is 2250, exactly the former three times
@@ -1281,8 +1322,9 @@ adopting LM and later growing into an ineligible architecture.
 
 \subsubsection{Example and notes}
 \begin{verbatim}
+// {} requests the whole curated list; {0,3,4} would request three methods
 autoalgo::Result choice = autoalgo::pick(
-    network, 0, autoalgo::DEFAULT_TOTAL_BUDGET_MS, cancelFlag);
+    network, {}, 0, autoalgo::DEFAULT_TOTAL_BUDGET_MS, cancelFlag);
 if (!choice.cancelled && choice.winner)
     adopt(choice.winner);
 for (const autoalgo::Omission& o : choice.omitted)
@@ -1807,8 +1849,8 @@ The equivalent REST request is:
 POST /api/train
 algorithm=6&batch_epoch=1&autostep=0&maxiter=2000
 \end{verbatim}
-It is also a candidate under \texttt{algorithm=auto} whenever the same
-eligibility checks pass. A subsequent \texttt{train()} starts a new LM run, recomputes
+It is also a candidate whenever the same eligibility checks pass --- under
+\texttt{algorithm=auto}, and under any requested set that names it. A subsequent \texttt{train()} starts a new LM run, recomputes
 $\mu_0$ from the new point, and preserves only the network's weights and ordinary
 training configuration. The $O(P^2)$ accumulation and state make the method
 appropriate only within its declared small-network ceiling.

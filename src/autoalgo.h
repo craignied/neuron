@@ -69,10 +69,56 @@ struct Settings {
 const char* ineligible( const Network& model, unsigned trainingType,
 	const Settings& s );
 
+// A method that was NOT probed, and why. An omission is a reported fact, not an
+//    absence: without this the selection result cannot distinguish "we tried it
+//    and it failed" from "it was never eligible here", and the second silently
+//    reads as the first.
+struct Omission {
+	unsigned algorithm;  // the REST/GUI token, trainingType + 1
+	std::string name;    // the algorithm's prose name
+	std::string reason;  // ineligible()'s sentence, verbatim
+};
+
+// WHAT A REQUESTED SET OF METHODS RESOLVES TO on this model: the ones that can
+//    actually run, and the ones that cannot with the reason each was refused.
+//
+//    `competitors` is in ascending trainingType order whatever order the caller
+//    asked in. That order is the tie policy -- pick() compares strictly, so an
+//    exact tie keeps the SIMPLER method, and simplicity is what the enumeration
+//    is ordered by -- and it is why the resolution sorts rather than preserving
+//    the request: a set of methods has no meaningful user-supplied order, and
+//    letting one in would make the winner depend on checkbox order.
+//
+//    THE THREE OUTCOMES A CALLER MUST DISTINGUISH, and the reason this is a
+//    resolution step rather than a filter inside pick():
+//
+//      competitors.empty()      nothing the caller named can run here: REFUSE,
+//                               naming every omission. Refusing is only correct
+//                               BEFORE the request is applied to the model.
+//      competitors.size() == 1  there is nothing to compare. Train on it
+//                               directly -- no probe, no budget spent. A
+//                               competition of one is not a competition; it is
+//                               a slower way to run the only eligible method.
+//      competitors.size() > 1   compete under the shared total budget.
+struct Plan {
+	std::vector< unsigned > competitors; // trainingTypes, ascending
+	std::vector< Omission > omitted;     // requested but ineligible, with reasons
+};
+
+// Resolve `requested` (trainingTypes, any order) against `model` under `s`.
+//    AN EMPTY REQUEST MEANS THE WHOLE CURATED LIST -- that is what algorithm=auto
+//    asks for, and it makes "probe everything eligible" the same code path as
+//    "probe these three", so the two can never disagree about eligibility.
+//
+//    Only requested methods are reported as omitted. A caller that named three
+//    methods is told about those three; it is not handed the eligibility status
+//    of methods it never asked about. (An empty request names all of them, so
+//    algorithm=auto still reports every ineligible method, exactly as before.)
+Plan plan( const Network& model, const std::vector< unsigned >& requested,
+	const Settings& s );
+
 // THE CURATED CANDIDATE LIST for `model` under `s`: every training type that is
-//    eligible, in ascending trainingType order. That order is the tie policy --
-//    pick() compares strictly, so an exact tie keeps the SIMPLER method, and
-//    simplicity is what the enumeration is ordered by.
+//    eligible, in ascending trainingType order. plan() with an empty request.
 std::vector< unsigned > candidates( const Network& model, const Settings& s );
 
 // THE DEFAULT TOTAL PROBE BUDGET, and a compatibility contract rather than a
@@ -98,22 +144,19 @@ struct Probe {
 	Iterative::StopReason stop = Iterative::STOP_NONE;
 };
 
-// A method that was NOT probed, and why. An omission is a reported fact, not an
-//    absence: without this the selection result cannot distinguish "we tried it
-//    and it failed" from "it was never eligible here", and the second silently
-//    reads as the first.
-struct Omission {
-	unsigned algorithm;  // the REST/GUI token, trainingType + 1
-	std::string name;    // the algorithm's prose name
-	std::string reason;  // ineligible()'s sentence, verbatim
-};
-
 // The selection: the probes, the omissions, the choice, and the winning clone
 struct Result {
 	unsigned selected = 0; // the winning token; 0 = no probe was usable
 	std::string selectedName;
 	std::vector< Probe > probes;
 	std::vector< Omission > omitted;
+
+	// WHETHER A COMPETITION ACTUALLY HAPPENED. False when the resolved list held
+	//    a single eligible method: `selected` names it, no probe ran, no budget
+	//    was spent and there is no winning clone to adopt, because the caller's
+	//    own model is already the thing that will train. A reader cannot infer
+	//    this from probes.empty() -- a cancelled selection is empty too.
+	bool competed = false;
 
 	// THE BUDGET, both halves, because neither is derivable from the other
 	//    without knowing how many candidates were eligible -- and that is
@@ -125,21 +168,33 @@ struct Result {
 	bool cancelled = false; // the caller's cancel flag fired mid-probe
 };
 
-// Probe the eligible candidates from 'start' (cloned; 'start' is not touched),
-//    sharing totalBudgetMs of wall clock EQUALLY between them. 'cancel' may be
-//    null; when it fires, probing stops and no winner is returned. Probes train
-//    into a discarded screen; the one decision summary is printed to the
-//    caller's screen.
+// Probe the eligible members of 'requested' from 'start' (cloned; 'start' is not
+//    touched), sharing totalBudgetMs of wall clock EQUALLY between them. An empty
+//    'requested' means every curated candidate. 'cancel' may be null; when it
+//    fires, probing stops and no winner is returned. Probes train into a
+//    discarded screen; the one decision summary is printed to the caller's
+//    screen.
+//
+//    A SINGLE ELIGIBLE METHOD IS NOT PROBED. plan() resolves the request first;
+//    when one method survives, there is nothing to compare it against, so the
+//    result names it (competed = false, no probes, no budget, no winning clone)
+//    and the caller trains on it directly. Probing it anyway would spend the
+//    whole budget re-deriving an answer that was already known, and -- because a
+//    probe's progress is adopted -- would silently make "train with L-BFGS" mean
+//    something different from "train with L-BFGS" depending on how many boxes
+//    happened to be ticked.
 //
 //    THE BUDGET RULE, stated once here and asserted in the tests:
 //
-//        per candidate = totalBudgetMs / (number of ELIGIBLE candidates)
+//        per candidate = totalBudgetMs / (number of ELIGIBLE COMPETITORS)
 //
 //    integer-divided, so every attempted candidate gets the SAME figure -- an
 //    unequal budget makes the comparison unfair, so the remainder is LEFT
 //    UNSPENT rather than handed to whichever candidates come first. An omitted
-//    candidate consumes nothing and does not divide the total. A nonempty
-//    selection whose total is smaller than its eligible-candidate count throws
+//    candidate consumes nothing and does not divide the total, and neither does
+//    a method the caller never named: narrowing the request buys the survivors a
+//    LARGER share of the same fixed total, it does not shorten the selection.
+//    A competition whose total is smaller than its competitor count throws
 //    std::invalid_argument: silently flooring the share to 1 ms would spend
 //    more than the declared total, while a zero-budget probe is not a useful
 //    comparison.
@@ -157,8 +212,9 @@ struct Result {
 //    the largest architecture its search will build. It is applied as a MAXIMUM
 //    against the model's own count, never as a replacement, so a caller passing
 //    0 cannot widen eligibility past what the model itself allows.
-Result pick( const Network& start, unsigned plannedParameters,
-	unsigned totalBudgetMs, const std::atomic< bool >* cancel );
+Result pick( const Network& start, const std::vector< unsigned >& requested,
+	unsigned plannedParameters, unsigned totalBudgetMs,
+	const std::atomic< bool >* cancel );
 
 } // namespace autoalgo
 

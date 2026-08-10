@@ -96,6 +96,22 @@ static DataSet makeThreeWayData( unsigned rows, unsigned inputs, unsigned seed )
 	return d;
 }
 
+// THE WHOLE CURATED LIST, spelled as an empty request. algorithm=auto means
+//    this; a named subset is any other vector. Written out rather than passed as
+//    a literal so that every call site says which of the two it is asking for.
+static const vector< unsigned > ALL;
+
+// A named subset, in the order a caller might have written it.
+static vector< unsigned > setOfTypes( unsigned a, unsigned b,
+	unsigned c = ( unsigned ) -1 )
+{
+	vector< unsigned > v;
+	v.push_back( a );
+	v.push_back( b );
+	if ( c != ( unsigned ) -1 ) v.push_back( c );
+	return v;
+}
+
 static string setOf( const vector< unsigned >& list )
 {
 	string s;
@@ -444,7 +460,7 @@ static void checkSelection()
 		"CONTROL: the starting objective is finite and positive ("
 			+ to_string( startError ) + ")" );
 
-	autoalgo::Result r = autoalgo::pick( start, 0, 60, 0 );
+	autoalgo::Result r = autoalgo::pick( start, ALL, 0, 60, 0 );
 
 	expect( r.probes.size() == 6 && r.omitted.empty(),
 		"an eligible small LMS network probes all six and omits none" );
@@ -511,14 +527,14 @@ static void checkSelection()
 	split.setLastop( false );
 	split.setHistory( false );
 	split.randomize();
-	autoalgo::Result v = autoalgo::pick( split, 0, 60, 0 );
+	autoalgo::Result v = autoalgo::pick( split, ALL, 0, 60, 0 );
 	expect( v.probes.size() == 6 && v.omitted.empty()
 		&& probed( v, Network::TRAIN_LM + 1 ),
 		"a dataset with a validation split still probes all six, LM included" );
 
 	// --- A PROCEDURE THAT WILL GROW PAST THE CEILING omits LM, and says so.
 	//     This is OBD's case: probe small, then grow.
-	autoalgo::Result g2 = autoalgo::pick( start, LM::MAX_PARAMETERS + 1, 60, 0 );
+	autoalgo::Result g2 = autoalgo::pick( start, ALL, LM::MAX_PARAMETERS + 1, 60, 0 );
 	expect( g2.probes.size() == 5 && !probed( g2, Network::TRAIN_LM + 1 ),
 		"a search planning to grow past the ceiling does not probe LM at all" );
 	expect( omissionReason( g2, Network::TRAIN_LM + 1 ).find( "ceiling" )
@@ -531,7 +547,7 @@ static void checkSelection()
 	// --- Cross-entropy: the same shape, a different reason.
 	SimpleProp xent( start );
 	xent.setXEerror();
-	autoalgo::Result x = autoalgo::pick( xent, 0, 60, 0 );
+	autoalgo::Result x = autoalgo::pick( xent, ALL, 0, 60, 0 );
 	expect( !probed( x, Network::TRAIN_LM + 1 )
 		&& omissionReason( x, Network::TRAIN_LM + 1 ).find( "least-squares" )
 			!= string::npos,
@@ -542,7 +558,7 @@ static void checkSelection()
 	logit.setDataSet( data );
 	logit.setLastop( false );
 	logit.setHistory( false );
-	autoalgo::Result g = autoalgo::pick( logit, 0, 60, 0 );
+	autoalgo::Result g = autoalgo::pick( logit, ALL, 0, 60, 0 );
 	expect( g.probes.size() == 3 && g.omitted.size() == 3,
 		"logistic regression probes the legacy three and omits the modern three" );
 	bool allNeuralReason = true;
@@ -584,8 +600,8 @@ static void checkBudget()
 		"the default total is the shipped three-arm cost, 3 x 750 ms -- a "
 		"compatibility contract, not a tuning constant" );
 
-	autoalgo::Result a = autoalgo::pick( six, 0, 60, 0 );
-	autoalgo::Result b = autoalgo::pick( three, 0, 60, 0 );
+	autoalgo::Result a = autoalgo::pick( six, ALL, 0, 60, 0 );
+	autoalgo::Result b = autoalgo::pick( three, ALL, 0, 60, 0 );
 
 	expect( a.probes.size() == 6 && b.probes.size() == 3,
 		"CONTROL: the two fixtures really do offer different candidate counts ("
@@ -609,7 +625,7 @@ static void checkBudget()
 	// EQUAL SHARES, and the remainder rule. 50 across 6 is 8 each with 2 ms
 	//    left unspent -- NOT 9 for the first two. An unequal window makes the
 	//    comparison that follows a comparison of budgets.
-	autoalgo::Result r = autoalgo::pick( six, 0, 50, 0 );
+	autoalgo::Result r = autoalgo::pick( six, ALL, 0, 50, 0 );
 	expect( r.perCandidateBudgetMs == 8,
 		"the remainder is floored, not distributed: 50 across six is 8 each" );
 	expect( r.perCandidateBudgetMs * 6 == 48 && r.totalBudgetMs == 50,
@@ -619,7 +635,7 @@ static void checkBudget()
 	// An impossible equal-share budget is refused rather than silently spending
 	//    more than the value reported as the total.
 	bool tinyRefused = false;
-	try { ( void ) autoalgo::pick( six, 0, 3, 0 ); }
+	try { ( void ) autoalgo::pick( six, ALL, 0, 3, 0 ); }
 	catch ( const invalid_argument& ) { tinyRefused = true; }
 	expect( tinyRefused,
 		"a total below one millisecond per candidate is refused, not overspent" );
@@ -628,6 +644,149 @@ static void checkBudget()
 	//    the logistic run above shared 60 between three, not between six.
 	expect( b.omitted.size() == 3 && b.perCandidateBudgetMs == 20,
 		"omitted candidates take no share of the total" );
+}
+
+// ---------------------------------------------------------------------------
+// 6. A REQUESTED SUBSET. The training panel's checkboxes name a set of methods,
+//    and the set decides three different things: WHO competes, WHETHER anything
+//    competes at all, and how large each competitor's share of the fixed total
+//    is.
+//
+//    THE ORDER OF THE TWO QUESTIONS IS THE CONTRACT. Eligibility is resolved
+//    FIRST and the count is read from the survivors -- so three boxes ticked
+//    with two of them impossible here is the same run as one box ticked, and
+//    neither spends a probe budget. Asserting only "three requested, three
+//    probed" would pass against an implementation that counted the request.
+// ---------------------------------------------------------------------------
+
+static void checkRequestedSubset()
+{
+	Hush hush;
+	DataSet data = makeData( 120, 4, 20260809u );
+
+	SimpleProp net;
+	net.setDataSet( data );
+	net.setHidden( 3 );
+	net.setLastop( false );
+	net.setHistory( false );
+	net.randomize();
+
+	autoalgo::Settings s = autoalgo::Settings::of( net );
+
+	// --- plan(): who competes, who is left out, and in whose order -----------
+	expect( setOf( autoalgo::plan( net, ALL, s ).competitors ) == "0,1,2,3,4,5"
+		&& autoalgo::plan( net, ALL, s ).omitted.empty(),
+		"CONTROL: an empty request is the whole curated list, as auto means" );
+
+	autoalgo::Plan two = autoalgo::plan( net,
+		setOfTypes( Network::TRAIN_IRPROP, 0 ), s );
+	expect( setOf( two.competitors ) == "0,4",
+		"a named subset yields exactly its members -- and in ASCENDING order, "
+		"not the order they were written, because that order is the tie policy" );
+	expect( two.omitted.empty(),
+		"and a method that was never requested is not reported as omitted: the "
+		"caller is told about the methods it asked about, not the other four" );
+
+	// The property the previous assertion is really guarding, stated so it
+	//    cannot be satisfied by an empty omission list in general.
+	SimpleProp xent( net );
+	xent.setXEerror();
+	autoalgo::Settings xs = autoalgo::Settings::of( xent );
+	autoalgo::Plan mixed = autoalgo::plan( xent,
+		setOfTypes( 0, Network::TRAIN_LM ), xs );
+	expect( setOf( mixed.competitors ) == "0" && mixed.omitted.size() == 1
+		&& mixed.omitted[ 0 ].algorithm == Network::TRAIN_LM + 1,
+		"a REQUESTED method that cannot run here is omitted by name" );
+	expect( mixed.omitted.size() == 1
+		&& mixed.omitted[ 0 ].reason.find( "least-squares" ) != string::npos,
+		"with the one rule's own sentence, so the refusal and the omission read "
+		"identically" );
+	expect( autoalgo::plan( xent, ALL, xs ).omitted.size() == 1,
+		"CONTROL: on this same model the full request omits exactly that one "
+		"method -- the subset changed WHO was asked about, not the rule" );
+
+	// --- Nothing eligible: the caller must be able to refuse -----------------
+	Logistic logit;
+	logit.setDataSet( data );
+	logit.setLastop( false );
+	logit.setHistory( false );
+	autoalgo::Settings ls = autoalgo::Settings::of( logit );
+	autoalgo::Plan none = autoalgo::plan( logit,
+		setOfTypes( Network::TRAIN_LBFGS, Network::TRAIN_LM ), ls );
+	expect( none.competitors.empty() && none.omitted.size() == 2,
+		"a request naming only methods this model cannot run resolves to NO "
+		"competitors, with a reason for each" );
+	expect( !autoalgo::plan( logit, setOfTypes( 0, 1 ), ls ).competitors.empty(),
+		"CONTROL: the same model with two runnable methods named still competes" );
+
+	// A token past the enumeration is refused rather than dropped: a caller that
+	//    named three methods and got a two-way competition would never learn why.
+	autoalgo::Plan bogus = autoalgo::plan( net,
+		setOfTypes( 0, Network::TRAINING_TYPES ), s );
+	expect( setOf( bogus.competitors ) == "0" && bogus.omitted.size() == 1
+		&& bogus.omitted[ 0 ].algorithm == Network::TRAINING_TYPES + 1,
+		"a token this engine has no algorithm for is reported, not ignored" );
+
+	// --- pick(): one survivor is not a competition --------------------------
+	//     Asserted through the ELIGIBILITY resolution, not the request size:
+	//     three methods are named and two of them cannot run here.
+	autoalgo::Result lone = autoalgo::pick( xent,
+		setOfTypes( Network::TRAIN_LM, 0 ), 0, 60, 0 );
+	expect( lone.selected == 1 && !lone.competed,
+		"TWO METHODS REQUESTED, ONE ELIGIBLE: the survivor is selected and NO "
+		"competition is run" );
+	expect( lone.probes.empty() && lone.totalBudgetMs == 60
+		&& lone.perCandidateBudgetMs == 0,
+		"and nothing is spent probing it -- there is nothing to compare it to" );
+	expect( lone.winner == 0,
+		"and no clone is adopted, so the run continues on the caller's own "
+		"weights rather than a probe's" );
+	expect( lone.omitted.size() == 1
+		&& lone.omitted[ 0 ].algorithm == Network::TRAIN_LM + 1,
+		"while the method that could not run is still reported by name" );
+
+	// The same shape with one method named, which is how a single ticked box
+	//    reaches the selector at all.
+	autoalgo::Result single = autoalgo::pick( net,
+		vector< unsigned >( 1, Network::TRAIN_IRPROP ), 0, 60, 0 );
+	expect( single.selected == Network::TRAIN_IRPROP + 1 && !single.competed
+		&& single.probes.empty() && single.perCandidateBudgetMs == 0,
+		"one method requested and eligible: named, not probed" );
+
+	// CONTROL, and the assertion that keeps the two above from passing against
+	//    an implementation that never probes anything.
+	autoalgo::Result pair = autoalgo::pick( net,
+		setOfTypes( 0, Network::TRAIN_IRPROP ), 0, 60, 0 );
+	expect( pair.competed && pair.probes.size() == 2 && pair.winner != 0,
+		"CONTROL: two ELIGIBLE methods requested really do compete, and a "
+		"winning clone comes back" );
+
+	// --- The narrowed set gets a LARGER share of the SAME total -------------
+	//     Narrowing the field must not shorten the selection: the total is a
+	//     fixed compatibility contract, so fewer competitors means each is
+	//     probed for longer, and the sum never grows.
+	autoalgo::Result all6 = autoalgo::pick( net, ALL, 0, 60, 0 );
+	expect( all6.probes.size() == 6 && all6.perCandidateBudgetMs == 10,
+		"CONTROL: all six share 60 ms as 10 ms each" );
+	expect( pair.totalBudgetMs == all6.totalBudgetMs
+		&& pair.perCandidateBudgetMs == 30,
+		"the same total across two competitors is 30 ms each -- a subset buys a "
+		"longer probe, it does not shorten the selection" );
+	expect( pair.perCandidateBudgetMs * pair.probes.size() <= pair.totalBudgetMs
+		&& all6.perCandidateBudgetMs * all6.probes.size() <= all6.totalBudgetMs,
+		"AND THE SHARES NEVER SUM PAST THE TOTAL, at either width" );
+
+	// --- A subset cannot elect a method it does not contain ------------------
+	bool onlyRequested = true;
+	for ( unsigned i = 0; i < pair.probes.size(); i++ )
+		if ( pair.probes[ i ].algorithm != 1
+			&& pair.probes[ i ].algorithm != Network::TRAIN_IRPROP + 1 )
+			onlyRequested = false;
+	expect( onlyRequested && ( pair.selected == 1
+		|| pair.selected == Network::TRAIN_IRPROP + 1 ),
+		"only requested methods are probed, and only a requested method can win" );
+	expect( pair.winner && pair.winner->getTrainingType() == pair.selected - 1,
+		"and the adopted clone carries the winning method, not a token to trust" );
 }
 
 int main()
@@ -639,6 +798,7 @@ int main()
 	checkCandidates();
 	checkSelection();
 	checkBudget();
+	checkRequestedSubset();
 
 	cout << ( failures ? "FAILURES: " : "all passed (" ) << failures
 		<< ( failures ? "" : " failures)" ) << endl;
@@ -651,6 +811,70 @@ int main()
 // pass again after a second visible recompilation. Both objects -- the library's
 // and this test's -- were removed each way, because make's timestamp
 // granularity has silently skipped a rebuild on this project before.
+//
+// I. THE ELIGIBILITY QUERY ASKED ABOUT THE LIVE STEP CONTROLS, in
+//    gui_page.html's refreshEligibility(): the query string rebuilt from
+//    $("batch_epoch").checked and $("autostep").checked instead of the fixed
+//    "?batch_epoch=1&autostep=0". This is the defect the panel actually shipped
+//    for review with, found by clicking the page in Chrome: with Automatic
+//    learning rate on, L-BFGS, iRPROP+ and LM grey out, and the control the
+//    user must change first is the one their tick was going to change for them.
+//    Caught by tests/gui/browser.sh on the assertion that names it -- "with
+//    Automatic learning rate ON, the methods that own their own step are STILL
+//    available" -- and, statically, by tests/gui/smoke.sh on "the Train panel
+//    asks about the live controls, not the forced ones". src/gui_page.html is
+//    compiled into the binary, so the neuron target visibly recompiled each way.
+//    CONTROL: the discriminating assertion beside it still passed -- LM stayed
+//    greyed on that cross-entropy model for the one reason a tick cannot fix --
+//    so the failure is the panel greying out the WRONG methods, not the panel
+//    having stopped greying anything out.
+//
+// H. THE SAME SABOTAGE, AND IT WAS NOT CAUGHT. Recorded because the null result
+//    is the measurement that produced assertion 2b. The first attempt reverted
+//    the query AND left the autostep/batch_epoch listeners removed, so nothing
+//    re-ran the query when those controls moved -- and TWO independent things
+//    prevent this defect, either of which is sufficient. browser.sh passed.
+//    The lock assertions could not see it because they only watch the controls
+//    the tick sets, not what the panel does with the answer. The guard was then
+//    stated as the invariant itself (re-run the query BY HAND with Automatic
+//    learning rate on, and require the step-owning methods to survive), after
+//    which sabotage I -- one mechanism, the other left intact -- fails it.
+//    The lesson is the standing one: sabotage ONE mechanism at a time, and a
+//    sabotage that is not caught is a measurement about the TEST.
+//
+// G. THE REQUESTED SET DISCARDED AT THE REST BOUNDARY, in gui.cpp's
+//    readAlgorithmSet(): `set = false` instead of `set = ( types.size() > 1 )`,
+//    so a request naming several methods trained with the FIRST one and never
+//    competed at all -- the silent-wrong-optimizer failure, since the run still
+//    succeeds and reports a perfectly true label for the method it did use.
+//    This file cannot see it (gui.cpp is not linked here) and neither can the
+//    engine tests above, which is exactly why it is recorded: tests/gui/smoke.sh
+//    owns that boundary and failed on "a requested subset must compete over
+//    exactly its members", the autoAlgo block being absent entirely.
+//    CONTROL: everything before it in the same script passed, including the
+//    algorithm=auto selection and both single-token trains -- auto sets the flag
+//    on the line above the sabotage, so it was unaffected, which is what makes
+//    this a sabotage of the SET wiring and not of selection.
+//    src/gui.cpp and the neuron binary visibly recompiled each way.
+//
+// F. THE NO-COMPETITION RULE REMOVED, in autoalgo::pick(): `if ( false )` in
+//    place of `if ( list.size() == 1 )`, so a lone eligible method was probed
+//    with the entire budget and the run continued from the PROBE's weights
+//    rather than the caller's. Four assertions failed, and they are the four
+//    that name the mechanism -- the survivor being selected without a
+//    competition, nothing being spent, no clone being adopted, and the
+//    single-method request. CONTROL: 80 assertions passed, including every
+//    competing case, so the sabotage did not simply break selection.
+//
+// E. THE REQUESTED SET IGNORED INSIDE THE SELECTOR, in autoalgo::pick():
+//    `plan( *probe, vector< unsigned >(), settings )`, which resolves the whole
+//    curated list whatever the caller asked for. Seven assertions failed and the
+//    one that names the mechanism was among them ("only requested methods are
+//    probed, and only a requested method can win"), together with the budget
+//    share -- six competitors cannot each get a two-way share. CONTROL: 77
+//    assertions passed, including the entire eligibility matrix, the naming
+//    tables, and every algorithm=auto (empty-request) assertion, which is what
+//    makes this a sabotage of the request wiring rather than of the rule.
 //
 // D. THE IMPOSSIBLE-BUDGET REFUSAL DISABLED, in autoalgo::pick(): the guard
 //    was made false so six candidates shared a declared 3 ms total. Both

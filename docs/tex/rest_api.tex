@@ -4,6 +4,7 @@
 \index{REST API!/api/load@\texttt{/api/load}}
 \index{REST API!/api/model@\texttt{/api/model}}
 \index{REST API!/api/randomize@\texttt{/api/randomize}}
+\index{REST API!/api/algorithms@\texttt{/api/algorithms}}
 \index{REST API!/api/train@\texttt{/api/train}}
 \index{REST API!/api/train/status@\texttt{/api/train/status}}
 \index{REST API!/api/train/stop@\texttt{/api/train/stop}}
@@ -179,6 +180,7 @@ GET & \texttt{/api/version} & Engine package and version string. \\ \hline
 POST & \texttt{/api/load} & Load, normalize, and optionally split a dataset. \\ \hline
 POST & \texttt{/api/model} & Create a model or load a saved network. \\ \hline
 POST & \texttt{/api/randomize} & Reset the current model's weights from a seed. \\ \hline
+GET & \texttt{/api/algorithms} & Report which training algorithms can run on the current model, and why the others cannot. \\ \hline
 POST & \texttt{/api/train} & Train synchronously or start an asynchronous run. \\ \hline
 GET & \texttt{/api/train/status} & Read progress and the completed result of the active or most recent long job. \\ \hline
 POST & \texttt{/api/train/stop} & Request graceful cancellation at an iteration boundary. \\ \hline
@@ -314,6 +316,19 @@ objective gradient into a weight update. It does not select a model, change the
 data split, or randomize the weights. Use \texttt{/api/randomize} explicitly
 before a request when a fresh, reproducible start is required.
 
+The field names \emph{one} method or a \emph{set} of them. A single token
+(\texttt{algorithm=5}) trains with that method. A comma-separated set
+(\texttt{algorithm=1,4,5}) asks for a competition among its members, and
+\texttt{algorithm=auto} is the set of everything. The set is resolved against
+the model before its size is read, and the number of \emph{eligible} members is
+what decides the behavior: none is a refusal naming every member with its own
+reason, exactly one trains directly with no probe budget spent, and two or more
+compete. Ticking a method that cannot run on the loaded model therefore costs
+nothing and changes nothing. Set syntax is strict, because a silently dropped
+token is a method that does not compete and can change the optimizer the run
+ends up using: every token must parse as a whole number in range, no method may
+be named twice, and a trailing comma is refused.
+
 \begin{description}
 \item[\texttt{algorithm=1}: canonical gradient descent]
       Applies the negative gradient using the configured learning rate
@@ -362,19 +377,26 @@ before a request when a fresh, reproducible start is required.
       The published algorithm, normal-equations accumulation, stopping and
       failure semantics, and measured scope are in
       Section~\ref{training_control_objects}.
-\item[\texttt{algorithm=auto}: bounded selector]
-      Builds a curated list from canonical, CGD, Shanno, L-BFGS, iRPROP+, and
-      LM, omitting each method that is ineligible for the actual model and
-      configuration with a machine-readable reason. Every eligible method starts
-      from identical weights and receives an equal share of one fixed 2250 ms
-      total budget; integer remainder is left unspent so earlier candidates do
-      not receive a longer trial. The lowest finite training error wins, its
-      trained clone is adopted, and the real run continues from that progress.
-      The response's \texttt{autoAlgo} object contains \texttt{probes},
-      \texttt{omitted}, \texttt{selected}, \texttt{selectedName},
-      \texttt{totalBudgetMs}, and \texttt{perCandidateBudgetMs}. This is a
-      bounded selection procedure on the caller's data, not an optimizer or a
-      universal performance claim.
+\item[A set, and \texttt{algorithm=auto}: the bounded selector]
+      A set names the methods the caller is willing to have trained. Each
+      member that is ineligible for the actual model and configuration is
+      omitted with a machine-readable reason rather than attempted;
+      \texttt{algorithm=auto} is the same procedure with every method named, so
+      it reports the eligibility of all six. Every remaining member starts from
+      identical weights and receives an equal share of one fixed 2250 ms total
+      budget; integer remainder is left unspent so earlier candidates do not
+      receive a longer trial. Narrowing the set therefore buys each survivor a
+      \emph{larger} share of the same total; it never shortens the selection,
+      and retaining a further algorithm never lengthens it. The lowest finite
+      training error wins, its trained clone is adopted, and the real run
+      continues from that progress. A single eligible survivor is not probed at
+      all: there is nothing to compare it against, so it is named, the run
+      trains on the caller's own weights, and \texttt{competed} is false. The
+      response's \texttt{autoAlgo} object contains \texttt{probes},
+      \texttt{omitted}, \texttt{competed}, \texttt{selected},
+      \texttt{selectedName}, \texttt{totalBudgetMs}, and
+      \texttt{perCandidateBudgetMs}. This is a bounded selection procedure on
+      the caller's data, not an optimizer or a universal performance claim.
 \end{description}
 
 No retained method is the universal default. Application benchmarks made
@@ -383,6 +405,35 @@ L-BFGS and its later endpoints. That finding supports explicit workload choice
 and the future bounded selector; it does not establish conditioning as the
 driver. When comparing methods, randomize once, preserve the starting weights,
 and give each method the same stopping and evaluation policy.
+
+\subsection{\texttt{GET /api/algorithms}: which methods can run here}
+\index{Automatic algorithm selection!eligibility query}
+
+Reports, for the currently loaded model, which training algorithms can run and
+why each of the others cannot. Each entry carries \texttt{algorithm},
+\texttt{name}, \texttt{label}, \texttt{eligible}, and \texttt{reason}, where the
+reason is the sentence \texttt{/api/train} would refuse with and the omission
+in \texttt{autoAlgo} would carry --- one rule, three presentations. The optional
+\texttt{batch\_epoch} and \texttt{autostep} fields ask about a configuration
+that is not installed yet, which is what lets a user interface disable a control
+for a request that has not been sent.
+
+A client that disables its own controls from this answer must ask about the
+configuration its next action would \emph{produce}, not the one currently
+showing. Those two fields are precisely the restrictions a well-built control
+panel satisfies on the user's behalf --- the GUI forces batch/epoch on and the
+step search off the moment a method that owns its own step is selected --- so
+asking about the live values makes the method unavailable exactly when its own
+selection was about to make it available, and the control the user would have to
+change first is the one the selection was going to change for them. The shipped
+page therefore asks with \texttt{batch\_epoch=1\&autostep=0} always, and what
+remains greyed out is only what a selection cannot fix: the model family, the
+error function, and the parameter ceiling.
+
+This endpoint is advisory and changes nothing. It exists so that a client need
+not carry a second copy of the eligibility rule; the refusal is still made by
+\texttt{/api/train}, on its own authority, against the request as it finally
+arrives.
 
 \subsection{Training request examples}
 
@@ -393,7 +444,13 @@ curl -s -X POST "$URL/api/train" \
 \end{verbatim}
 
 CGD and Shanno use the same contract with \texttt{algorithm=2} or
-\texttt{algorithm=3}. Direct retained-optimizer requests are:
+\texttt{algorithm=3}. A set of methods competes for one shared budget:
+\begin{verbatim}
+curl -s -X POST "$URL/api/train" \
+  -d "algorithm=1,4,5&batch_epoch=1&autostep=0&maxiter=2000"
+\end{verbatim}
+
+Direct retained-optimizer requests are:
 \begin{verbatim}
 curl -s -X POST "$URL/api/train" \
   -d "algorithm=4" -d "lbfgs_memory=5" -d "batch_epoch=1" \

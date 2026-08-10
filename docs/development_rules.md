@@ -12,6 +12,17 @@ changes, update `AGENTS.md`. When the GUI or menus change, update
 `docs/gui_cli_parity.md`; parity means a visible page control and HTTP parameter,
 not merely an internal handler.
 
+A page control is not verified until it has been clicked. `tests/gui/smoke.sh`
+greps the served page for the controls a feature must carry; it cannot see the
+page run, and a control can be present, correctly named, correctly handled and
+still be unreachable because of what the other controls are doing at the time.
+When `src/gui_page.html`'s JavaScript changes, run `./tests/gui/browser.sh`
+(real Chrome via Playwright; `--headed` to watch). It is deliberately outside
+the release gate, because the engine does not depend on Playwright. What it
+finds gets fixed, guarded behaviorally there, and pinned statically in
+`smoke.sh` so the gate catches a revert without a browser. `tests/gui/README.md`
+holds the division of labor and the defect that made this rule necessary.
+
 ## 2. Demonstrate that tests guard the change
 
 A new characterization must fail against the behavior it claims to detect. A

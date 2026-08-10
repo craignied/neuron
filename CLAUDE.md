@@ -16,6 +16,7 @@ Start here, then open the smallest relevant authority:
 | Engine or numerical code | `docs/development_rules.md`; relevant Manifest class section |
 | Optimizer or learning-algorithm research | `docs/optimizer_research.md`; rules 4, 6, 7 in `docs/development_rules.md` |
 | GUI or REST fields | `docs/gui_cli_parity.md`; Manifest REST chapter |
+| Page behavior (`gui_page.html` JavaScript) | `tests/gui/README.md` — drive it with `./tests/gui/browser.sh`, never only by curl |
 | Cross-validation or inference | `docs/cross_validation.md`; `docs/evaluation_report_spec.md`; relevant Manifest services |
 | ROC/statistics | `docs/roc_theory.md`; relevant cited Manifest section |
 | Manifest editing | `docs/manifest_maintenance.md` in full |
@@ -41,9 +42,13 @@ The Manifest and source are authoritative after implementation.
   before retention; and never alter a published formula merely to share code.
   Retained neural methods are L-BFGS, iRPROP+, and Levenberg--Marquardt (LM-v2).
   L-BFGS (`algorithm=4`), iRPROP+ (`algorithm=5`), and LM (`algorithm=6`) are
-  public through REST and the GUI. The bounded automatic selector considers all
-  retained optimizers that are eligible for the actual model and configuration;
-  it reports omissions by name. None is in the retired menus. BB was screened,
+  public through REST and the GUI. `/api/train`'s `algorithm` field names ONE
+  method (`5`), a SET of them (`1,4,5`), or `auto` (the set of everything), and
+  the GUI's Train panel is one checkbox per method. Eligibility is resolved
+  before the count is read: no eligible member is a refusal, exactly one trains
+  directly with no probe budget spent, two or more compete under one fixed
+  2250 ms total divided equally. The selector reports omissions by name. None
+  of the retained methods is in the retired menus. BB was screened,
   rejected and removed; its exact historical tree is the annotated
   `research/bb-prototype-2026-08-08` tag. The completed LM evidence is
   `lm_source_decision.md`, `lm_v2_source_decision.md`, `lm_step0_results.md`,
@@ -58,7 +63,9 @@ The complete operational wording is in `docs/development_rules.md`; these are th
 session-level triggers:
 
 1. Update `AGENTS.md` when an operational recipe changes.  If the GUI or REST
-   surface changes, update `docs/gui_cli_parity.md` in the same commit.
+   surface changes, update `docs/gui_cli_parity.md` in the same commit -- and if
+   the page's JavaScript changed, CLICK IT: `./tests/gui/browser.sh`.  The gate
+   greps the served page and cannot see it run.
 2. Prove a new test can fail.  Demonstrably recompile affected translation units
    after introducing a sabotage and again after restoring it; require the build
    log to show both compilations.  Guard against vacuous empty/default comparisons.

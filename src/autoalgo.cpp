@@ -3,6 +3,7 @@
 
 #include "stdafx.h" // For MSVC, must be first!
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <iomanip>
@@ -132,18 +133,63 @@ const char* autoalgo::ineligible( const Network& model, unsigned trainingType,
 	return 0;
 }
 
+autoalgo::Plan autoalgo::plan( const Network& model,
+	const vector< unsigned >& requested, const Settings& s )
+{
+	Plan p;
+
+	// ONE PASS IN ASCENDING ORDER over the enumeration, asking of each type
+	//    whether it was requested. Walking the REQUEST instead would carry the
+	//    caller's order into the competitor list -- and the tie policy is that
+	//    order (autoalgo.h) -- and would have to defend against a repeated token
+	//    producing a method that competes twice.
+	for ( unsigned t = 0; t < Network::TRAINING_TYPES; t++ )
+	{
+		if ( !requested.empty()
+			&& find( requested.begin(), requested.end(), t ) == requested.end() )
+			continue; // not asked for: neither a competitor nor an omission
+
+		const char* why = ineligible( model, t, s );
+		if ( !why )
+		{
+			p.competitors.push_back( t );
+			continue;
+		}
+		Omission o;
+		o.algorithm = t + 1;
+		o.name = Network::algorithmName( t );
+		o.reason = why;
+		p.omitted.push_back( o );
+	}
+
+	// A TOKEN THIS ENGINE HAS NO ALGORITHM FOR IS REFUSED, NOT DROPPED. The loop
+	//    above can only see the enumeration, so anything past it would otherwise
+	//    leave no trace at all -- and a caller that named four methods and got a
+	//    three-way competition would never learn which one vanished. Callers
+	//    validate the range before they get here; this is what makes the
+	//    resolution total rather than trusting that they did.
+	for ( vector< unsigned >::const_iterator r = requested.begin();
+		r != requested.end(); r++ )
+	{
+		if ( *r < Network::TRAINING_TYPES )
+			continue;
+		Omission o;
+		o.algorithm = *r + 1;
+		o.name = "unknown algorithm";
+		o.reason = ineligible( model, *r, s );
+		p.omitted.push_back( o );
+	}
+	return p;
+}
+
 vector< unsigned > autoalgo::candidates( const Network& model, const Settings& s )
 {
-	vector< unsigned > list;
-	for ( unsigned t = 0; t < Network::TRAINING_TYPES; t++ )
-		if ( !ineligible( model, t, s ) )
-			list.push_back( t );
-	return list;
+	return plan( model, vector< unsigned >(), s ).competitors;
 }
 
 autoalgo::Result autoalgo::pick( const Network& start,
-	unsigned plannedParameters, unsigned totalBudgetMs,
-	const atomic< bool >* cancel )
+	const vector< unsigned >& requested, unsigned plannedParameters,
+	unsigned totalBudgetMs, const atomic< bool >* cancel )
 {
 	Result result;
 	result.totalBudgetMs = totalBudgetMs;
@@ -173,23 +219,37 @@ autoalgo::Result autoalgo::pick( const Network& start,
 	//    throws Ineligible, the catch below turns any exception into a NaN, and
 	//    the summary would then tell the user that a perfectly good optimizer
 	//    diverged.
-	const vector< unsigned > list = candidates( *probe, settings );
-	for ( unsigned t = 0; t < Network::TRAINING_TYPES; t++ )
+	const Plan resolved = plan( *probe, requested, settings );
+	const vector< unsigned >& list = resolved.competitors;
+	result.omitted = resolved.omitted;
+
+	// NOTHING TO COMPARE. One eligible method is the answer already; probing it
+	//    would spend the budget to rediscover it, and the run that followed would
+	//    start from the probe's weights rather than the caller's. Say which
+	//    method it is, spend nothing, and adopt nothing -- competed stays false
+	//    and there is no winner, so the caller trains its OWN model on it.
+	if ( list.size() == 1 )
 	{
-		const char* why = ineligible( *probe, t, settings );
-		if ( !why ) continue;
-		Omission o;
-		o.algorithm = t + 1;
-		o.name = Network::algorithmName( t );
-		o.reason = why;
-		result.omitted.push_back( o );
+		result.selected = list[ 0 ] + 1;
+		result.selectedName = Network::algorithmName( list[ 0 ] );
+		callerScreen << "Algorithm: " << result.selectedName
+			<< " (the only eligible method of those requested; no competition"
+			" was run)." << endl;
+		for ( vector< Omission >::iterator o = result.omitted.begin();
+			o != result.omitted.end(); o++ )
+			callerScreen << "   " << o->name << ": not eligible here -- it "
+				<< o->reason << endl;
+		return result;
 	}
+	if ( list.empty() ) // nothing requested can run here; the caller reports why
+		return result;
+	result.competed = true;
 
 	// A POSITIVE, EQUAL SHARE IS PART OF THE CALLER CONTRACT. Silently flooring
 	//    an impossible share to 1 ms would spend MORE than the declared total,
 	//    so refuse the invalid budget rather than publish two contradictory
 	//    numbers. Production passes 2250 ms and is far from this boundary.
-	if ( !list.empty() && totalBudgetMs < list.size() )
+	if ( totalBudgetMs < list.size() )
 		throw invalid_argument( "automatic-selection total budget must provide "
 			"at least 1 ms per eligible candidate" );
 
@@ -200,8 +260,7 @@ autoalgo::Result autoalgo::pick( const Network& start,
 	//    integer remainder is deliberately left unspent: handing it to the first
 	//    few candidates would give them a longer window than the rest, and the
 	//    comparison that follows is between final errors reached in equal time.
-	if ( !list.empty() )
-		result.perCandidateBudgetMs = totalBudgetMs / ( unsigned ) list.size();
+	result.perCandidateBudgetMs = totalBudgetMs / ( unsigned ) list.size();
 
 	for ( vector< unsigned >::const_iterator it = list.begin();
 		it != list.end(); it++ )
@@ -306,8 +365,7 @@ autoalgo::Result autoalgo::pick( const Network& start,
 	// The one decision summary, on the caller's screen (the captured report)
 	callerScreen << "Auto algorithm selection (" << totalBudgetMs
 		<< " ms total, " << result.perCandidateBudgetMs << " ms each across "
-		<< list.size() << " eligible candidate"
-		<< ( list.size() == 1 ? "" : "s" ) << "):" << endl;
+		<< list.size() << " eligible candidates):" << endl;
 	for ( vector< Probe >::iterator p = result.probes.begin();
 		p != result.probes.end(); p++ )
 	{

@@ -92,9 +92,18 @@ Operational invariants that belong in every GUI session:
   require `batch_epoch=1` and `autostep=0`; the GUI enforces those controls. LM
   additionally requires LMS, a single-hidden-layer `SimpleProp`/`BareProp`, and
   at most 512 packed parameters. A validation split and weight decay are allowed.
-  `algorithm=auto` considers every eligible retained optimizer under one shared
-  2250 ms total probe budget and reports ineligible omissions. These methods
-  deliberately have no legacy-menu entry.
+  These methods deliberately have no legacy-menu entry.
+- `algorithm` names ONE method or a SET of them: `algorithm=5`, `algorithm=1,4,5`,
+  or `algorithm=auto` (the set of everything). Eligibility is resolved before the
+  count is read -- no eligible member is a refusal naming each one, exactly one
+  trains directly with no probe budget spent (`competed:false`), and two or more
+  compete under one shared 2250 ms total divided equally among them. Narrowing the
+  set buys each survivor a longer probe; it never shortens the selection. Set
+  syntax is strict: every token must parse, no method twice, no trailing comma.
+- `GET /api/algorithms` reports, for the loaded model, which methods can run and
+  why each of the others cannot -- the same rule `/api/train` refuses with.
+  Optional `batch_epoch=` and `autostep=` ask about a configuration that is not
+  installed yet. It is advisory; the refusal is still made at `/api/train`.
 - Present boolean fields use exactly `1` and `0`. Unknown, trailing, overflowing,
   or non-finite numeric text is a field-specific error; omission and an empty
   field retain the endpoint-specific defaults documented in the Manifest.
@@ -108,7 +117,17 @@ Operational invariants that belong in every GUI session:
 For agents, prefer the scripted CLI sessions in
 `docs/agent_data_workflows.md` §2 unless the task specifically concerns GUI/API
 behavior. The verified end-to-end API gate is
-`tests/gui/smoke.sh`; focused GUI characterization lives under `tests/gui/`.
+`tests/gui/smoke.sh`; focused GUI characterization lives under `tests/gui/`,
+which has its own `README.md` mapping the four harnesses to the boundary each
+one characterizes.
+
+**To drive the page in a browser, run `./tests/gui/browser.sh`** (`--headed` to
+watch it click). It uses Playwright against the Chrome that is already
+installed, so it needs no extension, bridge, or connector -- which matters
+because the "Claude in Chrome" bridge is not available in every environment,
+while this is. `smoke.sh` greps the served page; only a browser can see it run,
+and the difference has already cost one shipped-for-review defect
+(`tests/gui/README.md` records it).
 
 ## 4. Verifying the installation
 
@@ -131,6 +150,15 @@ behavior. The verified end-to-end API gate is
   present-but-empty rules, domain refusals, and the malformed values each field
   must refuse by name). Third server-starting script, separate for the same
   reason as the second. The contract it pins is `docs/b9_strict_parsing.md`.
+- Page behavior, MANUAL and not part of the gate: `./tests/gui/browser.sh`
+  clicks the page in a real Chrome via Playwright (`--headed` to watch). Run it
+  whenever `gui_page.html`'s JavaScript changes -- a control can be present,
+  correctly named and correctly handled and still be unreachable, because what
+  it does depends on what the other controls are doing. It is outside the gate
+  because the engine deliberately does not depend on Playwright; a missing
+  Playwright is a hard failure there rather than a silent skip. When it finds
+  something, pin what can be pinned statically in `smoke.sh` too, and prove both
+  new assertions fail.
 
 ### How a request field is read (since 2026-08-03)
 

@@ -17,6 +17,10 @@ records by default.
   baseline a new candidate must beat. Its harness is
   `tests/optimizer/README.md`.
 - `gui_cli_parity.md`: menu, page-control, and API parity.
+- `../tests/gui/README.md`: which GUI harness characterizes which boundary, and
+  how to drive the page in a real browser -- required reading before changing
+  `gui_page.html`'s JavaScript, because the gate greps the served page and
+  cannot see it run.
 - `cross_validation.md`: user-facing evaluation and nested-selection guidance.
 - `evaluation_report_spec.md`: report tiers and artifact contract.
 - `roc_theory.md`: ROC mathematics and inference.

@@ -35,22 +35,70 @@ curl -s "$URL/" | grep -q "<title>neuron</title>" || fail "page not served"
 #    submit it -- a control the page never sends is not parity.
 curl -s "$URL/" > page.html
 grep -q 'id="cv_algorithm"' page.html || fail "CV panel has no optimizer control"
-grep -q '<option value="4">L-BFGS</option>' page.html || fail "Train selector has no L-BFGS"
-grep -q '<option value="5">iRPROP+</option>' page.html || fail "Train selector has no iRPROP+"
-grep -q '<option value="6"' page.html || fail "Train selector has no Levenberg-Marquardt"
-grep -q 'Levenberg&ndash;Marquardt</option>' page.html \
-    || fail "Levenberg-Marquardt is not named in the Train selector"
+# The Train panel names a SET of algorithms, one checkbox each, because a
+#    competition is a choice among methods the user picked -- so the control has
+#    to be able to express more than one. The old single-choice selector is gone,
+#    and with it the "Auto" pseudo-method: ticking several IS auto.
+if grep -q 'id="algo"' page.html; then
+    fail "the Train panel still carries the single-choice algorithm selector"
+fi
+for v in 1 2 3 4 5 6; do
+    grep -q "class=\"algo\" value=\"$v\"" page.html \
+        || fail "Train panel has no checkbox for algorithm $v"
+done
+grep -q 'Levenberg&ndash;Marquardt</label>' page.html \
+    || fail "Levenberg-Marquardt is not named in the Train panel"
 grep -q 'automatic learning rate off, at most 512 weights' page.html \
     || fail "Levenberg-Marquardt tooltip does not state its current restrictions"
 if grep -q 'no validation split' page.html; then
     fail "Levenberg-Marquardt tooltip still invents a validation restriction"
 fi
+# EXACTLY ONE BOX IS TICKED BY DEFAULT, and it is canonical backpropagation: an
+#    untouched page must train the way it always has, with no competition and no
+#    probe budget spent.
+$PY - <<'DEFAULTBOX' || fail "the Train panel's default algorithm selection changed"
+import re
+html = open("page.html", encoding="utf-8").read()
+boxes = re.findall(r'<input type="checkbox" class="algo" value="(\d)"([^>]*)>', html)
+assert len(boxes) == 6, boxes
+checked = [v for v, rest in boxes if "checked" in rest]
+assert checked == ["1"], checked
+DEFAULTBOX
 # The controls whose required value is unambiguous are forced AND locked for
 # every optimizer that owns its own absolute step -- LM included, or the page
-# would compose a request the server refuses.
-grep -q 'a === "4" || a === "5" || a === "6"' page.html \
+# would compose a request the server refuses. With a SET the lock is the union:
+# ticking any one of the three fixes both controls for the whole set.
+grep -q 'v === "4" || v === "5" || v === "6"' page.html \
     || fail "the optimizer control lock does not cover algorithm 6"
 grep -q 'function syncOptimizerControls()' page.html || fail "Optimizer controls are not synchronized"
+grep -q 'algorithm: picked.join(",")' page.html \
+    || fail "the Train panel does not submit the ticked set"
+# The page does not own a second copy of the eligibility rule: it asks for it,
+#    which is what lets it grey a box out with the server's own sentence.
+grep -q '/api/algorithms' page.html \
+    || fail "the Train panel never asks which algorithms can run on this model"
+# AND IT ASKS ABOUT THE CONFIGURATION A TICK WOULD PRODUCE, not the one showing.
+#    Found by driving the page in a real browser (2026-08-09): asking with the
+#    LIVE batch/epoch and step-search values greys out L-BFGS, iRPROP+ and LM
+#    whenever Automatic learning rate happens to be on -- and the control the
+#    user would have to change first is the one the tick was going to change for
+#    them, so the box can never be reached. The two restrictions this panel can
+#    satisfy by itself must therefore not be what disables its own boxes.
+grep -q '/api/algorithms?batch_epoch=1&autostep=0' page.html \
+    || fail "the Train panel asks about the live controls, not the forced ones"
+$PY - <<'FORCEDQ' || fail "the eligibility query is built from live control values"
+import re
+html = open("page.html", encoding="utf-8").read()
+fn = re.search(r"async function refreshEligibility\(\)[\s\S]*?\n}", html).group(0)
+for live in ['$("autostep").checked', '$("batch_epoch").checked']:
+    assert live not in fn, live
+FORCEDQ
+# A greyed box has to READ as unavailable, not just refuse the click: the label
+#    is what the eye lands on, and a disabled checkbox alone leaves it black.
+grep -q 'classList.toggle("unavailable"' page.html \
+    || fail "an ineligible method's label is not marked unavailable"
+grep -q '#algoset label.unavailable' page.html \
+    || fail "the unavailable label has no styling to carry it"
 for opt in 'value="auto"' 'value="1"' 'value="2"' 'value="3"'; do
     $PY - "$opt" <<'PY' || fail "CV optimizer control is missing an option"
 import re, sys
@@ -1274,6 +1322,161 @@ assert a["totalBudgetMs"] == 2250, a
 assert a["perCandidateBudgetMs"] == 375, a
 assert a["perCandidateBudgetMs"] * len(probed) <= a["totalBudgetMs"], a
 PY
+
+# --- A REQUESTED SUBSET COMPETES; ONE SURVIVOR JUST RUNS --------------------
+# The Train panel's checkboxes name a set. THE COUNT THAT DECIDES is the number
+# of set members that can actually run on this model, resolved BEFORE anything
+# is counted -- so "three ticked, two impossible here" is the same run as "one
+# ticked", and neither spends a probe budget. The model here is the small LMS
+# net with a validation split loaded above, on which all six are eligible.
+curl -s -X POST "$URL/api/randomize" -d "seed=42" > /dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=2,3&maxiter=50&seed=42" > subset.json
+$PY - <<'SUBSET' || fail "a requested subset must compete over exactly its members"
+import json
+d = json.load(open("subset.json"))
+assert d["ok"] is True, d
+a = d["autoAlgo"]
+assert a["competed"] is True, a
+# ONLY THE REQUESTED METHODS ARE PROBED. Asserted as a SET, because a count of
+# two would also pass against an implementation that probed the first two of six.
+assert sorted(p["algorithm"] for p in a["probes"]) == [2, 3], a["probes"]
+assert a["omitted"] == [], a["omitted"]
+# AND A METHOD THE USER DID NOT TICK CANNOT BE ADOPTED, whatever it would have
+# scored. This is the assertion an implementation that ignored the set fails.
+assert a["selected"] in (2, 3), a
+assert d["algorithm"] in (2, 3), d
+# NARROWING THE FIELD DOES NOT SHORTEN THE SELECTION: the total is the same
+# fixed 2250 ms the six-arm and three-arm selections above spent, so two
+# competitors get a LARGER share of it, not a shorter run.
+assert a["totalBudgetMs"] == 2250, a
+assert a["perCandidateBudgetMs"] == 1125, a
+assert a["perCandidateBudgetMs"] * len(a["probes"]) <= a["totalBudgetMs"], a
+SUBSET
+# A single token is unchanged in every respect, including the ABSENCE of a
+#    selection block: one method named is not a competition of one.
+curl -s -X POST "$URL/api/train" -d "algorithm=5&maxiter=5&seed=42" > single.json
+$PY - <<'SINGLE' || fail "a single algorithm token must not run a selection"
+import json
+d = json.load(open("single.json"))
+assert d["ok"] is True, d
+assert "autoAlgo" not in d, d
+assert d["algorithm"] == 5 and d["algorithmName"] == "iRPROP+", d
+SINGLE
+# TWO REQUESTED, ONE ELIGIBLE: no competition, no budget, and the method that
+#    could not run is still reported by name. Cross-entropy refuses LM only.
+curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=2&errfunc=xentropy" >/dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=1,6&maxiter=5&seed=42" > lone.json
+$PY - <<'LONE' || fail "one eligible member of a requested set must train directly"
+import json
+d = json.load(open("lone.json"))
+assert d["ok"] is True, d
+a = d["autoAlgo"]
+assert a["competed"] is False, a
+assert a["probes"] == [], a
+assert a["perCandidateBudgetMs"] == 0, a
+assert [o["algorithm"] for o in a["omitted"]] == [6], a
+assert "least-squares" in a["omitted"][0]["reason"], a
+# It really trained on the survivor -- the ENGINE's own run header, not the
+# echoed label, is what says which optimizer ran.
+assert a["selected"] == 1 and d["algorithm"] == 1, d
+assert "Training algorithm is canonical backpropagation" in d["output"], d["output"][:400]
+LONE
+# CONTROL: the same two-member request on a model where BOTH can run really
+#    does compete, so the assertion above is about eligibility and not about
+#    two-member requests never competing.
+curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=2&errfunc=lms" >/dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=1,6&maxiter=5&seed=42" > lone_ctl.json
+$PY - <<'LONECTL' || fail "CONTROL: two eligible members must compete"
+import json
+a = json.load(open("lone_ctl.json"))["autoAlgo"]
+assert a["competed"] is True, a
+assert sorted(p["algorithm"] for p in a["probes"]) == [1, 6], a
+LONECTL
+# NOTHING ELIGIBLE IS A REFUSAL, not a silent fallback to some other method, and
+#    it names every member with its own reason. Refused before any field is
+#    applied, so the model is left exactly as it was.
+curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=4,6&maxiter=1" > none.json
+$PY - <<'NONE' || fail "a request naming only ineligible methods must be refused"
+import json
+d = json.load(open("none.json"))
+assert d["ok"] is False, d
+assert "algorithm=4" in d["message"] and "algorithm=6" in d["message"], d
+assert d["message"].count("neural models only") == 2, d
+NONE
+curl -s -X POST "$URL/api/train" -d "algorithm=1,4&maxiter=5&seed=42" \
+    | grep -q '"ok":true' \
+    || fail "CONTROL: the same request with one runnable method still trains"
+# Async carries the set through the status door.
+curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=2&errfunc=lms" >/dev/null
+curl -s -X POST "$URL/api/train" -d "algorithm=4,5&maxiter=20&seed=42&async=1" \
+    | grep -q '"ok":true' || fail "async subset train start"
+for i in $(seq 1 80); do
+    curl -s "$URL/api/train/status" > subset_async.json
+    grep -q '"running":false' subset_async.json && break
+    sleep 0.1
+done
+$PY - <<'ASYNC' || fail "async subset completed-result contract"
+import json
+d = json.load(open("subset_async.json"))
+assert d["running"] is False, d
+r = d["result"]
+assert r["ok"] is True, r
+a = r["autoAlgo"]
+assert a["competed"] is True, a
+assert sorted(p["algorithm"] for p in a["probes"]) == [4, 5], a
+assert r["algorithm"] in (4, 5), r
+ASYNC
+# The set's own syntax is strict: a dropped token is a method that does not
+#    compete, so nothing is skipped silently. (The full malformed-field matrix
+#    is tests/gui/strictparse_driver.py.)
+curl -s -X POST "$URL/api/train" -d "algorithm=4,4&maxiter=1" \
+    | grep -q 'twice' || fail "a repeated algorithm token must be refused"
+curl -s -X POST "$URL/api/train" -d "algorithm=1,&maxiter=1" \
+    | grep -q 'comma' || fail "a trailing comma in the algorithm set must be refused"
+curl -s -X POST "$URL/api/train" -d "algorithm=1,7&maxiter=1" \
+    | grep -q 'algorithm must be 1, 2, 3, 4, 5, 6 or auto' \
+    || fail "an out-of-range member of an algorithm set must be refused"
+
+# --- /api/algorithms: the eligibility the page renders ----------------------
+# One rule, two presentations: this endpoint and /api/train's refusal must give
+# the same answer for the same model, or a box is offered that cannot be used.
+curl -s "$URL/api/algorithms" > elig_lms.json
+$PY - <<'ELIG' || fail "/api/algorithms on an eligible LMS net"
+import json
+d = json.load(open("elig_lms.json"))
+assert d["ok"] is True, d
+assert [a["algorithm"] for a in d["algorithms"]] == [1, 2, 3, 4, 5, 6], d
+assert all(a["eligible"] for a in d["algorithms"]), d
+assert all(a["reason"] == "" for a in d["algorithms"]), d
+assert d["algorithms"][5]["label"] == "Levenberg-Marquardt", d
+ELIG
+# The two settings the user is composing are honoured, so the page can grey a
+#    box out for a configuration that is not installed yet.
+curl -s "$URL/api/algorithms?batch_epoch=0" > elig_online.json
+$PY - <<'ELIGONLINE' || fail "/api/algorithms must answer for the composed settings"
+import json
+d = json.load(open("elig_online.json"))
+e = { a["algorithm"]: a for a in d["algorithms"] }
+assert all(e[t]["eligible"] for t in (1, 2, 3)), d
+assert not any(e[t]["eligible"] for t in (4, 5, 6)), d
+assert "batch_epoch=1" in e[6]["reason"], e[6]
+ELIGONLINE
+# ...and it agrees with the refusal /api/train produces for the same request.
+curl -s -X POST "$URL/api/train" -d "algorithm=6&maxiter=1&batch_epoch=0" \
+    | grep -q 'requires batch_epoch=1' \
+    || fail "/api/algorithms and /api/train disagree about batch_epoch"
+curl -s -X POST "$URL/api/model" -d "type=logistic" > /dev/null
+curl -s "$URL/api/algorithms" > elig_logit.json
+$PY - <<'ELIGLOGIT' || fail "/api/algorithms on logistic regression"
+import json
+e = { a["algorithm"]: a for a in json.load(open("elig_logit.json"))["algorithms"] }
+assert all(e[t]["eligible"] for t in (1, 2, 3)), e
+assert not any(e[t]["eligible"] for t in (4, 5, 6)), e
+assert all(e[t]["reason"] == "is available for neural models only"
+           for t in (4, 5, 6)), e
+ELIGLOGIT
+curl -s -X POST "$URL/api/model" -d "type=simpleprop&hidden=2&errfunc=lms" >/dev/null
 
 curl -s -X POST "$URL/api/train" -d "algorithm=7&maxiter=1" \
     | grep -q 'algorithm must be 1, 2, 3, 4, 5, 6 or auto' \
