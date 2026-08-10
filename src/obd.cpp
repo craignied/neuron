@@ -312,7 +312,7 @@ obd::Result obd::run( DataSet& data, const Config& cfg,
 	result.autoSelected = ( cfg.algorithm < 0 );
 	if ( cfg.algorithm < 0 ) // auto
 	{
-		// Say that the probe is happening. It is a wall-clock-budgeted experiment
+		// Say that the probe is happening. It is a wall-clock-budgeted,
 		//    fixed-total experiment, so on a nested run it can dominate the fold's
 		//    whole elapsed time -- and it reported nothing, leaving a long search
 		//    looking idle (measured 2026-07-29: ~11 s of a 13 s five-fold nested

@@ -267,6 +267,16 @@ indexing it. When a genuinely principal object or operation is added, extend the
 curated inventory in the same change. The guard is also part of
 `tests/tools/run_tools.sh`, so CI refuses an incomplete index.
 
+The same script also guards the publish step below: it extracts the text of the
+published `docs/manifest.pdf` with `pdftotext` and requires every
+chapter/section/subsection heading declared in the tex sources to appear in it.
+This is the check that fails when a rebuild wrote `docs/tex/manifest.pdf` but
+the copy to `docs/manifest.pdf` was missed — every source-reading check stays
+green in that state, which is how a revision shipped without its new REST
+subsection on 2026-08-09. Where `pdftotext` is not installed the script prints
+a SKIPPED notice for this half rather than passing it silently; CI installs
+poppler on Linux and macOS.
+
 Index for how programmers search, not merely for source-file names. Include the
 object or namespace, each principal public method, public result/configuration
 types, important algorithms and estimators, statistical assumptions, failure

@@ -440,6 +440,12 @@ namespace
 	}
 }
 
+// The public face of the one trimming rule, for word-valued fields (utility.h).
+string util::trimmed( const string& text )
+{
+	return trimmedField( text );
+}
+
 util::ParseStatus util::parseUnsigned( const string& text, unsigned& out )
 {
 	string s = trimmedField( text );

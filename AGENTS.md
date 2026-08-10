@@ -17,8 +17,9 @@ Ground rules:
   control where appropriate, and keep the GUI and REST contract synchronized.
   Update **`docs/gui_cli_parity.md`** in the same commit as a GUI or REST surface
   change; its legacy matrix is historical coverage, not a new-work checklist.
-- **If you are about to write engine code, read standing rules 4, 6 and 7 in
-  `CLAUDE.md` first.** In short: the class layer (`Matrix`, `vector_ops`,
+- **If you are about to write engine code, read rules 4, 6 and 7 in
+  `docs/development_rules.md` first** (`CLAUDE.md` carries only their short
+  triggers). In short: the class layer (`Matrix`, `vector_ops`,
   `Population`) is the numerical vocabulary and code must read against the
   equations it came from (rule 4); each mechanism has one authoritative
   implementation in the class that owns it (rule 6); and **speed is an
@@ -42,8 +43,8 @@ Ground rules:
   *iteration table* is still printing after ~2 minutes, something is wrong —
   kill it and re-check the recipe (usually a missing iteration cap or
   missing `--refcat`). The statistical report AFTER training (including its
-  2,000-resample ROC bootstrap per set) adds a few seconds — ~2 s on the
-  a few seconds on datasets with thousands of rows — and scales gently
+  2,000-resample ROC bootstrap per set) adds a few seconds on datasets with
+  thousands of rows — and scales gently
   (nothing in the report is quadratic any more). A short pause after
   "Total iterations" is the report working, not a hang.
 - The train/test split (menu 5 / `/api/load` with a fraction) is stratified on
@@ -58,7 +59,7 @@ the resulting statistics, or producing a deployed browser calculator, read
 recipes, iteration caps, deployment prerequisites, and report-interpretation
 rules. Keep the root rules above in force while following it.
 
-## 3b. The GUI and loopback API (`neuron --gui`)
+## The GUI and loopback API (`neuron --gui`)
 
 `./build/neuron --gui` starts the browser interface on loopback; use
 `--no-browser` for scripted smoke work. The REST API is the authoritative surface
@@ -129,7 +130,7 @@ while this is. `smoke.sh` greps the served page; only a browser can see it run,
 and the difference has already cost one shipped-for-review defect
 (`tests/gui/README.md` records it).
 
-## 4. Verifying the installation
+## Verifying the installation
 
 - Quick: `./tests/tools/run_tools.sh` (Python tools vs committed outputs,
   including the deployment forward-pass check against the engine) and
@@ -159,6 +160,9 @@ and the difference has already cost one shipped-for-review defect
   Playwright is a hard failure there rather than a silent skip. When it finds
   something, pin what can be pinned statically in `smoke.sh` too, and prove both
   new assertions fail.
+- The low-birth-weight dataset is a self-verifying reference: follow
+  `docs/datasets/low-birth-weight/README.md` and the engine should report
+  log likelihood −111.2865 on the committed betas.
 
 ### How a request field is read (since 2026-08-03)
 
@@ -190,11 +194,8 @@ Every maintained curl recipe already uses `=1`/`=0` and unambiguous numbers,
 so none of them changes. Writing a new endpoint or parameter means using
 `readUnsigned` / `readDouble` / `readBool` in `src/gui.cpp`;
 `tools/check_strict_parsing.py` fails the build otherwise.
-- The low-birth-weight dataset is a self-verifying reference: follow
-  `docs/datasets/low-birth-weight/README.md` and the engine should report
-  log likelihood −111.2865 on the committed betas.
 
-## 5. Repository map (for when you need more)
+## Repository map (for when you need more)
 
 | Where | What |
 |---|---|
@@ -211,8 +212,9 @@ so none of them changes. Writing a new endpoint or parameter means using
 Maintainers: keep this file and `docs/agent_data_workflows.md` synchronized when
 their rules, tools, or recipes change; the routed recipes are promised to work.
 
-**If you are changing the engine rather than using it**, read the standing rules
-at the top of `CLAUDE.md` first. The short version, learned expensively: a green
+**If you are changing the engine rather than using it**, read
+`docs/development_rules.md` first (`CLAUDE.md` holds the session-level
+triggers). The short version, learned expensively: a green
 test suite is not evidence until you know it executes what you changed — run a
 new test against the old binary and watch it fail before you trust it — and a
 doc that names a mechanism (including one in this repo) is a hypothesis, not a

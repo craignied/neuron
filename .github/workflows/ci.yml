@@ -27,11 +27,11 @@ jobs:
 
       - name: Install GSL (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgsl-dev
+        run: sudo apt-get update && sudo apt-get install -y libgsl-dev poppler-utils
 
       - name: Install GSL (macOS)
         if: runner.os == 'macOS'
-        run: brew install gsl
+        run: brew install gsl poppler
 
       - name: Cache vcpkg (Windows)
         if: runner.os == 'Windows'

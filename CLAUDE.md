@@ -102,6 +102,8 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 tests/golden/run_golden.sh
 tests/gui/smoke.sh
+tests/gui/asyncjob.sh
+tests/gui/strictparse.sh
 tests/oracle/verify_oracle.sh
 tests/tools/run_tools.sh
 git diff --check

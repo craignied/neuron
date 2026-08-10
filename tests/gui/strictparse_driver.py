@@ -344,6 +344,11 @@ def group_train():
     #    method may be named twice, and a trailing comma is a fault rather than a
     #    typing convenience.
     accepted( "train: a set of two competes", train( algorithm = "2,3" ) )
+    # The whitespace rule applies to the one word-valued field too: " auto " is
+    #    auto, exactly as " 5" is 5. (Pinned after a sweep found the literal
+    #    comparison skipped the trim every numeric field gets.)
+    accepted( "train: algorithm=auto with surrounding whitespace",
+        train( algorithm = " auto " ) )
     refused( "train: empty algorithm", train( algorithm = "" ),
         "algorithm must be 1, 2, 3, 4, 5, 6 or auto" )
     refused( "train: algorithm=1,,2", train( algorithm = "1,,2" ),

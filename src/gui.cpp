@@ -1424,7 +1424,9 @@ static string readAlgorithmSet( const httplib::Request& req,
 	if ( !given( req, "algorithm" ) )
 		return ""; // absent: the caller reports the empty selection
 
-	if ( text == "auto" )
+	// Trimmed like every other field's value (the B9 whitespace rule): " auto "
+	//    is auto, exactly as " 5" is 5 inside parseUnsigned below.
+	if ( util::trimmed( text ) == "auto" )
 	{
 		set = true; // the whole curated list, resolved against the model
 		return "";

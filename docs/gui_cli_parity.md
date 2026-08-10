@@ -111,7 +111,7 @@ statistical/trapezoidal, 2 minimum data, 3 return); the GUI dropped the
 | 4 Batch/epoch on/off (forced ON for logistic, as the CLI forces it) | Batch/epoch toggle | `POST /api/train` `batch_epoch=` | ✅ |
 | 5 Weight decay (on/off + λ) | Weight-decay toggle + λ field | `POST /api/train` `weight_decay=`,`decay=` | ✅ |
 | 6 Print counter (log / linear) | Print-counter select + count | `POST /api/train` `logprint=`,`printcount=` | ✅ (presentation only — see note) |
-| (train-time) Algorithm (GD/CGD/Shanno plus REST-era L-BFGS/iRPROP+/LM/auto) | Algorithm select | `POST /api/train` `algorithm=` | ✅ |
+| (train-time) Algorithm (GD/CGD/Shanno plus REST-era L-BFGS/iRPROP+/LM/auto) | Algorithm checkboxes (one per method; several ticked compete) | `POST /api/train` `algorithm=` | ✅ |
 | 7 Train model | Train button | `POST /api/train` | ✅ |
 | 7/8 Save network + guesses after training | § Session files → Network / guesses | `GET /api/save/{network,train_guesses,test_guesses}` | ✅ |
 | 9 Stepwise regression | § Stepwise regression panel (+ persistent results pane, live progress, Stop) | `POST /api/regress` (+ `async=1`, `GET /api/train/status` → `stepwise`, `POST /api/train/stop`) | ✅ (GUI beyond CLI: async + progress + Stop) |

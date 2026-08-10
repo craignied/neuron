@@ -56,8 +56,9 @@ question. They are not prerequisite reading.
    public-surface tests. A deliberately research-only method must say why it is
    not public and remain excluded by design.
 8. Before integration, write characterization that passes on the old engine and
-   a new guard proven by fresh-compilation sabotage. Preserve CLI/GUI parity if
-   the optimizer becomes selectable.
+   a new guard proven by fresh-compilation sabotage. If the optimizer becomes
+   selectable, keep its REST contract and GUI control synchronized (rule 5: it
+   receives no legacy-menu entry).
 
    **Sabotage must cross the production wiring, not only the components.**
    Testing a mechanism's component operations is insufficient: sabotage the code

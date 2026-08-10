@@ -1197,7 +1197,7 @@ before any request field is applied and to omit an incompatible automatic
 candidate before probing.  The curated universe is canonical, CGD, Shanno,
 L-BFGS, iRPROP+, and LM. Each eligible method starts from a clone of the same
 weights, receives an equal share of one fixed total wall-clock budget, and is
-ranked by the finite training error it reached; the winning clone, including its
+ranked by the finite, non-negative training error it reached; the winning clone, including its
 probe progress, continues the real fit. This is an engineering choice on the
 caller's data under a time budget, not a claim that the selected method is
 globally best.
@@ -1259,8 +1259,9 @@ under:
 \texttt{autoalgo::Result} contains:
 
 \begin{itemize}
-\item \texttt{int selected} and \texttt{string selectedName}: winning
-      algorithm and display name.
+\item \texttt{unsigned selected} and \texttt{string selectedName}: winning
+      one-based algorithm token and display name; \texttt{0} when no probe
+      was usable.
 \item \texttt{vector<Probe> probes}: complete attempted-candidate audit.
 \item \texttt{vector<Omission> omitted}: every \emph{requested} method not
       attempted and its reason. An empty request names them all, so

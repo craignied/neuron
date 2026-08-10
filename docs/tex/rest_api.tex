@@ -387,8 +387,8 @@ be named twice, and a trailing comma is refused.
       budget; integer remainder is left unspent so earlier candidates do not
       receive a longer trial. Narrowing the set therefore buys each survivor a
       \emph{larger} share of the same total; it never shortens the selection,
-      and retaining a further algorithm never lengthens it. The lowest finite
-      training error wins, its trained clone is adopted, and the real run
+      and retaining a further algorithm never lengthens it. The lowest finite,
+      non-negative training error wins, its trained clone is adopted, and the real run
       continues from that progress. A single eligible survivor is not probed at
       all: there is nothing to compare it against, so it is named, the run
       trains on the caller's own weights, and \texttt{competed} is false. The
@@ -402,7 +402,7 @@ be named twice, and a trailing comma is refused.
 No retained method is the universal default. Application benchmarks made
 iRPROP+ faster than L-BFGS, while generated conditioning fixtures favored
 L-BFGS and its later endpoints. That finding supports explicit workload choice
-and the future bounded selector; it does not establish conditioning as the
+and the bounded selector above; it does not establish conditioning as the
 driver. When comparing methods, randomize once, preserve the starting weights,
 and give each method the same stopping and evaluation policy.
 

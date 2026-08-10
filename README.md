@@ -287,6 +287,7 @@ ctest --test-dir build --output-on-failure
 ./tests/tools/run_tools.sh
 ./tests/gui/smoke.sh
 ./tests/gui/asyncjob.sh
+./tests/gui/strictparse.sh
 ```
 
 The verification layers include:
@@ -347,5 +348,6 @@ The standing rules, current state, and remaining roadmap live in
 [`docs/HISTORY.md`](docs/HISTORY.md).
 
 Contributions should preserve the project's central contract: one authoritative
-implementation of each mechanism, reproducible analysis, GUI/CLI parity, and
+implementation of each mechanism, reproducible analysis, a REST-first surface
+with synchronized GUI controls (the legacy menus stay frozen), and
 statistical claims no stronger than the design supports.

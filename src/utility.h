@@ -125,6 +125,13 @@ namespace util {
 	//    UINT_MAX as Range rather than wrapping.
 	ParseStatus parseUnsigned( const string& text, unsigned& out );
 
+	// The field's text with surrounding spaces and tabs removed -- the same
+	//    trimming every parser here applies before reading, exposed for the one
+	//    field whose legal value is a WORD rather than a number (/api/train's
+	//    algorithm=auto). A literal comparison that skipped it would refuse
+	//    " auto" while accepting " 5", contradicting the whitespace rule above.
+	string trimmed( const string& text );
+
 	// parseDouble: refuses nan and every spelling of infinity (NotFinite) --
 	//    no field's contract permits one. Overflow to HUGE_VAL is Range;
 	//    UNDERFLOW is accepted and yields the closest representable value,
