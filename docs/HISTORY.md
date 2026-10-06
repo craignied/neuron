@@ -1389,7 +1389,7 @@ Quick routes: optimizer/training history — search `Shanno`, `CGD`, `autostep`,
   **Stepwise regression: visible results, async progress, fit validity, and legacy bug #11
   (2026-07-27).** Found in Craig's live Civic Choice GUI walkthrough: reverse grouped stepwise showed
   only `regressing…` for the whole operation and then produced **no result on the page at all**.
-  Spec: `stepwise_async_results_spec.md`. Four defects, each with a red proof watched to fail against
+  Spec: `docs/stepwise_async_results_spec.md`. Four defects, each with a red proof watched to fail against
   the pre-fix binary.
   - **The report was computed, returned, and thrown away.** `handleRegress` had always sent the full
     selection report as JSON `output`; `gui_page.html::regress()` rendered only `j.message`. The

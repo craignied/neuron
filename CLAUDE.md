@@ -23,7 +23,8 @@ Start here, then open the smallest relevant authority:
 | Why an old decision was made | Search `docs/HISTORY.md` and `docs/refactor_audit.md`; do not load either by default |
 
 Plans retained for provenance (`docs/obd_plan.md`,
-`docs/cv_refactoring_architecture.md`, `docs/b9_strict_parsing.md`) describe work
+`docs/cv_refactoring_architecture.md`, `docs/b9_strict_parsing.md`,
+`docs/stepwise_async_results_spec.md`) describe work
 as it was undertaken.  They are historical, not the current public contract.
 The Manifest and source are authoritative after implementation.
 
